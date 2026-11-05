@@ -7,7 +7,8 @@
 // 3. Otherwise where you last wrote ("where you last wrote"), or failing that where the latest talk was ("latest talk").
 // T-335 chat feel: the first two are sure (`sure`), and the composer chooses them for you, naming the room on Send; the third is a guess,
 // offered as a suggestion to tap, with nothing chosen until you do.
-// No model call: the app has no AI gateway of its own (a hosted one would mean sending the message off the device before it is sent).
+// T-335 All v2: this is the instant first guess and the fallback. A small model on the person's own box (the route door, src/all/modelRoute.ts) takes
+// over when it answers in time; `mergeRoute` below says how. A room the person named is theirs: the model isn't asked.
 
 export type RouteRoom = {
   /** The room's id (where a message is posted). */ id: string;
@@ -18,7 +19,8 @@ export type RouteRoom = {
   /** When anyone last wrote there (unix seconds). */ lastTs?: number | null;
 };
 
-export type RoutePick = { id: string; why: string; /** Named, or one strong match: chosen for you. A guess is only offered. */ sure?: boolean };
+export type RoutePick = { id: string; why: string; /** Named, or one strong match: chosen for you. A guess is only offered. */ sure?: boolean;
+  /** The message names this room (rule 1). */ named?: boolean };
 
 const STOP = new Set(("the and for with that this from have has had was were are you your our out about into over under then than them they " +
   "there here what when where which who why how can could would should will just like some more most much many any all not but also its it's " +
@@ -60,7 +62,7 @@ export function makeRouter(rooms: readonly RouteRoom[]): (text: string) => Route
     if (!rooms.length) return [];
     // 1. places named
     const named = rooms.map((r) => ({ r, at: namedAt(text, r) })).filter((x) => x.at >= 0).sort((a, b) => a.at - b.at);
-    if (named.length) return named.slice(0, 3).map(({ r }) => ({ id: r.id, why: `names ${r.name}`, sure: true }));
+    if (named.length) return named.slice(0, 3).map(({ r }) => ({ id: r.id, why: `names ${r.name}`, sure: true, named: true }));
     // 2. the most telling shared word: each word weighs log(1 + places / places using it)
     const words = [...new Set(routeWords(text))];
     if (words.length) {
@@ -91,3 +93,22 @@ export function makeRouter(rooms: readonly RouteRoom[]): (text: string) => Route
 
 /** The suggested room(s) for `text` among `rooms`, each with its reason; empty only when there is no room to suggest. */
 export const suggestRoute = (text: string, rooms: readonly RouteRoom[]): RoutePick[] => makeRouter(rooms)(text);
+
+/** At most this many rooms are suggested. */
+export const MAX_PICKS = 3;
+/**
+ * T-335 All v2: the route on screen, from the word match and the model's answer.
+ * - A room the message names stays the route, whatever the model said (it isn't asked).
+ * - No answer: the word match.
+ * - An answer in time: the model's rooms. Only its first can be sure (chosen, and named on Send); the rest are offered.
+ * - A late answer never moves what is chosen: what the word match was sure of stays, and the model's rooms are only offered beside it.
+ */
+export function mergeRoute(words: readonly RoutePick[], model: { picks: readonly RoutePick[]; timely: boolean } | null): RoutePick[] {
+  if (words.some((p) => p.named) || !model?.picks.length) return [...words];
+  const seen = new Set<string>();
+  const answer = model.picks.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+  if (model.timely) return answer.slice(0, MAX_PICKS).map((p, i) => ({ id: p.id, why: p.why, sure: i === 0 && !!p.sure }));
+  const sure = words.filter((p) => p.sure);
+  const offers = answer.filter((p) => !sure.some((s) => s.id === p.id)).map((p) => ({ id: p.id, why: p.why, sure: false }));
+  return [...sure, ...(offers.length ? offers : words.filter((p) => !p.sure))].slice(0, MAX_PICKS);
+}

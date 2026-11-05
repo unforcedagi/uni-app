@@ -5,7 +5,7 @@ import { nodeOfRoom, useRoomNodes } from "./areas/roomLabels";
 import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
-import { SettingsIcon, UniIcon, JournalIcon, StarIcon, MailIcon, CalendarIcon, MessagesIcon } from "./Icons";
+import { SettingsIcon, UniIcon, JournalIcon, StarIcon, MailIcon, CalendarIcon, MessagesIcon, AllIcon } from "./Icons";
 import Mail from "./Mail";
 import Calendar from "./calendar/Calendar";
 import { calShown, forgetCalendar, onCalShown, probeCalendar } from "./calendar/calDoor";
@@ -2455,8 +2455,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const areasOpen = active?.kind === "areas" || active?.kind === "area";
   /** Every room opens in the room shell (tree, conversation, companion): a node's room, a room no node owns ("Other rooms"), a thread. */
-  const shellOpen = areasOpen || active?.kind === "room" || active?.kind === "thread";
-  const uniShown = !panel && !searchOpen && !topNote && shellOpen;
+  const allOpen = active?.kind === "all";
+  const shellOpen = areasOpen || allOpen || active?.kind === "room" || active?.kind === "thread";
+  const uniShown = !panel && !searchOpen && !topNote && shellOpen && !allOpen;
   const threadNode = active?.kind === "thread" && active.channel ? roomNodes.get(active.channel) ?? null : null;
   const shellPath = active?.kind === "area" ? active.path ?? null : threadNode && threadNode.path !== "" ? threadNode.path : null;
   const shellLoose = active?.kind === "room" || (active?.kind === "thread" && !threadNode) ? active.channel ?? null : null;
@@ -2503,6 +2504,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     compose: (id: string, text: string) => composeInRoomRef.current(id, text),
     retryRooms: () => { void loadRooms().catch(() => {}); },
     focusMessage: (ref: string | null, room?: string, checking?: string | null) => { if (ref) { focusTries.current = 0; setFocusRef(ref); } if (room) setChecking(checking ? { channel: room, text: checking } : null); },
+    composerFocus: (on: boolean) => setComposerFocused(on),
     openPosts: (node?: string | null) => openTargetRef.current({ kind: "posts", title: "To post", ...(node ? { path: node } : {}) }, "new"),
   }), [openNote, loadRooms]);
   /** T-161: an approval prompt opens its room at the prompt with the composer focused; the user answers there (nothing is sent for them) */
@@ -2539,7 +2541,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       { label: "Mail", go: () => openTarget({ kind: "mail", title: "Mail" }) },
       ...(calOn ? [{ label: "Calendar", go: () => openTarget({ kind: "calendar", title: "Calendar" }) }] : []),
       ...(msgsOn ? [{ label: "Messages", go: () => openTarget({ kind: "messages", title: "Messages" }) }] : []),
-      ...(showUniGlue(lifeVault) ? [{ label: "For you", go: openForYou }, { label: "To post", go: () => openTarget({ kind: "posts", title: "To post" }) }] : []),
+      ...(showUniGlue(lifeVault) ? [{ label: "All", go: () => openTarget({ kind: "all", title: "All" }) }, { label: "For you", go: openForYou }, { label: "To post", go: () => openTarget({ kind: "posts", title: "To post" }) }] : []),
       { label: "Vault", go: () => { setSearchOpen(false); setPanel("vault"); } },
       { label: "Search", go: openFind },
       { label: "Settings", go: () => { setSearchOpen(false); setPanel("settings"); setForgetArmed(false); } },
@@ -2556,6 +2558,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     <nav ref={railRef} className="rail" aria-label="Main navigation">
       {/* T-294: from another side (Messages, Mail…) Uni goes back to where you were on its side; at Uni already, home to Uni */}
       <button aria-label="Uni" aria-current={uniShown ? "page" : undefined} onClick={() => openTarget(uniShown ? uniHome() : origin())}><i><UniIcon /></i><span>Uni</span></button>
+      {/* T-335: All is a place of its own, one tap from any room; rooms stay the main way in, and the app never opens on it */}
+      {showUniGlue(lifeVault) && <button aria-label="All" aria-current={!panel && !searchOpen && !topNote && allOpen ? "page" : undefined} onClick={() => openTarget({ kind: "all", title: "All" })}><i><AllIcon /></i><span>All</span></button>}
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
       <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })} aria-describedby={[held > 0 && "rail-mail-held", unreadMail > 0 && "rail-mail-unread"].filter(Boolean).join(" ") || undefined}><i><MailIcon />{held > 0 && <span className="rail-count" aria-hidden="true">{held}</span>}{unreadMail > 0 && <span className="rail-dot" aria-hidden="true" />}</i><span>Mail</span>{held > 0 && <span id="rail-mail-held" hidden>{held} waiting for you</span>}{unreadMail > 0 && <span id="rail-mail-unread" hidden>{unreadMail} unread in your Inbox</span>}</button>
       {calOn && <button aria-label="Calendar" aria-current={!panel && !searchOpen && (active?.kind === "calendar" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "calendar", title: "Calendar" })}><i><CalendarIcon /></i><span>Calendar</span></button>}
@@ -2602,7 +2606,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       : active?.kind === "posts" ? <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} backTo={originTitle} onBack={() => openTarget(origin())} />
       : active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} backTo={originTitle} onBack={() => openTarget(origin())} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : shellOpen && active ? <AreasSurface noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} loose={shellLoose} thread={shellThread} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
+      : shellOpen && active ? <AreasSurface allPlace={allOpen ? { backTo: originTitle, onBack: () => openTarget(origin()) } : null} noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} loose={shellLoose} thread={shellThread} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>

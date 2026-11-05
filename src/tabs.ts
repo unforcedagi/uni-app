@@ -4,7 +4,7 @@
 
 import type { VaultRef } from "./vaultlinks.ts";
 
-export type TabKind = "room" | "thread" | "note" | "journal" | "vault" | "areas" | "area" | "mail" | "calendar" | "messages" | "posts";
+export type TabKind = "room" | "thread" | "note" | "journal" | "vault" | "areas" | "area" | "mail" | "calendar" | "messages" | "posts" | "all";
 /** `channel` on an `areas` (Uni) or `area` tab is the node's room: the one its chat pane shows. */
 export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; /** `area`: the node's note path (an `Areas/<Name>` area, or a project under one). */ path?: string; title: string;
   /** `area` (r15): the node has no room of its own and talks in an ancestor's (or Uni's). Unset until the shell knows. */
@@ -33,7 +33,7 @@ export type OpenMode = "focus" | "new" | "replace";
 export function sameTarget(a: TabTarget, b: TabTarget): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
-    case "journal": case "areas": case "mail": case "calendar": case "messages": return true;
+    case "journal": case "areas": case "mail": case "calendar": case "messages": case "all": return true;
     case "area": return a.path === b.path;
     // T-335: the To post queue, all of it or one area's
     case "posts": return (a.path ?? "") === (b.path ?? "");
@@ -139,7 +139,7 @@ export function serializeTabs(s: Tabs): string {
   return JSON.stringify({ v: 1, tabs: s.tabs, active: s.active, recent: s.recent });
 }
 
-const KINDS: TabKind[] = ["room", "thread", "note", "journal", "vault", "areas", "area", "mail", "calendar", "messages", "posts"];
+const KINDS: TabKind[] = ["room", "thread", "note", "journal", "vault", "areas", "area", "mail", "calendar", "messages", "posts", "all"];
 const str = (x: unknown): x is string => typeof x === "string" && x.length > 0;
 
 function validTab(x: unknown): Tab | null {
@@ -152,6 +152,7 @@ function validTab(x: unknown): Tab | null {
   if (kind === "mail") return { id: t.id, kind, title: "Mail" };
   if (kind === "calendar") return { id: t.id, kind, title: "Calendar" };
   if (kind === "messages") return { id: t.id, kind, title: "Messages" };
+  if (kind === "all") return { id: t.id, kind, title: "All" };
   if (kind === "posts") return { id: t.id, kind, title: "To post", ...(typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { path: t.path } : {}) };
   // The areas tab is Uni's home (saved tabs from before were titled "Areas").
   if (kind === "areas") return { id: t.id, kind, title: "Uni", ...(str(t.channel) ? { channel: t.channel } : {}) };
@@ -200,9 +201,10 @@ export function restoreTabs(raw: string | null, roomIds: Iterable<string>): Tabs
 /** Kinds that are a place you can be (a room, Uni, an area, a thread, the Journal). A note or a vault browser is something opened over one. */
 export const isSurface = (t: Pick<Tab, "kind">): boolean => t.kind !== "note" && t.kind !== "vault";
 
-/** What to save: the surfaces only, so a note or a vault browser is never what the app reopens to. */
+/** What to save: the surfaces only, so a note or a vault browser is never what the app reopens to. T-335: nor is All: it is optional, never
+ *  where the app opens. */
 export function persistable(s: Tabs): Tabs {
-  const tabs = s.tabs.filter(isSurface);
+  const tabs = s.tabs.filter((t) => isSurface(t) && t.kind !== "all");
   const ids = new Set(tabs.map((t) => t.id));
   const recent = s.recent.filter((id) => ids.has(id));
   const active = s.active && ids.has(s.active) ? s.active : recent[recent.length - 1] ?? tabs[0]?.id ?? null;

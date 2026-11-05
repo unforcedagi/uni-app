@@ -61,6 +61,8 @@ export type ShellActions = Omit<AreaActions, "openNote"> & { openNote(ref: NoteR
   retryRooms?: () => void;
   /** r24: scroll to and mark a message of the room open now ("Check in #room first" goes to the first message about the request) */
   focusMessage?: (ref: string | null, room?: string, checking?: string | null) => void;
+  /** T-335: the All composer has the keyboard (a phone's bottom bar steps aside, as for a room's) */
+  composerFocus?: (on: boolean) => void;
   /** T-335: open the To post queue (one area's posts when `node` is given) */
   openPosts?: (node?: string | null) => void };
 
@@ -96,7 +98,9 @@ function ChatWait({ placeholder, retry }: { placeholder: string; retry: (() => v
  */
 const viaMemory: { path: string | null; via: string | null } = { path: null, via: null };
 
-export default function AreasSurface({ identity, path, loose = null, thread = null, rooms: hostRooms, roomsPending = false, actions, roomFor, onRoom, onOpenArea, onBackChange, onOverlayChange, noteBeside = false }: {
+export default function AreasSurface({ allPlace = null, identity, path, loose = null, thread = null, rooms: hostRooms, roomsPending = false, actions, roomFor, onRoom, onOpenArea, onBackChange, onOverlayChange, noteBeside = false }: {
+  /** T-335: this surface is the All place: every area's room at once, with the way back to where you came from. */
+  allPlace?: { backTo: string; onBack: () => void } | null;
   identity: string | null;
   /** T-200: a note is open beside the conversation. The chat keeps the room: the companion folds to its tab, and the tree to its icons
    *  on a window under 1400px. Either unfolds again for as long as the note is open; the choices kept on this device stay as they were. */
@@ -431,7 +435,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
       const i = navRows.findIndex((r) => r.path === a.path && r.depth === 1);
       const raw = privateRoot(data!.tree, a.path) ? null : tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
       const st = raw ? plainWords(raw) : null;
-      return { path: a.path, name: a.name, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null,
+      return { path: a.path, name: a.name, about: privateRoot(data!.tree, a.path) ? null : a.purpose || null, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null,
         room: v.own ? v.target?.id ?? null : null,
         // T-335: everything new in the area's rooms (its own and its projects'); what needs you is what its Needs you lists: the tasks
         // under it, and the approval prompts in its own room (a project's own room's prompts are in that project's, Codex T-335 P2)
@@ -447,9 +451,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
       privates: allNeeds.privates.map((g) => ({ place: g.place, count: g.count, path: g.open.path })),
     };
     // T-335 All view: every area's own room, interleaved, with a composer that routes; a private area stays out of it
-    const allRooms: AllRoom[] = doors.filter((d) => d.room && !privateRoot(data!.tree, d.path)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, lastTs: d.lastTs }));
+    const allRooms: AllRoom[] = doors.filter((d) => d.room && !privateRoot(data!.tree, d.path)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, about: d.about ?? null, lastTs: d.lastTs }));
     const all = allRooms.length ? { rooms: allRooms, onOpenAt: (room: string, ref?: string) => { setDrawer(false); (actions.openRoom as (id: string, focus?: string | null) => void)(room, ref ?? null); } } : null;
-    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} all={all} />
+    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} all={all} allPlace={allPlace} onComposerFocus={actions.composerFocus} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
   }
   if (treeHome && path === null && !rootOpen) {

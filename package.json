@@ -38,7 +38,10 @@
     "test:unread": "playwright test --config playwright.unread.config.ts",
     "test:typing": "playwright test --config playwright.typing.config.ts",
     "test:motion": "playwright test --config playwright.motion.config.ts",
-    "test:glowup": "playwright test --config playwright.glowup.config.ts"
+    "test:glowup": "playwright test --config playwright.glowup.config.ts",
+    "test:allv2": "playwright test --config playwright.allv2.config.ts",
+    "test:route-door": "python3 -I services/route/test_server.py",
+    "test:tour": "playwright test --config playwright.tour.config.ts"
   },
   "dependencies": {
     "@openparachute/surface-client": "0.3.7",

@@ -87,6 +87,14 @@ check("tabs: only places are saved (a note or vault is never what the app reopen
   assert.deepEqual(p.tabs.map((t) => t.id), ["1"]); assert.equal(p.active, "1"); assert.deepEqual(p.recent, ["1"]);
   assert.ok(isSurface({ kind: "journal" }) && !isSurface({ kind: "vault" }));
 });
+check("tabs: All is a place you can be, but never what the app reopens to; a re-read of the rooms keeps it", () => {
+  const s: Tabs = { tabs: [{ id: "1", kind: "all", title: "All" }], active: "1", recent: ["1"] };
+  assert.deepEqual(restoreTabs(serializeTabs(s), []).tabs.map((t) => t.kind), ["all"], "the live rooms' re-read goes through restoreTabs");
+  assert.equal(persistable(s).tabs.length, 0);
+  assert.equal(persistable(s).active, null);
+  const beside: Tabs = { tabs: [{ id: "1", kind: "all", title: "All" }, { id: "2", kind: "journal", title: "Journal" }], active: "1", recent: ["2", "1"] };
+  assert.equal(persistable(beside).active, "2");
+});
 check("tabs: uni.tabs.v1 migrates to its active place alone; a note-only set opens nothing in particular", () => {
   const v1 = serializeTabs({ tabs: [{ id: "a", kind: "room", channel: "r1", title: "r1" }, { id: "b", kind: "area", path: "Areas/Boulder", title: "Boulder" }, { id: "c", kind: "note", note: { hub: null, vault: "uni", ref: "r" }, title: "n" }], active: "b", recent: ["a", "b"] });
   const m = migrateLegacyTabs(v1, ["r1"]);

@@ -18,10 +18,10 @@ async function boot(page: Page, unread: Record<string, number> = {}, view: 'plac
     if (sessionStorage.getItem('feel.booted')) return;
     sessionStorage.setItem('feel.booted', '1');
     if (navigator.userAgent.includes('SM-T') || (window.innerWidth === 828 && window.innerHeight === 1104)) localStorage.setItem('uni.motion', 'calm');
-    if (v === 'all') localStorage.setItem('uni.home.view', 'all');
   }, view);
   await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, unread });
   await page.locator('[data-place="front-door"]').waitFor();
+  if (view === 'all') { await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'All', exact: true }).click(); await page.locator('[data-view="all"]').waitFor(); }
 }
 async function openRoom(page: Page, name: string) {
   await page.locator(`.fd-door[data-path="Areas/${name}"]`).click();

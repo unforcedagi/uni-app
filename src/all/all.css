@@ -1,16 +1,5 @@
 /* T-335 All view and its composer, in the glow-up's tokens (src/glow/glow.css). */
 
-/* the home's two views: Places and All rooms, a quiet pair of words above the list */
-.fd-tabs { max-width: 720px; margin: 36px auto 8px; display: flex; gap: 4px; }
-.fd-tabs button { all: unset; box-sizing: border-box; min-height: 36px; padding: 0 14px; display: inline-flex; align-items: center; border-radius: 999px; cursor: pointer;
-  font: 500 14px/1 var(--g-font-ui); color: var(--g-ink-2); }
-.fd-tabs button[aria-selected="true"] { background: var(--g-ink); color: var(--g-ground); }
-.fd-tabs button:not([aria-selected="true"]):hover { background: var(--g-sunk); color: var(--g-ink); }
-.fd-tabs button:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
-.fd-tabs:first-child { margin-left: 0; }
-:root[data-screen="ink"] .fd-tabs button { box-shadow: inset 0 0 0 1.5px #000; color: #000; }
-:root[data-screen="ink"] .fd-tabs button[aria-selected="true"] { background: #000; color: #fff; }
-
 /* the composer: the room's pill, with the route above it */
 .all-compose { max-width: 720px; margin: 26px auto 0; position: relative; }
 .all-compose .compose-row { align-items: flex-end; padding: 6px; }
@@ -43,7 +32,6 @@
 .fd.fd-all { display: flex; flex-direction: column; overflow: hidden; width: 100%; box-sizing: border-box; padding-top: 22px; padding-bottom: 0; }
 .fd-allhead { flex: none; width: 100%; max-width: 720px; margin: 0 auto 4px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
 .fd-allhead .fd-mark { margin: 0; }
-.fd-allhead .fd-tabs { margin: 0; }
 .all-feed { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(-1 * clamp(20px, 5vw, 64px)); padding: 0 clamp(20px, 5vw, 64px); }
 .all-stack { max-width: 720px; margin: 0 auto; padding: 8px 0 20px; }
 .all-file { margin: 2px 0 4px; font: italic 400 15px/1.5 var(--g-font-uni); color: var(--g-ink-2); }
@@ -62,7 +50,6 @@
 .all-msg.mine .message-content { max-width: min(88%, 56ch); }
 .fd-all .all-compose { flex: none; width: 100%; margin: 0 auto; padding: 10px 0 calc(14px + env(safe-area-inset-bottom)); background: var(--g-ground); }
 @media (max-width: 599px) {
-  .fd-tabs { margin-top: 28px; }
   .fd-allhead { justify-content: flex-start; }
   .all-feed { margin: 0 -20px; padding: 0 20px; }
   .all-send { padding: 0 14px; }
@@ -99,3 +86,32 @@
 .all-msg.run { flex-direction: column; }
 .all-msg.mine.run { align-items: flex-end; }
 .all-run strong { font: 600 13px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
+
+/* T-335 All v2: All's own head and the way back; a tap or a swipe on a message replies there. */
+.all-back { min-height: 36px; padding: 0 14px; font: 500 14px/1 var(--g-font-ui); white-space: nowrap; }
+.fd-allhead { flex-wrap: nowrap; }
+.fd-allhead .fd-mark { min-width: 0; }
+.fd-allhead .fd-title { font: 520 24px/1.1 var(--g-font-display) !important; font-variation-settings: "SOFT" 60, "opsz" 72; }
+.fd-allhead .fd-date { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.all-msg { position: relative; touch-action: pan-y; }
+.all-msg.targeted:not(.mine) .message-content { box-shadow: inset 3px 0 0 var(--g-accent); padding-left: 14px; }
+.all-msg.targeted.mine .message-content { box-shadow: 0 0 0 2px var(--g-accent); }
+.all-reply-go { all: unset; box-sizing: border-box; position: absolute; right: 0; top: 10px; min-height: 28px; padding: 0 10px; display: inline-flex; align-items: center; border-radius: 999px; cursor: pointer;
+  border: var(--g-hair) solid var(--g-line-strong); background: var(--g-paper); font: 500 12.5px/1 var(--g-font-ui); color: var(--g-ink-2); opacity: 0; transition: opacity var(--g-t-quick) var(--g-ease); }
+.all-msg.mine .all-reply-go { right: auto; left: 0; }
+.all-reply-go:hover { color: var(--g-ink); border-color: var(--g-ink-2); }
+.all-reply-go:focus-visible { opacity: 1; outline: 2px solid var(--g-focus); outline-offset: 2px; }
+@media (hover: hover) { .all-msg:hover .all-reply-go { opacity: 1; } }
+@media (hover: none) { .all-reply-go { display: none; } }
+.all-thread { margin: 2px 0 2px; font: 500 12.5px/1.4 var(--g-font-ui) !important; color: var(--g-ink-2) !important; }
+.all-echo-state { margin: 2px 2px 0 0; font: 400 12px/1.3 var(--g-font-ui); color: var(--g-ink-3); text-align: right; width: 100%; }
+.all-echo .all-place { cursor: default; }
+.all-reply-chip { padding-left: 14px; }
+.all-reply-chip .all-chip-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: min(64vw, 420px); }
+.all-send-idle { width: 40px; min-width: 40px; padding: 0 !important; display: grid; place-items: center; font: 500 18px/1 var(--g-font-ui); }
+@media (max-width: 599px) {
+  .fd-allhead .fd-date { display: none; }
+}
+:root[data-screen="ink"] .all-msg.targeted:not(.mine) .message-content { box-shadow: inset 4px 0 0 #000; }
+:root[data-screen="ink"] .all-msg.targeted.mine .message-content { box-shadow: 0 0 0 2px #000; }
+:root[data-screen="ink"] .all-reply-go { transition: none; border-color: #000; }

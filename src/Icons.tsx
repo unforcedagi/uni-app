@@ -8,6 +8,10 @@ export function MicIcon() {
 export function UniIcon() {
   return <svg className="mono-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z" /></svg>;
 }
+/** T-335: All: the rooms' lines woven into one. */
+export function AllIcon() {
+  return <svg className="mono-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 6.5h11M9 12h11M4 17.5h11" /></svg>;
+}
 export function JournalIcon() {
   return <svg className="mono-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 3v18m4-13h5m-5 4h5" /></svg>;
 }

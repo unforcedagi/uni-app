@@ -1,8 +1,8 @@
 // Run: node --experimental-strip-types scripts/all.test.ts
 // T-335 All view: the route decider, the interleaved timeline and the send that posts once per chosen room. Made-up places only.
 import assert from "node:assert/strict";
-import { suggestRoute, routeWords, type RouteRoom } from "../src/all/route.ts";
-import { interleave, sendEach, andList, type FeedMessage } from "../src/all/allCore.ts";
+import { mergeRoute, suggestRoute, routeWords, type RouteRoom } from "../src/all/route.ts";
+import { interleave, replyTargetOf, roomAddress, sameTarget, sendEach, andList, type FeedMessage } from "../src/all/allCore.ts";
 
 const rooms: RouteRoom[] = [
   { id: "ch-north", name: "North Field", slug: "north-field", text: "Hedges, paths and the long meadow. The hedge cutting is booked.", lastTs: 100, lastMine: 90 },
@@ -11,10 +11,10 @@ const rooms: RouteRoom[] = [
 ];
 
 // 1. a place named: that place, and why
-assert.deepEqual(suggestRoute("Can North Field take the spare benches?", rooms), [{ id: "ch-north", why: "names North Field", sure: true }]);
+assert.deepEqual(suggestRoute("Can North Field take the spare benches?", rooms), [{ id: "ch-north", why: "names North Field", sure: true, named: true }]);
 // by its slug, as #slug or in words
-assert.deepEqual(suggestRoute("#kiln-studio is cold this morning", rooms), [{ id: "ch-kiln", why: "names Kiln Studio", sure: true }]);
-assert.deepEqual(suggestRoute("tell kiln studio the cones arrived", rooms), [{ id: "ch-kiln", why: "names Kiln Studio", sure: true }]);
+assert.deepEqual(suggestRoute("#kiln-studio is cold this morning", rooms), [{ id: "ch-kiln", why: "names Kiln Studio", sure: true, named: true }]);
+assert.deepEqual(suggestRoute("tell kiln studio the cones arrived", rooms), [{ id: "ch-kiln", why: "names Kiln Studio", sure: true, named: true }]);
 // two places named: both, in the order named
 assert.deepEqual(suggestRoute("Bee Garden and North Field both need the mower", rooms).map((p) => p.id), ["ch-bees", "ch-north"]);
 // a name inside another word is not a mention ("northfield" is not "north field"; "beekeeping" is not "bees")
@@ -56,3 +56,35 @@ assert.equal(andList(["A"]), "A");
 assert.equal(andList(["A", "B"]), "A and B");
 assert.equal(andList(["A", "B", "C"]), "A, B and C");
 console.log("all tests passed");
+
+// T-335 All v2: the route on screen, from the word match and the model
+const named = [{ id: "ch-kiln", why: "names Kiln Studio", sure: true, named: true }];
+const word = [{ id: "ch-bees", why: "talks about honey", sure: true }];
+const guess = [{ id: "ch-north", why: "where you last wrote" }];
+const answer = [{ id: "ch-table", why: "supper plans", sure: true }, { id: "ch-kiln", why: "the bowls", sure: true }, { id: "ch-table", why: "again" }, { id: "ch-bees", why: "jars" }, { id: "ch-north", why: "fourth" }];
+// a room the message names is never overruled, in time or late
+assert.deepEqual(mergeRoute(named, { picks: answer, timely: true }), named);
+assert.deepEqual(mergeRoute(named, { picks: answer, timely: false }), named);
+// no answer: the word match, untouched
+assert.deepEqual(mergeRoute(word, null), word);
+assert.deepEqual(mergeRoute(word, { picks: [], timely: true }), word);
+// in time: the model's rooms, each once, at most three, and only the first can be sure
+assert.deepEqual(mergeRoute(word, { picks: answer, timely: true }), [{ id: "ch-table", why: "supper plans", sure: true }, { id: "ch-kiln", why: "the bowls", sure: false }, { id: "ch-bees", why: "jars", sure: false }]);
+// late: what the word match chose stays chosen, and the model's rooms are only offered, none of them sure
+const late = mergeRoute(word, { picks: answer, timely: false });
+assert.deepEqual(late.filter((p) => p.sure), word);
+assert.deepEqual(late.filter((p) => !p.sure).map((p) => p.id), ["ch-table", "ch-kiln"]);
+// late over a mere guess: nothing becomes chosen
+assert.deepEqual(mergeRoute(guess, { picks: answer, timely: false }).filter((p) => p.sure), []);
+// late, and it only agrees: the word match, with its guesses
+assert.deepEqual(mergeRoute([...word, ...guess], { picks: [{ id: "ch-bees", why: "same", sure: true }], timely: false }), [...word, ...guess]);
+
+// T-335 All v2: where a reply goes
+assert.deepEqual(replyTargetOf({ channel: "c", ref: "m", root: null }), { room: "c", root: null });
+assert.deepEqual(replyTargetOf({ channel: "c", ref: "m", root: null, reply_count: 2 }), { room: "c", root: "m" });
+assert.deepEqual(replyTargetOf({ channel: "c", ref: "m", root: "r" }), { room: "c", root: "r" });
+assert.equal(sameTarget({ room: "c", root: null }, { room: "c", root: null }), true);
+assert.equal(sameTarget({ room: "c", root: null }, { room: "c", root: "m" }), false);
+assert.equal(sameTarget(null, { room: "c", root: null }), false);
+assert.equal(roomAddress({ name: "Kiln Studio", slug: "kiln-studio" }), "#kiln-studio");
+assert.equal(roomAddress({ name: "Kiln Studio", slug: null }), "Kiln Studio");

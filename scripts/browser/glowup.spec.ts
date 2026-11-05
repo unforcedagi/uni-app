@@ -11,16 +11,17 @@ const project = () => test.info().project.name;
 const touch = () => project() !== 'desktop';
 const UNI = 'c'.repeat(64);
 
+const toAll = async (page: Page) => { await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'All', exact: true }).click(); await page.locator('[data-view="all"]').waitFor(); };
 async function boot(page: Page, view: 'places' | 'all' = 'places') {
   await page.addInitScript((v) => {
     if (sessionStorage.getItem('glow.booted')) return;
     sessionStorage.setItem('glow.booted', '1');
     // the Daylight is set to Calm screen, as the device is
     if (navigator.userAgent.includes('SM-T') || (window.innerWidth === 828 && window.innerHeight === 1104)) localStorage.setItem('uni.motion', 'calm');
-    if (v === 'all') localStorage.setItem('uni.home.view', 'all');
   }, view);
   await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, unread: { 'ch-kiln': 1, 'ch-bees': 2 } });
   await page.locator('[data-place="front-door"]').waitFor();
+  if (view === 'all') await toAll(page);
 }
 
 const posts = (page: Page) => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => ({ channel: c.args.channel, body: c.args.body, recipients: c.args.recipients })));
@@ -75,9 +76,9 @@ test('look: home, a room and find wear the glow-up, at every size', async ({ pag
   await expect(search).toHaveValue('glaze');
 });
 
-test('All: every area room interleaved by time, each marked with its place; a tap opens that room', async ({ page }) => {
+test('All: every area room interleaved by time, each marked with its place; its label opens that room', async ({ page }) => {
   await boot(page);
-  await page.getByRole('tab', { name: 'All rooms' }).click();
+  await toAll(page);
   const feed = page.getByRole('log', { name: 'All rooms, by time' });
   // oldest first across the five area rooms; Sanctum (private), the project room and the room no area holds stay out
   const order = ['c1', 'c2', 'n1', 'n2', 'k1', 'k2', 'b1', 't1', 't2', 'n3', 'b2', 'k3', 'c3'];
@@ -88,18 +89,14 @@ test('All: every area room interleaved by time, each marked with its place; a ta
   // T-335 chat feel: runs, not a mirror: a place's name where the room changes (nine runs here)
   await expect(feed.locator('article.all-msg .all-place')).toHaveCount(9);
   await expect(feed.locator('article[data-ref="k3"] .all-place')).toHaveText('Kiln Studio');
-  // the choice is kept: a reload opens on All
-  await page.reload();
-  await expect(page.getByRole('tab', { name: 'All rooms' })).toHaveAttribute('aria-selected', 'true');
-  await expect(feed.locator('article.all-msg')).toHaveCount(order.length);
   await page.waitForTimeout(300);
   await shot(page, '05-all');
   // a live message lands in its place
   await page.evaluate(() => (window as any).__arrive('ch-bees', 'Uni', 'Jars found: the neighbours have thirty.'));
   await expect(feed.locator('article.all-msg').last()).toContainText('Jars found');
   await expect(feed.locator('article.all-msg').last().locator('.all-place')).toHaveText('Bee Garden');
-  // a tap on a message steps into its room
-  await feed.locator('article[data-ref="k3"]').click();
+  // its room's label steps into the room (a tap on the message itself replies there: allv2.spec.ts)
+  await feed.locator('article[data-ref="k3"] .all-place').click();
   await expect(page.locator('.sr').first()).toBeVisible();
   await expect(page.locator('.message-list')).toContainText('Three glaze tiles came out glossy');
   await expect(page.getByRole('textbox', { name: /^Message kiln-studio/ })).toBeVisible();
@@ -122,7 +119,9 @@ test('All: the route is a suggestion with its reason; chips edit it; Send posts 
   await page.getByRole('button', { name: "Don't send to Choir" }).click();
   await page.getByRole('button', { name: 'Add a room' }).click();
   await page.getByRole('list', { name: 'Rooms to add' }).getByRole('button', { name: 'Long Table' }).click();
-  await expect(chips(page)).toHaveText(['North Field', 'Long Table']);
+  // what you dropped stays on offer, one tap back
+  await expect(page.locator('.all-chip.chosen .all-chip-name')).toHaveText(['North Field', 'Long Table']);
+  await expect(page.locator('.all-chip.suggested .all-chip-name')).toHaveText(['Choir']);
   await expect(page.locator('.all-why')).toHaveText('your choice');
   await page.waitForTimeout(200);
   await shot(page, '06-route-chips');

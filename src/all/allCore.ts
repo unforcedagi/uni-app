@@ -16,6 +16,16 @@ export function interleave<M extends FeedMessage>(byRoom: ReadonlyMap<string, re
   return all.slice(-limit);
 }
 
+/** T-335 All v2: where the composer replies: a room, or a thread in it. No routing happens while there is one. */
+export type ReplyTarget = { room: string; root: string | null };
+/** A reply to this message goes to its thread when it has one, else into its room (rooms stay unthreaded by default). */
+export const replyTargetOf = (m: Pick<FeedMessage, "channel" | "ref" | "root"> & { reply_count?: number }): ReplyTarget =>
+  ({ room: m.channel, root: m.root ?? (m.reply_count ? m.ref : null) });
+export const sameTarget = (a: ReplyTarget | null, b: ReplyTarget | null): boolean => (a?.room ?? null) === (b?.room ?? null) && (a?.root ?? null) === (b?.root ?? null);
+
+/** The room as the person knows its address: "#kiln-studio", or its name when it has no room name of its own. */
+export const roomAddress = (r: { name: string; slug?: string | null }): string => (r.slug ? `#${r.slug.replace(/^#/, "")}` : r.name);
+
 export type SendResult = { sent: string[]; failed: { id: string; error: string }[] };
 
 /**

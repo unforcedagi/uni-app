@@ -2,8 +2,8 @@
 // the room last talked, and a small mark when sessions are working there. No ids. Above the rooms, one quiet line on what needs you
 // (round 2: #Uni is archived, so this is where it lives); under them, one quiet line on the Claude accounts, which opens the full card.
 // T-304: the working mark counts the room's Uni at work on your message too, not only Claude Code sessions.
-import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { AllComposer, AllFeed, roomWords, useRoomsFeed, type AllRoom } from "../all/AllView";
+import { useMemo, useState, type ReactNode } from "react";
+import { AllComposer, AllFeed, roomWords, useEchoes, useReplyTarget, useRoomsFeed, type AllRoom } from "../all/AllView";
 import { liveInArea, span } from "./model";
 import { asOf, useWork } from "./store";
 import { useRoomTurns } from "./roomTurns";
@@ -12,6 +12,7 @@ import { unreadShort, unreadWords, type Unread } from "../areas/roomUnread";
 import "./projects.css";
 
 export type Door = { path: string; name: string; slug: string | null; stands: string | null; lastTs: number | null;
+  /** The area note's own one line on what it is (never a private area's): the route's description of it. */ about?: string | null;
   /** The area's own room (its id), where a turn of the room's Uni is looked for; null when it has none of its own. */ room?: string | null;
   /** T-335: what is new in the area's rooms (its own and its projects'), and how many things there need you. */ unread?: Unread | null; needs?: number };
 /** T-335: a room outside the doors (one no area holds) with something new in it. */
@@ -47,7 +48,6 @@ function NewLine({ rooms, onOpen }: { rooms: readonly NewRoom[]; onOpen: (id: st
 
 const today = () => new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 
-const VIEW_KEY = "uni.home.view";
 const NONE: readonly AllRoom[] = [];
 
 const WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
@@ -71,9 +71,11 @@ function workingWords(sessions: number, turn: boolean): string {
   return turn ? `Uni is answering here${s ? ` and ${s}` : ""}` : s;
 }
 
-export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, all = null }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
   /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */
   all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string) => void } | null;
+  /** T-335: this is the All place (a place of its own on the rail), and the way back from it; null: the home, with the places. */
+  allPlace?: { backTo: string; onBack: () => void } | null; onComposerFocus?: (on: boolean) => void;
   /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
   /** Your key: a turn is the room's Uni at work on your message. */ me?: string | null;
   /** T-335: the To post queue's one quiet line, under what needs you */ toPost?: ReactNode }) {
@@ -84,10 +86,8 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   // round 3: a read that failed, or a saved copy not read again yet, is "as of" its time; the working counts say so too
   const at = asOf(ws, now);
   const areaAt = new Map(work.areas.map((a) => [a.path, a]));
-  // T-335 All view: the home shows the places or every room at once; the choice is the device's, kept across visits
-  // (read whether or not the rooms are known yet: the home may draw once before they are, and the choice must survive that)
-  const [view, setView] = useState<"places" | "all">(() => { try { return localStorage.getItem(VIEW_KEY) === "all" ? "all" : "places"; } catch { return "places"; } });
-  const choose = useCallback((v: "places" | "all") => { setView(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* this session only */ } }, []);
+  // T-335 All view: every room at once is a place of its own on the rail; the home is always the places
+  const view: "places" | "all" = allPlace && all ? "all" : "places";
   // the rooms' recent messages: the feed in All; in Places only once the composer is used (for the route's words)
   const [wantWords, setWantWords] = useState(false);
   // the same rooms keep the same list, so the feed and the route aren't read again on every redraw of the home
@@ -97,21 +97,20 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   const feed = useRoomsFeed(allRooms, !!all && (view === "all" || wantWords));
   const words = useMemo(() => roomWords(feed.byRoom, me), [feed.byRoom, me]);
   const openAt = all?.onOpenAt;
-  const tabs = all && <div className="fd-tabs" role="tablist" aria-label="Home">
-    <button type="button" role="tab" aria-selected={view === "places"} onClick={() => choose("places")}>Places</button>
-    <button type="button" role="tab" aria-selected={view === "all"} onClick={() => choose("all")}>All rooms</button>
-  </div>;
-  const composer = all && <AllComposer rooms={allRooms} words={words} onOpen={(id) => openAt?.(id)} onFocus={() => setWantWords(true)} onSent={feed.reread} place={view} />;
+  const [target, setTarget] = useReplyTarget(allRooms);
+  const echoes = useEchoes(feed.byRoom);
+  const composer = all && <AllComposer rooms={allRooms} words={words} onOpen={(id) => openAt?.(id)} onFocus={() => setWantWords(true)} onSent={feed.reread} place={view}
+    target={view === "all" ? target : null} onTarget={setTarget} echo={echoes.send} onKeyboard={onComposerFocus} />;
   // T-335 glow-up: how many places are moving (a session or the room's Uni at work), for the home's one sentence
   const liveOf = (d: Door) => { const a = areaAt.get(d.path); return (a ? liveInArea(work, a.id).length : 0) + (d.room && turns.has(d.room) ? 1 : 0); };
   const moving = doors.filter((d) => liveOf(d) > 0).length;
   const needN = needs ? needs.rows.length + needs.privates.reduce((k, p) => k + p.count, 0) : 0;
   if (all && view === "all") return <div className="fd fd-all" data-place="front-door" data-view="all">
     <header className="fd-head fd-allhead">
-      <div className="fd-mark"><h1 className="fd-title"><Enso />Uni</h1><span className="fd-date">{today()}</span></div>
-      {tabs}
+      <div className="fd-mark"><h1 className="fd-title"><Enso />All</h1><span className="fd-date">Every room, newest at the bottom</span></div>
+      <button type="button" className="note-action all-back" onClick={allPlace!.onBack}>← {allPlace!.backTo}</button>
     </header>
-    <AllFeed rooms={allRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={(room, ref) => openAt?.(room, ref)} />
+    <AllFeed rooms={allRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={(room, ref) => openAt?.(room, ref)} target={target} onTarget={setTarget} echoes={echoes.shown} />
     {composer}
   </div>;
   return <div className="fd" data-place="front-door" data-view="places">
@@ -123,7 +122,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
     {needs && <NeedsLine needs={needs} onOpen={onOpen} />}
     {toPost && <div className="fd-topost">{toPost}</div>}
     {onOpenRoom && <NewLine rooms={newRooms} onOpen={onOpenRoom} />}
-    {tabs ?? <h2 className="fd-places-h">Places</h2>}
+    <h2 className="fd-places-h">Places</h2>
     <nav aria-label="Rooms"><ul className="fd-doors">{doors.map((d) => {
       const a = areaAt.get(d.path);
       const sessions = a ? liveInArea(work, a.id).length : 0;

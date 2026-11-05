@@ -3,26 +3,33 @@
 // person sees the route and can change it, and one tap sends to one room or several. Sending posts the message into each chosen room,
 // as the person, with that room's Uni addressed, so each room's own Uni session takes it. Nothing is posted anywhere else, and nothing
 // is posted on a guess: with no room chosen there is no Send.
+// T-335 All v2: All is a place on the rail, reachable from every room and back, never where the app opens. A tap or a swipe on a message
+// replies in that room (or its thread) with no routing at all; the room's label is the way into the room. An unaddressed message gets the word
+// match at once and the small model's route if it answers in time (modelRoute.ts).
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Body } from "../MessageBody";
 import type { Member } from "../mentions";
 import { findUniMember } from "../uniActions";
-import { andList, interleave, sendEach, type FeedMessage } from "./allCore";
-import { makeRouter, type RouteRoom } from "./route";
+import { andList, interleave, replyTargetOf, roomAddress, sameTarget, sendEach, type FeedMessage, type ReplyTarget } from "./allCore";
+import { makeRouter, mergeRoute, type RouteRoom } from "./route";
+import { logOutcome, useModelRoute, type DoorRoom } from "./modelRoute";
 import { enterInsertsNewline } from "../composerCore";
 import { isMaintenance, isWorkerStatus } from "../chatMarkers";
 import { commandOf, isStopReply } from "../chatFeel";
 import "./all.css";
 
 /** A place in the All view: an area and its own room. */
-export type AllRoom = { id: string; name: string; slug: string | null; stands: string | null; lastTs: number | null };
+export type AllRoom = { id: string; name: string; slug: string | null; stands: string | null; lastTs: number | null;
+  /** The area note's own one line on what it is (the route's description of the room). */ about?: string | null };
 
-type Message = FeedMessage & { mentions: Member[]; edited: boolean; media?: unknown[] | null };
+type Message = FeedMessage & { mentions: Member[]; edited: boolean; media?: unknown[] | null; reply_count?: number };
 type Live = { kind: string; channel: string | null };
 
 const PER_ROOM = 40;
+/** After the model moves the route, how long a Send is held (it was aimed at the route before). */
+const SETTLE_MS = 300;
 /** On a touch keyboard Return is a new line; Send is the button (as in the room's composer and Messages). */
 const touchKeyboard = () => typeof navigator !== "undefined" && enterInsertsNewline(navigator.maxTouchPoints ?? 0, matchMedia("(pointer: coarse)").matches);
 const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
@@ -67,20 +74,51 @@ export function useRoomsFeed(rooms: readonly AllRoom[], on: boolean) {
   return { byRoom, loaded, failed, reread };
 }
 
-/** What the composer holds across the home's two views (Places and All) and across visits. */
-const held = { text: "", chosen: null as string[] | null };
+/** What the composer holds across the home and All, and across visits. */
+const held = { text: "", chosen: null as string[] | null, target: null as ReplyTarget | null };
 
-export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "places" }: { rooms: readonly AllRoom[];
+/** T-335 All v2: where the composer is replying, if anywhere. Kept with the draft across visits; a room that left All drops it. */
+export function useReplyTarget(rooms: readonly AllRoom[]): [ReplyTarget | null, (t: ReplyTarget | null) => void] {
+  const [target, set] = useState<ReplyTarget | null>(held.target);
+  const choose = useCallback((t: ReplyTarget | null) => { held.target = t; set(t); }, []);
+  const gone = !!target && rooms.length > 0 && !rooms.some((r) => r.id === target.room);
+  useEffect(() => { if (gone) choose(null); }, [gone, choose]);
+  return [gone ? null : target, choose];
+}
+
+/** A reply on its way or just sent, shown at once in the feed. */
+export type Echo = { key: string; room: string; root: string | null; body: string; ts: number; ref: string | null; sending: boolean };
+export type EchoSend = { start: (e: Pick<Echo, "room" | "root" | "body">) => string; done: (key: string, ref: string | null) => void; fail: (key: string) => void };
+/** Your replies from All: on screen in the same frame as Send, until the room's own copy is read (a thread's reply stays: it isn't in the room's timeline). */
+export function useEchoes(byRoom: ReadonlyMap<string, readonly FeedMessage[]>): { shown: Echo[]; send: EchoSend } {
+  const [echoes, setEchoes] = useState<Echo[]>([]);
+  const send = useMemo<EchoSend>(() => ({
+    start: (e) => { const key = crypto.randomUUID(); setEchoes((l) => [...l.slice(-19), { ...e, key, ts: Date.now() / 1000, ref: null, sending: true }]); return key; },
+    done: (key, ref) => setEchoes((l) => l.map((x) => (x.key === key ? { ...x, ref, sending: false } : x))),
+    fail: (key) => setEchoes((l) => l.filter((x) => x.key !== key)),
+  }), []);
+  const shown = useMemo(() => echoes.filter((e) => e.root || !e.ref || !byRoom.get(e.room)?.some((m) => m.ref === e.ref)), [echoes, byRoom]);
+  return { shown, send };
+}
+
+export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "places", target = null, onTarget, echo, onKeyboard }: { rooms: readonly AllRoom[];
   /** Rooms just sent to. */ onSent?: (ids: string[]) => void;
   /** The field took focus (the home reads the rooms' words then, not before). */ onFocus?: () => void;
   /** Each room's recent words (the route's second rule) and when you last wrote there (its third). */ words: ReadonlyMap<string, RoomWords>;
   /** Opens a room (a sent-to line's link). */ onOpen: (id: string) => void;
-  /** Where it sits: in the middle of the home, or under the All feed. */ place?: "places" | "all" }) {
-  const [text, setText] = useState(held.text);
+  /** Where it sits: in the middle of the home, or under the All feed. */ place?: "places" | "all";
+  /** Replying in this room or thread: no route, no model, Send posts there. */ target?: ReplyTarget | null; onTarget?: (t: ReplyTarget | null) => void;
+  /** Shows a reply in the feed at once. */ echo?: EchoSend;
+  /** The field has the keyboard. */ onKeyboard?: (on: boolean) => void }) {
+  const [text, setTextState] = useState(held.text);
+  // what Send reads: Enter can come again before React has drawn the first one
+  const textNow = useRef(held.text);
+  const setText = useCallback((t: string) => { textNow.current = t; setTextState(t); }, []);
   // null: follow Uni's suggestion; a list: the person's own choice, kept until it is sent or cleared
   const [chosen, setChosen] = useState<string[] | null>(held.chosen);
   const [adding, setAdding] = useState(false);
   const [sending, setSending] = useState(false);
+  const sendingNow = useRef(false);
   const [outcome, setOutcome] = useState<{ sent: string[]; failed: { id: string; error: string }[]; noUni: string[] } | null>(null);
   const attempt = useRef<{ body: string; done: Set<string> } | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -88,30 +126,76 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   // the rooms' words are read once per change of rooms or words; each key then routes the text as it is now, so Send always goes
   // where the chips on screen say
   const route = useMemo(() => makeRouter(rooms.map((r): RouteRoom => ({ id: r.id, name: r.name, slug: r.slug, text: `${r.stands ?? ""} ${words.get(r.id)?.text ?? ""}`, lastTs: r.lastTs, lastMine: words.get(r.id)?.lastMine ?? null }))), [rooms, words]);
-  const picks = useMemo(() => (text.trim() ? route(text) : []), [text, route]);
+  const wordPicks = useMemo(() => (text.trim() && !target ? route(text) : []), [text, route, target]);
+  // T-335 All v2: the small model, when nothing is targeted and no room is named; it never stands between a key and the chips
+  const doorRooms = useMemo<DoorRoom[]>(() => rooms.map((r) => ({ id: r.id, name: r.name, about: (r.about || r.stands || "").slice(0, 200) })), [rooms]);
+  const model = useModelRoute(text, doorRooms, !target && !wordPicks.some((p) => p.named), chosen !== null);
+  const picks = useMemo(() => mergeRoute(wordPicks, model.picks.length ? model : null), [wordPicks, model]);
   // T-335 chat feel: a sure route is chosen for you (and named on Send); a guess is only offered, dashed, until you tap it
-  const to = (chosen ?? picks.filter((p) => p.sure).map((p) => p.id)).filter((id) => nameOf.has(id));
-  const offered = chosen ? [] : picks.filter((p) => !p.sure && nameOf.has(p.id) && !to.includes(p.id));
+  const to = target ? [target.room] : (chosen ?? picks.filter((p) => p.sure).map((p) => p.id)).filter((id) => nameOf.has(id));
+  // what you dropped stays on offer, dashed, so it is one tap back
+  const offered = target ? [] : picks.filter((p) => (chosen || !p.sure) && nameOf.has(p.id) && !to.includes(p.id));
   const done = attempt.current && attempt.current.body === text ? attempt.current.done : null;
   const left = to.filter((id) => !done?.has(id));
   const why = chosen ? "your choice" : picks.length ? picks.filter((p) => p.sure).map((p) => p.why).filter((w, i, a) => a.indexOf(w) === i).join(", ") : "";
+  // the model moved the route just now: a Send already on its way was aimed at the old one, so it waits a moment
+  const routeKey = to.join(",");
+  const lastRoute = useRef({ key: routeKey, model });
+  const settling = useRef(0);
+  useLayoutEffect(() => {
+    if (lastRoute.current.model !== model && lastRoute.current.key !== routeKey && !chosen && !target) settling.current = performance.now() + SETTLE_MS;
+    lastRoute.current = { key: routeKey, model };
+  });
   useEffect(() => { held.text = text; held.chosen = chosen; }, [text, chosen]);
   // the field grows with its text up to six lines
   useLayoutEffect(() => { const el = field.current; if (!el) return; el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 6 * 24 + 16)}px`; }, [text]);
+  // a tapped message: the words go there next, so the field takes the keys
+  const targetKey = target ? `${target.room}|${target.root ?? ""}` : "";
+  useEffect(() => { if (targetKey) field.current?.focus({ preventScroll: true }); }, [targetKey]);
+  // leaving All with the field focused hands the phone's bottom bar back
+  useEffect(() => () => onKeyboard?.(false), [onKeyboard]);
 
   const edit = (next: string[]) => { setChosen(next); setOutcome(null); };
+  const addressed = async (room: string) => findUniMember(await invoke<Member[]>("get_members", { channel: room }));
+
+  /** The room's own send: empty in the same frame, your words in the feed at once; on a failure the words and the chip come back, with why. */
+  async function reply(t: ReplyTarget) {
+    const body = textNow.current.trim();
+    if (!body) return;
+    setText("");
+    onTarget?.(null);
+    setOutcome(null);
+    const key = echo?.start({ room: t.room, root: t.root, body });
+    try {
+      const uni = await addressed(t.room);
+      const sent = await invoke<{ ref?: string } | null>("post_message", { channel: t.room, body, replyTo: t.root, recipients: uni ? [uni.pubkey] : [], media: [] });
+      if (key) echo?.done(key, sent?.ref ?? null);
+      setOutcome({ sent: [], failed: [], noUni: uni ? [] : [t.room] });
+      onSent?.([t.room]);
+    } catch (e) {
+      if (key) echo?.fail(key);
+      // anything typed since stays, after the words that came back
+      const since = textNow.current.trim();
+      setText(since ? `${body}\n${since}` : body);
+      onTarget?.(t);
+      setOutcome({ sent: [], failed: [{ id: t.room, error: String(e instanceof Error ? e.message : e).replace(/^Error:\s*/, "").slice(0, 160) }], noUni: [] });
+    }
+  }
+
   async function send() {
-    const body = text.trim();
-    if (!body || !left.length || sending) return;
+    if (target) { await reply(target); return; }
+    const body = textNow.current.trim();
+    if (!body || !left.length || sendingNow.current) return;
+    if (!chosen && performance.now() < settling.current) return;
     if (!attempt.current || attempt.current.body !== text) attempt.current = { body: text, done: new Set() };
     const run = attempt.current;
+    sendingNow.current = true;
     setSending(true);
     setOutcome(null);
     // as the room's own composer does: the message is addressed to the room's Uni when Uni is a member there
     const noUni: string[] = [];
     const post = async (room: string, b: string) => {
-      const members = await invoke<Member[]>("get_members", { channel: room });
-      const uni = findUniMember(members);
+      const uni = await addressed(room);
       await invoke("post_message", { channel: room, body: b, replyTo: null, recipients: uni ? [uni.pubkey] : [], media: [] });
       if (!uni) noUni.push(room);
     };
@@ -119,14 +203,28 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
       const r = await sendEach(to, body, post, run.done);
       const sent = to.filter((id) => run.done.has(id));
       setOutcome({ sent, failed: r.failed, noUni });
-      if (r.sent.length) onSent?.(r.sent);
+      if (r.sent.length) {
+        onSent?.(r.sent);
+        logOutcome({ suggestion: model.suggestion, model: model.picks.map((p) => p.id), modelState: model.state, words: wordPicks.map((p) => p.id), sent: r.sent, edited: chosen !== null });
+      }
       if (!r.failed.length) { setText(""); setChosen(null); setAdding(false); attempt.current = null; }
-    } finally { setSending(false); }
+    } finally { sendingNow.current = false; setSending(false); }
   }
 
   const named = (ids: readonly string[]) => andList(ids.map((id) => nameOf.get(id) ?? id));
-  return <section className={`all-compose all-compose-${place}`} aria-label="Talk to Uni">
-    {text.trim() && <div className="all-route" role="group" aria-label="Where this goes">
+  const targetRoom = target ? rooms.find((r) => r.id === target.room) ?? null : null;
+  const where = targetRoom ? roomAddress(targetRoom) : "";
+  const hasText = !!text.trim();
+  return <section className={`all-compose all-compose-${place}`} aria-label="Talk to Uni"
+    onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) onKeyboard?.(true); }}
+    onBlurCapture={(e) => { const box = e.currentTarget; requestAnimationFrame(() => onKeyboard?.(box.contains(document.activeElement))); }}>
+    {target && targetRoom && <div className="all-route" role="group" aria-label="Where this goes">
+      <span className="all-chip chosen all-reply-chip" data-room={target.room}>
+        <span className="all-chip-name">Replying in {where}{target.root ? " · thread" : ""}</span>
+        <button type="button" className="all-chip-x" aria-label={`Stop replying in ${where}`} onClick={() => { onTarget?.(null); field.current?.focus({ preventScroll: true }); }}>×</button>
+      </span>
+    </div>}
+    {!target && hasText && <div className="all-route" role="group" aria-label="Where this goes">
       <span className="all-to">To</span>
       {to.map((id) => <span key={id} className={`all-chip chosen${done?.has(id) ? " sent" : ""}`} data-room={id}>
         <span className="all-chip-name">{nameOf.get(id)}</span>
@@ -142,16 +240,16 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
         {rooms.every((r) => to.includes(r.id)) && <li className="all-add-none">Every room is on the list.</li>}</ul>}
     </div>}
     <div className="compose-row all-row">
-      <textarea ref={field} rows={1} value={text} aria-label="Message for your rooms" onFocus={onFocus} placeholder={place === "all" ? "Say something; Uni suggests where" : "Talk to Uni"}
+      <textarea ref={field} rows={1} value={text} aria-label="Message for your rooms" onFocus={onFocus} placeholder={target ? `Reply in ${where}` : place === "all" ? "Say something, or tap a message" : "Talk to Uni"}
         onChange={(e) => { setText(e.target.value); setOutcome(null); }}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !touchKeyboard()) { e.preventDefault(); void send(); } }} />
-      <button type="button" className="send all-send" disabled={!text.trim() || !left.length || sending}
-        aria-label={left.length ? `Send to ${named(left)}` : "Choose a room to send to"} onClick={() => void send()}>
-        {sending ? "Sending…" : left.length > 1 ? `Send to ${left.length} rooms` : left.length ? `Send to ${nameOf.get(left[0])}` : "Choose a room"}
+      <button type="button" className={`send all-send${hasText ? "" : " all-send-idle"}`} disabled={!hasText || !left.length || sending}
+        aria-label={!hasText ? "Send" : left.length ? `Send to ${named(left)}` : "Choose a room to send to"} onClick={() => void send()}>
+        {!hasText ? "↑" : sending ? "Sending…" : target ? "Send" : left.length > 1 ? `Send to ${left.length} rooms` : left.length ? `Send to ${nameOf.get(left[0])}` : "Choose a room"}
       </button>
     </div>
-    {text.trim() && !to.length && <p className="all-note" role="status">Pick a room, or keep typing. Nothing is sent until you do.</p>}
-    {outcome && <p className={`all-note${outcome.failed.length ? " all-failed" : ""}`} role="status">
+    {!target && hasText && !to.length && <p className="all-note" role="status">Pick a room, or keep typing. Nothing is sent until you do.</p>}
+    {outcome && (outcome.sent.length > 0 || outcome.noUni.length > 0 || outcome.failed.length > 0) && <p className={`all-note${outcome.failed.length ? " all-failed" : ""}`} role="status">
       {outcome.sent.length > 0 && <>Sent to {outcome.sent.map((id, i) => <span key={id}>{i > 0 && (i === outcome.sent.length - 1 ? " and " : ", ")}<button type="button" className="all-link" onClick={() => onOpen(id)}>{nameOf.get(id)}</button></span>)}. </>}
       {outcome.noUni.length > 0 && <>Uni isn't in {named(outcome.noUni)}, so no Uni there was asked. </>}
       {outcome.failed.length > 0 && <>Couldn't send to {named(outcome.failed.map((f) => f.id))} ({outcome.failed[0].error}). Send again to try only {outcome.failed.length === 1 ? "that room" : "those rooms"}.</>}
@@ -164,12 +262,20 @@ const isLong = (body: string) => body.length > 320 || body.split("\n").filter((l
 /** A room's own tint, from its id: the dot on its label. */
 const tint = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 38% 42%)`; };
 
-const FeedRow = memo(function FeedRow({ m, place, mine, me, run, named, onOpen }: { m: Message; place: string; mine: boolean; me: string | null;
+const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named, targeted, onOpen, onTap }: { m: Message; place: string; address: string; mine: boolean; me: string | null;
   /** The first message of a run from one room: it carries the room's label. */ run: boolean; /** Says who and when (a new author, or a pause). */ named: boolean;
-  onOpen: (room: string, ref: string) => void }) {
+  /** The composer is replying here. */ targeted: boolean;
+  onOpen: (room: string, ref: string) => void; onTap: (m: Message) => void }) {
   const clamp = !mine && isLong(m.body);
-  return <article className={`message all-msg${mine ? " mine" : ""}${run ? " run" : " grouped"}${clamp ? " clamped" : ""}`} data-ref={m.ref} data-room={m.channel}
-    onClick={(e) => { if (!(e.target instanceof Element) || !e.target.closest("a, button, summary, input, textarea")) onOpen(m.channel, m.ref); }}>
+  const replies = m.reply_count ?? 0;
+  return <article className={`message all-msg${mine ? " mine" : ""}${run ? " run" : " grouped"}${clamp ? " clamped" : ""}${targeted ? " targeted" : ""}`} data-ref={m.ref} data-room={m.channel}
+    onClick={(e) => {
+      // T-335 All v2: a tap replies here; the room's label opens the room. Links and buttons stay themselves, and selecting text isn't a tap.
+      if (e.target instanceof Element && e.target.closest("a, button, summary, input, textarea")) return;
+      const picked = getSelection();
+      if (picked && !picked.isCollapsed && picked.anchorNode && e.currentTarget.contains(picked.anchorNode)) return;
+      onTap(m);
+    }}>
     {run && <div className="all-run"><button type="button" className="all-place" style={{ ["--room-tint" as string]: tint(m.channel) }} aria-label={`Open ${place}, at this message`} onClick={() => onOpen(m.channel, m.ref)}>{place}</button>
       {!mine && <strong>{m.author_name}</strong>}<time>{clock(m.ts)}</time></div>}
     <div className="message-content">
@@ -177,40 +283,109 @@ const FeedRow = memo(function FeedRow({ m, place, mine, me, run, named, onOpen }
       {m.body.trim() ? <Body body={m.body} mentions={m.mentions ?? []} me={me} edited={m.edited} />
         : <p className="all-file">{m.media?.length ? `${m.media.length === 1 ? "A file" : `${m.media.length} files`}: open the room to see ${m.media.length === 1 ? "it" : "them"}` : "(nothing to show here)"}</p>}
       {clamp && <button type="button" className="all-rest" onClick={() => onOpen(m.channel, m.ref)}>Read the rest in {place} ›</button>}
+      {replies > 0 && <p className="all-thread">{replies} {replies === 1 ? "reply" : "replies"}</p>}
     </div>
+    <button type="button" className="all-reply-go" aria-label={`Reply in ${address}${m.root || replies ? ", in the thread" : ""}`} aria-pressed={targeted} onClick={() => onTap(m)}>Reply</button>
   </article>;
 });
+/** Your reply, shown from the moment you sent it. */
+function EchoRow({ e, place }: { e: Echo; place: string }) {
+  return <article className="message all-msg mine run all-echo" data-room={e.room}>
+    <div className="all-run"><span className="all-place" style={{ ["--room-tint" as string]: tint(e.room) }}>{place}</span><time>{clock(e.ts)}</time></div>
+    <div className="message-content"><Body body={e.body} mentions={[]} me={null} edited={false} /></div>
+    <p className="all-echo-state" role="status">{e.sending ? "Sending" : "Sent"}{e.root ? " in the thread" : ""}</p>
+  </article>;
+}
 /** Not for All: progress pings, Uni's upkeep, the room buttons' commands and the gateway's answer to a stop. */
 const notTalk = (m: FeedMessage) => isWorkerStatus(m.body) || isMaintenance(m.body) || !!commandOf(m.body) || isStopReply(m.body);
 
-export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen }: { rooms: readonly AllRoom[]; byRoom: ReadonlyMap<string, Message[]>; loaded: boolean; failed: readonly string[];
-  me: string | null; onOpen: (room: string, ref: string) => void }) {
+/** How far a finger must travel, sideways, for a swipe to mean "reply here"; touches this close to the screen's edge belong to the system. */
+const SWIPE_PX = 64, EDGE_PX = 24;
+const stillScreen = () => document.documentElement.dataset.screen === "ink" || matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = null, onTarget, echoes = [] }: { rooms: readonly AllRoom[]; byRoom: ReadonlyMap<string, Message[]>; loaded: boolean; failed: readonly string[];
+  me: string | null; onOpen: (room: string, ref: string) => void;
+  /** Where the composer is replying, and how a tap or a swipe sets it. */ target?: ReplyTarget | null; onTarget?: (t: ReplyTarget | null) => void;
+  /** Your replies not yet in their room's list. */ echoes?: readonly Echo[] }) {
   const nameOf = useMemo(() => new Map(rooms.map((r) => [r.id, r.name])), [rooms]);
+  const addressOf = useMemo(() => new Map(rooms.map((r) => [r.id, roomAddress(r)])), [rooms]);
   const feed = useMemo(() => interleave(new Map([...byRoom].filter(([id]) => nameOf.has(id)).map(([id, list]) => [id, list.filter((m) => !notTalk(m))]))), [byRoom, nameOf]);
   const list = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  useLayoutEffect(() => { const el = list.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [feed]);
-  // the feed gets shorter (the route row appearing over the composer): still at its newest if it was
+  // the message being replied to (the tapped one): when the keyboard takes the room, it stays in sight
+  const [tapped, setTapped] = useState<string | null>(null);
+  const tappedRef = useRef<string | null>(null);
+  tappedRef.current = target ? tapped : null;
+  const keepTapped = useCallback(() => {
+    const el = list.current, ref = tappedRef.current;
+    const row = el && ref ? el.querySelector(`article[data-ref="${CSS.escape(ref)}"]`) : null;
+    if (row) row.scrollIntoView({ block: "nearest" });
+    return !!row;
+  }, []);
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  const tap = useCallback((m: Message) => {
+    const t = replyTargetOf(m);
+    if (sameTarget(targetRef.current, t) && tappedRef.current === m.ref) { onTarget?.(null); setTapped(null); return; }
+    setTapped(m.ref);
+    onTarget?.(t);
+  }, [onTarget]);
+  // a sent reply: back to the newest, where it is
+  const echoCount = echoes.length;
+  useLayoutEffect(() => { stick.current = true; const el = list.current; if (el && echoCount) el.scrollTop = el.scrollHeight; }, [echoCount]);
+  useLayoutEffect(() => { const el = list.current; if (el && stick.current && !tappedRef.current) el.scrollTop = el.scrollHeight; }, [feed]);
+  useLayoutEffect(() => { keepTapped(); }, [tapped, target, keepTapped]);
+  // the feed gets shorter (the route row appearing over the composer, the keyboard): still at its newest if it was, or still at the tapped message
   useEffect(() => {
     const el = list.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => { if (stick.current) el.scrollTop = el.scrollHeight; });
+    const ro = new ResizeObserver(() => { if (!keepTapped() && stick.current) el.scrollTop = el.scrollHeight; });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [keepTapped]);
+  // a swipe sideways on a message is the same as a tap on it; up and down is the feed's own scroll (touch-action: pan-y)
+  const swipe = useRef<{ id: number; x: number; y: number; el: HTMLElement; ref: string; on: boolean } | null>(null);
+  const swiped = useRef(-Infinity);
+  const endSwipe = () => { const s = swipe.current; if (s) s.el.style.transform = ""; swipe.current = null; };
   const rows: React.ReactNode[] = [];
-  let prev: Message | null = null;
-  for (const m of feed) {
+  let prev: { channel: string; author: string; ts: number } | null = null;
+  const items: (Message | Echo)[] = [...feed, ...echoes].sort((a, b) => a.ts - b.ts);
+  for (const m of items) {
     const sameDay = !!prev && new Date(prev.ts * 1000).toDateString() === new Date(m.ts * 1000).toDateString();
-    if (!sameDay) rows.push(<div key={`d-${m.ref}`} className="day-divider" role="separator"><span>{dayLabel(m.ts)}</span></div>);
+    if (!sameDay) rows.push(<div key={`d-${"ref" in m && m.ref ? m.ref : (m as Echo).key}`} className="day-divider" role="separator"><span>{dayLabel(m.ts)}</span></div>);
+    if ("key" in m) { rows.push(<EchoRow key={m.key} e={m} place={nameOf.get(m.room) ?? "Room"} />); prev = { channel: m.room, author: me ?? "", ts: m.ts }; continue; }
     // T-335 chat feel: runs, not a mirror: the room's label only where the room changes; inside a run, who speaks when the author changes
     const run = !sameDay || prev!.channel !== m.channel;
     const named = run || prev!.author !== m.author || m.ts - prev!.ts >= 300;
-    rows.push(<FeedRow key={`${m.channel}:${m.ref}`} m={m} place={nameOf.get(m.channel) ?? "Room"} mine={!!me && m.author === me} me={me} run={run} named={named} onOpen={onOpen} />);
+    const targeted = !!target && tapped === m.ref && target.room === m.channel;
+    rows.push(<FeedRow key={`${m.channel}:${m.ref}`} m={m} place={nameOf.get(m.channel) ?? "Room"} address={addressOf.get(m.channel) ?? "this room"} mine={!!me && m.author === me} me={me} run={run} named={named} targeted={targeted} onOpen={onOpen} onTap={tap} />);
     prev = m;
   }
   return <div className="all-feed" ref={list} role="log" aria-label="All rooms, by time" aria-live="polite"
-    onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
+    onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}
+    onPointerDown={(e) => {
+      if (e.pointerType !== "touch" || e.clientX < EDGE_PX || e.clientX > innerWidth - EDGE_PX || !(e.target instanceof Element)) return;
+      const el = e.target.closest<HTMLElement>("article.all-msg:not(.all-echo)");
+      if (el?.dataset.ref) swipe.current = { id: e.pointerId, x: e.clientX, y: e.clientY, el, ref: el.dataset.ref, on: false };
+    }}
+    onPointerMove={(e) => {
+      const s = swipe.current;
+      if (!s || s.id !== e.pointerId) return;
+      const dx = e.clientX - s.x, dy = e.clientY - s.y;
+      if (!s.on && Math.abs(dx) > 14 && Math.abs(dx) > 2 * Math.abs(dy)) s.on = true;
+      if (s.on && !stillScreen()) s.el.style.transform = `translateX(${Math.max(-SWIPE_PX, Math.min(SWIPE_PX, dx)) / 2}px)`;
+    }}
+    onPointerUp={(e) => {
+      const s = swipe.current;
+      if (!s || s.id !== e.pointerId) return;
+      const hit = s.on && Math.abs(e.clientX - s.x) >= SWIPE_PX ? feed.find((m) => m.ref === s.ref) : null;
+      if (s.on) swiped.current = performance.now();
+      endSwipe();
+      if (hit) tap(hit);
+    }}
+    onPointerCancel={endSwipe}
+    // the click a swipe's lifted finger may leave behind isn't a tap
+    onClickCapture={(e) => { if (performance.now() - swiped.current < 350) { swiped.current = -Infinity; e.stopPropagation(); } }}>
     <div className="all-stack">
       {!loaded && <p className="all-quiet" role="status">Reading your rooms…</p>}
       {loaded && !feed.length && <p className="all-quiet">Nothing said in your rooms yet.</p>}

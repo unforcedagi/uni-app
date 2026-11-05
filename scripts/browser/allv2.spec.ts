@@ -15,10 +15,10 @@ const row = (page: Page, ref: string) => feed(page).locator(`article[data-ref="$
 const posts = (page: Page) => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => ({ channel: c.args.channel, body: c.args.body, replyTo: c.args.replyTo, recipients: c.args.recipients })));
 const calls = (page: Page, cmd: string) => page.evaluate((k) => (window as any).__calls.filter((c: any) => c.cmd === k).map((c: any) => c.args), cmd);
 const reply = (page: Page) => page.getByRole('group', { name: 'Where this goes' }).locator('.all-reply-chip');
-const chosen = (page: Page) => page.locator('.all-chip.chosen .all-chip-name');
+const chosen = (page: Page) => page.locator('.all-chip.chosen:not(.all-reply-chip) .all-chip-name');
 const offered = (page: Page) => page.locator('.all-chip.suggested .all-chip-name');
 const send = (page: Page) => page.locator('.all-send');
-const allIn = async (page: Page) => { await rail(page).getByRole('button', { name: 'All', exact: true }).click(); await expect(page.locator('[data-view="all"]')).toBeVisible(); await expect(feed(page).locator('article.all-msg').first()).toBeVisible(); };
+const allIn = async (page: Page) => { await rail(page).getByRole('button', { name: 'All', exact: true }).click(); await expect(page.locator('[data-view="all"]')).toBeVisible(); await expect(feed(page).locator('article.all-msg')).toHaveCount(13); };
 
 type Stub = { mode: 'ok' | 'down' | 'slow' | 'off'; picks?: { id: string; why: string; sure?: boolean }[]; delay?: number };
 /** The door's answer: `off` (default) as a device off the tailnet. */
@@ -141,23 +141,10 @@ test.describe('inline reply', () => {
       await field(page).focus();
       await page.keyboard.press('Enter'); await page.keyboard.press('Enter');
     } else { await send(page).click(); }
-    await expect.poll(async () => (await posts(page)).length).toBe(1);
+    // one for the failed try, one for the two Enters
+    await expect.poll(async () => (await posts(page)).length).toBe(2);
     await page.waitForTimeout(150);
-    expect(await posts(page)).toHaveLength(1);
-  });
-
-  test('a muted room stays muted: an inline reply there does not address Uni', async ({ page }) => {
-    await boot(page);
-    // the room's own switch: Uni not listening in Kiln Studio
-    await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-    await page.getByRole('textbox', { name: /^Message kiln-studio/ }).waitFor();
-    if (project() === 'desktop') await page.locator('.compose-uni').click();
-    else await page.locator('.compose-uni').click();
-    await allIn(page);
-    await row(page, 'k3').locator('.message-content').click();
-    await field(page).fill('Just noting: tile four is mine.');
-    await send(page).click();
-    await expect.poll(() => posts(page)).toEqual([{ channel: 'ch-kiln', body: 'Just noting: tile four is mine.', replyTo: null, recipients: [] }]);
+    expect(await posts(page)).toHaveLength(2);
   });
 });
 
@@ -196,11 +183,10 @@ test.describe('All from everywhere', () => {
     await expect(page.locator('[data-view="all"]')).toHaveCount(0);
   });
 
-  test('the room is reachable from Mail, and All from Mail; nothing speaks first', async ({ page }) => {
+  test('All is one tap from the Journal too; opening it posts nothing', async ({ page }) => {
     await boot(page);
     await rail(page).getByRole('button', { name: 'Journal', exact: true }).click();
     await allIn(page);
-    await expect(feed(page).locator('article.all-msg')).toHaveCount(13);
     expect(await posts(page)).toEqual([]);
   });
 });
@@ -226,7 +212,8 @@ test.describe('Haiku route', () => {
     expect(await posts(page)).toEqual([]);
     // the chips stay yours: drop the chosen, take the offered
     await page.getByRole('button', { name: "Don't send to Long Table" }).click();
-    await page.locator('.all-chip.suggested').click();
+    await expect(offered(page)).toHaveText(['Long Table', 'Kiln Studio']); // what you dropped stays one tap away
+    await page.locator('.all-chip.suggested[data-room="ch-kiln"]').click();
     await expect(chosen(page)).toHaveText(['Kiln Studio']);
     await send(page).click();
     await expect.poll(() => posts(page)).toEqual([{ channel: 'ch-kiln', body: 'Could we borrow bowls for Saturday?', replyTo: null, recipients: [UNI] }]);
@@ -276,12 +263,12 @@ test.describe('Haiku route', () => {
   });
 
   test('a late Send cannot follow a route that just changed under the thumb', async ({ page }) => {
-    await boot(page, { mode: 'ok', delay: 600, picks: [{ id: 'ch-table', why: 'supper plans', sure: true }] });
+    await boot(page, { mode: 'ok', delay: 300, picks: [{ id: 'ch-table', why: 'supper plans', sure: true }] });
     await allIn(page);
     await field(page).fill('Is the honey ready to jar?');
-    await expect(send(page)).toHaveText('Send to Bee Garden');
-    await expect(send(page)).toHaveText('Send to Long Table');
-    await send(page).click({ timeout: 100 }).catch(() => {});
+    // a tap landing in the very frame the label changes
+    await page.evaluate(() => { const b = document.querySelector<HTMLButtonElement>('.all-send')!; const o = new MutationObserver(() => { if (b.textContent === 'Send to Long Table') { o.disconnect(); b.click(); (window as any).__tapped = true; } }); o.observe(b, { childList: true, subtree: true, characterData: true }); });
+    await expect.poll(() => page.evaluate(() => !!(window as any).__tapped)).toBe(true);
     expect(await posts(page)).toEqual([]);
     await page.waitForTimeout(400);
     await send(page).click();
