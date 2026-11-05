@@ -148,12 +148,21 @@ class Run:
     def __init__(self):
         self.base = tempfile.mkdtemp(prefix="uni-route-")
         self.born = time.time()
+        try:
+            self._start()
+        except OSError:
+            shutil.rmtree(self.base, ignore_errors=True)
+            raise
+
+    def _start(self):
         mcp = os.path.join(self.base, "mcp.json")
         with open(os.open(mcp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
             json.dump({"mcpServers": {}}, f)
         env = {k: os.environ[k] for k in ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TZ") if os.environ.get(k)}
         env.update(HOME=str(HOME), PATH=":".join(dict.fromkeys([str(Path(CLAUDE).parent), "/usr/bin", "/bin"])), TMPDIR=self.base,
-                   DISABLE_AUTOUPDATER="1", CLAUDE_CODE_DISABLE_AUTO_MEMORY="1")
+                   DISABLE_AUTOUPDATER="1", CLAUDE_CODE_DISABLE_AUTO_MEMORY="1",
+                   # the message goes to the model and nowhere else: no telemetry, no error reports, no other traffic
+                   DISABLE_TELEMETRY="1", DISABLE_ERROR_REPORTING="1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
         pin = HOME / ".config/claude-job/config_dir"   # the account Uni's jobs run on, one line
         if pin.is_file():
             cfg = os.path.expanduser(pin.read_text().strip())
@@ -242,10 +251,14 @@ class Pool:
             return bool(self.warm and self.warm.alive())
 
     def _fill(self) -> None:
+        dead = None
         with self.lock:
             if self.starting or (self.warm and self.warm.alive()):
                 return
+            dead, self.warm = self.warm, None
             self.starting = True
+        if dead:
+            dead.close()
         run = None
         try:
             run = Run()
@@ -407,7 +420,10 @@ class Handler(BaseHTTPRequestHandler):
         run = routes.get(self.path)
         if not run:
             return self.reply(404, {"error": "not found"})
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
         if not 0 < length <= MAX_BODY:
             return self.reply(413, {"error": "empty or too large"})
         body = self.rfile.read(length)
@@ -420,12 +436,24 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e:
             # verify's reasons name nothing from the body; a body that isn't JSON says so
             self.reply(401 if not isinstance(e, json.JSONDecodeError) else 400, {"error": "not JSON" if isinstance(e, json.JSONDecodeError) else f"unauthorized: {e}"})
+        except OSError:
+            pass   # the app stopped waiting and left: nothing to tell it
         except Exception as e:   # no traceback in the journal: a frame could hold the words
             log({"kind": "error", "type": type(e).__name__})
-            self.reply(500, {"error": "the door failed"})
+            try:
+                self.reply(500, {"error": "the door failed"})
+            except OSError:
+                pass
 
     def log_message(self, *_):
         pass   # no request lines in the journal
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        pass   # never a traceback in the journal
 
 
 def report(path: Path = LOG_FILE) -> str:
@@ -459,7 +487,7 @@ def main() -> None:
         sys.exit("UNI_ROUTE_URLS is not set: no signature could name this door")
     pool = Pool()
     print(f"uni-route: {MODEL} on 127.0.0.1:{PORT}", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    Server(("127.0.0.1", PORT), Handler).serve_forever()
 
 
 if __name__ == "__main__":

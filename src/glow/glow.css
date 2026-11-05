@@ -91,7 +91,7 @@
   --g-ground: #ffffff; --g-paper: #ffffff; --g-sunk: #f0f0f0;
   --g-ink: #000000; --g-ink-2: #262626; --g-ink-3: #4a4a4a;
   --g-line: rgba(0, 0, 0, .35); --g-line-strong: rgba(0, 0, 0, .7);
-  --g-shadow-1: none; --g-shadow-2: none;
+  --g-shadow-1: 0 0 0 0 transparent; --g-shadow-2: 0 0 0 0 transparent;
   --g-accent: #000000; --g-accent-soft: rgba(0, 0, 0, .08);
   --g-needs: #000000; --g-needs-soft: rgba(0, 0, 0, .1);
   --g-focus: #000000; --g-hair: 1.5px;

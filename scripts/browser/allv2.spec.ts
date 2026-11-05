@@ -275,3 +275,196 @@ test.describe('Haiku route', () => {
     await expect.poll(async () => (await posts(page)).map((p: any) => p.channel)).toEqual(['ch-table']);
   });
 });
+
+// Review round 1 (a fresh reviewer, NO-SHIP): nothing posts twice, nothing is lost, and nothing moves a route already shown.
+test.describe('review', () => {
+  const hold = (page: Page, ms: number) => page.evaluate((m) => { (window as any).__postDelay = m; }, ms);
+  /** The next `n` posts fail with this error. */
+  const failPosts = (page: Page, err: unknown, n = 1) => page.evaluate(([e, k]) => { const w = window as any; const prev = w.__extraInvoke; w.__failLeft = k; w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'post_message' && w.__failLeft > 0) { w.__failLeft--; if (w.__postDelay) await new Promise((r) => setTimeout(r, w.__postDelay)); throw e; } return prev(cmd, a); }; }, [err, n] as const);
+
+  test('leave All while a routed message is on its way: it is not left as a draft to send again', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await hold(page, 500);
+    await field(page).fill('Is the honey ready to jar?');
+    await send(page).click();
+    await page.getByRole('button', { name: /^← / }).click();
+    await page.waitForTimeout(800);
+    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await expect(feed(page).locator('article.all-msg').first()).toBeVisible();
+    await expect(field(page)).toHaveValue('');
+    expect((await posts(page)).map((p: any) => p.channel)).toEqual(['ch-bees']);
+  });
+
+  test('leave All while a reply is on its way and it fails: the words, the chip and the reason are there when you come back', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await hold(page, 400);
+    await failPosts(page, 'relay said no');
+    await row(page, 'k3').locator('.message-content').click();
+    await field(page).fill('Keep the crawled tile.');
+    await send(page).click();
+    await expect(field(page)).toHaveValue('');
+    await page.getByRole('button', { name: /^← / }).click();
+    await page.waitForTimeout(700);
+    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await expect(field(page)).toHaveValue('Keep the crawled tile.');
+    await expect(reply(page)).toContainText('#kiln-studio');
+    await expect(page.locator('.all-note.all-failed')).toContainText('relay said no');
+  });
+
+  test('the relay has it and only this device\'s copy failed: it was sent, in a reply and in a routed send; nothing invites a second post', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await failPosts(page, { accepted: true, eventId: 'ev-1' }, 2);
+    await row(page, 'k3').locator('.message-content').click();
+    await field(page).fill('Reply the relay took.');
+    await send(page).click();
+    await page.waitForTimeout(200);
+    await expect(field(page)).toHaveValue('');
+    await expect(reply(page)).toHaveCount(0);
+    await expect(page.locator('.all-failed')).toHaveCount(0);
+    await field(page).fill('Is the honey ready to jar?');
+    await send(page).click();
+    await expect(page.locator('.all-note')).toContainText('Sent to Bee Garden');
+    await expect(field(page)).toHaveValue('');
+    await expect(page.locator('.all-failed')).toHaveCount(0);
+  });
+
+  test('a later answer that is late, or fails, does not move a route the model already gave', async ({ page }) => {
+    await boot(page, { mode: 'ok', picks: [{ id: 'ch-table', why: 'supper plans', sure: true }] });
+    await allIn(page);
+    await field(page).fill('Is the honey ready to jar?');
+    await expect(chosen(page)).toHaveText(['Long Table']);
+    await page.evaluate(() => { const s = (window as any).__routeStub; s.mode = 'slow'; s.delay = 1900; });
+    await field(page).fill('Is the honey ready to jar? And the wax');
+    await page.waitForTimeout(2800);
+    await expect(chosen(page)).toHaveText(['Long Table']);
+    await page.evaluate(() => { (window as any).__routeStub.mode = 'down'; });
+    await field(page).fill('Is the honey ready to jar? And the wax too');
+    await page.waitForTimeout(900);
+    await expect(chosen(page)).toHaveText(['Long Table']);
+    // a new thought drops it
+    await field(page).fill('The kiln shelf is cracked');
+    await expect(chosen(page)).toHaveText(['Kiln Studio']);
+  });
+
+  test('a reply does not leave an earlier choice of rooms armed for the next message', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await field(page).fill('Tell the choir');
+    await page.getByRole('button', { name: 'Add a room' }).click();
+    await page.getByRole('list', { name: 'Rooms to add' }).getByRole('button', { name: 'Long Table' }).click();
+    await expect(chosen(page)).toHaveText(['Choir', 'Long Table']);
+    await row(page, 'k3').locator('.message-content').click();
+    await send(page).click();
+    await expect.poll(async () => (await posts(page)).map((p: any) => p.channel)).toEqual(['ch-kiln']);
+    await field(page).fill('Is the honey ready to jar?');
+    await expect(chosen(page)).toHaveText(['Bee Garden']);
+    await expect(page.locator('[data-why]')).not.toContainText('your choice');
+  });
+
+  test('a reply fails after you moved on to another room: the new words stay where they were going, and the lost ones are offered back', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await hold(page, 500);
+    await failPosts(page, 'relay said no');
+    await row(page, 'k3').locator('.message-content').click();
+    await field(page).fill('For the kiln.');
+    await send(page).click();
+    await row(page, 'b2').locator('.message-content').click();
+    await field(page).fill('For the bees.');
+    await expect(page.locator('.all-note.all-failed')).toContainText('For the kiln.', { timeout: 3000 });
+    await expect(field(page)).toHaveValue('For the bees.');
+    await expect(reply(page)).toContainText('#bee-garden');
+    await page.evaluate(() => { (window as any).__postDelay = 0; });
+    await send(page).click();
+    await expect.poll(async () => (await posts(page)).filter((p: any) => p.body === 'For the bees.').map((p: any) => p.channel)).toEqual(['ch-bees']);
+    await page.getByRole('button', { name: 'Put it back' }).click();
+    await expect(field(page)).toHaveValue('For the kiln.');
+    await expect(reply(page)).toContainText('#kiln-studio');
+  });
+
+  test('during a routed send: a tap and Enter post nothing more, and words typed since are kept', async ({ page }) => {
+    test.skip(touch(), 'Enter is a new line on touch');
+    await boot(page);
+    await allIn(page);
+    await hold(page, 500);
+    await field(page).fill('Is the honey ready to jar?');
+    await send(page).click();
+    await row(page, 'k3').locator('.message-content').click();
+    await field(page).press('Enter');
+    await field(page).fill('And a second thought');
+    await expect(page.locator('.all-note')).toContainText('Sent to Bee Garden', { timeout: 3000 });
+    expect((await posts(page)).map((p: any) => p.channel)).toEqual(['ch-bees']);
+    await expect(field(page)).toHaveValue('And a second thought');
+  });
+
+  test('a reply draft keeps its chip on the home, and sending there goes to that room', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await row(page, 'k3').locator('.message-content').click();
+    await field(page).fill('yes, do it');
+    await page.getByRole('button', { name: /^← / }).click();
+    await expect(page.locator('[data-view="places"]')).toBeVisible();
+    await expect(field(page)).toHaveValue('yes, do it');
+    await expect(reply(page)).toContainText('#kiln-studio');
+    await send(page).click();
+    await expect.poll(async () => (await posts(page)).map((p: any) => p.channel)).toEqual(['ch-kiln']);
+    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await expect(feed(page).locator('article.all-msg').first()).toBeVisible();
+    await expect(reply(page)).toHaveCount(0);
+  });
+
+  test('asks are few: one at a time, none again for the words already answered, even after coming back', async ({ page }) => {
+    await boot(page, { mode: 'ok', delay: 900, picks: [{ id: 'ch-table', why: 'supper plans', sure: true }] });
+    await allIn(page);
+    // a slow typist, pausing past the wait at every word, while the first ask is out
+    await field(page).click();
+    for (const w of ['Could', ' we', ' borrow', ' bowls', ' for', ' Saturday']) { await page.keyboard.type(w); await page.waitForTimeout(450); }
+    await page.waitForTimeout(1300);
+    await expect(chosen(page)).toHaveText(['Long Table']);
+    const n = (await calls(page, 'route_suggest')).length;
+    expect(n).toBeLessThanOrEqual(4);
+    await page.getByRole('button', { name: /^← / }).click();
+    await expect(page.locator('[data-view="places"]')).toBeVisible();
+    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await expect(feed(page).locator('article.all-msg').first()).toBeVisible();
+    await page.waitForTimeout(900);
+    await expect(chosen(page)).toHaveText(['Long Table']);
+    expect((await calls(page, 'route_suggest')).length).toBe(n);
+  });
+
+  test('from a private room, All\'s way back doesn\'t name it', async ({ page }) => {
+    await boot(page);
+    await page.locator('.fd-door[data-path="Areas/Sanctum"]').click();
+    await page.getByRole('textbox', { name: /^Message sanctum/ }).waitFor();
+    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await expect(page.locator('[data-view="all"]')).toBeVisible();
+    await expect(page.locator('.all-back')).toHaveText('← Back');
+    await expect(page.locator('[data-view="all"]')).not.toContainText('Sanctum');
+    await page.locator('.all-back').click();
+    await expect(page.getByRole('textbox', { name: /^Message sanctum/ })).toBeVisible();
+  });
+
+  test('a link in a message is a link, not a reply; selecting words isn\'t a tap', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await page.evaluate(() => (window as any).__arrive('ch-bees', 'Uni', 'The hive map is at [the map](https://example.com/hives).'));
+    const msg = feed(page).locator('article.all-msg').filter({ hasText: 'The hive map' });
+    await msg.locator('a').click();
+    await expect(reply(page)).toHaveCount(0);
+    await page.evaluate(() => { const p = [...document.querySelectorAll('article[data-ref="k3"] p')][0]; const r = document.createRange(); r.selectNodeContents(p); const s = getSelection()!; s.removeAllRanges(); s.addRange(r); });
+    await row(page, 'k3').locator('p').first().dispatchEvent('click');
+    await expect(reply(page)).toHaveCount(0);
+  });
+
+  test('every place stays on the phone\'s bar, however many; All is among them', async ({ page }) => {
+    test.skip(project() !== 'phone', 'the phone\'s bar');
+    await boot(page);
+    const bar = rail(page);
+    const ok = await bar.evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+    expect(ok).toBe(true);
+    for (const b of await bar.getByRole('button').all()) await expect(b).toBeInViewport({ ratio: 0.95 });
+  });
+});

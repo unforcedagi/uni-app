@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """uni-route, end to end: the real server, real HTTP, real NIP-98 signatures, its real log. Only `claude` is a stand-in (a third party's model).
-Run: python3 -I services/route/test_server.py (with coincurve; the uni-transcribe venv has it). Made-up rooms and words only."""
+Run: uv run --no-project --python 3.13 --with coincurve python services/route/test_server.py. Made-up rooms and words only."""
 import base64
 import hashlib
 import json
@@ -28,6 +28,7 @@ d = {str(tmp)!r}
 open(d + "/argv.json", "w").write(json.dumps(sys.argv[1:]))
 open(d + "/envnames.json", "w").write(json.dumps(sorted(os.environ)))
 open(d + "/cwd.txt", "w").write(os.getcwd())
+if open(d + "/mode").read().strip() == "deadatstart": sys.exit(1)
 line = sys.stdin.readline()
 open(d + "/prompt.txt", "w").write(line)
 mode = open(d + "/mode").read().strip()
@@ -55,7 +56,8 @@ pub = lambda k: k.public_key.format(compressed=True)[1:].hex()
 s = socket.socket(); s.bind(("127.0.0.1", 0)); PORT = s.getsockname()[1]; s.close()
 ORIGIN = "https://door.example.ts.net:8521"
 LOG = tmp / "log.jsonl"
-env = {**os.environ, "UNI_ROUTE_PORT": str(PORT), "UNI_ROUTE_URLS": ORIGIN, "UNI_ROUTE_ALLOW": str(tmp / "allow"), "UNI_ROUTE_LOG": str(LOG), "UNI_ROUTE_CLAUDE": str(FAKE),
+(tmp / "runs").mkdir()
+env = {**os.environ, "TMPDIR": str(tmp / "runs"), "UNI_ROUTE_PORT": str(PORT), "UNI_ROUTE_URLS": ORIGIN, "UNI_ROUTE_ALLOW": str(tmp / "allow"), "UNI_ROUTE_LOG": str(LOG), "UNI_ROUTE_CLAUDE": str(FAKE),
        "UNI_ROUTE_DEADLINE": "1.5", "SECRET_THING": "must-not-reach-the-model", "HOME": str(tmp)}
 out = open(tmp / "server.out", "w")
 server = subprocess.Popen([sys.executable, "-I", str(HERE / "server.py")], env=env, stdout=out, stderr=subprocess.STDOUT)
@@ -150,6 +152,9 @@ try:
     argv = json.loads((tmp / "argv.json").read_text())
     joined = " ".join(argv)
     check("no tools", argv[argv.index("--tools") + 1] == "")
+    names0 = json.loads((tmp / "envnames.json").read_text())
+    for k in ("DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"):
+        check(f"env {k}", k in names0)
     for flag in ("--no-session-persistence", "--strict-mcp-config", "--safe-mode", "--disable-slash-commands"):
         check(f"flag {flag}", flag in argv)
     check("Haiku 5.5", argv[argv.index("--model") + 1] == "claude-haiku-5-5")
@@ -184,6 +189,31 @@ try:
     mode("ok")
     wait_warm()
 
+    # a model process that dies at start leaves nothing behind (auth lapsed, a bad upgrade): one directory at a time, however long it goes on
+    mode("deadatstart")
+    time.sleep(0.2)
+    for _ in range(6):
+        post(SUG, ask)
+    time.sleep(0.5)
+    runs = list((tmp / "runs").glob("uni-route-*"))
+    check("dead processes don't pile up directories", len(runs) <= 2, [p.name for p in runs])
+    mode("ok")
+    # the next ask starts a process that doesn't die, and the door is whole again
+    st, _ans = post(SUG, ask)
+    check("the door recovers once the model does", st == 200, (st, _ans))
+    wait_warm()
+
+    # a bad header is an answer, not a traceback
+    req = urllib.request.Request(f"http://127.0.0.1:{PORT}{SUG}", data=b"{}", method="POST", headers={"Authorization": "Nostr x"})
+    req.add_header("Content-Type", "application/json")
+    try:
+        urllib.request.urlopen(req, timeout=5)
+    except urllib.error.HTTPError as e:
+        check("an unreadable signature is refused", e.code == 401)
+    with socket.create_connection(("127.0.0.1", PORT), timeout=5) as c:
+        c.sendall(b"POST /route/v1/suggest HTTP/1.0\r\nContent-Length: nonsense\r\n\r\n")
+        check("a nonsense length is refused", b" 413 " in c.recv(200))
+
     # input is bounded
     check("no rooms", post(SUG, {"text": "hello there", "rooms": []})[0] == 400)
     check("a room id that isn't one", post(SUG, {"text": "hello there", "rooms": [{"id": "a b", "name": "x"}]})[0] == 400)
@@ -204,7 +234,10 @@ try:
     check("the log has the suggestions and the outcomes", {r["kind"] for r in rows} == {"suggest", "outcome"} and sum(r["kind"] == "outcome" for r in rows) == 2)
     check("the log never holds the words or a reason", MARK not in logged and "glaze" not in logged and "crawled" not in logged, logged[:300])
     check("the log is private", stat.S_IMODE(LOG.stat().st_mode) == 0o600)
-    check("the server's own output never holds the words", MARK not in (tmp / "server.out").read_text())
+    out.flush()
+    said = (tmp / "server.out").read_text()
+    check("the server's own output never holds the words", MARK not in said)
+    check("no traceback in its output", "Traceback" not in said, said[-400:])
     last = [r for r in rows if r["kind"] == "outcome"][-1]
     check("an outcome's row is only its fields", set(last) == {"at", "kind", "sid", "state", "model", "words", "sent", "edited"}, last)
 

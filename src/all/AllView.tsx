@@ -6,7 +6,7 @@
 // T-335 All v2: All is a place on the rail, reachable from every room and back, never where the app opens. A tap or a swipe on a message
 // replies in that room (or its thread) with no routing at all; the room's label is the way into the room. An unaddressed message gets the word
 // match at once and the small model's route if it answers in time (modelRoute.ts).
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Body } from "../MessageBody";
@@ -18,6 +18,7 @@ import { logOutcome, useModelRoute, type DoorRoom } from "./modelRoute";
 import { enterInsertsNewline } from "../composerCore";
 import { isMaintenance, isWorkerStatus } from "../chatMarkers";
 import { commandOf, isStopReply } from "../chatFeel";
+import { relayAccepted } from "../voiceOutbox";
 import "./all.css";
 
 /** A place in the All view: an area and its own room. */
@@ -74,13 +75,31 @@ export function useRoomsFeed(rooms: readonly AllRoom[], on: boolean) {
   return { byRoom, loaded, failed, reread };
 }
 
-/** What the composer holds across the home and All, and across visits. */
-const held = { text: "", chosen: null as string[] | null, target: null as ReplyTarget | null };
+/**
+ * What the composer holds, across the home and All, across visits, and while a send is out: written the moment it changes, not when a component draws,
+ * because a send can finish after you have left. A message delivered isn't left as a draft to send again; one that failed is back here, with why.
+ */
+const held = {
+  text: "", chosen: null as string[] | null, target: null as ReplyTarget | null,
+  attempt: null as { body: string; done: Set<string> } | null, sending: false,
+  /** A tap on a message just set the target: the field takes the keys (a reply coming back from a failure doesn't take them). */
+  wantKeys: false,
+  outcome: null as { sent: string[]; failed: { id: string; error: string }[]; noUni: string[] } | null,
+  /** A reply that failed after the composer had moved on: its words are offered back, never mixed into the new ones. */
+  lost: [] as { body: string; target: ReplyTarget; error: string }[],
+};
+const watchers = new Set<() => void>();
+const setHeld = (p: Partial<typeof held>) => { Object.assign(held, p); watchers.forEach((f) => f()); };
+function useHeld() {
+  const [, redraw] = useReducer((n: number) => n + 1, 0);
+  useLayoutEffect(() => { watchers.add(redraw); return () => { watchers.delete(redraw); }; }, []);
+  return held;
+}
 
-/** T-335 All v2: where the composer is replying, if anywhere. Kept with the draft across visits; a room that left All drops it. */
+/** T-335 All v2: where the composer is replying, if anywhere. A room that left All drops it. */
 export function useReplyTarget(rooms: readonly AllRoom[]): [ReplyTarget | null, (t: ReplyTarget | null) => void] {
-  const [target, set] = useState<ReplyTarget | null>(held.target);
-  const choose = useCallback((t: ReplyTarget | null) => { held.target = t; set(t); }, []);
+  const { target } = useHeld();
+  const choose = useCallback((t: ReplyTarget | null) => setHeld({ target: t, wantKeys: !!t }), []);
   const gone = !!target && rooms.length > 0 && !rooms.some((r) => r.id === target.room);
   useEffect(() => { if (gone) choose(null); }, [gone, choose]);
   return [gone ? null : target, choose];
@@ -110,17 +129,9 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   /** Replying in this room or thread: no route, no model, Send posts there. */ target?: ReplyTarget | null; onTarget?: (t: ReplyTarget | null) => void;
   /** Shows a reply in the feed at once. */ echo?: EchoSend;
   /** The field has the keyboard. */ onKeyboard?: (on: boolean) => void }) {
-  const [text, setTextState] = useState(held.text);
-  // what Send reads: Enter can come again before React has drawn the first one
-  const textNow = useRef(held.text);
-  const setText = useCallback((t: string) => { textNow.current = t; setTextState(t); }, []);
   // null: follow Uni's suggestion; a list: the person's own choice, kept until it is sent or cleared
-  const [chosen, setChosen] = useState<string[] | null>(held.chosen);
+  const { text, chosen, sending, outcome, lost, attempt } = useHeld();
   const [adding, setAdding] = useState(false);
-  const [sending, setSending] = useState(false);
-  const sendingNow = useRef(false);
-  const [outcome, setOutcome] = useState<{ sent: string[]; failed: { id: string; error: string }[]; noUni: string[] } | null>(null);
-  const attempt = useRef<{ body: string; done: Set<string> } | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const nameOf = useMemo(() => new Map(rooms.map((r) => [r.id, r.name])), [rooms]);
   // the rooms' words are read once per change of rooms or words; each key then routes the text as it is now, so Send always goes
@@ -135,80 +146,83 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   const to = target ? [target.room] : (chosen ?? picks.filter((p) => p.sure).map((p) => p.id)).filter((id) => nameOf.has(id));
   // what you dropped stays on offer, dashed, so it is one tap back
   const offered = target ? [] : picks.filter((p) => (chosen || !p.sure) && nameOf.has(p.id) && !to.includes(p.id));
-  const done = attempt.current && attempt.current.body === text ? attempt.current.done : null;
+  const done = attempt && attempt.body === text ? attempt.done : null;
   const left = to.filter((id) => !done?.has(id));
   const why = chosen ? "your choice" : picks.length ? picks.filter((p) => p.sure).map((p) => p.why).filter((w, i, a) => a.indexOf(w) === i).join(", ") : "";
-  // the model moved the route just now: a Send already on its way was aimed at the old one, so it waits a moment
+  // the route moved by itself just now (the model answered, a room's words changed), with the words the same: a Send already on its way was aimed
+  // at the old one, so it waits a moment
   const routeKey = to.join(",");
-  const lastRoute = useRef({ key: routeKey, model });
+  const lastRoute = useRef({ key: routeKey, text });
   const settling = useRef(0);
   useLayoutEffect(() => {
-    if (lastRoute.current.model !== model && lastRoute.current.key !== routeKey && !chosen && !target) settling.current = performance.now() + SETTLE_MS;
-    lastRoute.current = { key: routeKey, model };
+    if (lastRoute.current.text === text && lastRoute.current.key !== routeKey && !chosen && !target) settling.current = performance.now() + SETTLE_MS;
+    lastRoute.current = { key: routeKey, text };
   });
-  useEffect(() => { held.text = text; held.chosen = chosen; }, [text, chosen]);
   // the field grows with its text up to six lines
   useLayoutEffect(() => { const el = field.current; if (!el) return; el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 6 * 24 + 16)}px`; }, [text]);
-  // a tapped message: the words go there next, so the field takes the keys
+  // a tapped message: the words go there next
   const targetKey = target ? `${target.room}|${target.root ?? ""}` : "";
-  useEffect(() => { if (targetKey) field.current?.focus({ preventScroll: true }); }, [targetKey]);
+  useEffect(() => { if (targetKey && held.wantKeys) { held.wantKeys = false; field.current?.focus({ preventScroll: true }); } }, [targetKey]);
   // leaving All with the field focused hands the phone's bottom bar back
   useEffect(() => () => onKeyboard?.(false), [onKeyboard]);
 
-  const edit = (next: string[]) => { setChosen(next); setOutcome(null); };
-  const addressed = async (room: string) => findUniMember(await invoke<Member[]>("get_members", { channel: room }));
+  const edit = (next: string[]) => setHeld({ chosen: next, outcome: null });
+  /** One post, as the room's own composer does it: addressed to the room's Uni when Uni is a member there. The relay having it is sent, even if this
+   *  device's own copy failed (putting the words back would invite a second one). */
+  const postOnce = async (room: string, body: string, replyTo: string | null) => {
+    const uni = findUniMember(await invoke<Member[]>("get_members", { channel: room }));
+    try {
+      const sent = await invoke<{ ref?: string } | null>("post_message", { channel: room, body, replyTo, recipients: uni ? [uni.pubkey] : [], media: [] });
+      return { ref: sent?.ref ?? null, uni: !!uni };
+    } catch (e) {
+      if (relayAccepted(e)) return { ref: (e as { eventId: string }).eventId, uni: !!uni };
+      throw new Error(typeof e === "string" ? e : e instanceof Error ? e.message : "the relay refused it");
+    }
+  };
 
-  /** The room's own send: empty in the same frame, your words in the feed at once; on a failure the words and the chip come back, with why. */
+  /** Empty in the same frame, your words in the feed at once; on a failure the words and the chip come back, with why. */
   async function reply(t: ReplyTarget) {
-    const body = textNow.current.trim();
-    if (!body) return;
-    setText("");
-    onTarget?.(null);
-    setOutcome(null);
+    const body = held.text.trim();
+    if (!body || held.sending) return;
+    setHeld({ text: "", target: null, chosen: null, outcome: null });
     const key = echo?.start({ room: t.room, root: t.root, body });
     try {
-      const uni = await addressed(t.room);
-      const sent = await invoke<{ ref?: string } | null>("post_message", { channel: t.room, body, replyTo: t.root, recipients: uni ? [uni.pubkey] : [], media: [] });
-      if (key) echo?.done(key, sent?.ref ?? null);
-      setOutcome({ sent: [], failed: [], noUni: uni ? [] : [t.room] });
+      const sent = await postOnce(t.room, body, t.root);
+      if (key) echo?.done(key, sent.ref);
+      if (!sent.uni) setHeld({ outcome: { sent: [], failed: [], noUni: [t.room] } });
       onSent?.([t.room]);
     } catch (e) {
       if (key) echo?.fail(key);
-      // anything typed since stays, after the words that came back
-      const since = textNow.current.trim();
-      setText(since ? `${body}\n${since}` : body);
-      onTarget?.(t);
-      setOutcome({ sent: [], failed: [{ id: t.room, error: String(e instanceof Error ? e.message : e).replace(/^Error:\s*/, "").slice(0, 160) }], noUni: [] });
+      const error = String(e instanceof Error ? e.message : e).replace(/^Error:\s*/, "").slice(0, 160);
+      const here = !held.target || sameTarget(held.target, t);
+      if (here && !held.text.trim()) setHeld({ text: body, target: t, outcome: { sent: [], failed: [{ id: t.room, error }], noUni: [] } });
+      else if (held.target && sameTarget(held.target, t)) setHeld({ text: `${body}\n${held.text}`, outcome: { sent: [], failed: [{ id: t.room, error }], noUni: [] } });
+      // the composer has moved on: its new words stay where they were going
+      else setHeld({ lost: [...held.lost, { body, target: t, error }] });
     }
   }
 
   async function send() {
-    if (target) { await reply(target); return; }
-    const body = textNow.current.trim();
-    if (!body || !left.length || sendingNow.current) return;
-    if (!chosen && performance.now() < settling.current) return;
-    if (!attempt.current || attempt.current.body !== text) attempt.current = { body: text, done: new Set() };
-    const run = attempt.current;
-    sendingNow.current = true;
-    setSending(true);
-    setOutcome(null);
-    // as the room's own composer does: the message is addressed to the room's Uni when Uni is a member there
+    if (held.sending) return;
+    if (held.target) { await reply(held.target); return; }
+    const sentText = held.text, body = sentText.trim();
+    if (!body || !left.length) return;
+    if (!held.chosen && performance.now() < settling.current) return;
+    const run = held.attempt && held.attempt.body === sentText ? held.attempt : { body: sentText, done: new Set<string>() };
+    setHeld({ attempt: run, sending: true, outcome: null });
     const noUni: string[] = [];
-    const post = async (room: string, b: string) => {
-      const uni = await addressed(room);
-      await invoke("post_message", { channel: room, body: b, replyTo: null, recipients: uni ? [uni.pubkey] : [], media: [] });
-      if (!uni) noUni.push(room);
-    };
+    const post = async (room: string, b: string) => { const r = await postOnce(room, b, null); if (!r.uni) noUni.push(room); };
+    const edited = held.chosen !== null;
     try {
       const r = await sendEach(to, body, post, run.done);
-      const sent = to.filter((id) => run.done.has(id));
-      setOutcome({ sent, failed: r.failed, noUni });
+      setHeld({ outcome: { sent: to.filter((id) => run.done.has(id)), failed: r.failed, noUni } });
       if (r.sent.length) {
         onSent?.(r.sent);
-        logOutcome({ suggestion: model.suggestion, model: model.picks.map((p) => p.id), modelState: model.state, words: wordPicks.map((p) => p.id), sent: r.sent, edited: chosen !== null });
+        logOutcome({ suggestion: model.suggestion, model: model.picks.map((p) => p.id), modelState: model.state, words: wordPicks.map((p) => p.id), sent: r.sent, edited });
       }
-      if (!r.failed.length) { setText(""); setChosen(null); setAdding(false); attempt.current = null; }
-    } finally { sendingNow.current = false; setSending(false); }
+      // delivered: the words go, unless you have written more since
+      if (!r.failed.length) { setAdding(false); setHeld(held.text === sentText ? { text: "", chosen: null, attempt: null } : { attempt: null }); }
+    } finally { setHeld({ sending: false }); }
   }
 
   const named = (ids: readonly string[]) => andList(ids.map((id) => nameOf.get(id) ?? id));
@@ -241,7 +255,7 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
     </div>}
     <div className="compose-row all-row">
       <textarea ref={field} rows={1} value={text} aria-label="Message for your rooms" onFocus={onFocus} placeholder={target ? `Reply in ${where}` : place === "all" ? "Say something, or tap a message" : "Talk to Uni"}
-        onChange={(e) => { setText(e.target.value); setOutcome(null); }}
+        onChange={(e) => setHeld({ text: e.target.value, outcome: null })}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !touchKeyboard()) { e.preventDefault(); void send(); } }} />
       <button type="button" className={`send all-send${hasText ? "" : " all-send-idle"}`} disabled={!hasText || !left.length || sending}
         aria-label={!hasText ? "Send" : left.length ? `Send to ${named(left)}` : "Choose a room to send to"} onClick={() => void send()}>
@@ -254,6 +268,8 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
       {outcome.noUni.length > 0 && <>Uni isn't in {named(outcome.noUni)}, so no Uni there was asked. </>}
       {outcome.failed.length > 0 && <>Couldn't send to {named(outcome.failed.map((f) => f.id))} ({outcome.failed[0].error}). Send again to try only {outcome.failed.length === 1 ? "that room" : "those rooms"}.</>}
     </p>}
+    {lost.map((l, i) => <p key={i} className="all-note all-failed" role="status">Couldn't send "{l.body.length > 60 ? `${l.body.slice(0, 60)}…` : l.body}" to {nameOf.get(l.target.room) ?? "its room"} ({l.error}).{" "}
+      <button type="button" className="all-link" disabled={hasText} title={hasText ? "Send or clear what's in the box first" : undefined} onClick={() => setHeld({ text: l.body, target: l.target, lost: held.lost.filter((x) => x !== l) })}>Put it back</button></p>)}
   </section>;
 }
 

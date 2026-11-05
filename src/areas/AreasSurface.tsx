@@ -200,7 +200,7 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
   const closeProject = () => setProjectOpen(null);
   // T-302: Uni's home (no room attached) is the front door; Uni's own level is the home with its room (the tree's Uni row)
   const toTree = () => { setRootOpen(false); onOpenArea(null, "Uni", null); };
-  const back = loose ? (treeHome ? toTree : null) : path ? (treeHome ? toTree : () => {
+  const back = allPlace ? null : loose ? (treeHome ? toTree : null) : path ? (treeHome ? toTree : () => {
     const up = data ? data.tree.nodes.get(parentPath(data.tree, path, via)) : null;
     onOpenArea(up?.path ?? null, up?.name ?? "Uni", up ? pickRoom(withRoom(up).rooms, null) : null);
   }) : rootOpen ? () => setRootOpen(false) : null;
@@ -452,8 +452,18 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
     };
     // T-335 All view: every area's own room, interleaved, with a composer that routes; a private area stays out of it
     const allRooms: AllRoom[] = doors.filter((d) => d.room && !privateRoot(data!.tree, d.path)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, about: d.about ?? null, lastTs: d.lastTs }));
+    /** All's way back names where you came from, unless that is a private place: those stay out of All. */
+    const privateTitle = (title: string) => {
+      const t = title.replace(/^#/, "").toLowerCase();
+      for (const n of data!.tree.nodes.values()) {
+        if (!privateRoot(data!.tree, n.path)) continue;
+        const room = roomView(data!.tree, n.path, roomRefs, uniRef).target?.name;
+        if (n.name.toLowerCase() === t || room?.replace(/^#/, "").toLowerCase() === t) return true;
+      }
+      return false;
+    };
     const all = allRooms.length ? { rooms: allRooms, onOpenAt: (room: string, ref?: string) => { setDrawer(false); (actions.openRoom as (id: string, focus?: string | null) => void)(room, ref ?? null); } } : null;
-    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} all={all} allPlace={allPlace} onComposerFocus={actions.composerFocus} />
+    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} all={all} allPlace={allPlace && { ...allPlace, backTo: privateTitle(allPlace.backTo) ? "Back" : allPlace.backTo }} onComposerFocus={actions.composerFocus} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
   }
   if (treeHome && path === null && !rootOpen) {

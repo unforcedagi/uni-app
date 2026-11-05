@@ -29,7 +29,10 @@ pub struct DoorRoom {
 
 /// The door origin on the hub's host: same scheme and host, port [`ROUTE_PORT`].
 pub fn door_url(hub: &str) -> Option<String> {
-    crate::hub::service_origin(hub, ROUTE_PORT)
+    let origin = crate::hub::service_origin(hub, ROUTE_PORT)?;
+    // the words go to the owner's own box over the tailnet, never to a public host, whatever the hub is set to
+    let host = origin.strip_prefix("https://")?.split(':').next()?;
+    host.ends_with(".ts.net").then_some(origin)
 }
 
 /// The door to call for `hub`, and the door under the hub's other name (T-137) to try when the first can't be reached.
@@ -113,5 +116,6 @@ mod tests {
     fn the_door_is_on_the_hub_host_at_its_port() {
         assert_eq!(door_url("https://hub.example.ts.net").as_deref(), Some("https://hub.example.ts.net:8521"));
         assert_eq!(door_url("http://example.com"), None);
+        assert_eq!(door_url("https://example.com"), None, "never a public host");
     }
 }

@@ -791,10 +791,9 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
   .shell { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
   .rail { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: calc(56px + env(safe-area-inset-bottom)); padding: 0 4px env(safe-area-inset-bottom); flex-direction: row; justify-content: space-around; border-right: 0; border-top: 1px solid var(--line); gap: 0; overflow: visible; }
   /* T-45: the places share the bar evenly, however many there are (Mail made seven) */
-  /* T-335: however many places there are, each keeps a width its label fits; more than the bar holds, and the bar scrolls sideways */
-  .rail { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; justify-content: flex-start; }
-  .rail::-webkit-scrollbar { display: none; }
-  .rail button { flex: 1 0 46px; width: auto; min-width: 46px; min-height: 56px; border-radius: 8px; }
+  .rail button { flex: 1 1 0; width: auto; min-width: 0; min-height: 56px; border-radius: 8px; }
+  /* T-335: ten places or more don't leave room for ten words: each is its icon, and the current one says its name. Every place stays on the bar. */
+  .rail:has(> button:nth-of-type(10)) > button:not([aria-current="page"]):not([aria-expanded="true"]) > span { display: none; }
   .rail .rail-settings { margin-top: 0; }
   .shell.composer-focused, .shell.journal-focus { padding-bottom: 0; }
   .shell.composer-focused .rail { display: none; }

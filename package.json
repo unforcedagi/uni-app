@@ -40,7 +40,7 @@
     "test:motion": "playwright test --config playwright.motion.config.ts",
     "test:glowup": "playwright test --config playwright.glowup.config.ts",
     "test:allv2": "playwright test --config playwright.allv2.config.ts",
-    "test:route-door": "python3 -I services/route/test_server.py",
+    "test:route-door": "uv run --no-project --python 3.13 --with coincurve python services/route/test_server.py",
     "test:tour": "playwright test --config playwright.tour.config.ts"
   },
   "dependencies": {

@@ -19,4 +19,4 @@ systemctl --user daemon-reload && systemctl --user enable --now uni-route
 sudo tailscale serve --bg --https=8521 http://127.0.0.1:18521
 ```
 
-Tests: `python3 -I services/route/test_server.py`, with a stand-in for `claude` (the door, its auth and its log are real).
+Tests: `uv run --no-project --python 3.13 --with coincurve python services/route/test_server.py`, with a stand-in for `claude` (the door, its auth and its log are real).

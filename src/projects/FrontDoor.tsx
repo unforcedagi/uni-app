@@ -100,7 +100,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   const [target, setTarget] = useReplyTarget(allRooms);
   const echoes = useEchoes(feed.byRoom);
   const composer = all && <AllComposer rooms={allRooms} words={words} onOpen={(id) => openAt?.(id)} onFocus={() => setWantWords(true)} onSent={feed.reread} place={view}
-    target={view === "all" ? target : null} onTarget={setTarget} echo={echoes.send} onKeyboard={onComposerFocus} />;
+    target={target} onTarget={setTarget} echo={echoes.send} onKeyboard={onComposerFocus} />;
   // T-335 glow-up: how many places are moving (a session or the room's Uni at work), for the home's one sentence
   const liveOf = (d: Door) => { const a = areaAt.get(d.path); return (a ? liveInArea(work, a.id).length : 0) + (d.room && turns.has(d.room) ? 1 : 0); };
   const moving = doors.filter((d) => liveOf(d) > 0).length;

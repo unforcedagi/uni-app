@@ -1,7 +1,9 @@
 // T-335 All v2: asking the route door (services/route on the person's own box, tailnet only, signed with the device key like Mail and the calendar)
 // where an unaddressed message should go. The word match (route.ts) is already on screen: this only ever improves it.
-// - Asked when the typing pauses, never for a room the person named, never with a private area in the list (All's rooms leave those out).
-// - An answer within DEADLINE_MS takes over the route; a later one is `late` (only offers, see mergeRoute); a failure leaves the word match.
+// - Asked when the typing pauses, one ask at a time and a few for one thought; never for a room the person named, never with a private area in the
+//   list (All's rooms leave those out); not again for words already answered, even after leaving and coming back.
+// - An answer within DEADLINE_MS takes over the route; a later one is `late` (only offers, see mergeRoute). A later or failed ask never moves a
+//   route an earlier answer gave: only a timely answer does, or a new thought, which drops it. With no answer at all, the word match stands.
 // - Nothing here sends anything. The message's words go to the door and to Haiku through it, and nowhere else; no third party, no log of them.
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -12,45 +14,71 @@ export const DEADLINE_MS = 1500;
 const PAUSE_MS = 400;
 /** Shorter than this there is little for a model to read. */
 const MIN_CHARS = 8;
+/** Asks for one thought: past this the last answer stands. */
+const MAX_ASKS = 4;
 
 export type ModelState = "skipped" | "waiting" | "in-time" | "late" | "down";
 export type ModelRoute = { state: ModelState; picks: RoutePick[]; timely: boolean; suggestion: string | null };
 export type DoorRoom = { id: string; name: string; about: string };
 const IDLE: ModelRoute = { state: "skipped", picks: [], timely: false, suggestion: null };
 
-const related = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
+const related = (a: string, b: string) => !!a && !!b && (a.startsWith(b) || b.startsWith(a));
+/** The last answer: a composer that comes back to the same draft has it without asking again. */
+const last = { body: "", key: "", route: IDLE };
 
 /** The model's route for `text` among `rooms`; `enabled` false (a named room, a reply) asks nothing and forgets the answer; `hold` (the person
  *  has chosen the rooms) asks nothing more and keeps it, for the log. */
 export function useModelRoute(text: string, rooms: readonly DoorRoom[], enabled: boolean, hold = false): ModelRoute {
-  const [route, setRoute] = useState<ModelRoute>(IDLE);
-  const answered = useRef(""); // the text the answer on screen was for
-  const seq = useRef(0);
-  const roomsKey = JSON.stringify(rooms);
   const body = text.trim();
+  const key = JSON.stringify(rooms);
+  const [route, setRouteState] = useState<ModelRoute>(() => (enabled && last.key === key && related(body, last.body) ? last.route : IDLE));
+  const s = useRef({ answered: route.picks.length ? last.body : "", route, inFlight: false, queued: false, asks: 0, latest: body, on: enabled && !hold, key, live: true });
+  s.current.latest = body; s.current.on = enabled && !hold; s.current.key = key;
+  const setRoute = (r: ModelRoute) => { s.current.route = r; setRouteState(r); };
+  const ask = (asked: string) => {
+    const st = s.current, roomsNow = JSON.parse(st.key) as DoorRoom[], started = performance.now();
+    st.inFlight = true; st.asks += 1;
+    if (!st.route.picks.length) setRoute({ ...IDLE, state: "waiting" });
+    const next = () => {
+      st.inFlight = false;
+      if (!st.queued) return;
+      st.queued = false;
+      if (st.live && st.on && st.latest.length >= MIN_CHARS && st.latest !== st.answered && st.asks < MAX_ASKS) ask(st.latest);
+    };
+    invoke<{ id?: string; picks?: RoutePick[] }>("route_suggest", { text: asked, rooms: roomsNow })
+      .then((a) => {
+        if (!st.live || !st.on || !related(st.latest, asked)) return;
+        const known = new Set(roomsNow.map((r) => r.id));
+        const picks = (a?.picks ?? []).filter((p) => p && known.has(p.id)).map((p) => ({ id: p.id, why: String(p.why ?? "").slice(0, 60), sure: !!p.sure }));
+        const timely = performance.now() - started <= DEADLINE_MS;
+        if (!picks.length) { if (!st.route.picks.length) setRoute({ ...IDLE, state: "down" }); return; }
+        // a route already given stays until a timely answer replaces it
+        if (!timely && st.route.timely) { st.answered = asked; return; }
+        st.answered = asked;
+        const r: ModelRoute = { state: timely ? "in-time" : "late", picks, timely, suggestion: a?.id ?? null };
+        setRoute(r);
+        last.body = asked; last.key = st.key; last.route = r;
+      })
+      .catch(() => { if (st.live && st.on && !st.route.picks.length) setRoute({ ...IDLE, state: "down" }); })
+      .finally(next);
+  };
+  useEffect(() => { const st = s.current; st.live = true; return () => { st.live = false; }; }, []);
   useEffect(() => {
-    const mine = ++seq.current;
+    const st = s.current;
     if (hold) return;
-    if (!enabled || body.length < MIN_CHARS) { answered.current = ""; setRoute(IDLE); return; }
+    if (!enabled || body.length < MIN_CHARS) {
+      st.answered = ""; st.asks = 0; st.queued = false;
+      if (!body) last.body = "";
+      if (st.route !== IDLE) setRoute(IDLE);
+      return;
+    }
     // still typing the same thought: the last answer stays until the next one, so the chips don't flicker; a new thought drops it
-    if (answered.current && !related(body, answered.current)) { answered.current = ""; setRoute(IDLE); }
-    const pause = setTimeout(() => {
-      const asked = performance.now();
-      setRoute((r) => (r.picks.length ? r : { ...IDLE, state: "waiting" }));
-      invoke<{ id?: string; picks?: RoutePick[] }>("route_suggest", { text: body, rooms: JSON.parse(roomsKey) as DoorRoom[] })
-        .then((a) => {
-          if (seq.current !== mine) return;
-          const known = new Set((JSON.parse(roomsKey) as DoorRoom[]).map((r) => r.id));
-          const picks = (a?.picks ?? []).filter((p) => p && known.has(p.id)).map((p) => ({ id: p.id, why: String(p.why ?? "").slice(0, 60), sure: !!p.sure }));
-          if (!picks.length) { answered.current = ""; setRoute({ ...IDLE, state: "down" }); return; }
-          const timely = performance.now() - asked <= DEADLINE_MS;
-          answered.current = body;
-          setRoute({ state: timely ? "in-time" : "late", picks, timely, suggestion: a?.id ?? null });
-        })
-        .catch(() => { if (seq.current === mine) { answered.current = ""; setRoute({ ...IDLE, state: "down" }); } });
-    }, PAUSE_MS);
+    if (st.answered && !related(body, st.answered)) { st.answered = ""; st.asks = 0; setRoute(IDLE); }
+    if (body === st.answered || st.asks >= MAX_ASKS) return;
+    const pause = setTimeout(() => { if (st.inFlight) st.queued = true; else ask(st.latest); }, PAUSE_MS);
     return () => clearTimeout(pause);
-  }, [body, roomsKey, enabled, hold]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [body, key, enabled, hold]);
   return route;
 }
 
