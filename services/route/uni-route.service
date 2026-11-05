@@ -1,0 +1,15 @@
+[Unit]
+Description=uni-route: a small model's room suggestion for the Uni app's All composer (T-335), 127.0.0.1 only, tailnet via tailscale serve
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/share/uni/route/venv/bin/python -I %h/.local/share/uni/route/server.py
+# UNI_ROUTE_URLS: the public origins signatures may name
+EnvironmentFile=%h/.config/uni/route.env
+Restart=on-failure
+RestartSec=5
+Nice=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

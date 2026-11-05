@@ -1940,6 +1940,48 @@ async fn cal_op(app: tauri::AppHandle, op: serde_json::Value) -> Result<serde_js
     cal_io(&app, move |door| tauri::async_runtime::block_on(door.op(&op))).await
 }
 
+// ── The route door (T-335 All v2): a small model's suggestion for where an unaddressed message goes, on the hub's host. Each request is NIP-98
+// signed with the device key. The words go there and nowhere else; any failure leaves the app on its word match, so errors are plain strings.
+
+use uni_core::route::{DoorRoom, RouteDoor};
+
+/// `UNI_ROUTE_URL` (a scratch door, no alias), else its port on the hub's host, its new name first.
+fn route_base(app: &tauri::AppHandle) -> Result<(String, Option<String>), String> {
+    if let Ok(v) = std::env::var(uni_core::route::ROUTE_URL_ENV) {
+        if !v.trim().is_empty() {
+            return Ok((v.trim().to_string(), None));
+        }
+    }
+    let hub = vault_config(app).hub;
+    uni_core::route::door_urls(&hub).ok_or_else(|| "no route door for this hub (it must be https)".to_string())
+}
+
+async fn route_io<F>(app: &tauri::AppHandle, f: F) -> Result<serde_json::Value, String>
+where
+    F: FnOnce(&RouteDoor) -> Result<serde_json::Value, String> + Send + 'static,
+{
+    secure_store::ensure_loaded(app).await?;
+    let (base, alias) = route_base(app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        f(&RouteDoor::new(&base, alias.as_deref(), &keys)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Suggested rooms for a message not yet sent: `{id, picks, ms}`. Nothing is posted.
+#[tauri::command]
+async fn route_suggest(app: tauri::AppHandle, text: String, rooms: Vec<DoorRoom>) -> Result<serde_json::Value, String> {
+    route_io(&app, move |door| tauri::async_runtime::block_on(door.suggest(&text, &rooms))).await
+}
+
+/// What was suggested against what was sent: room ids only.
+#[tauri::command]
+async fn route_outcome(app: tauri::AppHandle, outcome: serde_json::Value) -> Result<serde_json::Value, String> {
+    route_io(&app, move |door| tauri::async_runtime::block_on(door.outcome(&outcome))).await
+}
+
 // ── Mail (T-45): through the mail bridge on the hub's host. Each
 // request is NIP-98 signed with the device key; the bridge holds the mail
 // credentials, so the webview never sees one. Reading never writes; the
@@ -3025,6 +3067,8 @@ pub fn run() {
             post_edit,
             vault_patch_meta,
             usage_set_preference,
+            route_suggest,
+            route_outcome,
             vault_decide,
             vault_pick_decision,
             vault_note_decision,

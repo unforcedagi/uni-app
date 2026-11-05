@@ -26,6 +26,7 @@ pub mod archive;
 pub mod backoff;
 pub mod buzz;
 pub mod cal;
+pub mod route;
 pub mod compose;
 pub mod identity;
 pub mod journal;
