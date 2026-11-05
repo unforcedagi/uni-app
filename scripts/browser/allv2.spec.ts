@@ -2,6 +2,7 @@
 // navigation from every room, and back; a small model suggests the route when nothing is targeted, and the word match stands when it is slow or
 // down. Made-up world only. The model is a stub here; the door itself is tested in services/route/test_server.py and by one real call.
 // Run: ALLV2_TEST_PORT=1481 npx playwright test --config playwright.allv2.config.ts
+import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
 
@@ -532,5 +533,70 @@ test.describe('review', () => {
     const before = await feed(page).evaluate((el) => { (el as any).__mark = el.querySelector('.all-stack')!.childElementCount; const mo = new MutationObserver((r) => { (window as any).__feedMut = ((window as any).__feedMut ?? 0) + r.length; }); mo.observe(el, { subtree: true, childList: true, attributes: true, characterData: true }); return 0; });
     await field(page).pressSequentially('A few words typed here', { delay: 10 });
     expect(await page.evaluate(() => (window as any).__feedMut ?? 0)).toBe(before);
+  });
+});
+
+// Review round 3 (a fresh reviewer, NO-SHIP on privacy).
+test.describe('review 3', () => {
+  const PROMPT = (cmd: string): string => JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8')).prompts.two_answers_30min.replace('feature/example-cleanup', cmd);
+  test('an approval waiting in a private room stays out of All; one in another room shows, and the home still has both', async ({ page }) => {
+    await boot(page);
+    await page.evaluate((b) => { const w = window as any; w.__arrive('ch-sad', 'Uni', b[0]); w.__arrive('ch-kiln', 'Uni', b[1]); }, [PROMPT('private-thing'), PROMPT('kiln-thing')]);
+    await expect(page.locator('.cp-approval')).toHaveCount(2);
+    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await expect(page.locator('[data-view="all"]')).toBeVisible();
+    await expect(page.locator('.cp-approval')).toHaveCount(1);
+    await expect(page.locator('.areas-home')).toContainText('kiln-thing');
+    await expect(page.locator('.areas-home')).not.toContainText('private-thing');
+    await expect(page.locator('.areas-home')).not.toContainText('anctum');
+  });
+
+  test('words added while a routed send is out: only the new words stay, and the next Send doesn\'t repeat the first', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await page.evaluate(() => { (window as any).__postDelay = 1500; });
+    await field(page).fill('Is the honey ready to jar?');
+    await send(page).click();
+    await field(page).press('End');
+    await field(page).pressSequentially(' And the wax', { delay: 5 });
+    await expect(page.locator('.all-note')).toContainText('Sent to Bee Garden', { timeout: 6000 }).catch(() => {});
+    await expect(field(page)).toHaveValue('And the wax', { timeout: 6000 });
+    expect((await posts(page)).map((p: any) => p.body)).toEqual(['Is the honey ready to jar?']);
+  });
+
+  test('a reply to a room a partial send already reached can still be sent', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await page.evaluate(() => { const w = window as any; const prev = w.__extraInvoke; w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'post_message' && a.channel === 'ch-north' && !w.__doneFail) { w.__doneFail = true; throw 'relay said no'; } return prev(cmd, a); }; });
+    await field(page).fill('Tell Choir and North Field the hall is booked');
+    await send(page).click();
+    await expect(page.locator('.all-note.all-failed')).toContainText('North Field');
+    await row(page, 'c3').locator('.message-content').click();
+    await expect(send(page)).toBeEnabled();
+  });
+
+  test('Forget while a reply is out: when it fails, nothing comes back', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await page.evaluate(() => { const w = window as any; w.__postDelay = 1200; const prev = w.__extraInvoke; w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'post_message') { await new Promise((r) => setTimeout(r, 1200)); throw 'relay said no'; } return prev(cmd, a); }; });
+    await row(page, 'k3').locator('.message-content').click();
+    await field(page).fill('A private reply');
+    await send(page).click();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await rail(page).getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Forget this device key' }).click();
+    await page.getByRole('button', { name: /Tap again to forget/ }).click();
+    await page.waitForTimeout(1800);
+    expect(await page.evaluate(() => { const h = (window as any).__allHeld; return [h.text, h.target, h.lost.length]; })).toEqual(['', null, 0]);
+  });
+
+  test('the note that the route just changed goes once you type', async ({ page }) => {
+    await boot(page, { mode: 'ok', delay: 300, picks: [{ id: 'ch-table', why: 'supper plans', sure: true }] });
+    await allIn(page);
+    await page.evaluate(() => { const b = document.querySelector<HTMLButtonElement>('.all-send')!; const o = new MutationObserver(() => { if (b.textContent === 'Send to Long Table') { o.disconnect(); b.click(); } }); o.observe(b, { childList: true, subtree: true, characterData: true }); });
+    await field(page).fill('Is the honey ready to jar?');
+    await expect(page.locator('.all-note')).toContainText('The route just changed');
+    await field(page).pressSequentially(' ok');
+    await expect(page.locator('.all-note')).toHaveCount(0);
   });
 });

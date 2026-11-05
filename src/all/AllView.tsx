@@ -7,6 +7,7 @@
 // replies in that room (or its thread) with no routing at all; the room's label is the way into the room. An unaddressed message gets the word
 // match at once and the small model's route if it answers in time (modelRoute.ts).
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Body } from "../MessageBody";
@@ -84,6 +85,8 @@ const held = {
   attempt: null as { body: string; done: Set<string> } | null, sending: false,
   /** Counts the taps that set a target: each one gives the field the keys (a reply coming back from a failure doesn't take them). */
   taps: 0,
+  /** Counts Forgets: a send still out when the key is forgotten must not bring anything back. */
+  era: 0,
   outcome: null as { sent: string[]; failed: { id: string; error: string }[]; noUni: string[] } | null,
   /** A reply that failed after the composer had moved on: its words are offered back, never mixed into the new ones. */
   lost: [] as { body: string; target: ReplyTarget; error: string }[],
@@ -97,7 +100,7 @@ function useHeld() {
 }
 /** Forget this device's key: nothing typed under it stays in memory, or could be read to a model under the next key. */
 export function forgetComposer() {
-  setHeld({ text: "", chosen: null, target: null, attempt: null, sending: false, outcome: null, lost: [] });
+  setHeld({ text: "", chosen: null, target: null, attempt: null, sending: false, outcome: null, lost: [], era: held.era + 1 });
   forgetModelRoute();
 }
 if (import.meta.env.VITE_AREAS_TESTHOOKS === "1" && typeof window !== "undefined") (window as unknown as { __allHeld: typeof held }).__allHeld = held;
@@ -160,7 +163,8 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   // what you dropped stays on offer, dashed, so it is one tap back
   const offered = target ? [] : picks.filter((p) => (chosen || !p.sure) && nameOf.has(p.id) && !to.includes(p.id));
   const done = attempt && attempt.body === text ? attempt.done : null;
-  const left = to.filter((id) => !done?.has(id));
+  // a partial send's rooms are skipped only for its own route; a reply goes where it says
+  const left = target ? to : to.filter((id) => !done?.has(id));
   const why = chosen ? "your choice" : picks.length ? picks.filter((p) => p.sure).map((p) => p.why).filter((w, i, a) => a.indexOf(w) === i).join(", ") : "";
   // the route moved by itself just now (the model answered, a room's words changed), with the words the same: a Send already on its way was aimed
   // at the old one, so it waits a moment
@@ -170,7 +174,7 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   const [routeMoved, setRouteMoved] = useState(false);
   useLayoutEffect(() => {
     if (lastRoute.current.text === text && lastRoute.current.key !== routeKey && routeKey && !chosen && !target) settling.current = performance.now() + SETTLE_MS;
-    if (lastRoute.current.key !== routeKey && routeMoved) setRouteMoved(false);
+    if (routeMoved && (lastRoute.current.key !== routeKey || lastRoute.current.text !== text || target)) setRouteMoved(false);
     lastRoute.current = { key: routeKey, text };
   });
   // the field grows with its text up to six lines
@@ -199,17 +203,20 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   async function reply(t: ReplyTarget) {
     const body = held.text.trim();
     if (!body || held.sending) return;
+    const era = held.era;
     setHeld({ text: "", target: null, chosen: null, outcome: null });
     const key = echo?.start({ room: t.room, root: t.root, body });
     try {
       const sent = await postOnce(t.room, body, t.root);
       if (key) echo?.done(key, sent.ref);
+      if (era !== held.era) return;
       // the feed shows it went; the home has no feed, so it says so
       const shown = place === "all" ? [] : [t.room];
       if (!sent.uni || shown.length) setHeld({ outcome: { sent: shown, failed: [], noUni: sent.uni ? [] : [t.room] } });
       onSent?.([t.room]);
     } catch (e) {
       if (key) echo?.fail(key);
+      if (era !== held.era) return;
       const error = String(e instanceof Error ? e.message : e).replace(/^Error:\s*/, "").slice(0, 160);
       const here = !held.target || sameTarget(held.target, t);
       if (here && !held.text.trim()) setHeld({ text: body, target: t, outcome: { sent: [], failed: [{ id: t.room, error }], noUni: [] } });
@@ -230,17 +237,23 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
     setHeld({ attempt: run, sending: true, outcome: null });
     const noUni: string[] = [];
     const post = async (room: string, b: string) => { const r = await postOnce(room, b, null); if (!r.uni) noUni.push(room); };
-    const edited = held.chosen !== null;
+    const edited = held.chosen !== null, era = held.era;
     try {
       const r = await sendEach(to, body, post, run.done);
+      if (era !== held.era) return;
       setHeld({ outcome: { sent: to.filter((id) => run.done.has(id)), failed: r.failed, noUni } });
       if (r.sent.length) {
         onSent?.(r.sent);
         logOutcome({ suggestion: model.suggestion, model: model.picks.map((p) => p.id), modelState: model.state, words: wordPicks.map((p) => p.id), sent: r.sent, edited });
       }
-      // delivered: the words go, unless you have written more since
-      if (!r.failed.length) { setAdding(false); setHeld(held.text === sentText ? { text: "", chosen: null, attempt: null } : { attempt: null }); }
-    } finally { setHeld({ sending: false }); }
+      // delivered: the sent words go; anything written since stays
+      if (!r.failed.length) {
+        setAdding(false);
+        const since = held.text.startsWith(sentText) ? held.text.slice(sentText.length).trimStart() : held.text;
+        // drawn now: a key already on its way must see the field without the sent words, or it would bring them back
+        flushSync(() => setHeld(since ? { text: since, attempt: null } : { text: "", chosen: null, attempt: null }));
+      }
+    } finally { if (era === held.era) setHeld({ sending: false }); }
   }
 
   const named = (ids: readonly string[]) => andList(ids.map((id) => nameOf.get(id) ?? id));
