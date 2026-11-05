@@ -5,8 +5,8 @@
 .msgs-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .msgs-title { display: flex; flex-direction: column; align-items: center; min-width: 0; text-align: center; }
 .msgs-account { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.msgs-live { font: 700 10.5px/16px var(--th-mono, var(--mono)); letter-spacing: .08em; color: var(--text); }
-.msgs-live.st-offline, .msgs-live.st-error, .msgs-live.st-connecting { padding: 0 5px; border: 1.5px dashed var(--th-ink); border-radius: 4px; }
+.msgs-live { font: 600 12px/16px var(--g-font-ui); color: var(--text); }
+.msgs-live.st-offline, .msgs-live.st-error, .msgs-live.st-connecting { padding: 0 5px; border: var(--g-hair) dashed var(--g-ink-3); border-radius: 999px; }
 .msgs-bar-gap { min-width: 44px; }
 .msgs-panes { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); flex: 1; min-height: 0; }
 .msgs-rooms, .msgs-read { grid-row: 2; }
@@ -17,7 +17,7 @@
 .msgs-problem { margin: 8px 14px; padding: 8px 12px; border-left: 3px solid var(--danger, var(--th-ink)); background: var(--surface); font-size: 14px; color: var(--text); }
 
 /* word tags, as Mail's: mono, small, bordered */
-.msgs-tag { flex: none; display: inline-block; padding: 0 6px; border: 1.5px solid var(--th-ink); border-radius: 4px; font: 700 10px/16px var(--th-mono, var(--mono)); letter-spacing: .06em; color: var(--th-ink); background: var(--th-card); }
+.msgs-tag { flex: none; display: inline-block; padding: 0 6px; border: var(--g-hair) solid var(--g-line-strong); border-radius: 999px; font: 600 12px/16px var(--g-font-ui); color: var(--th-ink); background: var(--th-card); }
 .msgs-tag-open { border-style: dashed; }
 .msgs-tag-private { background: var(--th-ink); color: var(--th-card); }
 
@@ -25,20 +25,20 @@
 .msgs-signin { display: flex; flex-direction: column; gap: 12px; max-width: 420px; margin: 32px auto; padding: 0 18px; }
 .msgs-signin h1 { margin: 0; font-family: var(--serif); font-weight: 500; font-size: 26px; }
 .msgs-signin label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
-.msgs-signin input { min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; background: var(--surface); color: var(--text); font: 15px var(--sans); }
+.msgs-signin input { min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 12px; background: var(--surface); color: var(--text); font: 15px var(--sans); }
 .msgs-signin-go { align-self: flex-start; min-height: 44px; }
 .msgs-signin-form { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; padding-top: 16px; border-top: 1px dashed var(--line-strong, var(--line)); }
 .msgs-signin-form h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-soft); }
 .msgs-signin-form label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
-.msgs-signin-form input { min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; background: var(--surface); color: var(--text); font: 15px var(--sans); }
+.msgs-signin-form input { min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 12px; background: var(--surface); color: var(--text); font: 15px var(--sans); }
 
 /* conversations */
 .msgs-rooms { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--line); background: var(--surface-2); }
 .msgs-rows { list-style: none; margin: 0; padding: 0; }
 .msgs-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 10px 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--text-soft); text-align: left; font-size: 14px; }
 .msgs-row:hover { background: var(--surface); }
-.msgs-row.selected { background: var(--highlight); box-shadow: inset 4px 0 0 var(--th-ink); }
-.msgs-avatar { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid var(--th-ink); background: var(--th-card); color: var(--th-ink); font: 600 14px var(--sans); letter-spacing: .02em; }
+.msgs-row.selected { background: var(--highlight); box-shadow: inset 3px 0 0 var(--g-accent); }
+.msgs-avatar { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: var(--g-hair) solid var(--g-line-strong); background: var(--th-card); color: var(--th-ink); font: 600 14px var(--sans); letter-spacing: .02em; }
 .msgs-row.unread .msgs-avatar { background: var(--th-ink); color: var(--th-card); }
 .msgs-row-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
 .msgs-row-top, .msgs-row-bottom { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -48,8 +48,8 @@
 .msgs-row-preview { flex: 1; color: var(--muted); font-size: 13px; }
 .msgs-row.unread .msgs-row-name, .msgs-row.unread .msgs-row-preview { color: var(--text); font-weight: 700; }
 /* T-310: a network's word on a row in All, quieter than the name */
-.msgs-net { flex: none; padding: 0 4px; border: 1px solid var(--line-strong, var(--line)); border-radius: 4px; font: 700 10px/15px var(--th-mono, var(--mono)); letter-spacing: .06em; color: var(--muted); }
-.msgs-count { flex: none; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--th-ink); color: var(--th-card); font: 600 11px/18px var(--sans); text-align: center; }
+.msgs-net { flex: none; padding: 0 4px; border: 1px solid var(--line-strong, var(--line)); border-radius: 999px; font: 600 12px/15px var(--g-font-ui); color: var(--muted); }
+.msgs-count { flex: none; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--th-ink); color: var(--th-card); font: 600 12px/18px var(--g-font-ui); text-align: center; }
 
 /* T-310 tabs: All, then one per network, across the top. The one you're on is ink-filled (a shape, not a colour, for
    the Daylight); a count is how many conversations wait for you; "!" is a link to do again. */
@@ -60,13 +60,13 @@
 .msgs-tab:hover { border-color: var(--line-strong, var(--line)); }
 .msgs-tab:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
 .msgs-tab[aria-selected="true"] { background: var(--th-ink); border-color: var(--th-ink); color: var(--th-card); }
-.msgs-tab-count { min-width: 20px; padding: 0 6px; border: 1.5px solid currentColor; border-radius: 999px; font: 600 11px/16px var(--sans); text-align: center; box-sizing: border-box; }
+.msgs-tab-count { min-width: 20px; padding: 0 6px; border: var(--g-hair) solid currentColor; border-radius: 999px; font: 600 12px/16px var(--g-font-ui); text-align: center; box-sizing: border-box; }
 .msgs-tab[aria-selected="true"] .msgs-tab-count { background: var(--th-card); border-color: var(--th-card); color: var(--th-ink); }
-.msgs-tab-alert { display: grid; place-items: center; width: 18px; height: 18px; border: 1.5px dashed currentColor; border-radius: 50%; font: 700 11px/1 var(--sans); }
+.msgs-tab-alert { display: grid; place-items: center; width: 18px; height: 18px; border: var(--g-hair) dashed currentColor; border-radius: 50%; font: 600 12px/1 var(--g-font-ui); }
 .msgs-tabs .msgs-link-open { margin-left: auto; flex: none; white-space: nowrap; }
 /* a Daylight on its side, or a narrow window: the tabs keep the row, the link says less */
 @media (min-width: 700px) and (max-width: 979px) { .msgs-link-more { display: none; } }
-.msgs-attention { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 10px 14px 4px; padding: 8px 12px; border: 1.5px dashed var(--th-ink); border-radius: 12px; font-size: 14px; color: var(--text); }
+.msgs-attention { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 10px 14px 4px; padding: 8px 12px; border: var(--g-hair) dashed var(--g-ink-3); border-radius: 12px; font-size: 14px; color: var(--text); }
 .msgs-attention .note-action { min-height: 36px; margin-left: auto; }
 .msgs-tab-empty { padding: 28px 16px; text-align: center; color: var(--muted); font-family: var(--serif); font-style: italic; font-size: 17px; }
 
@@ -88,10 +88,10 @@
 .msgs-msg.own { align-self: flex-end; align-items: flex-end; }
 .msgs-from { margin: 0 4px 3px; font-size: 12.5px; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
 .msgs-from strong { color: var(--text); font-weight: 600; font-size: 13.5px; }
-.msgs-from time { font-size: 11px; }
+.msgs-from time { font-size: 12px; }
 .msgs-body { margin: 0; padding: 8px 14px; border-radius: var(--radius); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.45; }
 .msgs-msg.theirs .msgs-body { background: var(--surface); border: 1.5px solid var(--line-strong, var(--line)); color: var(--text); }
-.msgs-msg.own .msgs-body { background: var(--th-ink); color: var(--th-card); border: 1.5px solid var(--th-ink); }
+.msgs-msg.own .msgs-body { background: var(--th-ink); color: var(--th-card); border: var(--g-hair) solid var(--g-line-strong); }
 .msgs-msg.theirs.first .msgs-body { border-top-left-radius: 4px; }
 .msgs-msg.own.first .msgs-body { border-top-right-radius: 4px; }
 .msgs-msg.st-sending .msgs-body { border-style: dashed; background: var(--th-card); color: var(--th-ink); }
@@ -104,14 +104,14 @@
 .msgs-invite { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px; text-align: center; font-size: 16px; }
 
 /* T-313: links, long messages, replies, reactions and attachments. Yours are ink-filled, so what sits inside them turns over. */
-.msgs-link { color: inherit; text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 2px; overflow-wrap: anywhere; }
-.msgs-more { display: inline; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
-.msgs-quote { display: flex; flex-direction: column; gap: 1px; width: 100%; margin: 0 0 6px; padding: 4px 10px; border: 0; border-left: 3px solid var(--th-ink); border-radius: 4px; background: var(--surface-2); color: var(--text-soft); font: 13px/1.35 var(--sans); text-align: left; white-space: normal; cursor: pointer; }
+a.msgs-link { color: inherit; text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.msgs-more { display: inline; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); cursor: pointer; }
+.msgs-quote { display: flex; flex-direction: column; gap: 1px; width: 100%; margin: 0 0 6px; padding: 4px 10px; border: 0; border-left: 2px solid var(--g-line-strong); border-radius: 4px; background: var(--surface-2); color: var(--text-soft); font: 13px/1.35 var(--sans); text-align: left; white-space: normal; cursor: pointer; }
 .msgs-quote strong { color: var(--text); font-weight: 600; }
 .msgs-quote-text { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .msgs-msg.own .msgs-quote { border-left-color: var(--th-card); background: transparent; color: var(--th-card); box-shadow: inset 0 0 0 1px var(--th-card); }
 .msgs-msg.own .msgs-quote strong { color: var(--th-card); }
-.msgs-msg.marked .msgs-body { outline: 3px solid var(--th-ink); outline-offset: 2px; }
+.msgs-msg.marked .msgs-body { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .msgs-reactions { display: flex; flex-wrap: wrap; gap: 4px; list-style: none; margin: 3px 4px 0; padding: 0; }
 .msgs-reactions li { padding: 0 8px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 999px; background: var(--th-card); color: var(--text); font: 13px/22px var(--sans); }
 .msgs-reactions li.own { border-color: var(--th-ink); background: var(--th-ink); color: var(--th-card); }
@@ -121,7 +121,7 @@
 .msgs-voice { display: flex; flex-direction: column; gap: 4px; min-width: min(260px, 64vw); padding: 2px 4px; }
 .msgs-audio-name { margin: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .msgs-player { display: flex; align-items: center; gap: 10px; }
-.msgs-play { flex: none; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 1.5px solid currentColor; border-radius: 50%; background: transparent; color: inherit; font: 700 13px/1 var(--sans); cursor: pointer; }
+.msgs-play { flex: none; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: var(--g-hair) solid currentColor; border-radius: 50%; background: transparent; color: inherit; font: 700 13px/1 var(--sans); cursor: pointer; }
 .msgs-player.playing .msgs-play { background: var(--th-ink); color: var(--th-card); border-color: var(--th-ink); }
 .msgs-msg.own .msgs-player.playing .msgs-play { background: var(--th-card); color: var(--th-ink); border-color: var(--th-card); }
 .msgs-scrub { flex: 1; min-width: 80px; height: 28px; margin: 0; accent-color: var(--th-ink); background: transparent; }
@@ -138,9 +138,9 @@
 .msgs-video-box { max-width: 100%; }
 .msgs-video { display: block; max-width: 100%; border-radius: calc(var(--radius) - 4px); background: #000; }
 .msgs-video-full { margin-top: 6px; }
-.msgs-video-wait { display: flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; padding: 8px; border: 1.5px dashed currentColor; border-radius: calc(var(--radius) - 4px); background: transparent; color: inherit; font-size: 14px; }
+.msgs-video-wait { display: flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; padding: 8px; border: var(--g-hair) dashed currentColor; border-radius: calc(var(--radius) - 4px); background: transparent; color: inherit; font-size: 14px; }
 .msgs-file { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: min(260px, 64vw); padding: 4px; }
-.msgs-file-mark { display: grid; place-items: center; width: 42px; height: 50px; border: 1.5px solid currentColor; border-radius: 4px 12px 4px 4px; font: 700 10.5px/1 var(--th-mono, var(--mono)); letter-spacing: .04em; }
+.msgs-file-mark { display: grid; place-items: center; width: 42px; height: 50px; border: var(--g-hair) solid currentColor; border-radius: 4px 12px 4px 4px; font: 600 12px/1 var(--g-font-ui); }
 .msgs-file-text { display: flex; flex-direction: column; min-width: 0; }
 .msgs-file-text strong { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
 .msgs-file-text small { font-size: 12px; opacity: .8; }
@@ -192,17 +192,17 @@
 .msgs-link-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .msgs-link-actions .send, .msgs-link-actions .note-action { min-height: 44px; }
 .msgs-link-flows { display: flex; flex-direction: column; gap: 8px; }
-.msgs-link-flow { min-height: 44px; padding: 8px 12px; text-align: left; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; background: var(--bg); color: var(--text); font-size: 14px; }
+.msgs-link-flow { min-height: 44px; padding: 8px 12px; text-align: left; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 12px; background: var(--bg); color: var(--text); font-size: 14px; }
 .msgs-link-flow strong { font-weight: 500; }
 .msgs-link-flow:hover { border-color: var(--th-ink); }
 .msgs-link-form { display: flex; flex-direction: column; gap: 8px; }
 .msgs-link-form label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
-.msgs-link-form input, .msgs-link-form select, .msgs-link-form textarea { min-height: 44px; padding: 8px 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; background: var(--bg); color: var(--text); font: 15px var(--sans); box-sizing: border-box; }
+.msgs-link-form input, .msgs-link-form select, .msgs-link-form textarea { min-height: 44px; padding: 8px 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 12px; background: var(--bg); color: var(--text); font: 15px var(--sans); box-sizing: border-box; }
 .msgs-link-form textarea { font: 13px/1.4 var(--mono); resize: vertical; }
 .msgs-link-steps { margin: 0; padding-left: 20px; font-size: 13.5px; line-height: 1.5; color: var(--text-soft); }
 .msgs-link-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.msgs-qr { width: min(280px, 78vw); height: auto; border: 1.5px solid var(--th-ink); border-radius: 6px; background: #fff; }
-.msgs-code { margin: 0; font: 700 26px/1.3 var(--th-mono, var(--mono)); letter-spacing: .08em; text-align: center; color: var(--text); }
+.msgs-qr { width: min(280px, 78vw); height: auto; border: var(--g-hair) solid var(--g-line-strong); border-radius: 6px; background: #fff; }
+.msgs-code { margin: 0; font: 700 26px/1.3 var(--g-font-ui); letter-spacing: .08em; text-align: center; color: var(--text); }
 .msgs-link-done { margin: 0; font-size: 14px; color: var(--text); font-weight: 600; }
 @media (max-width: 699px) {
   .msgs-cards { grid-template-columns: minmax(0, 1fr); padding: 8px 12px 24px; }

@@ -44,6 +44,9 @@
   --g-needs: #a8571c;    /* needs you: ochre, and always a filled shape */
   --g-needs-soft: rgba(168, 87, 28, .12);
   --g-focus: #2f6fb3;
+  --g-danger: #a23b2a;   /* something failed or can't be undone: rust, always with words */
+  --g-danger-soft: rgba(162, 59, 42, .12);
+  --g-scrim: rgba(29, 26, 22, .26);
   --g-hair: 1px;
   --g-ease: cubic-bezier(.22, .8, .2, 1);
   --g-t-quick: 140ms; --g-t-state: 220ms;
@@ -56,6 +59,8 @@
   --th-hair: var(--g-line-strong); --th-hair2: var(--g-line);
   --th-serif: var(--g-font-display); --th-sans: var(--g-font-ui); --th-mono: var(--g-font-ui);
   /* App.css's names */
+  --danger: var(--g-danger); --warn: var(--g-needs); --serif: var(--g-font-display); --sans: var(--g-font-ui);
+  --radius: 18px; --radius-sm: 12px;
   --mono: var(--g-font-code);
   --shadow: var(--g-shadow-1); --shadow-lift: var(--g-shadow-2);
   --ease: var(--g-ease);
@@ -76,6 +81,7 @@
     --g-accent: #d6a75c; --g-accent-soft: rgba(214, 167, 92, .14);
     --g-needs: #e08a4f; --g-needs-soft: rgba(224, 138, 79, .15);
     --g-focus: #79aef0;
+    --g-danger: #e58d78; --g-danger-soft: rgba(229, 141, 120, .15); --g-scrim: rgba(0, 0, 0, .5);
     --th-ink2: #d4cdbf; --th-ring: rgba(236, 230, 218, .08);
   }
 }
@@ -89,6 +95,7 @@
   --g-accent: #000000; --g-accent-soft: rgba(0, 0, 0, .08);
   --g-needs: #000000; --g-needs-soft: rgba(0, 0, 0, .1);
   --g-focus: #000000; --g-hair: 1.5px;
+  --g-danger: #000000; --g-danger-soft: rgba(0, 0, 0, .08); --g-scrim: rgba(0, 0, 0, .12);
   --g-text-uni: 18px; --g-text-me: 17px;
   --th-ink2: #1a1a1a; --th-ring: rgba(0, 0, 0, .08);
   color-scheme: light;

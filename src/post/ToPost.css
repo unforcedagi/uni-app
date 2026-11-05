@@ -9,7 +9,7 @@
 .tp-badge { font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; }
 .tp-badge-uni { border-style: dashed; }
 .tp-where { opacity: 0.75; }
-.tp-preview { border: 1px solid var(--border, #e4e0d8); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.tp-preview { border: 1px solid var(--border, #e4e0d8); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
 .tp-who { display: flex; gap: 8px; align-items: center; }
 .tp-avatar { width: 28px; height: 28px; border-radius: 50%; display: inline-grid; place-items: center; border: 1px solid currentColor; font-size: 0.8rem; }
 .tp-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
@@ -23,7 +23,7 @@
 .tp-form textarea { font: inherit; padding: 8px; border-radius: 8px; }
 .tp-status { margin: 0; opacity: 0.85; }
 .tp-error { margin: 0; font-weight: 600; }
-.tp-line { align-self: flex-start; background: none; border: none; padding: 4px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; font: inherit; }
+.tp-line { align-self: flex-start; background: none; border: none; padding: 4px 0; cursor: pointer; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; font: inherit; }
 .tp-actions button { background: transparent; border: 1px solid var(--line); color: var(--text-soft); border-radius: 999px; min-height: 44px; padding: 0 16px; font-size: 14px; }
 .tp-actions button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .tp-actions button.primary { background: var(--th-ink, #222); color: var(--th-card, #fff); border-color: var(--th-ink, #222); }

@@ -36,7 +36,7 @@
 .work-receipt { margin: 2px 0 6px; font: 500 12.5px/1.4 var(--g-font-ui); color: var(--g-ink-3); }
 .work-receipt summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 24px; }
 .work-receipt summary::-webkit-details-marker { display: none; }
-.work-receipt summary::after { content: "▸"; font-size: 10px; transition: transform var(--g-t-state) var(--g-ease); }
+.work-receipt summary::after { content: "▸"; font-size: 12px; transition: transform var(--g-t-state) var(--g-ease); }
 .work-receipt[open] summary::after { transform: rotate(90deg); }
 .work-receipt ul { margin: 2px 0 6px; padding-left: 18px; font-weight: 400; }
 
@@ -74,7 +74,7 @@
 }
 
 /* the long-press sheet */
-.msg-sheet-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(20, 16, 10, .28); animation: feel-fade 220ms var(--g-ease) backwards; }
+.msg-sheet-scrim { position: fixed; inset: 0; z-index: 60; background: var(--g-scrim); animation: feel-fade 220ms var(--g-ease) backwards; }
 .msg-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; padding: 8px 12px calc(12px + env(safe-area-inset-bottom)); background: var(--g-paper);
   border-top: var(--g-hair) solid var(--g-line-strong); border-radius: 18px 18px 0 0; box-shadow: var(--g-shadow-2); animation: feel-sheet 220ms var(--g-ease) backwards; }
 @keyframes feel-sheet { from { transform: translateY(100%); } }
@@ -84,7 +84,7 @@
 .msg-sheet-react button { width: 52px; height: 48px; border: var(--g-hair) solid var(--g-line); border-radius: 14px; background: var(--g-ground); font-size: 22px; }
 .msg-sheet-react button[aria-pressed="true"] { border-color: var(--g-ink); }
 .msg-sheet-rows { display: grid; padding-top: 6px; }
-.msg-sheet-rows button { display: flex; align-items: center; gap: 14px; min-height: 48px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--g-ink); font: 500 16px/1 var(--g-font-ui); text-align: left; }
+.msg-sheet-rows button { display: flex; align-items: center; gap: 14px; min-height: 48px; padding: 0 8px; border: 0; border-radius: 12px; background: transparent; color: var(--g-ink); font: 500 16px/1 var(--g-font-ui); text-align: left; }
 .msg-sheet-rows button:active { background: var(--g-sunk); }
 .msg-sheet-rows .act-icon { width: 20px; height: 20px; color: var(--g-ink-2); }
 .msg-sheet-rows button.danger { color: var(--g-needs); }
@@ -133,4 +133,4 @@
 :root[data-screen="ink"] .new-line { color: var(--g-ink); }
 :root[data-screen="ink"] .new-line::after { opacity: 1; }
 :root[data-screen="ink"] .msg-sheet { box-shadow: none; border-top-color: var(--g-ink); }
-:root[data-screen="ink"] .msg-sheet-scrim { background: rgba(0, 0, 0, .15); }
+:root[data-screen="ink"] .msg-sheet-scrim { background: var(--g-scrim); }

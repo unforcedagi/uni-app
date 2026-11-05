@@ -89,11 +89,13 @@
 
 /* T-335 All v2: All's own head and the way back; a tap or a swipe on a message replies there. */
 .all-back { min-height: 36px; padding: 0 14px; font: 500 14px/1 var(--g-font-ui); white-space: nowrap; }
-.fd-allhead { flex-wrap: nowrap; }
+.fd-head.fd-allhead { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 6px; margin-bottom: 0; }
 .fd-allhead .fd-mark { min-width: 0; }
 .fd-allhead .fd-title { font: 520 24px/1.1 var(--g-font-display) !important; font-variation-settings: "SOFT" 60, "opsz" 72; }
 .fd-allhead .fd-date { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .all-msg { position: relative; touch-action: pan-y; }
+/* a run here is a run of one room's messages, not the tree's running row */
+.all-msg.run { border-bottom: 0; }
 .all-msg.targeted:not(.mine) .message-content { box-shadow: inset 3px 0 0 var(--g-accent); padding-left: 14px; }
 .all-msg.targeted.mine .message-content { box-shadow: 0 0 0 2px var(--g-accent); }
 .all-reply-go { all: unset; box-sizing: border-box; position: absolute; right: 0; top: 10px; min-height: 28px; padding: 0 10px; display: inline-flex; align-items: center; border-radius: 999px; cursor: pointer;

@@ -33,7 +33,7 @@
 }
 .tree-home-wrap { background: var(--th-paper); }
 .tree-home button { font-family: inherit; }
-.tree-home .th-mono, .th-ctx, .chg, .run-chip, .run-what small, .th-cap, .th-h, .th-colname, .th-fresh, .th-roomline, .th-door, .th-up small, .th-line small, .th-crumbs, .task-meta, .work-group h3 { font-family: var(--th-mono); }
+.tree-home .th-mono, .th-ctx, .chg, .run-chip, .run-what small, .th-cap, .th-h, .th-colname, .th-fresh, .th-roomline, .th-door, .th-up small, .th-line small, .th-crumbs, .task-meta, .work-group h3 { font-family: var(--g-font-ui); }
 
 /* ------------------------------------------------------------------------------------------------- the level (wide) */
 .tree-home.th-level { flex: 1; min-height: 0; display: grid; background: var(--th-ground); }
@@ -42,55 +42,55 @@
 .tree-home.th-level.phone { grid-template-columns: minmax(0, 1fr); }
 
 .th-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--th-paper); }
-.th-level.wide .th-panel { border-left: 2px solid var(--th-ink); }
-@media (max-aspect-ratio: 1/1) { .th-level.wide .th-panel { border-left: 0; border-top: 2px solid var(--th-ink); } }
+.th-level.wide .th-panel { border-left: 2px solid var(--g-line-strong); }
+@media (max-aspect-ratio: 1/1) { .th-level.wide .th-panel { border-left: 0; border-top: var(--g-hair) solid var(--g-line-strong); } }
 .th-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 26px 18px; }
 .th-panel.phone .th-scroll { padding: 8px 18px 18px; }
-.th-foot { position: relative; flex: none; padding: 4px 20px 10px; border-top: 1px solid var(--th-ink); background: var(--th-paper); }
+.th-foot { position: relative; flex: none; padding: 4px 20px 10px; border-top: var(--g-hair) solid var(--g-line-strong); background: var(--th-paper); }
 .th-panel.phone .th-foot { padding: 4px 14px calc(8px + env(safe-area-inset-bottom)); }
 /* the head */
 .th-head { display: flex; flex-direction: column; gap: 2px; }
 .th-head.phone { padding: 0 0 6px; }
 .th-back { all: unset; box-sizing: border-box; align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 2px; font: 600 15px/1 var(--th-sans); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; cursor: pointer; }
-.th-back:focus-visible, .th-crumb:focus-visible, .th-go:focus-visible, .th-kid:focus-visible, .th-up:focus-visible, .th-link:focus-visible { outline: 3px solid var(--th-ink); outline-offset: 2px; }
+.th-back:focus-visible, .th-crumb:focus-visible, .th-go:focus-visible, .th-kid:focus-visible, .th-up:focus-visible, .th-link:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .th-crumbs { display: flex; flex-wrap: wrap; align-items: center; font-size: 12.5px; letter-spacing: .02em; }
 .th-crumb-wrap, .th-crumb.here { display: inline-flex; align-items: center; }
 .th-crumbs i { font-style: normal; color: var(--th-mute); padding: 0 4px; }
-.th-crumb { all: unset; box-sizing: border-box; min-height: 44px; min-width: 32px; display: inline-flex; align-items: center; justify-content: center; padding: 0 2px; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; cursor: pointer; font: 500 13px/1 var(--th-mono); }
+.th-crumb { all: unset; box-sizing: border-box; min-height: 44px; min-width: 32px; display: inline-flex; align-items: center; justify-content: center; padding: 0 2px; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; cursor: pointer; font: 500 13px/1 var(--g-font-ui); }
 .th-crumb.here { min-height: 44px; font-weight: 700; }
-.th-cap { margin: 4px 0 0; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--th-ink2); }
-.th-state { margin-left: 8px; padding: 2px 8px; border: 1.5px solid var(--th-ink); letter-spacing: .06em; font-size: 11px; }
+.th-cap { margin: 4px 0 0; font-size: 12px; color: var(--th-ink2); }
+.th-state { margin-left: 8px; padding: 2px 8px; border: var(--g-hair) solid var(--g-line-strong); font-size: 12px; }
 .th-state[data-st="needs"] { background: var(--th-ink); color: var(--th-card); }
 .th-head .note-title { margin: 2px 0 2px; font: 600 34px/1.05 var(--th-serif); letter-spacing: -.02em; overflow-wrap: anywhere; }
 .th-roomline { margin: 6px 0 4px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 /* ------------------------------------------------------------------------------------------------- objects */
-.th-door { display: inline-flex; align-items: center; box-sizing: border-box; min-height: 30px; padding: 6px 12px 3px; border: 1.5px solid var(--th-ink); border-bottom-width: 4px; border-radius: var(--th-door); background: var(--th-card); font-size: 14px; line-height: 1; letter-spacing: 0; color: var(--th-ink); max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.th-door { display: inline-flex; align-items: center; box-sizing: border-box; min-height: 30px; padding: 6px 12px 3px; border: var(--g-hair) solid var(--g-line-strong); border-bottom-width: 4px; border-radius: var(--th-door); background: var(--th-card); font-size: 14px; line-height: 1; letter-spacing: 0; color: var(--th-ink); max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .th-door-p { color: var(--th-mute); }
 .th-door.held { border-style: dashed; border-bottom-width: 3px; color: var(--th-ink2); background: transparent; }
 .th-door.th-rowdoor { min-height: 0; padding: 2px 8px 1px; border-radius: 12px 12px 2px 2px; border-bottom-width: 3px; font-size: 12px; align-self: flex-start; }
 
-.th-tag { display: inline-grid; place-items: center; position: relative; flex: none; min-width: 28px; height: 26px; padding: 0 8px 0 15px; background: var(--th-ink); color: var(--th-card); clip-path: var(--th-tag); font: 700 12.5px/1 var(--th-mono); }
+.th-tag { display: inline-grid; place-items: center; position: relative; flex: none; min-width: 28px; height: 26px; padding: 0 8px 0 15px; background: var(--th-ink); color: var(--th-card); border-radius: 999px; font: 700 12.5px/1 var(--g-font-ui); }
 .th-tag::before { content: ""; position: absolute; left: 5px; top: 50%; width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%; background: var(--th-card); }
-.th-open { flex: none; min-width: 26px; height: 24px; padding: 0 6px; box-sizing: border-box; display: inline-grid; place-items: center; border: 1.5px solid var(--th-ink); border-radius: 12px; background: var(--th-card); font: 700 12px/1 var(--th-mono); }
+.th-open { flex: none; min-width: 26px; height: 24px; padding: 0 6px; box-sizing: border-box; display: inline-grid; place-items: center; border: var(--g-hair) solid var(--g-line-strong); border-radius: 12px; background: var(--th-card); font: 700 12px/1 var(--g-font-ui); }
 
 /* section heads: a label, then a rule that ends in a ring with the count */
 .th-sec, .th-alive, .tree-home .work { margin-top: 24px; }
 .th-alive { margin-top: 10px; }
-.th-h, .tree-home .work-head { position: relative; display: flex; align-items: center; gap: 12px; margin: 18px 0 4px; padding: 0; border: 0; font: 400 12px/1.3 var(--th-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--th-ink); }
+.th-h, .tree-home .work-head { position: relative; display: flex; align-items: center; gap: 12px; margin: 18px 0 4px; padding: 0; border: 0; font: 400 12px/1.3 var(--g-font-ui); color: var(--th-ink); }
 .th-h::after, .tree-home .work-head::after { content: ""; order: 1; flex: 1; height: 1px; background: var(--th-ink); }
-.th-h em, .tree-home .work-head .brief-count { order: 2; flex: none; display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 6px; box-sizing: border-box; border: 1.5px solid var(--th-ink); border-radius: 12px; background: var(--th-card); font: 700 12px/1 var(--th-mono); font-style: normal; letter-spacing: 0; color: var(--th-ink); }
+.th-h em, .tree-home .work-head .brief-count { order: 2; flex: none; display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 6px; box-sizing: border-box; border: var(--g-hair) solid var(--g-line-strong); border-radius: 12px; background: var(--th-card); font: 700 12px/1 var(--g-font-ui); font-style: normal; letter-spacing: 0; color: var(--th-ink); }
 .th-sec > .th-h { margin-top: 0; }
 .th-lede { margin: 6px 0 0; font: 400 18px/1.5 var(--th-serif); letter-spacing: -.003em; }
 .th-lede.quiet { color: var(--th-mute); font-style: italic; }
-.th-fresh { margin: 6px 0 0; display: flex; gap: 14px; align-items: center; font-size: 12px; letter-spacing: .04em; color: var(--th-mute); }
+.th-fresh { margin: 6px 0 0; display: flex; gap: 14px; align-items: center; font-size: 12px; color: var(--th-mute); }
 .th-link { all: unset; box-sizing: border-box; min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; padding: 0 2px; font: 600 14px/1 var(--th-sans); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; cursor: pointer; }
 .th-lines { list-style: none; margin: 0; padding: 0; }
 .th-line { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--th-hair2); font-size: 15.5px; line-height: 1.4; }
-.th-line .th-k { flex: none; width: 11px; height: 11px; margin: 6px 6px 0 5px; box-sizing: border-box; border: 1.5px solid var(--th-ink); border-radius: 50%; background: var(--th-card); box-shadow: 0 0 0 3px var(--th-paper), 0 0 0 4.5px var(--th-ink); }
-.th-lines.needs .th-k { width: 14px; height: 17px; margin: 4px 4px 0 3px; border: 0; border-radius: 0; background: var(--th-ink); box-shadow: none; clip-path: var(--th-tag); }
+.th-line .th-k { flex: none; width: 11px; height: 11px; margin: 6px 6px 0 5px; box-sizing: border-box; border: var(--g-hair) solid var(--g-line-strong); border-radius: 50%; background: var(--th-card); box-shadow: 0 0 0 3px var(--th-paper), 0 0 0 4.5px var(--th-ink); }
+.th-lines.needs .th-k { width: 14px; height: 17px; margin: 4px 4px 0 3px; border: 0; border-radius: 0; background: var(--th-ink); box-shadow: none; border-radius: 999px; }
 .th-line-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.th-line small { display: block; margin-top: 3px; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--th-mute); }
+.th-line small { display: block; margin-top: 3px; font-size: 12px; color: var(--th-mute); }
 
 .tree-home .brief-link { color: var(--th-ink); }
 
@@ -100,7 +100,7 @@
 .th-arrow { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; border: 2px solid var(--th-sap); border-radius: 50%; background: var(--th-card); color: var(--th-sap); font-size: 15px; font-weight: 700; margin-top: 1px; }
 .th-up b { font-weight: 700; color: var(--th-sap); }
 .th-up-room { font-family: var(--th-mono); font-weight: 600; }
-.th-up-text small { display: block; margin-top: 2px; font-size: 11.5px; letter-spacing: .02em; color: var(--th-ink2); overflow-wrap: anywhere; }
+.th-up-text small { display: block; margin-top: 2px; font-size: 12px; letter-spacing: .02em; color: var(--th-ink2); overflow-wrap: anywhere; }
 
 /* inside: the children of this level */
 .th-kids { list-style: none; margin: 0; padding: 0; }
@@ -110,32 +110,32 @@
 .th-kid-main em { font: 400 14px/1.35 var(--th-serif); font-style: normal; color: var(--th-ink2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .th-note { margin-top: 18px; border-top: 1px solid var(--th-hair); padding-top: 4px; }
 .th-note summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font: 600 14px var(--th-sans); list-style: none; }
-.th-note summary::after { content: "+"; margin-left: auto; font: 700 18px var(--th-mono); }
+.th-note summary::after { content: "+"; margin-left: auto; font: 700 18px/1.35 var(--g-font-ui); }
 .th-note[open] summary::after { content: "–"; }
 .th-note summary::-webkit-details-marker { display: none; }
 
 /* tasks (the app's own list, dressed in the tokens) */
-.tree-home .work-group h3 { font-size: 11.5px; letter-spacing: .1em; border-bottom: 1px solid var(--th-hair2); padding: 6px 0 4px; color: var(--th-mute); }
+.tree-home .work-group h3 { font-size: 12px; border-bottom: 1px solid var(--th-hair2); padding: 6px 0 4px; color: var(--th-mute); }
 .tree-home .task-row { border-bottom: 1px solid var(--th-hair2); }
 .tree-home .task-title { font: 600 15.5px/1.3 var(--th-sans); }
-.tree-home .task-meta { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--th-mute); }
+.tree-home .task-meta { font-size: 12px; color: var(--th-mute); }
 .tree-home .task-check span { width: 24px; height: 24px; background: var(--th-card); box-shadow: inset 0 0 0 4px var(--th-card), inset 0 0 0 5.5px var(--th-hair); }
 .tree-home .work-more { font-family: var(--th-sans); }
-.tree-home .undo-main, .tree-home .undo-note { border-radius: 0; background: var(--th-ink); color: var(--th-card); clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); }
-.tree-home .undo-go { font-family: var(--th-mono); text-transform: uppercase; letter-spacing: .06em; }
+.tree-home .undo-main, .tree-home .undo-note { border-radius: 0; background: var(--th-ink); color: var(--th-card); border-radius: 14px; }
+.tree-home .undo-go { font-family: var(--g-font-ui); }
 
 /* the room: slips in a ledger, not bubbles */
 
 .sr-chat > .th-quiet { margin: 0; padding: 36px 24px; text-align: center; font-family: var(--th-serif); font-size: 17px; }
 .th-quiet { margin: 8px 0; color: var(--th-mute); font-style: italic; }
 
-.tree-home .suggestion-go { border-radius: 0; background: var(--th-ink); color: var(--th-card); font: 700 13px var(--th-mono); letter-spacing: .08em; text-transform: uppercase; }
-.tree-home .pairing-secondary { border-radius: 0; border: 1.5px solid var(--th-ink); background: var(--th-card); color: var(--th-ink); font-family: var(--th-mono); }
+.tree-home .suggestion-go { border-radius: 0; background: var(--th-ink); color: var(--th-card); font: 700 13px/1.35 var(--g-font-ui); }
+.tree-home .pairing-secondary { border-radius: 999px; border: var(--g-hair) solid var(--g-line-strong); background: var(--th-card); color: var(--th-ink); font-family: var(--g-font-ui); }
 
 /* ------------------------------------------------------------------------------------------------- the phone's tree */
 .tree-home-wrap { padding: 0 !important; }
 .th-phone-tree { display: block; min-height: 100%; padding: 0 0 28px; }
-.th-treehead { padding: 18px 18px 10px; border-bottom: 2px solid var(--th-ink); }
+.th-treehead { padding: 18px 18px 10px; border-bottom: var(--g-hair) solid var(--g-line-strong); }
 .th-treehead .note-title { margin: 2px 0 2px; font: 600 40px/1.05 var(--th-serif); letter-spacing: -.02em; }
 .th-summary { margin: 4px 0 0; font: 400 16px/1.4 var(--th-serif); color: var(--th-ink2); }
 .th-rows { list-style: none; margin: 0; padding: 6px 10px 12px 4px; }
@@ -169,13 +169,13 @@
 /* wide: the room tree is a left column that is always there; the level's panel is the right side (portrait too) */
 .tree-home.th-level.th-rooms.wide { grid-template-columns: clamp(270px, 22vw, 340px) minmax(0, 1fr); grid-template-rows: none; }
 .th-roomnav { min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--th-paper); }
-.th-level.th-rooms.wide .th-panel { border-left: 2px solid var(--th-ink); border-top: 0; }
+.th-level.th-rooms.wide .th-panel { border-left: 2px solid var(--g-line-strong); border-top: 0; }
 .th-column .th-treehead { padding: 14px 16px 8px; }
-.th-colname { margin: 2px 0 0; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
+.th-colname { margin: 2px 0 0; font-size: 12px; }
 .th-column .th-summary { font-size: 14.5px; }
 .th-column .th-rows { padding-right: 6px; }
 .th-column .th-name b { font-size: 16px; }
-.th-row.sel .th-go { background: var(--th-card); box-shadow: inset 4px 0 0 var(--th-ink); }
+.th-row.sel .th-go { background: var(--th-card); box-shadow: inset 3px 0 0 var(--g-accent); }
 .th-row.sel .th-name b { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 4px; }
 .th-scroll { container-type: inline-size; }
 .th-rooms .th-head .note-title { margin: 6px 0 2px; }
@@ -187,7 +187,7 @@
 
 /* ------------------------------------------------------------------------------------------------- steer (T-122) */
 /* the node page is the room's state: two columns when the panel is wide enough (a container query on the scrolling page), one when not */
-.th-ctx { margin-left: 10px; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--th-mute); }
+.th-ctx { margin-left: 10px; font-size: 12px; color: var(--th-mute); }
 .th-roomline { display: flex; flex-wrap: wrap; align-items: center; row-gap: 0; }
 .sp-cols { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 36px; align-items: start; margin-top: 4px; }
 @container (min-width: 800px) { .sp-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
@@ -198,19 +198,19 @@
 .ss:first-child { margin-top: 0; }
 /* Running / Drafts rows */
 .run, .draft { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--th-hair2); }
-.run-chip { flex: none; min-width: 84px; display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; box-sizing: border-box; border: 1.5px solid var(--th-ink); background: var(--th-card); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.run-chip { flex: none; min-width: 84px; display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; box-sizing: border-box; border: var(--g-hair) solid var(--g-line-strong); background: var(--th-card); font-size: 12px; }
 .run-chip i { font-style: normal; font-weight: 700; }
 .run-chip[data-state="queued"] { border-style: dashed; }
 .run-chip[data-state="running"] { border-width: 2px; }
 .run-chip[data-state="stalled"], .run-chip[data-state="failed"] { background: var(--th-ink); color: var(--th-card); }
 .run-chip[data-state="done"] { border-color: var(--th-hair); color: var(--th-ink2); }
 .run-what { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font: 500 15px/1.35 var(--th-sans); overflow-wrap: anywhere; }
-.run-what small { flex-basis: 100%; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--th-mute); }
+.run-what small { flex-basis: 100%; font-size: 12px; color: var(--th-mute); }
 .run .th-link, .draft .th-link { flex: none; }
 /* a change a steer made: the sap rule on the item's left edge, and when and what it was before. No motion beyond one 200ms fade. */
 .changed { position: relative; box-shadow: inset 4px 0 0 var(--th-sap); padding-left: 10px; background: linear-gradient(90deg, var(--th-sap-soft), transparent 70%); animation: chg-in .2s ease-out; }
 @keyframes chg-in { from { background-color: var(--th-sap-soft); } }
-.chg { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--th-sap); font-weight: 600; }
+.chg { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; font-size: 12px; color: var(--th-sap); font-weight: 600; }
 
 .tree-home .task-row.changed { max-height: none; }
 /* the counts line: one compact row of small tags in a node page, so the state starts above the fold */
@@ -225,7 +225,7 @@
 .th-column .th-treehead { padding: 22px 20px 8px; }
 .th-rows { padding: 6px 12px 16px 8px; }
 .th-row { min-height: 52px; }
-.th-go { min-height: 52px; gap: 8px; padding: 6px 10px 6px 4px; border-radius: 10px; }
+.th-go { min-height: 52px; gap: 8px; padding: 6px 10px 6px 4px; border-radius: 12px; }
 .th-go:hover, .th-go:active { background: var(--th-ring); }
 .th-name { gap: 1px; }
 .th-name b { font: 600 17px/1.25 var(--th-serif); }
@@ -260,17 +260,17 @@
 .sr-context { margin: 1px 0 0; font: 400 12.5px/1.3 var(--th-sans); color: var(--th-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-scope { font-weight: 600; color: var(--th-ink2); }
 .sr-back { all: unset; box-sizing: border-box; flex: none; width: 44px; height: 44px; display: grid; place-items: center; font: 400 30px/1 var(--th-sans); cursor: pointer; color: var(--th-ink); }
-.sr-back:focus-visible { outline: 2px solid var(--th-ink); outline-offset: -4px; }
+.sr-back:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -4px; }
 .sr .th-crumbs { font: 400 12.5px var(--th-sans); letter-spacing: 0; color: var(--th-mute); }
 .sr .th-crumb { font: 400 12.5px/1 var(--th-sans); min-height: 24px; min-width: 0; text-decoration: none; color: var(--th-mute); }
-.sr .th-crumb:hover { text-decoration: underline; }
+.sr .th-crumb:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); }
 .sr .th-crumb.here { min-height: 24px; font-weight: 400; }
 .sr .th-crumbs i { padding: 0 5px; }
 /* a thread, inside its room: a quiet line with the way back */
 .sr-thread { flex: none; display: flex; align-items: center; gap: 12px; padding: 0 max(24px, calc((100% - 720px) / 2)) 8px; border-bottom: 1px solid var(--th-hair2); font: 400 13px/1.3 var(--th-sans); color: var(--th-mute); }
 .th-simple.phone .sr-thread { padding: 0 14px 6px; }
 .sr-thread-back { all: unset; box-sizing: border-box; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--th-ink); font-weight: 500; }
-.sr-thread-back:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.sr-thread-back:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .sr-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sr-chat .composer { padding-bottom: 10px; }
 .sr-chat .compose-hint { display: none; }
@@ -284,7 +284,7 @@
 .cp-top { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; display: flex; align-items: center; justify-content: space-between; min-height: 56px; font: 500 13px var(--th-sans); color: var(--th-mute); }
 .cp-fold, .cp-unfold { all: unset; box-sizing: border-box; display: grid; place-items: center; width: 40px; height: 40px; font: 400 24px/1 var(--th-sans); cursor: pointer; color: var(--th-ink2); border-radius: 50%; }
 .cp-fold:hover, .cp-unfold:hover { background: var(--th-ring); }
-.cp-fold:focus-visible, .cp-unfold:focus-visible, .cp-need:focus-visible, .cp-all:focus-visible, .cp-more:focus-visible, .cp-line:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.cp-fold:focus-visible, .cp-unfold:focus-visible, .cp-need:focus-visible, .cp-all:focus-visible, .cp-more:focus-visible, .cp-line:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .cp-unfold { position: relative; margin: 8px; }
 .cp-dot { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--th-sap); }
 .cp-unfold .cp-dot { position: absolute; right: 4px; top: 4px; }
@@ -306,17 +306,17 @@
 .cp-item { border-bottom: 1px solid var(--th-hair2); }
 .cp-item .cp-need { border-bottom: 0; }
 .cp-opts { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 8px; }
-.cp-opt { all: unset; box-sizing: border-box; min-height: 32px; max-width: 100%; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 8px; background: var(--th-ink); color: var(--th-paper); font: 500 13px var(--th-sans); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-opt { all: unset; box-sizing: border-box; min-height: 32px; max-width: 100%; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 999px; background: var(--th-ink); color: var(--th-paper); font: 500 13px var(--th-sans); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-opt.more { background: none; color: var(--th-ink); box-shadow: inset 0 0 0 1px var(--th-ink2); }
 .cp-opt:hover { opacity: .85; }
-.cp-opt:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.cp-opt:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .cp-more { all: unset; box-sizing: border-box; min-height: 40px; display: inline-flex; align-items: center; font: 500 14px var(--th-sans); color: var(--th-ink2); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .cp-run { display: flex; align-items: baseline; gap: 10px; padding: 5px 0; font: 400 15px/1.35 var(--th-sans); }
 /* r24: a run is a glance, two lines at most (its words whole in the tooltip and the work view), so it fits above the panel footer; cut at a
    whole line like the r23 rows, never with the "…" -webkit-line-clamp draws */
 .cp .cp-run span { display: block; min-width: 0; overflow-wrap: anywhere; }
 .cp-run i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--th-ink); align-self: center; }
-.cp-run[data-state="queued"] i { background: none; box-shadow: inset 0 0 0 1.5px var(--th-ink); }
+.cp-run[data-state="queued"] i { background: none; box-shadow: inset 0 0 0 var(--g-hair) var(--g-ink-2); }
 .cp-run small { margin-left: auto; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
 .cp-foot { position: sticky; bottom: 0; margin-top: auto; padding-top: 8px; padding-bottom: 12px; background: var(--th-paper); border-top: 1px solid var(--th-hair2); }
 /* a list longer than the panel: a rule above the footer says there is more under it, and the last item ends above it */
@@ -332,12 +332,12 @@
 .cp-strip-body { overflow-y: auto; overscroll-behavior: contain; }
 /* r16: otherwise a sheet over the room, under its header; the conversation stays where it was */
 .cp-sheet-wrap { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; justify-content: flex-end; }
-.cp-sheet-scrim { all: unset; position: absolute; inset: 0; background: rgb(12 11 8 / 30%); }
-.cp-sheet { position: relative; box-sizing: border-box; max-height: calc(100% - 12px); overflow-y: auto; overscroll-behavior: contain; background: var(--th-paper); border-top: 2px solid var(--th-ink); border-radius: 16px 16px 0 0; padding: 0 0 calc(10px + env(safe-area-inset-bottom)); }
+.cp-sheet-scrim { all: unset; position: absolute; inset: 0; background: var(--g-scrim); }
+.cp-sheet { position: relative; box-sizing: border-box; max-height: calc(100% - 12px); overflow-y: auto; overscroll-behavior: contain; background: var(--th-paper); border-top: var(--g-hair) solid var(--g-line-strong); border-radius: 16px 16px 0 0; padding: 0 0 calc(10px + env(safe-area-inset-bottom)); }
 .cp-sheet:focus-visible { outline: none; }
 .cp-sheet-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 0 8px 0 16px; background: var(--th-paper); border-bottom: 1px solid var(--th-hair2); font: 500 13px var(--th-sans); color: var(--th-mute); }
 .cp-sheet-close { all: unset; box-sizing: border-box; min-height: 44px; min-width: 44px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; font: 500 14px var(--th-sans); color: var(--th-ink); cursor: pointer; border-radius: 8px; }
-.cp-sheet-close:focus-visible { outline: 2px solid var(--th-ink); outline-offset: -2px; }
+.cp-sheet-close:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -2px; }
 .cp-sheet .cp-body { padding: 10px 16px 6px; }
 /* r17: the way to the room's whole work stays in sight at the sheet's foot, however long the list (Codex r16: missed at 800×600 and 740×360) */
 .cp-sheet .cp-foot { position: sticky; bottom: calc(-10px - env(safe-area-inset-bottom)); z-index: 1; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
@@ -372,7 +372,7 @@
 .th-nb { all: unset; box-sizing: border-box; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; font: 400 15px/1 var(--th-sans); color: var(--th-mute); cursor: pointer; }
 .th-nb:hover:not(:disabled) { background: var(--th-ring); color: var(--th-ink); }
 .th-nb:disabled { opacity: .35; cursor: default; }
-.th-nb:focus-visible { outline: 2px solid var(--th-ink); outline-offset: -2px; }
+.th-nb:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -2px; }
 .th-resize { position: absolute; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; z-index: 5; touch-action: none; }
 .th-resize:hover, .th-resize:focus-visible, .th-resize:active { background: linear-gradient(to right, transparent 3px, var(--th-hair2) 3px, var(--th-hair2) 4px, transparent 4px); outline: none; }
 
@@ -388,7 +388,7 @@
 .th-column .th-row.d0 .th-name b { font-size: 15px; font-weight: 700; }
 .th-column .th-row.d1 .th-name b { font-size: 14px; font-weight: 650; }
 .th-column .th-row.d2 .th-name b, .th-column .th-row.d3 .th-name b, .th-column .th-row.d4 .th-name b { font-weight: 500; font-size: 13.5px; }
-.th-column .th-sub { font-size: 11px; line-height: 1.25; }
+.th-column .th-sub { font-size: 12px; line-height: 1.25; }
 .th-column .th-dot { width: 7px; height: 7px; margin-right: 2px; }
 .th-column .th-row.d0 { padding-left: 10px; }
 .th-column .th-row.d1 { padding-left: 14px; }
@@ -397,7 +397,7 @@
 .th-fold { all: unset; box-sizing: border-box; flex: none; width: 20px; height: 24px; display: grid; place-items: center; cursor: pointer; border-radius: 5px; }
 .th-fold:hover { background: var(--th-ring); }
 .th-fold:hover i { opacity: 1; }
-.th-fold:focus-visible { outline: 2px solid var(--th-ink); outline-offset: -2px; }
+.th-fold:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -2px; }
 .th-fold i { width: 7px; height: 7px; border-right: 2px solid var(--th-ink); border-bottom: 2px solid var(--th-ink); opacity: .75; transform: rotate(-45deg); transition: transform .12s; }
 .th-fold[aria-expanded="true"] i { transform: rotate(45deg); }
 .th-phone-tree:not(.th-column) .th-fold, .th-phone-tree:not(.th-column) .th-fold-gap { width: 30px; height: 44px; }
@@ -409,11 +409,11 @@
 .th-phone-tree:not(.th-column) .th-treehead .note-title { font-size: 28px; }
 
 .th-recent { flex: none; box-sizing: border-box; max-height: 124px; overflow: hidden; border-top: 1px solid var(--th-hair2); padding: 6px 8px 8px 10px; }
-.th-recent h2 { margin: 0 0 2px; font: 600 10.5px/1.6 var(--th-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--th-mute); }
+.th-recent h2 { margin: 0 0 2px; font: 600 12px/1.6 var(--g-font-ui); color: var(--th-mute); }
 .th-recent ul { list-style: none; margin: 0; padding: 0; }
 .th-recent button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 2px 4px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; border-radius: 5px; }
 .th-recent button:hover { background: var(--th-ring); color: var(--th-ink); }
-.th-recent button:focus-visible { outline: 2px solid var(--th-ink); outline-offset: -2px; }
+.th-recent button:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -2px; }
 
 /* ------------------------------------------------------------------------------------------------- r7: the needs-you feed */
 .cp-need small { -webkit-line-clamp: unset; line-clamp: none; display: block; }
@@ -422,16 +422,16 @@
 .cp-next { margin: 0; font: 400 13.5px/1.45 var(--th-sans); color: var(--th-ink2); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6; overflow: hidden; }
 .cp-next.open { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
 .cp-link { color: var(--th-ink); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; cursor: pointer; }
-.cp-link:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.cp-link:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .cp-more-next { all: unset; box-sizing: border-box; min-height: 28px; display: inline-flex; align-items: center; font: 500 12.5px var(--th-sans); color: var(--th-mute); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-.cp-more-next:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.cp-more-next:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .cp-open-to-see, .cp-none { margin: 0; padding: 0 0 8px; font: 400 13px/1.4 var(--th-sans); color: var(--th-mute); }
 .cp-none { padding-top: 2px; }
 
 /* r9: a decision with no options asks for a yes or no; a note id in a next step reads as its title */
 .cp-call { margin: 0 0 6px; font: 500 13px var(--th-sans); color: var(--th-ink2); }
 .cp-ref { all: unset; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-.cp-ref:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.cp-ref:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .cp-detail.overdue { color: var(--th-mute); }
 /* the sidebar's last row clears the bottom edge and Recent, with a fade that says the list goes on */
 .th-column .th-rows { padding-bottom: 16px; }
@@ -461,8 +461,8 @@
 .task-answer .cp-opt { min-height: 44px; padding: 0 18px; font-size: 15px; }
 .task-sheet .cp-call-lead { margin-top: 4px; }
 .task-next .cp-next { -webkit-line-clamp: unset; line-clamp: none; display: block; max-height: none; }
-.task-link { all: unset; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; color: var(--th-ink); font-weight: 600; }
-.task-link:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.task-link { all: unset; cursor: pointer; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; color: var(--th-ink); font-weight: 600; }
+.task-link:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .task-details { margin: 14px 0 0; font: 400 13px/1.45 var(--th-sans); color: var(--th-ink2); }
 .task-details summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; font-weight: 600; }
 .task-details p { margin: 2px 0; }
@@ -470,9 +470,9 @@
 /* r12: Needs you says when it could not read the list, and the tree's dot for "something inside" is a ring */
 .cp-stale, .cp-private { margin: 0; padding: 4px 0 8px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-mute); }
 .cp-failed { color: var(--th-ink); }
-.cp-retry { all: unset; cursor: pointer; min-height: 28px; display: inline-flex; align-items: center; font: 600 12.5px var(--th-sans); color: var(--th-ink); text-decoration: underline; text-underline-offset: 3px; }
+.cp-retry { all: unset; cursor: pointer; min-height: 28px; display: inline-flex; align-items: center; font: 600 12.5px var(--th-sans); color: var(--th-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; }
 .cp-failed .cp-retry { font-size: inherit; }
-.cp-retry:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.cp-retry:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .cp-stands-more { display: inline-flex; margin-top: 2px; }
 .th-dot.inside { background: none; box-shadow: inset 0 0 0 2px var(--th-sap); }
 .th-load { flex: none; margin: 2px 12px 4px; font: 400 12.5px/1.35 var(--th-sans); color: var(--th-mute); }
@@ -490,11 +490,11 @@
 .wv-fresh { margin: 0; display: flex; gap: 12px; align-items: center; }
 .wv-note { margin-top: 4px; }
 .wv-sec .cp-list { margin: 0; }
-.wv-h { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font: 600 13px/1.3 var(--th-sans); letter-spacing: .04em; text-transform: uppercase; color: var(--th-ink2); }
+.wv-h { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font: 600 13px/1.3 var(--th-sans); color: var(--th-ink2); }
 .wv-n { font-weight: 500; color: var(--th-mute); letter-spacing: 0; }
 .wv-fold { min-height: 44px; cursor: pointer; width: 100%; }
 .wv-fold i { margin-left: auto; font-style: normal; }
-.wv-fold:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.wv-fold:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .wv-runs, .wv-drafts { margin-bottom: 8px !important; }
 .cp-meta { color: var(--th-mute); }
 /* a private item: named by its place only, and it opens */
@@ -502,30 +502,30 @@
 .cp-more-areas { margin-top: 2px; }
 /* the task sheet: the action leads, the title under it; priority is set here */
 .task-sub { margin: 0 0 8px; font-size: 14.5px; color: var(--th-ink2); overflow-wrap: anywhere; }
-.task-gone { margin: 0 0 10px; padding: 8px 10px; border-radius: 10px; background: var(--th-card); font-size: 14px; color: var(--th-ink2); }
+.task-gone { margin: 0 0 10px; padding: 8px 10px; border-radius: 12px; background: var(--th-card); font-size: 14px; color: var(--th-ink2); }
 .task-sheet:focus { outline: none; }
 .task-prio { display: flex; gap: 6px; margin: 0 0 14px; }
 .task-prio-b { all: unset; box-sizing: border-box; min-height: 40px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--th-hair2); border-radius: 999px; font: 500 14px var(--th-sans); color: var(--th-ink2); cursor: pointer; }
 .task-prio-b[aria-pressed="true"] { border-color: var(--th-ink); color: var(--th-ink); font-weight: 650; box-shadow: inset 0 0 0 1px var(--th-ink); }
-.task-prio-b:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.task-prio-b:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 @media (pointer: coarse) { .task-prio-b { min-height: 44px; } }
 /* below 900px: the room header opens the drawer (the tree, Back/Forward, Recent and the app's places), and keeps a one-line breadcrumb */
 .sr-drawer { all: unset; box-sizing: border-box; flex: none; width: 44px; height: 44px; display: grid; place-items: center; cursor: pointer; color: var(--th-ink); }
 .sr-drawer span, .sr-drawer span::before, .sr-drawer span::after { display: block; width: 18px; height: 2px; border-radius: 1px; background: currentColor; position: relative; }
 .sr-drawer span::before, .sr-drawer span::after { content: ""; position: absolute; left: 0; }
 .sr-drawer span::before { top: -6px; } .sr-drawer span::after { top: 6px; }
-.sr-drawer:focus-visible { outline: 2px solid var(--th-ink); outline-offset: -4px; }
+.sr-drawer:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -4px; }
 .th-crumbs.compact { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; min-width: 0; }
 .th-crumbs.compact .th-crumb-wrap { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .th-crumbs.compact .th-crumb-wrap:last-child { flex: none; }
 .th-simple.phone .sr-meta { min-height: 20px; }
 .th-drawer-wrap { position: fixed; inset: 0; z-index: 55; display: flex; }
-.th-drawer-scrim { all: unset; position: absolute; inset: 0; background: rgba(28,38,34,.22); }
+.th-drawer-scrim { all: unset; position: absolute; inset: 0; background: var(--g-scrim); }
 .th-drawer { position: relative; box-sizing: border-box; width: min(340px, 86vw); height: 100%; display: flex; flex-direction: column; background: var(--th-paper); border-right: 1px solid var(--th-hair2); box-shadow: var(--shadow-lift); padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
 .th-drawer > .th-column { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 0; }
 .th-places { flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 10px 4px; }
 .th-place { all: unset; box-sizing: border-box; min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--th-hair2); border-radius: 999px; font: 500 14px var(--th-sans); color: var(--th-ink); cursor: pointer; background: var(--th-paper); }
-.th-place:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.th-place:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 /* the phone's tree home shows the places only where the rail is hidden (useRailHidden, r14) */
 .key-error { display: flex; align-items: center; gap: 8px; justify-content: center; }
 .tree-home.th-level.th-simple.wide.solo { grid-template-columns: var(--th-nav-w, 220px) minmax(0, 1fr); }
@@ -561,7 +561,7 @@
 .wv .lh { margin: 0 0 12px; }
 /* r14: an area's app is a view inside the room shell, opened from the header */
 .sr-app { all: unset; box-sizing: border-box; flex: none; margin-left: auto; align-self: center; min-height: 32px; padding: 0 12px; display: inline-flex; align-items: center; border: 1px solid var(--th-hair2); border-radius: 999px; font: 500 13px var(--th-sans); color: var(--th-ink); cursor: pointer; }
-.sr-app:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.sr-app:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 @media (pointer: coarse) { .sr-app { min-height: 44px; } }
 .sr-work:has(> .area-app) { overflow: hidden; display: flex; flex-direction: column; }
 .area-app { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -584,8 +584,8 @@
 .cp-title.cp-preview { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
 /* r16: a step cut short when it was written: the way to the rest, under the action */
 .cp-open-decide.cp-rest { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; min-height: 32px; padding: 0 0 6px; font: 500 13px/1.4 var(--th-sans); color: var(--th-ink2); cursor: pointer; }
-.cp-open-decide.cp-rest:hover { text-decoration: underline; text-underline-offset: 3px; }
-.cp-open-decide.cp-rest:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.cp-open-decide.cp-rest:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; }
+.cp-open-decide.cp-rest:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 /* r17: under 400px tall the sidebar folds into the Places drawer (useShortTree): the room takes its column */
 @media (max-height: 399.98px) {
   .tree-home.th-level.th-simple.wide { grid-template-columns: minmax(0, 1fr) 272px; }
@@ -632,8 +632,8 @@
 .cp-sub-when.overdue { color: var(--th-ink2); font-weight: 500; }
 /* r20: Uni's tidying is one quiet line; opened, its records are titles only, read-only (nothing to act on, nothing counted) */
 .wv-tidy-line { all: unset; box-sizing: border-box; min-height: 32px; display: inline-flex; align-items: center; font: 400 13px/1.4 var(--th-sans); color: var(--th-mute); cursor: pointer; }
-.wv-tidy-line:hover { color: var(--th-ink2); text-decoration: underline; text-underline-offset: 3px; }
-.wv-tidy-line:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.wv-tidy-line:hover { color: var(--th-ink2); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; }
+.wv-tidy-line:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .wv-tidy-list { margin: 2px 0 0; padding: 0 0 0 1.1em; font: 400 13px/1.5 var(--th-sans); color: var(--th-mute); }
 .wv-tidy-list li { margin: 2px 0; }
 /* a decision's answers sit at the top of the sheet's footer (its primary action), whole rows, wrapping */
@@ -647,7 +647,7 @@
    phone keeps the sheet that rises from the bottom edge */
 @media (min-width: 600px) {
   .task-sheet-wrap { align-items: center; padding: 12px; box-sizing: border-box; }
-  .task-sheet { border-bottom: 2px solid var(--th-ink); border-radius: 18px; max-height: min(88vh, calc(100dvh - 24px)); }
+  .task-sheet { border-bottom: var(--g-hair) solid var(--g-line-strong); border-radius: 18px; max-height: min(88vh, calc(100dvh - 24px)); }
   .task-sheet .task-foot { border-radius: 0 0 16px 16px; }
 }
 /* r21 (Codex 9): the conversation's place while it opens is a quiet chat (its composer's line greyed), never a status panel */
@@ -696,7 +696,7 @@
 /* r27: a summary's date before it; a run waiting on the user sits under Needs you's rows; an unconfirmed request's one quiet line */
 .cp-asof { color: var(--th-mute); }
 .cp-waiting { margin-top: 4px !important; }
-.cp-run-waiting i { background: none; box-shadow: inset 0 0 0 1.5px var(--th-ink); }
+.cp-run-waiting i { background: none; box-shadow: inset 0 0 0 var(--g-hair) var(--g-ink-2); }
 .task-unconfirmed { color: var(--th-ink2); }
 .cp-said > p { color: var(--th-mute); }
 /* r27: Details is a control, not a heading with nothing under it: it shows a + that turns to – when opened (the same mark Later uses) */
@@ -710,7 +710,7 @@
    question as the step; the compact panel is one panel whose summary is a date line and whose footer is outside what scrolls. */
 .cp-recheck { margin: 8px 0 2px; font: 400 13px/1.4 var(--th-sans); color: var(--th-mute); }
 .cp-recheck-line { all: unset; box-sizing: border-box; min-height: 36px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--th-mute); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-.cp-recheck-line:focus-visible, .cp-rc-open:focus-visible, .cp-rc-anyway:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.cp-recheck-line:focus-visible, .cp-rc-open:focus-visible, .cp-rc-anyway:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .cp-recheck-line i { font-style: normal; text-decoration: none; }
 .cp-recheck-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 0; }
 .cp-recheck-item { padding: 8px 0; border-top: 1px solid var(--th-hair2); display: grid; gap: 2px; color: var(--th-ink2); }
@@ -772,7 +772,7 @@
 .th-views { flex: none; display: flex; gap: 2px; margin: 2px 8px 8px; padding: 3px; border-radius: 8px; background: var(--th-ring); }
 .th-view { all: unset; box-sizing: border-box; flex: 1; min-height: 32px; display: grid; place-items: center; border-radius: 6px; font: 500 13px/1 var(--th-sans); color: var(--th-mute); cursor: pointer; }
 .th-view[aria-pressed="true"] { background: var(--th-card); color: var(--th-ink); font-weight: 700; box-shadow: 0 1px 2px var(--th-ring); }
-.th-view:focus-visible, .th-showarch:focus-visible, .th-chip:focus-visible, .th-cardroom:focus-visible { outline: 3px solid var(--th-ink); outline-offset: 2px; }
+.th-view:focus-visible, .th-showarch:focus-visible, .th-chip:focus-visible, .th-cardroom:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .th-roomlist, .th-cards { list-style: none; margin: 0; padding: 0; }
 .th-room { display: flex; border-radius: 6px; }
 .th-room.sel, .th-card.sel { background: var(--th-sap-soft); }
@@ -780,8 +780,8 @@
 .th-room-go .th-name b { font: 600 15px/1.2 var(--th-sans); }
 .th-when { flex: none; font: 400 12px/1 var(--th-sans); color: var(--th-mute); white-space: nowrap; }
 .th-archived { padding: 6px 8px; }
-.th-showarch { all: unset; cursor: pointer; font: 400 13px/1.2 var(--th-sans); color: var(--th-mute); text-decoration: underline; }
-.th-card { margin: 0 8px 8px; padding: 8px 10px; border: 1px solid var(--th-hair2); border-radius: 10px; background: var(--th-card); display: flex; flex-direction: column; gap: 4px; }
+.th-showarch { all: unset; cursor: pointer; font: 400 13px/1.2 var(--th-sans); color: var(--th-mute); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); }
+.th-card { margin: 0 8px 8px; padding: 8px 10px; border: 1px solid var(--th-hair2); border-radius: 12px; background: var(--th-card); display: flex; flex-direction: column; gap: 4px; }
 .th-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
 .th-card-name { min-height: 32px; padding: 0; }
 .th-card-name .th-name b { font: 600 16px/1.2 var(--th-serif); }
@@ -795,16 +795,16 @@
 /* T-161: a Hermes approval prompt waiting on the user's OK: first in Needs you, marked so it can't be missed (--danger is the app's own) */
 .cp-approvals { margin: 2px 0 8px !important; }
 .cp-approval { list-style: none; }
-.cp-approval-open { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 9px 10px !important; border: 1.5px solid var(--danger, #a4493d) !important; border-radius: 6px; background: color-mix(in srgb, var(--danger, #a4493d) 7%, transparent); color: var(--th-ink); font: 400 14px/1.35 var(--th-sans); cursor: pointer; }
-.cp-approval-open > i { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; background: var(--danger, #a4493d); color: var(--th-card); font: 700 12px/1 var(--th-sans); font-style: normal; }
+.cp-approval-open { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 12px 14px !important; border: var(--g-hair) solid var(--g-needs) !important; border-radius: 14px; background: color-mix(in srgb, var(--g-needs) 7%, transparent); color: var(--th-ink); font: 400 14px/1.35 var(--th-sans); cursor: pointer; }
+.cp-approval-open > i { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; background: var(--g-needs); color: var(--th-card); font: 700 12px/1 var(--th-sans); font-style: normal; }
 .cp-approval-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
 .cp-approval-lead { font-weight: 600; }
-.cp-approval-cmd { font: 500 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--th-card); padding: 3px 6px; border-radius: 4px; }
+.cp-approval-cmd { font: 500 12.5px/1.4 var(--g-font-code); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--g-paper); padding: 3px 8px; border-radius: 6px; }
 .cp-approval-why, .cp-approval-how { color: var(--th-mute); font-size: 12.5px; overflow-wrap: anywhere; }
-.cp-approval-open:hover .cp-approval-lead, .cp-approval-open:focus-visible .cp-approval-lead { text-decoration: underline; text-underline-offset: 3px; }
-.th-approvals { margin: 0 0 10px !important; padding: 0; }
+.cp-approval-open:hover .cp-approval-lead, .cp-approval-open:focus-visible .cp-approval-lead { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; }
+.th-approvals { margin: 12px auto 10px !important; padding: 0 clamp(20px, 5vw, 64px); max-width: calc(720px + 2 * clamp(20px, 5vw, 64px)); box-sizing: border-box; width: 100%; }
 /* T-335: a room's new messages, a small count at the row's end: outlined, filled when one mentions you, dashed when it is inside a folded area */
-.th-new { flex: none; min-width: 22px; height: 20px; padding: 0 6px; box-sizing: border-box; display: inline-grid; place-items: center; border: 1.5px solid var(--th-ink); border-radius: 10px; font: 700 11.5px/1 var(--th-sans); font-variant-numeric: tabular-nums; color: var(--th-ink); background: var(--th-card); }
+.th-new { flex: none; min-width: 22px; height: 20px; padding: 0 6px; box-sizing: border-box; display: inline-grid; place-items: center; border: var(--g-hair) solid var(--g-line-strong); border-radius: 12px; font: 600 12px/1 var(--g-font-ui); font-variant-numeric: tabular-nums; color: var(--th-ink); background: var(--th-card); }
 .th-new.at { background: var(--th-ink); color: var(--th-card); }
 .th-new.inside { border-style: dashed; border-color: var(--th-ink2); color: var(--th-ink2); background: none; font-weight: 600; }
 .th-new.inside.at { border-style: solid; }
@@ -819,13 +819,13 @@
 /* T-335: an approval waiting in another room, said at the top of the room you are in; one tap opens that room at the card */
 .approval-elsewhere { all: unset; box-sizing: border-box; flex: none; display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 0 max(24px, calc((100% - 720px) / 2)) 8px; padding: 6px 12px; border: 1.5px solid var(--danger); border-radius: 6px; background: color-mix(in srgb, var(--danger) 7%, transparent); font: 500 13.5px/1.3 var(--th-sans); color: var(--th-ink); cursor: pointer; }
 .th-simple.phone .approval-elsewhere { margin: 0 14px 6px; }
-.approval-elsewhere:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.approval-elsewhere:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .approval-elsewhere > i { flex: none; font-style: normal; }
 .approval-elsewhere-text { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; }
 .approval-elsewhere-text b { font-weight: 700; }
 .approval-elsewhere-text small { font-size: 12.5px; color: var(--th-ink2); }
-.approval-elsewhere-go { flex: none; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.approval-elsewhere-go { flex: none; font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; }
 /* T-335: the rooms list's key: an approval waiting in that room (the dot stays the tasks'); hollow when it is inside a folded row */
-.th-ask { flex: none; height: 20px; padding: 0 5px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 2px; border: 1.5px solid var(--danger); border-radius: 10px; font: 700 11.5px/1 var(--th-sans); font-variant-numeric: tabular-nums; color: var(--th-ink); background: color-mix(in srgb, var(--danger) 10%, var(--th-card)); }
+.th-ask { flex: none; height: 20px; padding: 0 5px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 2px; border: 1.5px solid var(--danger); border-radius: 12px; font: 600 12px/1 var(--g-font-ui); font-variant-numeric: tabular-nums; color: var(--th-ink); background: color-mix(in srgb, var(--danger) 10%, var(--th-card)); }
 .th-ask.inside { border-style: dashed; background: none; }
 .th-ask + .th-new { margin-left: 4px; }

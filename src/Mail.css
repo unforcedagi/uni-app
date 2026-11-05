@@ -10,20 +10,20 @@
 .mail-note { color: var(--muted); font-size: 13px; margin: 0; }
 
 /* identity: YOU filled, UNI dashed */
-.mail-who { display: inline-flex; align-items: baseline; gap: 6px; flex: none; padding: 1px 6px; border-radius: 4px; font: 700 10.5px/16px var(--th-mono, var(--mono)); letter-spacing: .08em; vertical-align: 1px; }
-.mail-who small { font-weight: 500; letter-spacing: 0; font-size: 11px; text-transform: none; }
-.mail-who.who-owner { background: var(--th-ink); color: var(--th-card); border: 1.5px solid var(--th-ink); }
-.mail-who.who-uni { background: transparent; color: var(--th-ink); border: 1.5px dashed var(--th-ink); }
+.mail-who { display: inline-flex; align-items: baseline; gap: 6px; flex: none; padding: 1px 6px; border-radius: 999px; font: 600 12px/16px var(--g-font-ui); vertical-align: 1px; }
+.mail-who small { font-weight: 500; letter-spacing: 0; font-size: 12px; text-transform: none; }
+.mail-who.who-owner { background: var(--th-ink); color: var(--th-card); border: var(--g-hair) solid var(--g-line-strong); }
+.mail-who.who-uni { background: transparent; color: var(--th-ink); border: var(--g-hair) dashed var(--g-ink-3); }
 
 /* mailboxes */
 .mail-boxes { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border-right: 1px solid var(--line); background: var(--surface-2); overflow-y: auto; min-height: 0; }
-.mail-acct { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; padding-left: 8px; border-left: 3px solid var(--th-ink); }
+.mail-acct { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; padding-left: 8px; border-left: 2px solid var(--g-line-strong); }
 .mail-acct.who-uni { border-left-style: dashed; }
 .mail-acct-head { margin: 4px 0 4px 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.mail-box { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text-soft); font-size: 14px; text-align: left; }
+.mail-box { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: var(--text-soft); font-size: 14px; text-align: left; }
 .mail-box:hover { background: var(--surface); }
-.mail-box.selected { background: var(--th-card); color: var(--text); font-weight: 700; box-shadow: inset 0 0 0 1.5px var(--th-ink); }
-.mail-count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--th-ink); color: var(--th-card); font: 600 11px/18px var(--sans); text-align: center; }
+.mail-box.selected { background: var(--g-paper); background: var(--th-card); color: var(--text); font-weight: 700; box-shadow: inset 0 0 0 var(--g-hair) var(--g-ink-2); }
+.mail-count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--th-ink); color: var(--th-card); font: 600 12px/18px var(--g-font-ui); text-align: center; }
 .mail-count.quiet { background: transparent; color: var(--text); border: 1px solid var(--line-strong, var(--line)); }
 .mail-one-account { margin: 12px 6px 0; }
 
@@ -36,11 +36,11 @@
 .mail-boxes-open, .mail-thread-back { display: none; }
 .mail-list-search { display: flex; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
 .mail-search { display: flex; flex: 1; }
-.mail-search input { width: 100%; min-height: 44px; padding: 0 14px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; background: var(--surface); font-size: 15px; color: var(--text); }
+.mail-search input { width: 100%; min-height: 44px; padding: 0 14px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 12px; background: var(--surface); font-size: 15px; color: var(--text); }
 .mail-rows { list-style: none; margin: 0; padding: 0; }
 .mail-row { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 10px 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--text-soft); text-align: left; font-size: 14px; }
 .mail-row:hover { background: var(--surface); }
-.mail-row.selected { background: var(--highlight); box-shadow: inset 4px 0 0 var(--th-ink); }
+.mail-row.selected { background: var(--highlight); box-shadow: inset 3px 0 0 var(--g-accent); }
 .mail-row-top { display: flex; align-items: center; gap: 8px; }
 .mail-row-top .mail-from { flex: 1 1 auto; }
 .mail-row-top time { flex: none; margin-left: auto; color: var(--muted); font-size: 12px; }
@@ -48,17 +48,17 @@
 .mail-row-preview { color: var(--muted); font-size: 13px; }
 /* C's triage status line: Uni's, and said so */
 .mail-row-triage { font-size: 13px; color: var(--text-soft); font-style: italic; }
-.mail-row-triage-who { font: 700 10.5px var(--th-mono, var(--mono)); font-style: normal; letter-spacing: .06em; }
+.mail-row-triage-who { font: 600 12px/1.35 var(--g-font-ui); font-style: normal; }
 .mail-row.unread .mail-from, .mail-row.unread .mail-row-subject { color: var(--text); font-weight: 700; }
 .mail-dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--th-ink); vertical-align: 1px; }
-.mail-draft-tag { display: inline-block; margin-right: 8px; padding: 1px 10px 1px 7px; font: 700 10.5px/16px var(--th-mono, var(--mono)); letter-spacing: .06em; border: 1.5px dashed var(--th-ink); background: var(--th-card); color: var(--th-ink); }
-.mail-draft-tag.small { font-size: 9.5px; line-height: 14px; }
+.mail-draft-tag { border-radius: 999px; display: inline-block; margin-right: 8px; padding: 1px 10px 1px 7px; font: 600 12px/16px var(--g-font-ui); border: var(--g-hair) dashed var(--g-ink-3); background: var(--th-card); color: var(--th-ink); }
+.mail-draft-tag.small { font-size: 12px; line-height: 14px; }
 .mail-more { text-align: center; padding: 12px; }
 .mail-loading, .mail-pick, .mail-empty { padding: 28px 16px; color: var(--muted); text-align: center; }
 .mail-pick { margin: auto; }
 .mail-new { min-height: 44px; padding: 0 18px; }
 .mail-new.captioned { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; padding: 2px 14px; line-height: 1.15; }
-.mail-new.captioned small { font-size: 10.5px; font-weight: 400; white-space: nowrap; }
+.mail-new.captioned small { font-size: 12px; font-weight: 400; white-space: nowrap; }
 .mail-later:disabled { opacity: .55; cursor: not-allowed; }
 .mail-later-note { color: var(--muted); font-size: 12px; align-self: center; }
 
@@ -77,11 +77,11 @@
 .mail-thread-scroll > * { flex: none; }
 .mail-subject { margin: 0; font-family: var(--serif); font-size: 24px; font-weight: 500; line-height: 1.25; color: var(--text); overflow-wrap: anywhere; }
 .mail-thread-where { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
-.mail-triage { margin: 0; padding: 8px 12px; border-left: 3px solid var(--th-ink); background: var(--surface-3, var(--surface)); font-size: 14px; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
-.mail-draft-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 44px; padding: 10px 12px; border: 2px dashed var(--th-ink); border-radius: 10px; background: var(--th-paper); color: var(--text); font-size: 14px; text-align: left; }
+.mail-triage { margin: 0; padding: 8px 12px; border-left: 2px solid var(--g-line-strong); background: var(--surface-3, var(--surface)); font-size: 14px; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.mail-draft-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 44px; padding: 10px 12px; border: var(--g-hair) dashed var(--g-ink-3); border-radius: 12px; background: var(--th-paper); color: var(--text); font-size: 14px; text-align: left; }
 .mail-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
-.mail-card.mail-card-unread { border: 2px solid var(--th-ink); }
-.mail-card.mail-card-draft { border: 2px dashed var(--th-ink); background: var(--th-paper); }
+.mail-card.mail-card-unread { border: var(--g-hair) solid var(--g-line-strong); ; box-shadow: inset 3px 0 0 var(--g-accent), var(--g-shadow-1) }
+.mail-card.mail-card-draft { border: var(--g-hair) dashed var(--g-ink-3); background: var(--th-paper); }
 .mail-draft-note { margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--text); }
 .mail-draft-note .mail-draft-tag { align-self: flex-start; }
 .mail-unread-word { font-weight: 700; color: var(--text); }
@@ -116,16 +116,16 @@
 .mail-compose-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .mail-compose-wrap[hidden] { display: none; }
 .mail-compose-note { margin: 8px 14px 0; }
-.mail-resume { min-height: 44px; margin: 8px 14px 0; padding: 0 14px; border: 2px dashed var(--th-ink); border-radius: 10px; background: var(--th-paper); color: var(--text); font-size: 14px; text-align: left; }
-.mail-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 14px 0; padding: 8px 12px; border: 2px dashed var(--th-ink); border-radius: 10px; font-size: 14px; color: var(--text); }
+.mail-resume { min-height: 44px; margin: 8px 14px 0; padding: 0 14px; border: var(--g-hair) dashed var(--g-ink-3); border-radius: 12px; background: var(--th-paper); color: var(--text); font-size: 14px; text-align: left; }
+.mail-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 14px 0; padding: 8px 12px; border: var(--g-hair) dashed var(--g-ink-3); border-radius: 12px; font-size: 14px; color: var(--text); }
 .mail-pending > button { min-height: 44px; margin-left: auto; }
 .mail-pending-note { margin: 6px 14px 0; }
-.mail-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 2px dashed var(--th-ink); background: var(--th-paper); font-size: 14px; color: var(--text); }
+.mail-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: var(--g-hair) dashed var(--g-ink-3); background: var(--th-paper); font-size: 14px; color: var(--text); }
 .mail-confirm > button { min-height: 44px; }
 
 /* T-210: the composer. From and Send sit in the bar at the top, so a phone's keyboard never covers them. */
 .mail-compose { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
-.mail-compose-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 2px solid var(--th-ink); min-height: 56px; box-sizing: border-box; background: var(--bg); }
+.mail-compose-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: var(--g-hair) solid var(--g-line-strong); min-height: 56px; box-sizing: border-box; background: var(--bg); }
 .mail-compose-bar > button { min-height: 44px; }
 .mail-compose-title { flex: 1; min-width: 6em; }
 .mail-send-block { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-left: auto; }
@@ -136,19 +136,19 @@
 .mail-compose-from { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
 .mail-compose-label { color: var(--muted); min-width: 4.5em; }
 .mail-compose-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.mail-from-pick { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; cursor: pointer; }
-.mail-from-pick.on { border-color: var(--th-ink); box-shadow: inset 0 0 0 1.5px var(--th-ink); }
+.mail-from-pick { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 12px; cursor: pointer; }
+.mail-from-pick.on { border-color: var(--th-ink); box-shadow: inset 0 0 0 var(--g-hair) var(--g-ink-2); }
 .mail-from-pick input { width: 18px; height: 18px; margin: 0; }
 .mail-compose-fields { display: flex; flex-direction: column; gap: 8px; }
 .mail-compose-fields label { display: flex; align-items: flex-start; gap: 8px; }
 .mail-compose-fields label > span { color: var(--muted); font-size: 14px; min-width: 4.5em; padding-top: 12px; }
-.mail-compose-fields input, .mail-compose-fields textarea { flex: 1; min-width: 0; min-height: 44px; padding: 8px 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; background: var(--surface); color: var(--text); font: 15px/1.5 var(--sans); box-sizing: border-box; }
+.mail-compose-fields input, .mail-compose-fields textarea { flex: 1; min-width: 0; min-height: 44px; padding: 8px 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 12px; background: var(--surface); color: var(--text); font: 15px/1.5 var(--sans); box-sizing: border-box; }
 .mail-compose-fields textarea { min-height: 12em; resize: vertical; }
 .mail-cc-open { align-self: flex-start; min-height: 44px; }
 .mail-compose-discard { margin: 0; }
 .mail-review-headers { font-size: 14px; }
-.mail-review-text { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); white-space: pre-wrap; overflow-wrap: anywhere; font: 15px/1.55 var(--sans); color: var(--text); max-width: 72ch; }
-.mail-outcome { padding: 12px 14px; border: 2px solid var(--th-ink); border-radius: 10px; display: flex; flex-direction: column; gap: 6px; }
+.mail-review-text { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); white-space: pre-wrap; overflow-wrap: anywhere; font: 15px/1.55 var(--sans); color: var(--text); max-width: 72ch; }
+.mail-outcome { padding: 12px 14px; border: var(--g-hair) solid var(--g-line-strong); border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
 .mail-outcome.state-refused, .mail-outcome.state-failed, .mail-outcome.state-unknown, .mail-outcome.state-awaiting-approval { border-style: dashed; }
 .mail-outcome-text { margin: 0; font-size: 16px; color: var(--text); font-weight: 600; }
 .mail-outcome-actions { display: flex; gap: 8px; margin: 0; }
@@ -158,22 +158,22 @@
 /* T-213: Uni's sends held for you. A square badge and a WAITING tag (not colour) mark them; the two decisions are
    large, labelled with whose address they send from, and each opens a confirm box instead of acting. */
 .mail-box-waiting { font-weight: 600; color: var(--text); }
-.mail-count-waiting { border-radius: 4px; }
-.mail-held-tag { flex: none; padding: 0 6px; border: 1.5px solid var(--th-ink); font: 700 10px/16px var(--th-mono, var(--mono)); letter-spacing: .06em; color: var(--th-ink); background: var(--th-card); }
+.mail-count-waiting { border-radius: 999px; }
+.mail-held-tag { border-radius: 999px; flex: none; padding: 0 6px; border: var(--g-hair) solid var(--g-line-strong); font: 600 12px/16px var(--g-font-ui); color: var(--th-ink); background: var(--th-card); }
 .mail-held-row.held-waiting .mail-held-tag { background: var(--th-ink); color: var(--th-card); }
 .mail-held-row.held-failed .mail-held-tag { border-style: dashed; }
 .mail-held-row .mail-row-subject { color: var(--text); font-weight: 600; }
-.mail-held-banner { display: flex; align-items: center; gap: 8px; min-height: 44px; margin: 8px 14px 0; padding: 6px 12px; border: 2px solid var(--th-ink); border-radius: 10px; background: var(--th-paper); color: var(--text); font-size: 14px; text-align: left; }
+.mail-held-banner { display: flex; align-items: center; gap: 8px; min-height: 44px; margin: 8px 14px 0; padding: 6px 12px; border: var(--g-hair) solid var(--g-line-strong); border-radius: 12px; background: var(--th-paper); color: var(--text); font-size: 14px; text-align: left; }
 .mail-held-where { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; color: var(--muted); font-size: 13px; }
 .mail-held-actions, .mail-held-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
 .mail-held-actions > button { display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; min-height: 52px; padding: 6px 18px; text-align: left; }
 .mail-held-actions > button > span { font-weight: 700; font-size: 15px; }
 .mail-held-actions > button > small { font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
-.mail-held-confirm { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 2px solid var(--th-ink); border-radius: 10px; background: var(--th-paper); color: var(--text); font-size: 15px; outline: none; }
+.mail-held-confirm { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: var(--g-hair) solid var(--g-line-strong); border-radius: 12px; background: var(--th-paper); color: var(--text); font-size: 15px; outline: none; }
 .mail-held-confirm:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft, var(--line)); }
 .mail-held-confirm p { margin: 0; overflow-wrap: anywhere; }
 .mail-held-buttons > button { min-height: 44px; padding: 0 16px; }
-.mail-held-outcome { margin: 0; padding: 12px 14px; border: 2px solid var(--th-ink); border-radius: 10px; font-size: 16px; font-weight: 600; color: var(--text); }
+.mail-held-outcome { margin: 0; padding: 12px 14px; border: var(--g-hair) solid var(--g-line-strong); border-radius: 12px; font-size: 16px; font-weight: 600; color: var(--text); }
 .mail-held-outcome.held-failed { border-style: dashed; }
 .mail-held-unlisted { margin: 14px; }
 /* T-335: a held file's whole name, wrapped, is part of what you approve */
@@ -201,7 +201,7 @@
   .mail[data-pane="boxes"] .mail-boxes, .mail[data-pane="list"] .mail-list, .mail[data-pane="thread"] .mail-read { display: flex; }
   .mail-thread-back { display: inline-flex; align-items: center; }
   .mail-list-new { display: none; }
-  .mail-thumb { display: flex; align-items: stretch; gap: 8px; padding: 8px 12px; border-top: 2px solid var(--th-ink); background: var(--bg); flex: none; }
+  .mail-thumb { display: flex; align-items: stretch; gap: 8px; padding: 8px 12px; border-top: var(--g-hair) solid var(--g-line-strong); background: var(--bg); flex: none; }
   .mail-thumb > button { flex: 1; }
   .mail-thread-scroll { padding: 12px 14px 32px; }
   .mail-subject { font-size: 21px; }

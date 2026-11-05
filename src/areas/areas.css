@@ -6,7 +6,7 @@
 }
 .areas-home, .area-view { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; padding: 0 clamp(16px, 4vw, 40px) 28px; }
 
-.area-mark { font-size: 10px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+.area-mark { font-size: 12px; font-weight: 600; color: var(--muted); }
 .area-mark.foreground { color: var(--accent); }
 .area-mark.foreground::before { content: "● "; }
 
@@ -56,7 +56,7 @@
 .area-updated { flex: none; margin: 0; padding: 8px clamp(16px, 3vw, 24px); border-bottom: 1px solid var(--line); background: var(--card-lift); color: var(--text-soft); font-size: 13px; }
 .grant-outside { color: var(--danger); }
 .grant-name { font-style: normal; font-weight: 600; }
-.suggestion-draft { margin: 6px 0 0; padding: 8px 10px; max-width: 100%; max-height: min(40vh, 24rem); overflow: auto; border-left: 3px solid var(--accent); background: var(--surface); color: var(--text-soft); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.suggestion-draft { margin: 6px 0 0; padding: 8px 10px; max-width: 100%; max-height: min(40vh, 24rem); overflow: auto; border-left: 2px solid var(--g-line-strong); background: var(--surface); color: var(--text-soft); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .suggestion-ref { overflow-wrap: anywhere; }
 
 /* The frame the room shell sits in (r14: an area's app is a view inside the shell; the side chat and the sheet are gone). */
@@ -86,7 +86,7 @@
 /* Counts and links in a node's work page. Calm, high-contrast, large targets: it is read on e-ink and a phone. */
 .brief-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 11px; background: var(--accent); color: var(--surface); font-family: var(--sans, inherit); font-size: 12px; font-weight: 700; }
 
-.brief-link { all: unset; cursor: pointer; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.brief-link { all: unset; cursor: pointer; color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; overflow-wrap: anywhere; }
 .brief-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 
@@ -94,52 +94,52 @@
 
 /* T-86: tasks on the node view. Calm: one finite exit per check-off, nothing loops, reduced motion drops it. */
 .work { margin: 14px 0 8px; }
-.work-head { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 13px; letter-spacing: .12em; text-transform: uppercase; padding-bottom: 6px; border-bottom: 1.5px solid var(--th-ink); }
+.work-head { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 13px; padding-bottom: 6px; border-bottom: var(--g-hair) solid var(--g-line-strong); }
 .work-error { margin: 8px 0; font-weight: 600; }
-.work-group h3 { display: flex; gap: 8px; align-items: baseline; margin: 14px 0 2px; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--th-ink2); }
+.work-group h3 { display: flex; gap: 8px; align-items: baseline; margin: 14px 0 2px; font-size: 12px; font-weight: 700; color: var(--th-ink2); }
 .work-group h3 span { font-weight: 500; }
 .work-group ul { list-style: none; margin: 0; padding: 0; }
 .task-row { display: flex; align-items: stretch; border-bottom: 1px solid var(--th-hair2); overflow: hidden; max-height: 120px; }
 .task-main { all: unset; box-sizing: border-box; flex: 1; min-width: 0; min-height: 48px; padding: 8px 4px; display: flex; flex-direction: column; justify-content: center; gap: 2px; cursor: pointer; }
-.task-main:focus-visible, .task-check:focus-visible { outline: 3px solid var(--th-ink); outline-offset: -3px; }
+.task-main:focus-visible, .task-check:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -3px; }
 .task-title { font-size: 15px; line-height: 1.3; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .task-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--th-ink2); }
-.task-decide { font-weight: 700; color: var(--th-ink); text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
+.task-decide { font-weight: 700; color: var(--th-ink); font-size: 12px; }
 .task-check { all: unset; box-sizing: border-box; flex: none; width: 48px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .task-check span { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--th-ink); box-sizing: border-box; }
-.work-more { all: unset; box-sizing: border-box; min-height: 44px; display: inline-flex; align-items: center; padding: 0 4px; font-size: 13px; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.work-more { all: unset; box-sizing: border-box; min-height: 44px; display: inline-flex; align-items: center; padding: 0 4px; font-size: 13px; font-weight: 600; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); cursor: pointer; }
 
 .task-sheet-wrap { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; justify-content: center; }
 /* r22 (Codex 9): a quiet scrim, dark in both themes (the ink colour washed a dark screen bright) */
-.task-backdrop { all: unset; position: absolute; inset: 0; background: rgb(12 11 8 / 34%); }
-.task-sheet { position: relative; box-sizing: border-box; width: min(520px, 100%); max-height: 88vh; overflow-y: auto; padding: 20px 22px calc(18px + env(safe-area-inset-bottom)); background: var(--th-paper); border: 2px solid var(--th-ink); border-bottom: 0; border-radius: 18px 18px 0 0; animation: task-in .22s var(--ease); }
-@media (min-width: 900px) { .task-sheet-wrap { align-items: center; } .task-sheet { border-bottom: 2px solid var(--th-ink); border-radius: 18px; } }
+.task-backdrop { all: unset; position: absolute; inset: 0; background: var(--g-scrim); }
+.task-sheet { position: relative; box-sizing: border-box; width: min(520px, 100%); max-height: 88vh; overflow-y: auto; padding: 20px 22px calc(18px + env(safe-area-inset-bottom)); background: var(--th-paper); border: var(--g-hair) solid var(--g-line-strong); border-bottom: 0; border-radius: 18px 18px 0 0; animation: task-in .22s var(--ease); }
+@media (min-width: 900px) { .task-sheet-wrap { align-items: center; } .task-sheet { border-bottom: var(--g-hair) solid var(--g-line-strong); border-radius: 18px; } }
 /* r15: WebKit leaves a scrolling box's bottom padding out of what it scrolls to, so the last line of Details sat on the edge: a spacer it can't drop */
 .task-sheet::after { content: ""; display: block; height: 14px; }
 @keyframes task-in { from { transform: translateY(24px); opacity: 0; } }
 .task-sheet h2 { margin: 2px 0 6px; font-size: 21px; line-height: 1.2; overflow-wrap: anywhere; }
-.task-kind { margin: 0; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--th-ink2); font-weight: 700; }
+.task-kind { margin: 0; font-size: 12px; color: var(--th-ink2); font-weight: 700; }
 .task-next { margin: 0 0 8px; color: var(--th-ink2); overflow-wrap: anywhere; }
 .task-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 8px 0 14px; font-size: 14px; }
 .task-facts dt { color: var(--th-ink2); } .task-facts dd { margin: 0; overflow-wrap: anywhere; }
 .task-actions { display: flex; flex-direction: column; gap: 8px; }
-.task-do { all: unset; box-sizing: border-box; min-height: 48px; padding: 0 16px; display: flex; align-items: center; border: 1.5px solid var(--th-ink); border-radius: 12px; font-weight: 600; cursor: pointer; background: var(--th-paper); color: var(--th-ink); }
+.task-do { all: unset; box-sizing: border-box; min-height: 48px; padding: 0 16px; display: flex; align-items: center; border: var(--g-hair) solid var(--g-line-strong); border-radius: 999px; font-weight: 600; cursor: pointer; background: var(--th-paper); color: var(--th-ink); }
 .task-do.primary { background: var(--th-ink); color: var(--th-paper); }
 .task-do.quiet { border-color: var(--th-hair2); font-weight: 500; }
-.task-do:focus-visible { outline: 3px solid var(--th-ink); outline-offset: 3px; }
+.task-do:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 3px; }
 
 .undo-bar { position: fixed; z-index: 50; left: 50%; transform: translateX(-50%); bottom: calc(76px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 6px; align-items: stretch; width: min(420px, calc(100vw - 24px)); }
 @media (min-width: 900px) { .undo-bar { bottom: 24px; } }
 .undo-main, .undo-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 0 8px 0 16px; border-radius: 12px; background: var(--th-ink); color: var(--th-paper); font-size: 14px; font-weight: 600; box-sizing: border-box; }
 .undo-note { font-weight: 500; padding: 8px 8px 8px 16px; }
-.undo-go, .undo-x { all: unset; box-sizing: border-box; min-width: 48px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; text-decoration: underline; cursor: pointer; color: inherit; }
+.undo-go, .undo-x { all: unset; box-sizing: border-box; min-width: 48px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); cursor: pointer; color: inherit; }
 .undo-go:focus-visible, .undo-x:focus-visible { outline: 3px solid var(--th-paper); outline-offset: -4px; }
 
 /* r17: Archive and Snooze are housekeeping: a small quiet row under the real action, never as heavy as it */
 .task-house { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 10px 0 0; padding: 0 2px; }
-.task-house-b { all: unset; box-sizing: border-box; min-height: 36px; display: inline-flex; align-items: center; font-size: 13.5px; font-weight: 500; color: var(--th-ink2); text-decoration: underline; text-decoration-color: var(--th-hair2); text-underline-offset: 3px; cursor: pointer; }
+.task-house-b { all: unset; box-sizing: border-box; min-height: 36px; display: inline-flex; align-items: center; font-size: 13.5px; font-weight: 500; color: var(--th-ink2); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); text-decoration-color: var(--th-hair2); text-underline-offset: 3px; cursor: pointer; }
 .task-house-b:hover { color: var(--th-ink); }
-.task-house-b:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.task-house-b:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .task-house-b[disabled] { opacity: .6; cursor: default; }
 @media (pointer: coarse) { .task-house-b { min-height: 44px; } }
 /* r17: the questions a step asks to answer, read from the notes, as a numbered list in the sheet */
@@ -159,8 +159,8 @@
 .task-answer-box { margin: 4px 0 12px; display: grid; gap: 6px; }
 .task-answer-box label { font-size: 13px; font-weight: 600; color: var(--th-ink); }
 .task-answer-row { display: flex; gap: 8px; }
-.task-answer-row input { flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; font: 400 15px var(--th-sans); color: var(--th-ink); background: transparent; border: 1px solid var(--th-hair2); border-radius: 10px; }
-.task-answer-row input:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 1px; }
+.task-answer-row input { flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; font: 400 15px var(--th-sans); color: var(--th-ink); background: transparent; border: 1px solid var(--th-hair2); border-radius: 12px; }
+.task-answer-row input:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 1px; }
 .task-answer-row .task-do { flex: none; width: auto; min-width: 96px; }
 .task-sub { white-space: normal; }
 .task-about { overflow-wrap: break-word; }
