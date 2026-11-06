@@ -57,7 +57,7 @@ async function boot(page: Page) {
 }
 const reactions = (page: Page) => page.evaluate(() => (window as any).__arcade as any[]);
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
-const tap = async (page: Page, loc: ReturnType<Page['locator']>) => { if (test.info().project.name === 'phone') await loc.tap(); else await loc.click(); };
+const tap = async (page: Page, loc: ReturnType<Page['locator']>, timeout?: number) => { if (test.info().project.name === 'phone') await loc.tap({ timeout }); else await loc.click({ timeout }); };
 
 async function openArcade(page: Page) {
   await tap(page, page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Arcade' }));
@@ -65,6 +65,7 @@ async function openArcade(page: Page) {
 }
 
 test('the Arcade opens from the app, a burst saves each pick once, and the way back returns to where you were', async ({ page }) => {
+  test.setTimeout(90_000); // a timed burst, played tap by tap
   await boot(page);
   await openArcade(page);
   await expect(page.locator('.ta-toy')).toHaveCount(6);
@@ -73,7 +74,7 @@ test('the Arcade opens from the app, a burst saves each pick once, and the way b
   const sides = page.locator('.ta-side-hit');
   let picks = 0;
   while (!(await page.locator('.ta-end').isVisible())) {
-    if (await sides.first().isEnabled({ timeout: 300 }).catch(() => false)) { await tap(page, sides.first()).catch(() => undefined); picks++; await page.waitForTimeout(550); }
+    if (await sides.first().isEnabled({ timeout: 300 }).catch(() => false)) { await tap(page, sides.first(), 1500).catch(() => undefined); picks++; await page.waitForTimeout(550); }
     else await page.waitForTimeout(100);
     expect(picks).toBeLessThan(40);
   }
