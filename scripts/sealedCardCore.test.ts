@@ -1,6 +1,6 @@
 // T-234: the card's pure helpers (src/sealedCardCore.ts). The checks themselves are Rust's (uni-core sealed_card.rs).
 import assert from "node:assert/strict";
-import { childToken, payloadEntries, plainError, releasesLine, sealedFence, sealedProse, shortText, span, waitingTitle, windowText } from "../src/sealedCardCore.ts";
+import { ageText, needsHold, reachLine, tapOnly, whenText, childToken, payloadEntries, plainError, releasesLine, sealedFence, sealedProse, shortText, span, waitingTitle, windowText } from "../src/sealedCardCore.ts";
 
 const card = "🔑 **Uni asks to use dns-zone** (powerful)\nFor: dns.edit. Add an A record\nOpen this in the Uni app.\n\n```uni-sealed-approval\n{\n \"v\": 1\n}\n```";
 assert.equal(sealedFence(card), "single");
@@ -37,4 +37,36 @@ assert.equal(plainError("invalid: This card has expired."), "This card has expir
 assert.equal(plainError(undefined), "it couldn't be sent");
 assert.equal(waitingTitle({ kind: "single", credential: "dns-zone", action: "dns.edit", rows: 1 }), "dns-zone · dns.edit");
 assert.equal(waitingTitle({ kind: "morning", credential: null, action: null, rows: 3 }), "Morning card · 3 routine credentials");
+// Only the broker's own cards have a reach line, and only their first line is it (Rust gives it; this is for the row's words).
+assert.equal(reachLine({ reach: "🔴 All of A · 10 min" }), "🔴 All of A · 10 min");
+assert.equal(reachLine({ reach: null }), null);
+assert.equal(reachLine({}), null, "an older app build's view has none");
+
+// A small key on a powerful credential needs only a tap inside the grace; anything else keeps the hold and the unlock.
+assert.equal(tapOnly([{ class: "powerful", always_unlock: false }]), true);
+assert.equal(tapOnly([{ class: "powerful", always_unlock: true }]), false);
+assert.equal(tapOnly([{ class: "routine", always_unlock: false }]), true);
+assert.equal(tapOnly([{ class: "routine", always_unlock: true }]), false);
+assert.equal(tapOnly([{ class: "powerful" }]), false, "not said: it asks");
+assert.equal(tapOnly([]), false);
+assert.equal(needsHold({ class: "powerful", always_unlock: true }), true);
+assert.equal(needsHold({ class: "powerful" }), true, "not said: the hold stays");
+assert.equal(needsHold({ class: "powerful", always_unlock: false }), false);
+assert.equal(needsHold({ class: "routine", always_unlock: true }), false);
+
+// The job's age: nothing while it's as fresh as a card could always be, then in plain words.
+const T = 1_800_000_000;
+assert.equal(ageText(T, T), null);
+assert.equal(ageText(T + 899, T), null);
+assert.equal(ageText(T + 900, T), "asked 15 min ago");
+assert.equal(ageText(T + 7199, T), "asked 119 min ago");
+assert.equal(ageText(T + 7200, T), "asked 2 h ago");
+assert.equal(ageText(T + 23 * 3600, T), "asked 23 h ago");
+assert.equal(ageText(T + 900), null, "an older view has no time");
+
+// A card can be open past midnight: its time says which day.
+const noon = new Date(2030, 5, 10, 12, 0).getTime() / 1000;
+assert.ok(!whenText(noon + 3600, noon).includes("tomorrow"));
+assert.ok(whenText(noon + 20 * 3600, noon).startsWith("tomorrow "));
+
 console.log("sealedCardCore ok");

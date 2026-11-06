@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { clockTime as clock, DoneCard, PendingCard, QuietCard } from "./CompactCard";
 import { GraceHint } from "./UnlockGrace";
 import {
-  SEALED_CHANGED, childToken, jobFingerprint, payloadEntries, payloadField, plainError, releasesLine, shortText, span, tapOnly, windowText,
+  SEALED_CHANGED, ageText, childToken, jobFingerprint, needsHold, payloadEntries, payloadField, plainError, reachLine, releasesLine, shortText, span, tapOnly, whenText, windowText,
   type SealedCardView, type SealedRow,
 } from "./sealedCardCore";
 
@@ -23,6 +23,16 @@ function useNow(until: number | null): number {
     const t = window.setTimeout(() => setNow(Date.now() / 1000), Math.min(2 ** 31 - 1, (until - now) * 1000 + 50));
     return () => window.clearTimeout(t);
   }, [until, now]);
+  return now;
+}
+
+/** The time now, once a minute: a card's age moves while it stays open. */
+function useMinute(): number {
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now() / 1000), 60_000);
+    return () => window.clearInterval(t);
+  }, []);
   return now;
 }
 
@@ -103,6 +113,7 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
 
   const expires = view?.rows.length ? Math.min(...view.rows.map((r) => r.expires)) : null;
   const now = useNow(expires);
+  const minute = useMinute();
 
   const answer = useCallback(async (decision: "approve" | "deny", rids: string[]) => {
     if (sending.current || !rids.length) return;
@@ -150,6 +161,10 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
     const releases = releasesLine(r);
     // T-335: what it's for, in the card's own checked words: a mint's purpose, else its scope
     const what = purpose ?? r.scope;
+    // the key's true reach comes first, in the broker's words; the agent's sentence comes after it, labelled as theirs
+    const reach = reachLine(r);
+    const age = ageText(minute, r.asked);
+    const hold = needsHold(r);
     const warn = child?.permanent && <p className="sealed-warn" role="note"><span aria-hidden="true">⚠️</span> This makes a <strong>permanent token</strong>. It keeps working until someone revokes it.</p>;
     const facts = <>
       <dl className="secret-facts sealed-facts">
@@ -162,7 +177,8 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
         <dt>Window</dt><dd>{windowText(r.ttl_s, r.uses)}</dd>
         <dt>Payload</dt><dd><Payload payload={r.payload} /></dd>
         <dt>Exact job</dt><dd><code>{jobFingerprint(r.request_digest)}</code> (fingerprint)</dd>
-        <dt>Answer by</dt><dd>{clock(r.expires)}</dd>
+        {r.asked !== undefined && <><dt>Asked</dt><dd>{whenText(r.asked, minute).replace("tomorrow ", "")}{age && ` (${age})`}</dd></>}
+        <dt>Answer by</dt><dd>{whenText(r.expires, minute)}</dd>
         {r.answer?.decision === "approve" && r.answer.sent && <><dt>Open until</dt><dd>{clock(r.answer.until ?? r.answer.at)}</dd></>}
       </dl>
       {r.answer && releases && <p className="sealed-releases">{releases}</p>}
@@ -177,15 +193,15 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
         status={status} what={what} when={expired ? clock(r.expires) : a ? clock(a.at) : null} details={facts}
         after={<>{failure}{retry}</>} />;
     }
-    return <PendingCard className={cls} label={label} icon="🔑" what={what}
-      meta={<><span className="cc-where">{r.credential}</span> · <code className="cc-action">{r.action}</code> · {span(r.ttl_s)}{r.class === "powerful" && <> · <Badge cls="powerful" /></>} · <GraceHint on={tapOnly([r])} sep /></>}
+    return <PendingCard className={cls} label={label} icon="🔑" what={reach ?? what}
+      meta={<>{!reach && <><span className="cc-where">{r.credential}</span> · <code className="cc-action">{r.action}</code> · {span(r.ttl_s)} · </>}{age && <><span className="cc-age">{age}</span> · </>}{hold && <><Badge cls="powerful" /> · </>}<GraceHint on={tapOnly([r])} sep /></>}
       actions={<div className="sealed-actions">
         <button type="button" className="pairing-secondary sealed-deny" disabled={busy} onClick={() => void answer("deny", [r.rid])}>Deny</button>
-        {r.class === "powerful"
+        {hold
           ? <HoldButton label="Hold to approve" disabled={busy} onDone={() => void answer("approve", [r.rid])} onCancel={() => setNote("Cancelled: nothing was sent. Hold for a second to approve.")} />
           : <button type="button" className="sealed-approve" disabled={busy} onClick={() => void answer("approve", [r.rid])}>Approve</button>}
       </div>}
-      below={<>{warn}{releases && <p className="sealed-releases">{releases}</p>}{note && <p className="secret-status" role="status">{note}</p>}{failure}</>}
+      below={<>{reach && what !== r.scope && <p className="sealed-says">Uni says: {what}</p>}{warn}{releases && <p className="sealed-releases">{releases}</p>}{note && <p className="secret-status" role="status">{note}</p>}{failure}</>}
       details={facts} />;
   }
 

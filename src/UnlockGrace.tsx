@@ -75,5 +75,5 @@ export function useUnlockGrace(on: boolean): number | null {
 export function GraceHint({ on, sep = false }: { on: boolean; sep?: boolean }) {
   const text = graceText(useUnlockGrace(on));
   if (!text) return null;
-  return <><span className="cc-grace" title="You unlocked this device for an approval a moment ago, so a routine approval needs only its tap. Powerful ones still ask.">{text}</span>{sep && " · "}</>;
+  return <><span className="cc-grace" title="You unlocked this device for an approval a moment ago, so this one, with its small key, needs only its tap. Bigger ones still ask.">{text}</span>{sep && " · "}</>;
 }

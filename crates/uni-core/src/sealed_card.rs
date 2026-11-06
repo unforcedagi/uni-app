@@ -663,6 +663,10 @@ pub struct RowView {
     pub answer: Option<AnswerView>,
     /// T-335: approving it always asks for the device unlock, even just after one ([`always_unlock`]).
     pub always_unlock: bool,
+    /// When Uni asked: the signed card's own time. A card can wait up to a day, so the card shows how old the job is.
+    pub asked: u64,
+    /// The key's true reach, the first thing the card says ([`reach_line`]); None for a card that has no such line.
+    pub reach: Option<String>,
 }
 
 /// What the card shows: its rows when every check passed, else the one-line reason and nothing to tap.
@@ -709,6 +713,8 @@ pub fn view(ev: &Event, uni: &PublicKey, seal: &SealKey, answers: &Answers, now:
                 .find(|a| a.rid == r.rid)
                 .map(|a| AnswerView { decision: a.decision, at: a.at, until: a.until, sent: a.sent }),
             always_unlock: always_unlock(r.class, &r.action, &r.payload),
+            asked: ev.created_at.as_secs(),
+            reach: reach_line(&r.action, &r.scope),
         })
         .collect();
     CardView { kind: Some(card.kind), event_id: ev.id.to_hex(), refused: None, rows }
@@ -752,7 +758,9 @@ pub fn approval_summary(view: &CardView, rids: &[String]) -> Result<(String, Str
         [] => Err(Error::Invalid("nothing was chosen".into())),
         [r] if view.kind == Some(CardKind::Single) => {
             let power = if r.class == Class::Powerful { "powerful " } else { "" };
-            Ok((format!("Approve a {power}credential"), format!("Uni: {}. {}.{} Exact {}.", one(r), r.scope.trim_end_matches(['.', '!', '?']), permanent(r), job(r))))
+            // the reach alone, where the card has one: the device's own prompt is one short paragraph, and never the agent's words
+            let what = r.reach.as_deref().unwrap_or(&r.scope);
+            Ok((format!("Approve a {power}credential"), format!("Uni: {}. {}.{} Exact {}.", one(r), what.trim_end_matches(['.', '!', '?']), permanent(r), job(r))))
         }
         rs => Ok((
             format!("Approve {} of Uni's morning grants", rs.len()),
@@ -761,12 +769,54 @@ pub fn approval_summary(view: &CardView, rids: &[String]) -> Result<(String, Str
     }
 }
 
+/// The actions only the broker words itself (a caller's request can't use them), so the first line of their scope is the
+/// broker's, from fields it checked. Everyone else's scope is that caller's words.
+const BROKER_WORDED: [&str; 3] = ["job.cloudflare", "mint.cloudflare", "lookup.cloudflare"];
+
+/// The first line of a card's scope when it says the key's true reach (uni-ops sealed/card_text.py).
+pub fn reach_line(action: &str, scope: &str) -> Option<String> {
+    let first = scope.lines().next()?.trim();
+    (BROKER_WORDED.contains(&action) && ["🔴 ", "🟡 ", "🟢 "].iter().any(|d| first.starts_with(d))).then(|| first.to_string())
+}
+
+/// Keys small enough for the grace: read-only on one bucket, or the names and settings of zones. Not D1 Read and the like:
+/// read-only, but across all of an account, and it can read people's data. A template this table doesn't know is big.
+const SMALL_TEMPLATES: [&str; 2] = ["r2-bucket-read", "zone-read"];
+
+fn all_small(templates: Option<&Value>) -> bool {
+    templates
+        .and_then(Value::as_array)
+        .is_some_and(|ts| !ts.is_empty() && ts.iter().all(|t| t.as_str().is_some_and(|t| SMALL_TEMPLATES.contains(&t))))
+}
+
+/// Whether a powerful credential opens here only for a small key: decided from the signed payload's templates, never from
+/// the card's words. A tap on any of these still opens the credential itself on uni for its window (the card says so); what
+/// the grace skips is the second unlock inside a few minutes of the last one.
+fn small_key(action: &str, payload: &Value) -> bool {
+    match action {
+        "lookup.cloudflare" => *payload == serde_json::json!({"v": 1, "lookup": "discover"}),
+        "job.cloudflare" => {
+            all_small(payload.get("templates"))
+                && match payload.get("checks") {
+                    None => true,
+                    Some(c) => all_small(c.get("templates")),
+                }
+        }
+        "mint.cloudflare" => {
+            payload.get("template").and_then(Value::as_str).is_some_and(|t| SMALL_TEMPLATES.contains(&t))
+                && payload.get("destination").and_then(Value::as_str) == Some("job")
+                && payload.get("child_ttl_s").and_then(Value::as_u64).is_some_and(|t| t > 0 && t <= LONG_LIVED_CHILD_S)
+        }
+        _ => false,
+    }
+}
+
 /// T-335: whether approving a request always needs the device's own unlock, even within the few minutes after one: a
-/// powerful credential (the one-second hold), or a mint whose child token is permanent, long-lived or of no stated
-/// lifetime (the permanent-token warning). Everything else is routine.
+/// powerful credential (the one-second hold) unless it opens only for a small key ([`small_key`]), or a mint whose child
+/// token is permanent, long-lived or of no stated lifetime (the permanent-token warning). Everything else is routine.
 pub fn always_unlock(class: Class, action: &str, payload: &Value) -> bool {
     if class == Class::Powerful {
-        return true;
+        return !small_key(action, payload);
     }
     let child = payload.get("child_ttl_s");
     if action.starts_with("mint.") || child.is_some() {
@@ -800,6 +850,8 @@ pub struct Waiting {
     pub rows: usize,
     pub expires: u64,
     pub fingerprint: String,
+    /// The key's true reach, for a single card that says it ([`reach_line`]).
+    pub reach: Option<String>,
 }
 
 /// Every card from `uni` in the last day that passes its checks now and isn't answered here, oldest first.
@@ -831,6 +883,7 @@ pub fn waiting(store: &Store, me: &str, uni: &PublicKey, seal: &SealKey, answers
             rows: card.rows.len(),
             expires: card.expires(),
             fingerprint: first.request_digest[..8].to_string(),
+            reach: single.then(|| reach_line(&first.action, &first.scope)).flatten(),
         });
     }
     out.sort_by_key(|w| w.ts);
@@ -1179,6 +1232,87 @@ mod tests {
         let refused = view(&card(&Keys::generate(), &f), &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
         assert_eq!(approval_summary(&refused, &[rid]).unwrap_err().to_string(), "invalid: Not signed by Uni.");
         assert_eq!([span(45), span(600), span(7200), span(5400 * 3)], ["45 s", "10 min", "2 h", "4.5 h"]);
+    }
+
+    /// A powerful credential opens for a job that holds only a small key. The app decides that from the signed payload's
+    /// templates, never from the card's words.
+    fn job(templates: &[&str]) -> Value {
+        json!({"v": 1, "job": "j", "account": "a", "account_id": "0".repeat(32), "templates": templates, "window_s": 300, "purpose": "🟢 trust me"})
+    }
+
+    #[test]
+    fn small_keys_may_use_the_grace_though_their_credential_is_powerful() {
+        let p = Class::Powerful;
+        assert!(!always_unlock(p, "job.cloudflare", &json!({"templates": ["r2-bucket-read"], "bucket": "b"})), "read-only, one bucket");
+        assert!(!always_unlock(p, "job.cloudflare", &job(&["zone-read"])), "names and settings only");
+        assert!(!always_unlock(p, "job.cloudflare", &job(&["r2-bucket-read", "zone-read"])), "both small");
+        assert!(!always_unlock(p, "lookup.cloudflare", &json!({"v": 1, "lookup": "discover"})), "names and ids");
+        let m = |t: &str, ttl: Value, dest: &str| json!({"template": t, "child_ttl_s": ttl, "destination": dest, "then": "revoke-in-window"});
+        assert!(!always_unlock(p, "mint.cloudflare", &m("zone-read", json!(900), "job")));
+        assert!(!always_unlock(p, "mint.cloudflare", &m("r2-bucket-read", json!(3600), "job")));
+    }
+
+    #[test]
+    fn everything_else_on_a_powerful_credential_always_asks() {
+        let p = Class::Powerful;
+        for t in ["d1-read", "workers-read", "pages-read", "r2-bucket-write", "workers-scripts-write", "d1-write", "worker-app", "dns-zone-edit", "something-new"] {
+            assert!(always_unlock(p, "job.cloudflare", &job(&[t])), "{t} is not small");
+            assert!(always_unlock(p, "job.cloudflare", &job(&["zone-read", t])), "one big right makes the job big: {t}");
+        }
+        assert!(always_unlock(p, "job.cloudflare", &job(&[])), "no templates");
+        assert!(always_unlock(p, "job.cloudflare", &json!({"templates": "zone-read"})), "not a list");
+        assert!(always_unlock(p, "job.cloudflare", &json!({"templates": [1]})), "not names");
+        assert!(always_unlock(p, "job.cloudflare", &Value::Null));
+        // a read key riding on the card is part of what the tap gives
+        let mut riding = job(&["zone-read"]);
+        riding["checks"] = json!({"templates": ["d1-read"], "for_s": 10800});
+        assert!(always_unlock(p, "job.cloudflare", &riding), "a D1 read key rides on it");
+        riding["checks"] = json!({"templates": ["zone-read"], "for_s": 10800});
+        assert!(!always_unlock(p, "job.cloudflare", &riding), "a small one rides on it");
+        riding["checks"] = json!("zone-read");
+        assert!(always_unlock(p, "job.cloudflare", &riding), "a check that can't be read");
+        // a mint: small only when short and to the job
+        let m = |t: &str, ttl: Value, dest: &str| json!({"template": t, "child_ttl_s": ttl, "destination": dest});
+        assert!(always_unlock(p, "mint.cloudflare", &m("d1-read", json!(900), "job")));
+        assert!(always_unlock(p, "mint.cloudflare", &m("zone-read", Value::Null, "job")), "permanent");
+        assert!(always_unlock(p, "mint.cloudflare", &m("zone-read", json!(0), "job")), "0 is no expiry to many APIs");
+        assert!(always_unlock(p, "mint.cloudflare", &m("zone-read", json!(90 * 86_400), "lookup-key")), "long-lived");
+        assert!(always_unlock(p, "mint.cloudflare", &m("zone-read", json!(900), "seal:x")), "kept");
+        assert!(always_unlock(p, "mint.cloudflare", &json!({"child_ttl_s": 900, "destination": "job"})), "no template");
+        // only the actions the broker words itself: a caller's request can't borrow the shape
+        assert!(always_unlock(p, "dns.edit", &job(&["zone-read"])));
+        assert!(always_unlock(p, "lookup.cloudflare", &json!({"v": 1, "lookup": "other"})));
+        assert!(always_unlock(p, "cloudflare.job", &job(&["zone-read"])));
+    }
+
+    #[test]
+    fn the_reach_line_comes_only_from_cards_the_broker_words_itself() {
+        let scope = "🔴 All of Acct, production included · 10 min\nCan: deploy any Worker.\nUni says: 🟢 fine";
+        assert_eq!(reach_line("job.cloudflare", scope).as_deref(), Some("🔴 All of Acct, production included · 10 min"));
+        assert_eq!(reach_line("mint.cloudflare", "🟡 One thing on A · 10 min\nCan: x.").as_deref(), Some("🟡 One thing on A · 10 min"));
+        assert_eq!(reach_line("lookup.cloudflare", "🟢 Names · 5 min\nRead-only.").as_deref(), Some("🟢 Names · 5 min"));
+        assert_eq!(reach_line("dns.edit", "🟢 One small thing"), None, "a caller's words");
+        assert_eq!(reach_line("hermes.tool", "🟢 One small thing"), None);
+        assert_eq!(reach_line("job.cloudflare", "One job (x), 10 min, tokens for A"), None, "an older card");
+        assert_eq!(reach_line("job.cloudflare", "⚪ something else"), None);
+    }
+
+    #[test]
+    fn a_card_says_when_it_was_asked_and_its_reach() {
+        let w = world();
+        let (mut f, _) = fields(&w, "cloudflare-parent", "powerful", 600, 1);
+        f["action"] = json!("job.cloudflare");
+        f["payload"] = job(&["zone-read"]);
+        f["payload_digest"] = json!(payload_digest("job.cloudflare", &f["payload"]).unwrap());
+        f["scope"] = json!("🟢 Names and settings of every zone on A · 5 min\nCan: read.\nUni says: x");
+        let ev = card(&w.uni, &f);
+        let v = view(&ev, &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
+        assert_eq!(v.rows[0].asked, ev.created_at.as_secs());
+        assert_eq!(v.rows[0].reach.as_deref(), Some("🟢 Names and settings of every zone on A · 5 min"));
+        assert!(!v.rows[0].always_unlock && !needs_fresh_unlock(&v, std::slice::from_ref(&v.rows[0].rid)));
+        let (title, why) = approval_summary(&v, std::slice::from_ref(&v.rows[0].rid)).unwrap();
+        assert!(title.contains("powerful"), "the credential it opens stays powerful: {title}");
+        assert!(why.contains("Names and settings of every zone") && !why.contains('\n') && !why.contains("Uni says"), "{why}");
     }
 
     #[test]

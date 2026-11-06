@@ -397,3 +397,45 @@ test('T-335 the hold fill grows by transform (no layout per frame); calm shows n
   await expect(card(page, 'Approve use of dns-zone').getByRole('status')).toHaveText('Approved');
   expect(await answers(page)).toHaveLength(1);
 });
+
+test('a card opens with the key\'s true reach and the job\'s age, and a small key is a tap', async ({ page }) => {
+  // Rust's view for a job on a powerful credential: it worked out `always_unlock` and `reach` from the signed fields.
+  const big = row({ rid: 'b1'.padEnd(32, '0'), credential: 'cf-parent', action: 'job.cloudflare', always_unlock: true,
+    scope: '🔴 All of Example Co, production included · 10 min\nCan: deploy any Worker (account-wide).\nUni says: Deploy to STAGING only',
+    reach: '🔴 All of Example Co, production included · 10 min', asked: now() - 6 * 3600, expires: now() + 18 * 3600,
+    payload: { job: 'site', purpose: 'Deploy to STAGING only', templates: ['workers-scripts-write'] } } as Partial<Row>);
+  const small = row({ rid: 's1'.padEnd(32, '0'), credential: 'cf-parent', action: 'job.cloudflare', always_unlock: false,
+    scope: '🟢 Names and settings of every zone on Example Co · 5 min\nCan: read the settings of every zone.\nUni says: find a zone id',
+    reach: '🟢 Names and settings of every zone on Example Co · 5 min', asked: now() - 60,
+    payload: { job: 'zones', purpose: 'find a zone id', templates: ['zone-read'] } } as Partial<Row>);
+  await boot(page, { messages: [msg('b'.repeat(64), single('🔑 **🔴 All of Example Co, production included · 10 min**'), now() - 21600), msg('s'.repeat(64), single('🔑 **🟢 Names and settings of every zone on Example Co · 5 min**'), now() - 60)],
+    cards: { ['b'.repeat(64)]: view([big]), ['s'.repeat(64)]: view([small]) }, grace: 240 });
+  const cardBig = page.getByRole('region', { name: 'Approve use of cf-parent' }).first();
+  const cardSmall = page.getByRole('region', { name: 'Approve use of cf-parent' }).last();
+  // the first thing on the card is the reach, not the agent's sentence, which is below it and labelled
+  await expect(cardBig.locator('.cc-what')).toHaveText('🔴 All of Example Co, production included · 10 min');
+  await expect(cardBig.locator('.sealed-says')).toHaveText('Uni says: Deploy to STAGING only');
+  await expect(cardBig.getByText('asked 6 h ago')).toBeVisible();
+  await expect(cardBig.getByRole('button', { name: /press and hold/ })).toBeVisible();
+  await expect(cardBig.locator('.cc-grace')).toHaveCount(0);
+  // a small key on the same powerful credential: one tap, inside the grace, and no age while it's fresh
+  await expect(cardSmall.locator('.cc-what')).toHaveText('🟢 Names and settings of every zone on Example Co · 5 min');
+  await expect(cardSmall.getByText(/asked .* ago/)).toHaveCount(0);
+  await expect(cardSmall.getByRole('button', { name: /press and hold/ })).toHaveCount(0);
+  await expect(cardSmall.locator('.cc-grace')).toBeVisible();
+  await cardSmall.getByRole('button', { name: 'Approve', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Approve use of cf-parent' }).last()).toContainText('Approved');
+  const sent = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'sealed_answer'));
+  expect(sent.map((c: any) => c.args.rids)).toEqual([[small.rid]]);
+});
+
+test('a card open past midnight says which day, and an older card still draws', async ({ page }) => {
+  const later = row({ expires: now() + 86000, scope: 'Add an A record for demo.example.org' });
+  await boot(page, { messages: [msg('c'.repeat(64), single(), now() - 30)], cards: { ['c'.repeat(64)]: view([later]) } });
+  const c = page.getByRole('region', { name: 'Approve use of dns-zone' });
+  await expect(c.locator('.cc-what')).toContainText('demo.example.org');
+  await expect(c.locator('.sealed-says')).toHaveCount(0);
+  await c.getByRole('button', { name: 'details' }).click();
+  const tomorrow = new Date(Date.now() + 86000 * 1000).getDate() !== new Date().getDate();
+  if (tomorrow) await expect(c.getByText(/^tomorrow /)).toBeVisible();
+});

@@ -9,16 +9,43 @@ export type SealedRow = {
   payload: unknown; request_digest: string; expires: number; answer: SealedAnswer | null;
   /** T-335: approving it always asks for the device unlock, even just after one (Rust's `always_unlock`). */
   always_unlock?: boolean;
+  /** When Uni asked: a card can wait up to a day. */
+  asked?: number;
+  /** The key's true reach (Rust's `reach_line`): what the card says first. */
+  reach?: string | null;
 };
 
 /** T-335: approving these rows would need only the tap while the unlock grace lasts (Rust decides, at the tap). */
 export const tapOnly = (rows: Pick<SealedRow, "class" | "always_unlock">[]): boolean =>
-  rows.length > 0 && rows.every((r) => r.class === "routine" && r.always_unlock === false);
+  rows.length > 0 && rows.every((r) => r.always_unlock === false);
+
+/** Held for a second, not tapped: a powerful credential, unless Rust says it opens only for a small key. */
+export const needsHold = (r: Pick<SealedRow, "class" | "always_unlock">): boolean => r.class === "powerful" && r.always_unlock !== false;
+
+/** The first thing the card says, when it has a true-reach line. */
+export const reachLine = (r: Pick<SealedRow, "reach">): string | null => r.reach ?? null;
+
+/** How old the job is, once it's older than a card could ever get before cards stayed open: null until 15 minutes. */
+export function ageText(now: number, asked?: number): string | null {
+  if (asked === undefined) return null;
+  const s = now - asked;
+  if (s < 900) return null;
+  return s < 7200 ? `asked ${Math.floor(s / 60)} min ago` : `asked ${Math.floor(s / 3600)} h ago`;
+}
+
+const whenFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+/** "14:05", or "tomorrow 14:05": a card can be open past midnight. */
+export function whenText(ts: number, now: number): string {
+  const at = new Date(ts * 1000), today = new Date(now * 1000);
+  const t = whenFormat.format(at);
+  return at.toDateString() === today.toDateString() ? t : `tomorrow ${t}`;
+}
 export type SealedCardView = { kind: "single" | "morning" | null; event_id: string; refused: string | null; rows: SealedRow[] };
 /** A card waiting for a tap in some room (`sealed_waiting`), for Needs you. */
 export type SealedWaiting = {
   ref: string; channel: string; root: string | null; ts: number; kind: "single" | "morning";
   credential: string | null; action: string | null; class: SealedClass; rows: number; expires: number; fingerprint: string;
+  reach?: string | null;
 };
 
 /** Tells the Needs you list to read again after an answer. */
@@ -94,6 +121,7 @@ export function plainError(e: unknown): string {
 }
 
 /** The Needs you title of a waiting card. */
-export function waitingTitle(w: Pick<SealedWaiting, "kind" | "credential" | "action" | "rows">): string {
+export function waitingTitle(w: Pick<SealedWaiting, "kind" | "credential" | "action" | "rows" | "reach">): string {
+  if (w.reach) return w.reach;
   return w.kind === "morning" ? `Morning card · ${w.rows} routine credential${w.rows === 1 ? "" : "s"}` : `${w.credential} · ${w.action}`;
 }
