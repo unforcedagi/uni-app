@@ -1,6 +1,6 @@
 // T-335 Taste Arcade in the app, with Rust faked (`arcade_*`, `journal_save_voice`, `journal_save_text`; the door itself
-// is proven end to end in the taste-arcade repo). Reachable from the rail at phone and desktop sizes; a burst
-// of This or That saves each pick once; a Ripple voice answer files a journal voice entry and the reaction names the
+// is proven end to end in the taste-arcade repo). Reachable from the rail at desktop size and from More on a phone; a burst
+// of This or That saves each pick once; Gallery, Fix It and Who Said It save what was played; a Ripple voice answer files a journal voice entry and the reaction names the
 // note it landed in, never its words; the Garden's "Not me" saves a verdict and the plant moves to the Not me patch.
 // Synthetic cards and words only.
 import { test, expect, type Page } from '@playwright/test';
@@ -24,9 +24,29 @@ const CLAIMS = [
   { id: 'words:plain+', domain: 'words', text: 'Plain words, short sentences.', weight: 0.5, evidence: 3, status: 'live', quotes: [] },
 ];
 const NOTE_ID = '01M6QAF6FYXD39R6BP1TW2TEST';
+const ASK_GAL = { dimension: 'visual', prompt: 'Does this one pull you?', detail: 'Pin what pulls. Drift past the rest.' };
+const GALLERY = [
+  { id: 't-img-a', kind: 'image', domain: 'visual', title: 'Made-up fern', features: ['visual:organic'], source: 'generated', media: { src: 't-img-a' } },
+  { id: 't-img-b', kind: 'image', domain: 'visual', title: 'Made-up sign', features: ['visual:neon'], source: 'generated', media: { src: 't-img-b' } },
+];
+const ASK_FIX = { dimension: 'words', prompt: 'What would you change?', detail: 'Nudge it until it feels right.' };
+const FIX = {
+  id: 't-fix', kind: 'artifact', domain: 'words', title: 'A made-up welcome', features: [], source: 'generated',
+  artifact: {
+    template: 'copy', params: { tone: 0.7, length: 0.6 }, hunch: 'made-up hunch: too stiff',
+    axes: [{ key: 'tone', low: 'human', high: 'corporate', feature: 'words:corporate' }, { key: 'length', low: 'shorter', high: 'longer', feature: 'words:long' }],
+    variants: { 'high-high': 'Made-up long stiff welcome.', 'high-low': 'Made-up stiff welcome.', 'low-high': 'Made-up long warm welcome.', 'low-low': 'Made-up warm welcome.', mid: 'Made-up welcome.' },
+    text: { title: 'First screen', body: 'Get started' },
+  },
+};
+const ASK_WHO = { dimension: 'words', prompt: 'Who wrote this line?', detail: 'You, or Uni writing as you?' };
+const VOICES = [
+  { id: 't-v-own', kind: 'voice', domain: 'words', title: 'Porch', text: 'A made-up line about a coat by the door.', features: ['words:plain'], source: 'generated', voice: { by: 'owner', origin: 'an invented post' } },
+  { id: 't-v-uni', kind: 'voice', domain: 'words', title: 'Unlock', text: 'A made-up line about unlocking potential.', features: ['words:hype'], source: 'generated', voice: { by: 'uni', tell: 'Made-up tell: too tidy.' } },
+];
 
 async function boot(page: Page) {
-  await page.addInitScript(({ cards, tonal, ask, askGrey, askQ, question, claims, noteId }) => {
+  await page.addInitScript(({ cards, tonal, ask, askGrey, askQ, question, claims, noteId, gallery, askGal, fix, askFix, voices, askWho }) => {
     const w = window as any;
     w.__arcadeBurst = 6;
     w.__arcade = [];
@@ -43,6 +63,9 @@ async function boot(page: Page) {
         if (args.game === 'this-or-that' && args.grey) return { rounds: Array.from({ length: args.n }, () => ({ game: 'this-or-that', a: tonal[0], b: tonal[1], ask: askGrey })) };
         if (args.game === 'this-or-that') return { rounds: Array.from({ length: args.n }, (_, i) => { const a = cards[(2 * i + n++) % 4], b = cards[(2 * i + 1 + n) % 4]; return { game: 'this-or-that', a, b: b.id === a.id ? cards[(cards.indexOf(a) + 1) % 4] : b, ask }; }) };
         if (args.game === 'ripple') return { rounds: [{ game: 'ripple', card: question, ask: askQ }] };
+        if (args.game === 'gallery') return { rounds: gallery.map((card: any) => ({ game: 'gallery', card, ask: askGal })) };
+        if (args.game === 'fix-it') return { rounds: [{ game: 'fix-it', card: fix, ask: askFix }] };
+        if (args.game === 'who-said-it') return { rounds: voices.map((card: any) => ({ game: 'who-said-it', card, ask: askWho })) };
         return { rounds: [] };
       }
       if (cmd === 'arcade_react') { w.__arcade.push(...args.reactions); return { ok: true, stored: args.reactions.length, stats: stats() }; }
@@ -56,7 +79,7 @@ async function boot(page: Page) {
     // a microphone that hears a quiet tone, so the app's own recorder session runs for real
     const md = navigator.mediaDevices ?? ((navigator as any).mediaDevices = {});
     md.getUserMedia = async () => { const ctx = new AudioContext(); const o = ctx.createOscillator(); const d = ctx.createMediaStreamDestination(); o.connect(d); o.start(); return d.stream; };
-  }, { cards: CARDS, tonal: TONAL, ask: ASK, askGrey: ASK_GREY, askQ: ASK_Q, question: QUESTION, claims: CLAIMS, noteId: NOTE_ID });
+  }, { cards: CARDS, tonal: TONAL, ask: ASK, askGrey: ASK_GREY, askQ: ASK_Q, question: QUESTION, claims: CLAIMS, noteId: NOTE_ID, gallery: GALLERY, askGal: ASK_GAL, fix: FIX, askFix: ASK_FIX, voices: VOICES, askWho: ASK_WHO });
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true });
   await page.locator('[data-place="front-door"]').waitFor();
 }
@@ -65,8 +88,19 @@ const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).
 const tap = async (page: Page, loc: ReturnType<Page['locator']>, timeout?: number) => { if (test.info().project.name === 'phone') await loc.tap({ timeout }); else await loc.click({ timeout }); };
 
 async function openArcade(page: Page) {
-  await tap(page, page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Arcade' }));
+  const rail = page.getByRole('navigation', { name: 'Main navigation' });
+  const arcade = rail.getByRole('button', { name: 'Arcade' });
+  // the phone's bar is four places and More; the Arcade is in the sheet above it
+  if (test.info().project.name === 'phone') {
+    await expect(arcade).toBeHidden();
+    await tap(page, rail.getByRole('button', { name: 'More' }));
+  }
+  await tap(page, arcade);
   await expect(page.locator('.arcade-place .ta-home')).toBeVisible();
+  if (test.info().project.name === 'phone') {
+    await expect(arcade).toBeHidden(); // the sheet folds away
+    await expect(rail.getByRole('button', { name: 'More' })).toHaveAttribute('aria-current', 'page'); // and More says where you are
+  }
 }
 
 test('the Arcade opens from the app, a burst saves each pick once, and the way back returns to where you were', async ({ page }) => {
@@ -171,4 +205,66 @@ test('Garden: "Not me" saves a verdict and moves the plant to the patch at once'
   await expect(page.locator('.ta-patch-item[data-claim="visual:warm+"]')).toBeVisible();
   expect((await reactions(page)).pop()).toMatchObject({ game: 'garden', kind: 'claim', claim: { id: 'visual:warm+', verdict: 'not-me' } });
   if (process.env.T335_SHOTS) await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-arcade-garden.png` });
+});
+
+test('Gallery: a pin with words and a pin without are saved, one per picture', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="gallery"]'));
+  await tap(page, page.getByRole('button', { name: /Pin it/ }));
+  await page.getByLabel(/What pulls you/).fill('made-up: the quiet middle');
+  await tap(page, page.getByRole('button', { name: 'Drift on', exact: true }));
+  await expect(page.locator('.ta-gal-where')).toHaveText(/^2 of/);
+  await tap(page, page.getByRole('button', { name: /Pin it/ }));
+  await tap(page, page.locator('.ta-arcade').getByRole('button', { name: 'Arcade' }).first());
+  await expect(page.locator('.ta-home')).toBeVisible();
+  await expect.poll(async () => (await reactions(page)).length).toBe(2);
+  const rs = await reactions(page);
+  expect(rs[0]).toMatchObject({ game: 'gallery', kind: 'pin', card: 't-img-a', words: 'made-up: the quiet middle' });
+  expect(rs[1]).toMatchObject({ game: 'gallery', kind: 'pin', card: 't-img-b' });
+  expect(rs[1].words).toBeUndefined();
+});
+
+test("Fix It: a nudge and a why are saved, and Uni's hunch shows beside them", async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="fix-it"]'));
+  const slider = page.getByRole('slider').first();
+  await expect(slider).toBeVisible();
+  const before = Number(await slider.inputValue());
+  const box = (await slider.boundingBox())!;
+  await page.mouse.move(box.x + ((before + 1) / 2) * box.width, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.05, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const after = Number(await slider.inputValue());
+  expect(before - after).toBeGreaterThan(0.3);
+  await page.getByLabel(/In your words/).fill('made-up: less stiff');
+  await tap(page, page.getByRole('button', { name: 'Done' }));
+  await expect(page.locator('.ta-fix-hunch')).toContainText('made-up hunch: too stiff');
+  await expect(page.locator('.ta-fix-words')).toContainText('made-up: less stiff');
+  await expect.poll(async () => (await reactions(page)).length).toBe(1);
+  const r = (await reactions(page))[0];
+  expect(r).toMatchObject({ game: 'fix-it', kind: 'nudge', card: 't-fix', words: 'made-up: less stiff' });
+  expect(r.nudges.tone).toBeCloseTo(after - before, 1);
+});
+
+test('Who Said It: each guess is scored against who wrote the line, and saved', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="who-said-it"]'));
+  const seen: string[] = [];
+  for (let i = 0; i < VOICES.length; i++) {
+    const text = (await page.locator('.ta-who-line blockquote').textContent())!.trim();
+    const card = VOICES.find((v) => v.text === text)!;
+    seen.push(card.id);
+    // always "I wrote that": right on the owner's line, wrong on Uni's
+    await tap(page, page.getByRole('button', { name: 'I wrote that' }));
+    await expect(page.locator('.ta-who-verdict b')).toHaveText(card.voice.by === 'owner' ? 'Right.' : 'Not this time.');
+    await tap(page, page.getByRole('button', { name: /Next line|That's the stack/ }));
+  }
+  await expect.poll(async () => (await reactions(page)).length).toBe(VOICES.length);
+  const rs = await reactions(page);
+  expect(rs.map((r) => r.card).sort()).toEqual([...seen].sort());
+  for (const r of rs) expect(r).toMatchObject({ game: 'who-said-it', kind: 'guess', guess: { said: 'owner', right: r.card === 't-v-own' } });
 });
