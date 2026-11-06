@@ -345,7 +345,7 @@ export default function Composer({ composeKey, overview, start, snapshot, onSnap
     <div className="mail-scroll">
       {fromBlock}
       {cantSend}
-      {uniDraft && <p className="mail-draft-note" role="note"><span className="mail-draft-tag">DRAFT · BY UNI · NOT SENT</span>
+      {uniDraft && <p className="mail-draft-note" role="note"><span className="mail-draft-tag">Draft by Uni · not sent</span>
         <span>Uni wrote this in your Drafts. Uni can't send as you: nothing goes out unless you send it here.</span></p>}
       {discardNote}
       {asUni && <p className="mail-note">As Uni: it goes from Uni's address, through Uni's outbound rules.</p>}
