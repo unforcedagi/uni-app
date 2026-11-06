@@ -108,9 +108,9 @@ body { font-family: var(--g-font-ui); text-rendering: optimizeLegibility; }
 :focus-visible { outline-color: var(--g-focus); }
 /* labels speak in sentence case: no capitals shouted in a monospace */
 .eyebrow, .area-mark, .work-head, .work-group h3, .task-decide, .task-kind, .th-cap, .th-h, .tree-home .work-head, .th-line small,
-.tree-home .task-meta, .tree-home .undo-go, .tree-home .suggestion-go, .th-colname, .th-ctx, .run-what small, .chg, .th-recent h2, .wv-h,
+.tree-home .task-meta, .tree-home .undo-go, .tree-home .suggestion-go, .th-colname, .th-ctx, .run-what small, .chg, .wv-h,
 .decision-kind, .decision-dflt, .search-section, .cal-dflt, .usage-head h2, .fd-date, .ps-fold, .pj-folder span, .pj-state, .pj-earlier summary,
-.pj-confirm-to, .sv-back, .sv-needs h4, .sv-part h4, .sv-more summary, .sv-live-head, .run-chip {
+.pj-confirm-to, .sv-back, .sv-needs h4, .sv-part h4, .sv-more summary, .sv-live-head, .run-chip{
   text-transform: none !important; letter-spacing: 0 !important;
 }
 
@@ -186,14 +186,8 @@ body { font-family: var(--g-font-ui); text-rendering: optimizeLegibility; }
   .compose-uni.on::before { box-shadow: inset 0 0 0 2px var(--g-accent); }
 }
 
-/* ── A room: a place you step into ── */
-.sr-title { font: 560 28px/1.12 var(--g-font-display); letter-spacing: -.012em; font-variation-settings: "opsz" 72, "SOFT" 60; color: var(--g-ink); }
-.sr .th-crumbs, .sr .th-crumb, .sr-door, .sr-context { font-family: var(--g-font-ui); color: var(--g-ink-3); }
-.sr-head { border-bottom: 0; }
-.th-level.wide .th-panel, .th-level.th-rooms.wide .th-panel { border-left: var(--g-hair) solid var(--g-line) !important; }
-.th-foot { border-top: var(--g-hair) solid var(--g-line); background: var(--g-ground); }
 .th-treehead { border-bottom: var(--g-hair) solid var(--g-line); }
-.th-treehead .note-title, .th-head .note-title { font: 560 32px/1.08 var(--g-font-display); letter-spacing: -.015em; }
+.th-treehead .note-title { font: 560 32px/1.08 var(--g-font-display); letter-spacing: -.015em; }
 .th-name b { font-family: var(--g-font-display); font-weight: 520; }
 .th-row.d0 .th-name b { font-weight: 580; }
 .th-guide.run::before, .th-guide.branch::before { border-left-color: var(--g-line-strong); border-left-width: 1px; }
@@ -203,10 +197,10 @@ body { font-family: var(--g-font-ui); text-rendering: optimizeLegibility; }
 .th-h, .tree-home .work-head { font: 600 13px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
 .th-h::after, .tree-home .work-head::after { background: var(--g-line); }
 .th-lede, .cp-lede { font-family: var(--g-font-uni); }
-.cp-sheet { border-top: var(--g-hair) solid var(--g-line-strong); border-radius: 18px 18px 0 0; box-shadow: var(--g-shadow-2); }
+
 .th-door { border: var(--g-hair) solid var(--g-line-strong); border-radius: 999px; padding: 4px 11px; background: var(--g-paper); font: 500 13px/1.2 var(--g-font-ui); }
 .th-tag { background: var(--g-needs); }
-.cp-dot, .fd-live i, .ps-dot, .pj-state i { background: var(--g-needs); }
+ .fd-live i, .ps-dot, .pj-state i{ background: var(--g-needs); }
 
 /* ── Home: the day in one sentence, then the places ── */
 .fd { background: var(--g-ground); padding: clamp(28px, 7vh, 88px) clamp(20px, 5vw, 64px) 56px; }

@@ -1,4 +1,4 @@
-// T-140: the tree from node links (`links` two-way, `parent` as a legacy link), and the Rooms / Projects views over it.
+// T-140: the tree from node links (`links` two-way, `parent` as a legacy link).
 // Run: node --experimental-strip-types scripts/links.test.ts
 import assert from "node:assert/strict";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
@@ -6,7 +6,6 @@ import { buildTree, childrenOf, parentPath, ROOT, trail, ancestry } from "../src
 import { buildTaskTree, parseNodes, subtreePaths, rollUp, tasksUnder } from "../src/areas/taskCore.ts";
 import { roomView, treeRows } from "../src/areas/treeRooms.ts";
 import { ancestorsOf, visibleRows } from "../src/areas/sidebarState.ts";
-import { archivedRoomIds, byActivity, parseView, projectCards, roomsList } from "../src/areas/viewsCore.ts";
 import { linksOf } from "../src/areas/nodeLinks.ts";
 
 let failed = 0;
@@ -103,43 +102,6 @@ check("the task tree reads the same links: an area's subtree is its projects; a 
   const r = rollUp(t, [task("Projects/uni-app")]);
   assert.deepEqual([r.get("Areas/Parachute")!.total, r.get("Areas/Sanctum")!.total, r.get(ROOT)!.total], [1, 1, 1]);
   assert.equal(tasksUnder(t, "Areas/Sanctum", [task("Projects/uni-app")]).length, 1);
-});
-
-const ROOMS = [{ id: "r-uni", name: "Uni", last_ts: 100 }, { id: "r-par", name: "parachute", last_ts: 500 }, { id: "r-os", name: "uni-os", last_ts: 900 }, { id: "r-sad", name: "sanctum", last_ts: null }, { id: "r-old", name: "priya", last_ts: 950 }, { id: "r-bou", name: "boulder", last_ts: 300 }];
-const UNI = ROOMS[0];
-const vt = () => buildTree([area("a-par", "Parachute", { room: "parachute" }), area("a-sad", "Sanctum", { room: "sanctum" }), area("a-bou", "Boulder", { room: "boulder" }),
-  proj("p-app", "uni-app", { links: ["a-par", "a-sad", "p-mail"], room: "uni-os" }), proj("p-mail", "Mail", { links: ["a-par"] }), proj("p-reg", "RegenHub", { links: ["a-bou"] }),
-  proj("p-ric", "Priya", { links: ["a-bou"], status: "archived", room: "priya" })]);
-check("Rooms view: newest message first, a room with none last; archived rooms (a retired node's) leave the list", () => {
-  const t = vt();
-  const archived = archivedRoomIds(t, ROOMS, new Map([["r-par", 1], ["r-os", 1], ["r-sad", 1], ["r-bou", 1]]));
-  assert.deepEqual([...archived], ["r-old"]);
-  const l = roomsList(ROOMS, archived);
-  assert.deepEqual(l.live.map((r) => r.name), ["uni-os", "parachute", "boulder", "Uni", "sanctum"]);
-  assert.deepEqual(l.archived.map((r) => r.name), ["priya"]);
-  assert.deepEqual(byActivity([{ name: "b", last_ts: null }, { name: "a", last_ts: null }]).map((r) => r.name), ["a", "b"]);
-});
-check("Projects view: by the room's last activity; a roomless project talks in its area's room; chips are areas then linked projects", () => {
-  const cards = projectCards(vt(), ROOMS, UNI);
-  assert.deepEqual(cards.map((c) => c.name), ["uni-app", "Mail", "RegenHub"], "uni-os 900, parachute 500, boulder 300");
-  const app = cards[0];
-  assert.deepEqual([app.roomName, app.own], ["uni-os", true]);
-  assert.deepEqual(app.chips.map((c) => [c.name, c.roomName]), [["Parachute", "parachute"], ["Sanctum", "sanctum"], ["Mail", "parachute"]]);
-  assert.deepEqual([cards[1].roomName, cards[1].own], ["parachute", false], "Mail has no room: it talks in #parachute");
-  assert.deepEqual(cards[1].chips.map((c) => c.name), ["Parachute", "uni-app"]);
-});
-check("Projects view: a project linked to nothing (it only falls back to #Uni) sorts after projects with a room, not first because #Uni is busy", () => {
-  const busyUni = ROOMS.map((r) => r.id === "r-uni" ? { ...r, last_ts: 9999 } : r);
-  const t = buildTree([area("a-par", "Parachute", { room: "parachute" }), area("a-bou", "Boulder", { room: "boulder" }),
-    proj("p-mail", "Mail", { links: ["a-par"] }), proj("p-reg", "RegenHub", { links: ["a-bou"] }), proj("p-g5", "Give5")]);
-  const cards = projectCards(t, busyUni, busyUni[0]);
-  assert.deepEqual(cards.map((c) => c.name), ["Mail", "RegenHub", "Give5"]);
-  const g5 = cards[2];
-  assert.deepEqual([g5.roomName, g5.own, g5.lastTs], ["Uni", false, null], "it still talks in #Uni");
-});
-check("the view choice is remembered per device: a bad value is Areas", () => {
-  assert.equal(parseView('"rooms"'), "rooms"); assert.equal(parseView("projects"), "projects");
-  assert.equal(parseView(null), "areas"); assert.equal(parseView("nope"), "areas");
 });
 
 // ---- fix pass: legacy parent chains keep their room and task scope; the fallback task tree keeps links; 0.1.46 equivalence on parent-only data

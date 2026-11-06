@@ -175,6 +175,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   /** T-301/T-302: a project (or the Unfiled sessions) opened in place, over the room or the home. */
   const [projectOpen, setProjectOpen] = useState<string | null>(null);
   const closeProject = () => setProjectOpen(null);
+  /** A vault without rooms: the place's app, shown in its page's place (Back closes it). */
+  const [appOpen, setAppOpen] = useState(false);
   const focusView: FocusView = focus?.view ?? "chat";
   /** Without rooms, a place's page is its work; with rooms, the focus's "all of its work" step. */
   const workShown = !chat ? !!node : focusView === "work";
@@ -182,11 +184,12 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const up = data ? data.tree.nodes.get(parentPath(data.tree, path, via)) : null;
     if (up && up.path !== ROOT) onOpenArea(up.path, up.name, null); else { setRootOpen(false); onOpenArea(null, "Uni", null); }
   } : rootOpen ? () => setRootOpen(false) : null;
-  const overlay: Overlay | null = projectOpen ? { close: closeProject, modal: true, history: false } : sheetId ? { close: closeSheet, modal: true, history: false } : null;
-  const overlayKey = `${projectOpen ? "project" : ""}${sheetId ? "sheet" : ""}`;
+  const overlay: Overlay | null = projectOpen ? { close: closeProject, modal: true, history: false } : sheetId ? { close: closeSheet, modal: true, history: false }
+    : appOpen && !chat ? { close: () => setAppOpen(false), modal: false, history: true } : null;
+  const overlayKey = `${projectOpen ? "project" : ""}${sheetId ? "sheet" : ""}${appOpen && !chat ? "app" : ""}`;
   // (layout effects: what is over the place is known to the host's Back before the first key can reach it)
   useLayoutEffect(() => {
-    onBackChange(projectOpen ? closeProject : sheetId ? closeSheet : back);
+    onBackChange(projectOpen ? closeProject : sheetId ? closeSheet : appOpen && !chat ? () => setAppOpen(false) : back);
     return () => onBackChange(null);
   }, [path, data, onBackChange, overlayKey, rootOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => { onOverlayChange?.(overlay); }, [overlayKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -222,7 +225,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const others = useMemo(() => (owned ? roomRefs.filter((r) => !owned.has(r.id) && r.id !== uniRoom).sort((a, b) => a.name.localeCompare(b.name)) : []), [owned, roomRefs, uniRoom]);
   // Opening a room re-reads the tasks if the copy is more than a few seconds old (the needs-you feed must not show what is already done).
   useEffect(() => { tasks.refreshIfStale(); }, [node?.path, focus?.room]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setSheetId(null); setProjectOpen(null); }, [node?.path, focus?.room]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setSheetId(null); setProjectOpen(null); setAppOpen(false); }, [node?.path, focus?.room]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Who stewards a node: its own room, else the nearest ancestor's (an archived room's `room_fallback` stands in), else #Uni. */
   const stewardOf = (p: string): Steward => {
     const v = data ? roomView(data.tree, p, roomRefs, uniRef) : { target: uniRef, own: false, heldBy: uniRef };
@@ -424,7 +427,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
       const details = focusView === "work" ? <div className="fx-work">{workMain}</div>
         : focusView === "app" ? (app ? <div className="fx-app">{app.bar}{app.main}</div> : <p className="cp-none">This place has no app.</p>)
         : <div className="fx">
-          {node && companionProps ? <CompanionBody {...companionProps} fit={false} /> : <p className="cp-lede cp-note">{UNFILED}</p>}
+          <div className="cp fx-cp">{node && companionProps ? <CompanionBody {...companionProps} fit={false} /> : <p className="cp-lede cp-note">{UNFILED}</p>}</div>
           {borrowed && <p className="fx-context">{node!.name} has no room of its own yet: it talks in {borrowed}.</p>}
           {strip && <div className="fx-strip">{strip}</div>}
           {inside.length > 0 && <section className="fx-sec" aria-label={`Inside ${node!.name}`}><h3 className="cp-h">Inside {node!.name}</h3>
@@ -474,16 +477,19 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
       </div></section></div>;
   }
   const trailItems = [{ path: ROOT, name: profile.title }, ...(tree && !isRoot ? trail(tree, node.path, via) : isRoot ? [] : [node]).map((n) => ({ path: n.path, name: n.name }))];
-  return <ApprovalsContext.Provider value={{ ...approvalsAll, open: openApproval }}><div className="area-view tree-page">
-    <section className="wp" aria-label={`${node.name}'s work`}>
+  const page = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => <div className="area-view tree-page">
+    <section className="wp" aria-label={app ? `${node.name}'s app` : `${node.name}'s work`}>
       <header className="wp-head">
-        {back && <button type="button" className="note-action wp-back" onClick={back}><span aria-hidden="true">←</span> Back</button>}
+        {(app || back) && <button type="button" className="note-action wp-back" onClick={app ? () => setAppOpen(false) : back!}><span aria-hidden="true">←</span> {app ? "Work" : "Back"}</button>}
         <div className="wp-titles">{!isRoot && <Crumbs trail={trailItems} onOpen={(p) => openPlace(p)} compact={!wide} />}<h1 className="wp-title">{node.name}</h1></div>
+        {openApp && !app && <button type="button" className="note-action wp-app" onClick={openApp}>App ›</button>}
       </header>
       {status}
-      <div className="sr-work">{workMain}</div>
+      {app ? <div className="fx-app">{app.bar}{app.main}</div> : <div className="sr-work">{workMain}</div>}
     </section>
     <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} />
     {sheetView}{projectSheet}
-  </div></ApprovalsContext.Provider>;
+  </div>;
+  return <ApprovalsContext.Provider value={{ ...approvalsAll, open: openApproval }}>{isRoot ? page(null, null)
+    : <AreaView key={node.id} area={body !== null ? { ...node, body } : node} mode={mode} roomName={roomName} actions={appActions} room={null} open={appOpen} onOpen={setAppOpen} render={page} />}</ApprovalsContext.Provider>;
 }

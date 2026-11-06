@@ -1,7 +1,7 @@
 // T-124 r7: the sidebar's fold state and width, Back/Forward history, the tab-set migration, link text and the needs-you feed.
 // Run: node --experimental-strip-types scripts/navtree.test.ts
 import assert from "node:assert/strict";
-import { ancestorsOf, clampWidth, hasKids, isOpen, parseFolds, parseSidebar, recentLabels, rolledNeeds, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, visibleRows } from "../src/areas/sidebarState.ts";
+import { ancestorsOf, hasKids, isOpen, parseFolds, rolledNeeds, visibleRows } from "../src/areas/sidebarState.ts";
 import { canBack, canForward, EMPTY_HISTORY, placeKey, recent, step, visit, type History } from "../src/navHistory.ts";
 import { EMPTY_TABS, isSurface, migrateLegacyTabs, persistable, restoreTabs, serializeTabs, type Tabs, type TabTarget } from "../src/tabs.ts";
 import { linkLabel, splitLinks } from "../src/areas/linkText.ts";
@@ -44,13 +44,9 @@ check("folds: a folded row keeps its dot when anything under it needs you", () =
   assert.equal(rolledNeeds(rows, needs, 1), 0); // A
   assert.equal(rolledNeeds(rows, needs, 8), 2); // C
 });
-check("folds and sidebar parse safely", () => {
+check("folds parse safely", () => {
   assert.deepEqual(parseFolds('{"a":true,"b":false,"c":3}'), { a: true, b: false });
   assert.deepEqual(parseFolds("nope"), {}); assert.deepEqual(parseFolds(null), {}); assert.deepEqual(parseFolds("[1]"), {});
-  assert.deepEqual(parseSidebar(null), { width: SIDEBAR_DEFAULT, hidden: false });
-  assert.deepEqual(parseSidebar('{"width":9000,"hidden":true}'), { width: SIDEBAR_MAX, hidden: true });
-  assert.equal(clampWidth(10), SIDEBAR_MIN); assert.equal(clampWidth(NaN), SIDEBAR_DEFAULT); assert.equal(clampWidth(250.4), 250);
-  assert.equal(SIDEBAR_DEFAULT, 220);
 });
 
 const room = (c: string, title = c): TabTarget => ({ kind: "area", path: c, channel: c, title });
@@ -330,11 +326,17 @@ check("r10 askOrder and lineBudget", () => {
   assert.equal(lineBudget(2, false).next, 1); assert.equal(lineBudget(2, true).next, 0); assert.equal(lineBudget(1, true).next, 1); assert.equal(lineBudget(3, false).next, 0);
 });
 check("r12 recent: never the current place, a place once, told apart by its id, never by its name", () => {
-  // Uni's room, opened before the tree loaded, is Uni: the app's key maps a room a node owns to that node
-  const uniKey = (t: TabTarget) => (t.kind === "room" && t.channel === "uni-ch" ? "uni" : placeKey(t));
+  // T-335 one surface: All is one place, whichever room is in focus there
+  const uniKey = placeKey;
   let h: History = EMPTY_HISTORY;
-  h = visit(h, { kind: "room", channel: "uni-ch", title: "Uni" });
+  h = visit(h, { kind: "all", channel: "c1", title: "All" });
+  h = visit(h, { kind: "all", channel: "c2", title: "All" });
+  assert.equal(h.entries.length, 1, "a room in focus is All's own step, never a second visit");
   h = visit(h, { kind: "areas", title: "Uni" });
+  h = visit(h, { kind: "area", path: "A", title: "Atlas" });
+  h = visit(h, { kind: "areas", title: "Uni" });
+  assert.deepEqual(recent(h, 5, uniKey).map((t) => t.title), ["Atlas", "All"]);
+  h = visit(EMPTY_HISTORY, { kind: "areas", title: "Uni" });
   h = visit(h, { kind: "area", path: "A", title: "Atlas" });
   h = visit(h, { kind: "areas", title: "Uni" });
   assert.deepEqual(recent(h, 5, uniKey).map((t) => t.title), ["Atlas"]);
@@ -343,16 +345,7 @@ check("r12 recent: never the current place, a place once, told apart by its id, 
   h = visit(h, { kind: "area", path: "Areas/Techne/Projects/Site", title: "Site" });
   h = visit(h, { kind: "areas", title: "Uni" });
   assert.deepEqual(recent(h, 5, uniKey).map((t) => t.path), ["Areas/Techne/Projects/Site", "Areas/Atlas/Projects/Site", "A"]);
-  assert.equal(placeKey({ kind: "thread", channel: "c", root: "r", title: "t" }), "thread:c:r");
-});
-check("r12 recent labels: a name two places share says where each sits; at most the given number", () => {
-  const rows = [{ path: "", name: "Uni", depth: 0 }, { path: "A", name: "Atlas", depth: 1 }, { path: "A/S", name: "Site", depth: 2 }, { path: "T", name: "Techne", depth: 1 }, { path: "T/S", name: "Site", depth: 2 }, { path: "T/K", name: "Kit", depth: 2 }];
-  const r = (key: string, title: string, path: string | null = null, room: string | null = null) => ({ key, title, path, room, go: () => {} });
-  const list = [r("area:A/S", "Site", "A/S"), r("area:T/K", "Kit", "T/K"), r("area:T/S", "Site", "T/S"), r("room:g", "garden", null, "g")];
-  assert.deepEqual(recentLabels(list, rows, null, 5).map((x) => x.label), ["Site · Atlas", "Kit", "Site · Techne", "garden"]);
-  assert.deepEqual(recentLabels(list, rows, "garden", 5).map((x) => x.label), ["Site · Atlas", "Kit", "Site · Techne", "garden · Other rooms"]);
-  assert.deepEqual(recentLabels(list, rows, null, 3).map((x) => x.label), ["Site · Atlas", "Kit", "Site · Techne"]);
-  assert.deepEqual(recentLabels(list.slice(0, 2), rows, null, 3).map((x) => x.label), ["Site", "Kit"], "no collision, no parent");
+  assert.equal(placeKey({ kind: "all", channel: "c", root: "r", title: "All" }), "all");
 });
 check("runs: only the ones still going are running", () => {
   assert.equal(isActiveRun({ state: "running" }), true);

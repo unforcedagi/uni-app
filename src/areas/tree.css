@@ -35,22 +35,6 @@
 .tree-home button { font-family: inherit; }
 .tree-home .th-mono, .th-ctx, .chg, .run-chip, .run-what small, .th-cap, .th-h, .th-colname, .th-fresh, .th-roomline, .th-door, .th-up small, .th-line small, .th-crumbs, .task-meta, .work-group h3 { font-family: var(--g-font-ui); }
 
-/* ------------------------------------------------------------------------------------------------- the level (wide) */
-.tree-home.th-level { flex: 1; min-height: 0; display: grid; background: var(--th-ground); }
-.tree-home.th-level.wide { grid-template-columns: minmax(0, 1fr) clamp(430px, 38vw, 560px); }
-@media (max-aspect-ratio: 1/1) { .tree-home.th-level.wide { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 46fr) minmax(0, 54fr); } }
-.tree-home.th-level.phone { grid-template-columns: minmax(0, 1fr); }
-
-.th-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--th-paper); }
-.th-level.wide .th-panel { border-left: 2px solid var(--g-line-strong); }
-@media (max-aspect-ratio: 1/1) { .th-level.wide .th-panel { border-left: 0; border-top: var(--g-hair) solid var(--g-line-strong); } }
-.th-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 26px 18px; }
-.th-panel.phone .th-scroll { padding: 8px 18px 18px; }
-.th-foot { position: relative; flex: none; padding: 4px 20px 10px; border-top: var(--g-hair) solid var(--g-line-strong); background: var(--th-paper); }
-.th-panel.phone .th-foot { padding: 4px 14px calc(8px + env(safe-area-inset-bottom)); }
-/* the head */
-.th-head { display: flex; flex-direction: column; gap: 2px; }
-.th-head.phone { padding: 0 0 6px; }
 .th-back { all: unset; box-sizing: border-box; align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 2px; font: 600 15px/1 var(--th-sans); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; cursor: pointer; }
 .th-back:focus-visible, .th-crumb:focus-visible, .th-go:focus-visible, .th-kid:focus-visible, .th-up:focus-visible, .th-link:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .th-crumbs { display: flex; flex-wrap: wrap; align-items: center; font-size: 12.5px; letter-spacing: .02em; }
@@ -61,7 +45,7 @@
 .th-cap { margin: 4px 0 0; font-size: 12px; color: var(--th-ink2); }
 .th-state { margin-left: 8px; padding: 2px 8px; border: var(--g-hair) solid var(--g-line-strong); font-size: 12px; }
 .th-state[data-st="needs"] { background: var(--th-ink); color: var(--th-card); }
-.th-head .note-title { margin: 2px 0 2px; font: 600 34px/1.05 var(--th-serif); letter-spacing: -.02em; overflow-wrap: anywhere; }
+
 .th-roomline { margin: 6px 0 4px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 /* ------------------------------------------------------------------------------------------------- objects */
@@ -162,23 +146,11 @@
 .tree-home .undo-bar { bottom: calc(76px + 92px + env(safe-area-inset-bottom)); }
 @media (min-width: 900px) { .tree-home .undo-bar { left: auto; right: 24px; transform: none; bottom: 104px; } }
 .tree-home-wrap .undo-bar { bottom: calc(76px + 16px + env(safe-area-inset-bottom)); }
-/* no composer (chat.provider null) and nothing in the foot: no rule either */
-.th-foot:not(:has(*)) { display: none; }
 
-/* ------------------------------------------------------------------------------------------------- rooms (0.1.42) */
-/* wide: the room tree is a left column that is always there; the level's panel is the right side (portrait too) */
-.tree-home.th-level.th-rooms.wide { grid-template-columns: clamp(270px, 22vw, 340px) minmax(0, 1fr); grid-template-rows: none; }
-.th-roomnav { min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--th-paper); }
-.th-level.th-rooms.wide .th-panel { border-left: 2px solid var(--g-line-strong); border-top: 0; }
-.th-column .th-treehead { padding: 14px 16px 8px; }
 .th-colname { margin: 2px 0 0; font-size: 12px; }
-.th-column .th-summary { font-size: 14.5px; }
-.th-column .th-rows { padding-right: 6px; }
-.th-column .th-name b { font-size: 16px; }
+
 .th-row.sel .th-go { background: var(--th-card); box-shadow: inset 3px 0 0 var(--g-accent); }
 .th-row.sel .th-name b { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 4px; }
-.th-scroll { container-type: inline-size; }
-.th-rooms .th-head .note-title { margin: 6px 0 2px; }
 
 /* where we are: counts, what moved, what needs you by priority */
 .wr { margin-top: 8px; }
@@ -213,16 +185,12 @@
 .chg { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; font-size: 12px; color: var(--th-sap); font-weight: 600; }
 
 .tree-home .task-row.changed { max-height: none; }
-/* the counts line: one compact row of small tags in a node page, so the state starts above the fold */
-.th-rooms .th-alive { margin-top: 6px; }
-.th-rooms .th-lede { font-size: 17px; }
-.th-rooms .th-head .wr > .th-h { margin-top: 8px; }
 
 /* ------------------------------------------------------------------------------------------------- simple first (T-124) */
 /* the rooms list: a name, its room in small type, one quiet dot for "needs you". Nesting is the trunk and ticks. */
 .th-treehead { padding: 20px 20px 6px; border-bottom: 0; }
 .th-treehead .note-title, .th-colname { margin: 0; font: 600 28px/1.1 var(--th-serif); letter-spacing: -.015em; text-transform: none; }
-.th-column .th-treehead { padding: 22px 20px 8px; }
+
 .th-rows { padding: 6px 12px 16px 8px; }
 .th-row { min-height: 52px; }
 .th-go { min-height: 52px; gap: 8px; padding: 6px 10px 6px 4px; border-radius: 12px; }
@@ -242,56 +210,27 @@
 .th-others .th-name b, .th-other .th-name b { font-weight: 500; color: var(--th-mute); }
 .th-row.th-other.sel .th-name b { color: var(--th-ink); }
 
-/* a room is its conversation: [rooms list | the chat | the companion]. The chat is the app's own room view. */
-.tree-home.th-level.th-simple.wide { grid-template-columns: clamp(250px, 21vw, 310px) minmax(0, 1fr) 272px; }
-.tree-home.th-level.th-simple.wide.folded { grid-template-columns: clamp(250px, 21vw, 310px) minmax(0, 1fr) 48px; }
-.tree-home.th-level.th-simple { background: var(--bg); }
-.th-simple .th-roomnav { border-right: 1px solid var(--th-hair2); background: var(--th-paper); }
-.sr { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
-.sr-head { flex: none; display: flex; align-items: center; gap: 4px; padding: 16px max(24px, calc((100% - 720px) / 2)) 10px; }
-.th-simple.phone .sr-head { padding: 6px 14px 8px 4px; }
 .sr-titles { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.sr-title { margin: 0; font: 600 26px/1.15 var(--th-serif); letter-spacing: -.015em; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.th-simple.phone .sr-title { font-size: 22px; }
-.sr-meta { min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 24px; }
-.sr-door { flex: none; margin: 0; font: 400 12.5px/1.3 var(--th-sans); color: var(--th-mute); }
-.sr-meta .th-crumbs + .sr-door::before { content: "·"; margin-right: 10px; }
-/* r15: a node in a borrowed room: the room is the heading, the node a quiet line under it */
-.sr-context { margin: 1px 0 0; font: 400 12.5px/1.3 var(--th-sans); color: var(--th-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .cp-scope { font-weight: 600; color: var(--th-ink2); }
 .sr-back { all: unset; box-sizing: border-box; flex: none; width: 44px; height: 44px; display: grid; place-items: center; font: 400 30px/1 var(--th-sans); cursor: pointer; color: var(--th-ink); }
 .sr-back:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -4px; }
-.sr .th-crumbs { font: 400 12.5px var(--th-sans); letter-spacing: 0; color: var(--th-mute); }
-.sr .th-crumb { font: 400 12.5px/1 var(--th-sans); min-height: 24px; min-width: 0; text-decoration: none; color: var(--th-mute); }
-.sr .th-crumb:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); }
-.sr .th-crumb.here { min-height: 24px; font-weight: 400; }
-.sr .th-crumbs i { padding: 0 5px; }
+
 /* a thread, inside its room: a quiet line with the way back */
 .sr-thread { flex: none; display: flex; align-items: center; gap: 12px; padding: 0 max(24px, calc((100% - 720px) / 2)) 8px; border-bottom: 1px solid var(--th-hair2); font: 400 13px/1.3 var(--th-sans); color: var(--th-mute); }
-.th-simple.phone .sr-thread { padding: 0 14px 6px; }
-.sr-thread-back { all: unset; box-sizing: border-box; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--th-ink); font-weight: 500; }
-.sr-thread-back:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+
 .sr-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sr-chat .composer { padding-bottom: 10px; }
 .sr-chat .compose-hint { display: none; }
-.th-simple.phone .sr-chat .message-list { padding-inline: 14px; }
 
 /* the companion */
 .cp { color: var(--th-ink); font-family: var(--th-sans); }
-.cp.side { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid var(--th-hair2); background: var(--th-paper); padding: 0 18px; display: flex; flex-direction: column; }
-.cp.side.open > .cp-body { flex: 1; display: flex; flex-direction: column; }
-.cp.side.folded { padding: 0; }
-.cp-top { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; display: flex; align-items: center; justify-content: space-between; min-height: 56px; font: 500 13px var(--th-sans); color: var(--th-mute); }
-.cp-fold, .cp-unfold { all: unset; box-sizing: border-box; display: grid; place-items: center; width: 40px; height: 40px; font: 400 24px/1 var(--th-sans); cursor: pointer; color: var(--th-ink2); border-radius: 50%; }
-.cp-fold:hover, .cp-unfold:hover { background: var(--th-ring); }
-.cp-fold:focus-visible, .cp-unfold:focus-visible, .cp-need:focus-visible, .cp-all:focus-visible, .cp-more:focus-visible, .cp-line:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
-.cp-unfold { position: relative; margin: 8px; }
-.cp-dot { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--th-sap); }
-.cp-unfold .cp-dot { position: absolute; right: 4px; top: 4px; }
+
+ .cp-need:focus-visible, .cp-all:focus-visible, .cp-more:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+
 .cp-lede { margin: 0; font: 400 16px/1.4 var(--th-serif); letter-spacing: -.003em; color: var(--th-ink); }
 .cp-stands { margin: 0; overflow-wrap: break-word; }
-/* r18: the strip's folded line is cut on a whole word by WordClamp, never by the browser's mid-word ellipsis */
-.cp-line-words { display: block; white-space: normal; overflow: hidden; }
+
 /* r18: small print is one line of whole words (SmallLine renders a span, cut by WordClamp) */
 .cp-under, .cp-meta { white-space: normal; display: block; overflow: hidden; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-mute); }
 .cp-sec { margin-top: 16px; }
@@ -319,33 +258,16 @@
 .cp-run[data-state="queued"] i { background: none; box-shadow: inset 0 0 0 var(--g-hair) var(--g-ink-2); }
 .cp-run small { margin-left: auto; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
 .cp-foot { position: sticky; bottom: 0; margin-top: auto; padding-top: 8px; padding-bottom: 12px; background: var(--th-paper); border-top: 1px solid var(--th-hair2); }
-/* a list longer than the panel: a rule above the footer says there is more under it, and the last item ends above it */
-.cp.side.open { scroll-padding-bottom: 80px; }
+
 .cp-list { padding-bottom: 6px; }
 .cp-all { all: unset; box-sizing: border-box; max-width: 100%; min-height: 40px; display: flex; align-items: center; padding: 4px 0; gap: 6px; font: 500 14.5px var(--th-sans); color: var(--th-ink); cursor: pointer; }
 .cp-all-t { min-width: 0; overflow-wrap: anywhere; white-space: normal; line-height: 1.3; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
 .cp-all-arrow { flex: none; }
 .cp-all-more { flex: none; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
-/* the phone's strip */
-.cp.strip { flex: none; border-top: 1px solid var(--th-hair2); border-bottom: 1px solid var(--th-hair2); background: var(--th-paper); }
+
 /* r16: open inline only with room to spare (the strip sets its body's height: the composer and 40% of the room stay the conversation's) */
 .cp-strip-body { overflow-y: auto; overscroll-behavior: contain; }
-/* r16: otherwise a sheet over the room, under its header; the conversation stays where it was */
-.cp-sheet-wrap { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; justify-content: flex-end; }
-.cp-sheet-scrim { all: unset; position: absolute; inset: 0; background: var(--g-scrim); }
-.cp-sheet { position: relative; box-sizing: border-box; max-height: calc(100% - 12px); overflow-y: auto; overscroll-behavior: contain; background: var(--th-paper); border-top: var(--g-hair) solid var(--g-line-strong); border-radius: 16px 16px 0 0; padding: 0 0 calc(10px + env(safe-area-inset-bottom)); }
-.cp-sheet:focus-visible { outline: none; }
-.cp-sheet-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 0 8px 0 16px; background: var(--th-paper); border-bottom: 1px solid var(--th-hair2); font: 500 13px var(--th-sans); color: var(--th-mute); }
-.cp-sheet-close { all: unset; box-sizing: border-box; min-height: 44px; min-width: 44px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; font: 500 14px var(--th-sans); color: var(--th-ink); cursor: pointer; border-radius: 8px; }
-.cp-sheet-close:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -2px; }
-.cp-sheet .cp-body { padding: 10px 16px 6px; }
-/* r17: the way to the room's whole work stays in sight at the sheet's foot, however long the list (Codex r16: missed at 800×600 and 740×360) */
-.cp-sheet .cp-foot { position: sticky; bottom: calc(-10px - env(safe-area-inset-bottom)); z-index: 1; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
-.cp-line { all: unset; box-sizing: border-box; width: 100%; min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 16px; cursor: pointer; }
-.cp-line-text { flex: 1; min-width: 0; font: 400 15px/1.3 var(--th-serif); color: var(--th-ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cp-chev { flex: none; width: 20px; text-align: center; font: 400 14px var(--th-sans); color: var(--th-mute); }
-.cp.strip .cp-body { padding: 0 16px 18px; }
-.cp.strip.open .cp-line-text { font: 500 13px var(--th-sans); color: var(--th-mute); }
+
 /* the full node page's way back to the conversation sits where its room line is */
 /* the chat as part of the same look: graphite avatars (no per-author hue), no destination line (the placeholder names the room) */
 .message-avatar, .avatar { background: var(--th-ink2) !important; color: var(--th-card); }
@@ -357,41 +279,6 @@
 .cp-lede.full .cp-stands { display: block; }
 .cp-lede.cp-note { cursor: default; color: var(--th-mute); }
 
-/* ------------------------------------------------------------------------------------------------- r7: a narrow, foldable sidebar */
-/* width is --th-nav-w (set by useSidebar: 180 to 360, default 220; 34px when hidden) */
-.tree-home.th-level.th-rooms.wide { grid-template-columns: var(--th-nav-w, 220px) minmax(0, 1fr); }
-.tree-home.th-level.th-simple.wide { grid-template-columns: var(--th-nav-w, 220px) minmax(0, 1fr) 272px; }
-.tree-home.th-level.th-simple.wide.folded { grid-template-columns: var(--th-nav-w, 220px) minmax(0, 1fr) 48px; }
-.th-roomnav { position: relative; display: flex; flex-direction: column; overflow: hidden; }
-.th-roomnav.hidden { align-items: center; gap: 4px; padding: 6px 0; }
-.th-roomnav > .th-column { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 0; }
-.th-column .th-rows-wrap { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.th-column .th-rows-wrap[data-more] { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); }
-.th-toolbar { flex: none; display: flex; align-items: center; gap: 2px; padding: 4px 6px; }
-.th-tb-gap { flex: 1; }
-.th-nb { all: unset; box-sizing: border-box; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; font: 400 15px/1 var(--th-sans); color: var(--th-mute); cursor: pointer; }
-.th-nb:hover:not(:disabled) { background: var(--th-ring); color: var(--th-ink); }
-.th-nb:disabled { opacity: .35; cursor: default; }
-.th-nb:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -2px; }
-.th-resize { position: absolute; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; z-index: 5; touch-action: none; }
-.th-resize:hover, .th-resize:focus-visible, .th-resize:active { background: linear-gradient(to right, transparent 3px, var(--th-hair2) 3px, var(--th-hair2) 4px, transparent 4px); outline: none; }
-
-.th-column .th-rows { padding: 2px 6px 8px 4px; }
-.th-column .th-row { min-height: 0; align-items: center; }
-.th-column .th-row.d1 { margin-top: 2px; }
-.th-column .th-row.d2 { padding-left: 28px; }
-.th-column .th-row.d3 { padding-left: 42px; }
-.th-column .th-row.d4 { padding-left: 56px; }
-.th-column .th-go { min-height: 0; padding: 3px 6px 3px 2px; gap: 6px; border-radius: 7px; }
-.th-column .th-name { gap: 0; }
-.th-column .th-name b { font: 600 14px/1.25 var(--th-sans); letter-spacing: 0; overflow-wrap: anywhere; }
-.th-column .th-row.d0 .th-name b { font-size: 15px; font-weight: 700; }
-.th-column .th-row.d1 .th-name b { font-size: 14px; font-weight: 650; }
-.th-column .th-row.d2 .th-name b, .th-column .th-row.d3 .th-name b, .th-column .th-row.d4 .th-name b { font-weight: 500; font-size: 13.5px; }
-.th-column .th-sub { font-size: 12px; line-height: 1.25; }
-.th-column .th-dot { width: 7px; height: 7px; margin-right: 2px; }
-.th-column .th-row.d0 { padding-left: 10px; }
-.th-column .th-row.d1 { padding-left: 14px; }
 /* the fold chevron: its own target, left of the name */
 .th-fold, .th-fold-gap { flex: none; width: 20px; height: 24px; }
 .th-fold { all: unset; box-sizing: border-box; flex: none; width: 20px; height: 24px; display: grid; place-items: center; cursor: pointer; border-radius: 5px; }
@@ -400,20 +287,6 @@
 .th-fold:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -2px; }
 .th-fold i { width: 7px; height: 7px; border-right: 2px solid var(--th-ink); border-bottom: 2px solid var(--th-ink); opacity: .75; transform: rotate(-45deg); transition: transform .12s; }
 .th-fold[aria-expanded="true"] i { transform: rotate(45deg); }
-.th-phone-tree:not(.th-column) .th-fold, .th-phone-tree:not(.th-column) .th-fold-gap { width: 30px; height: 44px; }
-.th-phone-tree:not(.th-column) .th-row.d2 { padding-left: 14px; }
-.th-phone-tree:not(.th-column) .th-row.d3 { padding-left: 28px; }
-.th-phone-tree:not(.th-column) .th-row.d4 { padding-left: 42px; }
-.th-phone-tree:not(.th-column) .th-row { min-height: 48px; align-items: center; }
-.th-phone-tree:not(.th-column) .th-go { min-height: 48px; }
-.th-phone-tree:not(.th-column) .th-treehead .note-title { font-size: 28px; }
-
-.th-recent { flex: none; box-sizing: border-box; max-height: 124px; overflow: hidden; border-top: 1px solid var(--th-hair2); padding: 6px 8px 8px 10px; }
-.th-recent h2 { margin: 0 0 2px; font: 600 12px/1.6 var(--g-font-ui); color: var(--th-mute); }
-.th-recent ul { list-style: none; margin: 0; padding: 0; }
-.th-recent button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 2px 4px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; border-radius: 5px; }
-.th-recent button:hover { background: var(--th-ring); color: var(--th-ink); }
-.th-recent button:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -2px; }
 
 /* ------------------------------------------------------------------------------------------------- r7: the needs-you feed */
 .cp-need small { -webkit-line-clamp: unset; line-clamp: none; display: block; }
@@ -433,9 +306,6 @@
 .cp-ref { all: unset; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .cp-ref:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .cp-detail.overdue { color: var(--th-mute); }
-/* the sidebar's last row clears the bottom edge and Recent, with a fade that says the list goes on */
-.th-column .th-rows { padding-bottom: 16px; }
-.th-column .th-rows-wrap { -webkit-mask-image: none; mask-image: none; }
 
 /* r10: whole rows (at most three lines, then More), a quiet neutral while a note's title is read, an opaque footer instead of a fade */
 .cp-title { display: -webkit-box; }
@@ -484,7 +354,7 @@
 .sr-work { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--th-hair2); }
 .sr-workbar { border-bottom: 0; }
 .wv { box-sizing: border-box; width: min(100%, 720px); margin: 0 auto; padding: 8px 24px 40px; display: flex; flex-direction: column; gap: 22px; }
-.th-simple.phone .wv { padding: 6px 14px 32px; }
+
 .wv-top { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
 .wv-brief { margin: 0; font: 400 16px/1.5 var(--th-serif); color: var(--text); }
 .wv-fresh { margin: 0; display: flex; gap: 12px; align-items: center; }
@@ -509,45 +379,17 @@
 .task-prio-b[aria-pressed="true"] { border-color: var(--th-ink); color: var(--th-ink); font-weight: 650; box-shadow: inset 0 0 0 1px var(--th-ink); }
 .task-prio-b:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 @media (pointer: coarse) { .task-prio-b { min-height: 44px; } }
-/* below 900px: the room header opens the drawer (the tree, Back/Forward, Recent and the app's places), and keeps a one-line breadcrumb */
-.sr-drawer { all: unset; box-sizing: border-box; flex: none; width: 44px; height: 44px; display: grid; place-items: center; cursor: pointer; color: var(--th-ink); }
-.sr-drawer span, .sr-drawer span::before, .sr-drawer span::after { display: block; width: 18px; height: 2px; border-radius: 1px; background: currentColor; position: relative; }
-.sr-drawer span::before, .sr-drawer span::after { content: ""; position: absolute; left: 0; }
-.sr-drawer span::before { top: -6px; } .sr-drawer span::after { top: 6px; }
-.sr-drawer:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -4px; }
+
 .th-crumbs.compact { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; min-width: 0; }
 .th-crumbs.compact .th-crumb-wrap { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .th-crumbs.compact .th-crumb-wrap:last-child { flex: none; }
-.th-simple.phone .sr-meta { min-height: 20px; }
-.th-drawer-wrap { position: fixed; inset: 0; z-index: 55; display: flex; }
-.th-drawer-scrim { all: unset; position: absolute; inset: 0; background: var(--g-scrim); }
-.th-drawer { position: relative; box-sizing: border-box; width: min(340px, 86vw); height: 100%; display: flex; flex-direction: column; background: var(--th-paper); border-right: 1px solid var(--th-hair2); box-shadow: var(--shadow-lift); padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
-.th-drawer > .th-column { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+
 .th-places { flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 10px 4px; }
 .th-place { all: unset; box-sizing: border-box; min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--th-hair2); border-radius: 999px; font: 500 14px var(--th-sans); color: var(--th-ink); cursor: pointer; background: var(--th-paper); }
 .th-place:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 /* the phone's tree home shows the places only where the rail is hidden (useRailHidden, r14) */
 .key-error { display: flex; align-items: center; gap: 8px; justify-content: center; }
-.tree-home.th-level.th-simple.wide.solo { grid-template-columns: var(--th-nav-w, 220px) minmax(0, 1fr); }
-/* the drawer is touched on phones and tablets: whole rows and folds are 44px targets there */
-@media (pointer: coarse), (max-width: 599px) {
-  .th-drawer .th-column .th-go { min-height: 44px; }
-  .th-drawer .th-column .th-fold, .th-drawer .th-column .th-fold-gap { width: 30px; height: 44px; }
-  .th-drawer .th-recent button { min-height: 44px; display: flex; align-items: center; }
-  .th-drawer .th-nb { width: 44px; height: 44px; }
-}
-/* a short screen (r14): the drawer is wider so the places fit one line without scrolling. r21 (Codex 3): Recent is kept, as one line of places
-   under the tree (it no longer steps aside), so going back to a place means the same at every size */
-@media (max-height: 499px) {
-  .th-drawer { width: min(520px, 92vw); }
-  .th-drawer .th-places { flex-wrap: wrap; overflow: visible; gap: 4px; padding: 6px 8px 2px; }
-  .th-drawer .th-place { flex: none; padding: 0 12px; font-size: 13.5px; }
-  .th-drawer .th-recent { display: flex; align-items: center; gap: 8px; max-height: none; padding: 4px 8px 6px; }
-  .th-drawer .th-recent h2 { flex: none; margin: 0; }
-  .th-drawer .th-recent ul { display: flex; gap: 4px; min-width: 0; overflow-x: auto; }
-  .th-drawer .th-recent li { flex: none; max-width: 160px; }
-  .th-drawer .th-recent button { min-height: 40px; padding: 0 10px; border: 1px solid var(--th-hair2); border-radius: 999px; }
-}
+
 /* r14: a row leads with its action; its title (the event or project) is a quiet line under it. A long decision opens to decide. */
 .cp-need .cp-under { display: block; color: var(--th-mute); overflow-wrap: break-word; }
 .cp-open-decide { font: 500 13px/1.4 var(--th-sans); color: var(--th-ink2); }
@@ -556,13 +398,10 @@
 .lh-line { margin: 0; padding: 2px 0 6px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-mute); }
 .lh-line.bad { color: var(--th-ink); }
 .lh-detail { font: inherit; color: var(--th-mute); }
-.th-column .lh, .th-phone-tree .lh { flex: none; margin: 2px 12px 4px; }
-.sr-health { flex: none; padding: 4px 16px 0; border-bottom: 1px solid var(--th-hair2); }
+ .th-phone-tree .lh{ flex: none; margin: 2px 12px 4px; }
+
 .wv .lh { margin: 0 0 12px; }
-/* r14: an area's app is a view inside the room shell, opened from the header */
-.sr-app { all: unset; box-sizing: border-box; flex: none; margin-left: auto; align-self: center; min-height: 32px; padding: 0 12px; display: inline-flex; align-items: center; border: 1px solid var(--th-hair2); border-radius: 999px; font: 500 13px var(--th-sans); color: var(--th-ink); cursor: pointer; }
-.sr-app:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
-@media (pointer: coarse) { .sr-app { min-height: 44px; } }
+
 .sr-work:has(> .area-app) { overflow: hidden; display: flex; flex-direction: column; }
 .area-app { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sr-appbar .area-bar-controls { margin-left: auto; position: relative; }
@@ -586,13 +425,7 @@
 .cp-open-decide.cp-rest { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; min-height: 32px; padding: 0 0 6px; font: 500 13px/1.4 var(--th-sans); color: var(--th-ink2); cursor: pointer; }
 .cp-open-decide.cp-rest:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; }
 .cp-open-decide.cp-rest:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
-/* r17: under 400px tall the sidebar folds into the Places drawer (useShortTree): the room takes its column */
-@media (max-height: 399.98px) {
-  .tree-home.th-level.th-simple.wide { grid-template-columns: minmax(0, 1fr) 272px; }
-  .tree-home.th-level.th-simple.wide.folded { grid-template-columns: minmax(0, 1fr) 48px; }
-  .tree-home.th-level.th-simple.wide.solo { grid-template-columns: minmax(0, 1fr); }
-  .cp.side.folded { overflow: hidden; }
-}
+
 /* r18: a linked note that couldn't be read just now keeps its last title, quietly marked */
 .cp-ref-off { text-decoration-style: dotted; opacity: .75; }
 /* ------------------------------------------------------------------------------------------------- r19 */
@@ -705,7 +538,6 @@
 .task-details summary::after { content: "+"; font-weight: 400; color: var(--th-mute); }
 .task-details[open] summary::after { content: "–"; }
 
-
 /* r28: Needs you holds only confirmed asks. What Uni must recheck is one quiet line that opens to a plain list; a waiting run is a row with its
    question as the step; the compact panel is one panel whose summary is a date line and whose footer is outside what scrolls. */
 .cp-recheck { margin: 8px 0 2px; font: 400 13px/1.4 var(--th-sans); color: var(--th-mute); }
@@ -723,14 +555,9 @@
 .cp-run-text .cp-run-place { display: block; margin: 0; font: 400 12.5px/1.35 var(--th-sans); color: var(--th-mute); }
 .cp-run-waiting { align-items: flex-start; }
 .cp-run-waiting i { margin-top: .45em; align-self: flex-start; }
-.cp-line-text .cp-line-fit { display: block; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+
 .cp-stands-fold { margin: 0 0 6px; }
 .cp-stands-fold > summary { font: 400 13px/1.4 var(--th-sans); }
-/* the one compact panel: head and footer are fixed, what is between them scrolls, so nothing is ever under the footer */
-.cp-sheet { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
-.cp-sheet .cp-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.cp-sheet > .cp-foot { position: static; flex: none; margin: 0; padding: 4px 16px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--th-hair2); }
-.cp-sheet-head { position: static; flex: none; }
 
 /* r29 (Codex P1-3): the summary is a dated account, muted and secondary, below Needs you; the app doesn't vouch for it */
 .cp-stands-note { margin: 14px 0 0; font: 400 13.5px/1.45 var(--th-sans); letter-spacing: 0; color: var(--th-mute); }
@@ -768,29 +595,7 @@
 .cp-foot .cp-said[open] > p { max-height: 30vh; overflow-y: auto; }
 .cp-recheck-next { font: 400 13.5px/1.4 var(--th-sans); color: var(--th-ink2); overflow-wrap: anywhere; }
 
-/* T-140: the Rooms / Projects / Areas switch and the two list views */
-.th-views { flex: none; display: flex; gap: 2px; margin: 2px 8px 8px; padding: 3px; border-radius: 8px; background: var(--th-ring); }
-.th-view { all: unset; box-sizing: border-box; flex: 1; min-height: 32px; display: grid; place-items: center; border-radius: 6px; font: 500 13px/1 var(--th-sans); color: var(--th-mute); cursor: pointer; }
-.th-view[aria-pressed="true"] { background: var(--th-card); color: var(--th-ink); font-weight: 700; box-shadow: 0 1px 2px var(--th-ring); }
-.th-view:focus-visible, .th-showarch:focus-visible, .th-chip:focus-visible, .th-cardroom:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
-.th-roomlist, .th-cards { list-style: none; margin: 0; padding: 0; }
-.th-room { display: flex; border-radius: 6px; }
-.th-room.sel, .th-card.sel { background: var(--th-sap-soft); }
-.th-room-go { min-height: 40px; padding: 4px 8px; justify-content: space-between; }
-.th-room-go .th-name b { font: 600 15px/1.2 var(--th-sans); }
 .th-when { flex: none; font: 400 12px/1 var(--th-sans); color: var(--th-mute); white-space: nowrap; }
-.th-archived { padding: 6px 8px; }
-.th-showarch { all: unset; cursor: pointer; font: 400 13px/1.2 var(--th-sans); color: var(--th-mute); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); }
-.th-card { margin: 0 8px 8px; padding: 8px 10px; border: 1px solid var(--th-hair2); border-radius: 12px; background: var(--th-card); display: flex; flex-direction: column; gap: 4px; }
-.th-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
-.th-card-name { min-height: 32px; padding: 0; }
-.th-card-name .th-name b { font: 600 16px/1.2 var(--th-serif); }
-.th-cardroom { all: unset; cursor: pointer; align-self: flex-start; font: 500 13px/1.2 var(--th-sans); color: var(--th-sap); }
-.th-cardroom.held { color: var(--th-mute); font-weight: 400; }
-.th-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.th-chip { all: unset; box-sizing: border-box; cursor: pointer; min-height: 26px; padding: 3px 9px; display: inline-flex; align-items: center; border: 1px solid var(--th-hair2); border-radius: 999px; font: 400 12px/1.2 var(--th-sans); color: var(--th-ink); background: var(--th-paper); }
-.th-chip b { font-weight: 600; }
-.th-chip:disabled { opacity: .5; cursor: default; }
 
 /* T-161: a Hermes approval prompt waiting on the user's OK: first in Needs you, marked so it can't be missed (--danger is the app's own) */
 .cp-approvals { margin: 2px 0 8px !important; }
@@ -810,15 +615,10 @@
 .th-new.inside.at { border-style: solid; }
 .th-go:has(.th-new:not(.inside)) .th-name b { color: var(--th-ink); }
 .th-new + .th-dot { margin-left: -2px; }
-/* T-335: the Places button (below 900px) carries a mark when another room has something new */
-.sr-drawer { position: relative; }
-/* its words are for a screen reader only: the hamburger's `.sr-drawer span` rule would otherwise draw them */
-.sr-drawer span[hidden] { display: none; }
-.sr-drawer-new { position: absolute; top: 9px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--th-ink); box-shadow: 0 0 0 2px var(--th-paper); }
 
 /* T-335: an approval waiting in another room, said at the top of the room you are in; one tap opens that room at the card */
 .approval-elsewhere { all: unset; box-sizing: border-box; flex: none; display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 0 max(24px, calc((100% - 720px) / 2)) 8px; padding: 6px 12px; border: 1.5px solid var(--danger); border-radius: 6px; background: color-mix(in srgb, var(--danger) 7%, transparent); font: 500 13.5px/1.3 var(--th-sans); color: var(--th-ink); cursor: pointer; }
-.th-simple.phone .approval-elsewhere { margin: 0 14px 6px; }
+
 .approval-elsewhere:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .approval-elsewhere > i { flex: none; font-style: normal; }
 .approval-elsewhere-text { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; }
@@ -829,3 +629,12 @@
 .th-ask { flex: none; height: 20px; padding: 0 5px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 2px; border: 1.5px solid var(--danger); border-radius: 12px; font: 600 12px/1 var(--g-font-ui); font-variant-numeric: tabular-nums; color: var(--th-ink); background: color-mix(in srgb, var(--danger) 10%, var(--th-card)); }
 .th-ask.inside { border-style: dashed; background: none; }
 .th-ask + .th-new { margin-left: 4px; }
+
+/* T-335 one surface: a vault without rooms shows each place's work as a page of its own: a quiet head (Back, where it sits, its name, its app) over the work */
+.tree-page { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.wp { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.wp-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px max(16px, calc((100% - 720px) / 2)) 6px; }
+.wp-titles { flex: 1; min-width: 0; }
+.wp-title { margin: 0; font: 520 22px/1.2 var(--g-font-display); color: var(--g-ink); }
+.wp-back, .wp-app { flex: none; min-height: 40px; padding: 0 14px; }
+.wp .sr-work { flex: 1; min-height: 0; }

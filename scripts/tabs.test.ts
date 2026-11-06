@@ -1,12 +1,15 @@
 // Run: node --experimental-strip-types scripts/tabs.test.ts
 import assert from "node:assert/strict";
-import { isRealRoom, isUniSide, lastRoomOf, readUniPlace, restorePlace, serializeUniPlace, viewOf, activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, sameTarget, serializeTabs, updateTab, type TabTarget, type Tabs } from "../src/tabs.ts";
+import { isUniSide, persistable, readUniPlace, serializeUniPlace, viewOf, activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, sameTarget, serializeTabs, updateTab, type TabTarget, type Tabs } from "../src/tabs.ts";
 import { claimRecording, recordingHolder, releaseRecording, RecordingBusy } from "../src/recLock.ts";
 
 let n = 0;
 const id = () => `t${++n}`;
-const room = (channel: string): TabTarget => ({ kind: "room", channel, title: channel });
-const thread = (channel: string, root: string): TabTarget => ({ kind: "thread", channel, root, title: `Thread · ${channel}` });
+// T-335 one surface: a room is never a tab; the tab mechanics are a place's (an area's work, in a vault without rooms), a note's, the Journal's.
+// `room(x)` is a place named for its room, so the order and cap checks read as before.
+const room = (channel: string): TabTarget => ({ kind: "area", path: `Areas/${channel}`, channel, title: channel });
+/** All with a room in focus (a thread of it with `root`). */
+const all = (channel: string, root?: string): TabTarget => ({ kind: "all", title: "All", channel, ...(root ? { root } : {}) });
 const note = (ref: string): TabTarget => ({ kind: "note", note: { hub: null, vault: "uni", ref }, title: ref });
 const journal: TabTarget = { kind: "journal", title: "Journal" };
 const ids = (s: Tabs) => s.tabs.map((t) => t.id);
@@ -40,12 +43,12 @@ s = openTab(s, note("Projects/X"), "new", id);
 assert.equal(s.tabs.length, before);
 assert.equal(activeTab(s)?.kind, "note");
 
-// Replace navigates in place (room → thread); a place that already has a tab is opened there instead (r13: no tab strip, so a
+// Replace navigates in place; a place that already has a tab is opened there instead (r13: no tab strip, so a
 // second tab for one place is never wanted, and a restore folds it away).
 s = focusTab(s, s.tabs[0].id);
 const pos = s.tabs.findIndex((t) => t.id === s.active);
-s = openTab(s, thread("b", "r1"), "replace", id);
-assert.equal(s.tabs[pos].kind, "thread");
+s = openTab(s, journal, "replace", id);
+assert.equal(s.tabs[pos].kind, "journal");
 assert.equal(s.tabs[pos].id, s.active);
 s = openTab(s, room("c"), "replace", id);
 assert.equal(s.tabs.filter((t) => t.channel === "c").length, 1);
@@ -53,9 +56,9 @@ assert.equal(activeTab(s)?.channel, "c");
 
 // sameTarget.
 assert.ok(sameTarget(journal, { kind: "journal", title: "x" }));
-assert.ok(!sameTarget(room("a"), thread("a", "r")));
-assert.ok(sameTarget(thread("a", "r"), thread("a", "r")));
-assert.ok(!sameTarget(thread("a", "r"), thread("a", "q")));
+// one All, whichever room is in focus there
+assert.ok(sameTarget(all("a"), all("b", "r")));
+assert.ok(!sameTarget(room("a"), room("b")));
 assert.ok(!sameTarget(note("A"), note("B")));
 
 // Close: the most recently used other tab takes over.
@@ -105,9 +108,9 @@ nested = navigateNoteTab(nested, nestedId, note("A").note!, "A title");
 assert.equal(activeTab(restoreTabs(serializeTabs(nested), []))?.note?.ref, "A");
 
 
-// Persist and restore round trip.
-let p = openTab(EMPTY_TABS, room("a"), "focus", id);
-p = openTab(p, thread("a", "root1"), "new", id);
+// Persist and restore round trip: All keeps the room in focus (and its thread).
+let p = openTab(EMPTY_TABS, { kind: "areas", title: "Uni" }, "focus", id);
+p = openTab(p, all("a", "root1"), "new", id);
 p = openTab(p, note("Projects/uni-app/Tabs"), "new", id);
 p = openTab(p, journal, "new", id);
 p = focusTab(p, p.tabs[1].id);
@@ -115,22 +118,38 @@ const raw = serializeTabs(p);
 const r = restoreTabs(raw, ["a", "b"]);
 assert.deepEqual(r.tabs, p.tabs);
 assert.equal(r.active, p.active);
+assert.deepEqual(activeTab(r), { ...p.tabs[1] }, "All comes back with its room and thread");
 
-// Restoring drops tabs for rooms that no longer exist (silently), keeps the rest.
+// A room that no longer exists leaves focus (silently): All is All again; the rest is kept.
 const gone = restoreTabs(raw, ["b"]);
-assert.deepEqual(gone.tabs.map((t) => t.kind), ["note", "journal"]);
-// The active tab was the dropped thread: fall back to the most recent survivor.
-assert.equal(activeTab(gone)?.kind, "journal");
+assert.deepEqual(gone.tabs.map((t) => t.kind), ["areas", "all", "note", "journal"]);
+assert.deepEqual(activeTab(gone), { id: p.tabs[1].id, kind: "all", title: "All" });
+// what is saved: All only with a room in focus; never a note
+assert.deepEqual(persistable(p).tabs.map((t) => t.kind), ["areas", "all", "journal"]);
+assert.deepEqual(persistable(gone).tabs.map((t) => t.kind), ["areas", "journal"]);
+
+// T-335 one surface: a room or a thread saved by an older version (a tab of its own) is that room in focus over All
+{
+  const old = restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "o1", kind: "room", channel: "a", title: "a" }], active: "o1", recent: ["o1"] }), ["a"]);
+  assert.deepEqual(activeTab(old), { id: "o1", kind: "all", title: "All", channel: "a" });
+  const oldThread = restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "o2", kind: "thread", channel: "a", root: "r9", title: "Thread" }], active: "o2" }), ["a"]);
+  assert.deepEqual(activeTab(oldThread), { id: "o2", kind: "all", title: "All", channel: "a", root: "r9" });
+  // a room gone since: All alone
+  assert.deepEqual(activeTab(restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "o3", kind: "room", channel: "gone", title: "x" }], active: "o3" }), ["a"])), { id: "o3", kind: "all", title: "All" });
+  // All's place for a room it borrows is a note path, checked like an area's
+  assert.equal(activeTab(restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "o4", kind: "all", channel: "a", path: "Areas/Still Water" }], active: "o4" }), ["a"]))?.path, "Areas/Still Water");
+  assert.equal(activeTab(restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "o5", kind: "all", channel: "a", path: "../x" }], active: "o5" }), ["a"]))?.path, undefined);
+}
 
 // Garbage in: empty state, never a throw.
 assert.deepEqual(restoreTabs(null, []), EMPTY_TABS);
 assert.deepEqual(restoreTabs("{not json", []), EMPTY_TABS);
 assert.deepEqual(restoreTabs(JSON.stringify({ tabs: "x" }), []), EMPTY_TABS);
-const junk = restoreTabs(JSON.stringify({ tabs: [{ id: "x", kind: "room" }, { id: "y", kind: "weird", channel: "a" }, { id: "z", kind: "thread", channel: "a" }, null, { id: "j", kind: "journal" }, { id: "j2", kind: "journal" }], active: "nope" }), ["a"]);
+const junk = restoreTabs(JSON.stringify({ tabs: [{ id: "x", kind: "room" }, { id: "y", kind: "weird", channel: "a" }, { id: "z", kind: "area", channel: "a" }, null, { id: "j", kind: "journal" }, { id: "j2", kind: "journal" }], active: "nope" }), ["a"]);
 assert.deepEqual(junk.tabs, [{ id: "j", kind: "journal", title: "Journal" }]);
 assert.equal(junk.active, "j");
 // Over-cap saved state is trimmed on restore.
-const many = { tabs: Array.from({ length: 20 }, (_, i) => ({ id: `m${i}`, kind: "room", channel: `c${i}`, title: "" })), active: "m19" };
+const many = { tabs: Array.from({ length: 20 }, (_, i) => ({ id: `m${i}`, kind: "area", path: `Areas/c${i}`, channel: `c${i}`, title: "" })), active: "m19" };
 const trimmed = restoreTabs(JSON.stringify(many), many.tabs.map((t) => t.channel));
 assert.equal(trimmed.tabs.length, MAX_TABS);
 assert.equal(trimmed.active, "m19");
@@ -209,45 +228,20 @@ assert.equal(activeTab(restoreTabs(serializeTabs(resolvedTab), []))?.note?.ref, 
   assert.equal(restoreTabs(raw, []).active, "a1");
 }
 
-{
-  // r15: a saved node that only borrows a room reopens on the last real room opened, else on nothing (the app then opens Uni)
-  let n = 0; const id = () => `n${++n}`;
-  const saved = (t: object) => restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "x", ...t }], active: "x", recent: ["x"] }), ["ch-uni", "ch-cohere"]);
-  const expr = saved({ kind: "area", path: "Areas/Expression", title: "Expression", channel: "ch-uni", borrowed: true });
-  assert.equal(activeTab(expr)?.borrowed, true, "the flag survives a save");
-  const cohere = { id: "c", kind: "area" as const, path: "Projects/COhere", title: "COhere", channel: "ch-cohere", borrowed: false };
-  assert.equal(isRealRoom(cohere), true);
-  assert.equal(lastRoomOf({ ...cohere, borrowed: true }), null, "a borrowed room is never the last room");
-  assert.equal(lastRoomOf({ id: "u", kind: "area", path: "X", title: "X" }), null, "nor a node not yet known to own one");
-  const back = restorePlace(expr, lastRoomOf(cohere), ["ch-uni", "ch-cohere"], id);
-  assert.equal(activeTab(back)?.path, "Projects/COhere");
-  assert.equal(back.tabs.some((t) => t.path === "Areas/Expression"), false);
-  assert.equal(activeTab(restorePlace(expr, null, ["ch-uni"], id)), null, "no last room: nothing, so the app opens Uni");
-  assert.equal(activeTab(restorePlace(expr, "{bad", ["ch-uni"], id)), null);
-  // a last room that has gone is not reopened
-  assert.equal(activeTab(restorePlace(expr, JSON.stringify({ kind: "room", channel: "ch-gone", title: "x" }), ["ch-uni"], id)), null);
-  // a place that owns its room, or is not yet known, is kept
-  const own = saved({ kind: "area", path: "Projects/COhere", title: "COhere", channel: "ch-cohere", borrowed: false });
-  assert.equal(restorePlace(own, null, [], id), own);
-  const unknown = saved({ kind: "area", path: "Areas/Expression", title: "Expression" });
-  assert.equal(restorePlace(unknown, null, [], id), unknown);
-}
-
-
 // T-294: Uni's side's last place, as kept on the device. It comes back with its spot when the place still exists.
 {
-  const area: TabTarget = { kind: "area", path: "Projects/Lantern", title: "Lantern", channel: "ch-lantern", borrowed: false };
+  const area: TabTarget = { kind: "area", path: "Projects/Lantern", title: "Lantern", channel: "ch-lantern" };
   const spot = { view: "ch-lantern|null", ref: "m12", offset: -14, limit: 300 };
   assert.deepEqual(readUniPlace(serializeUniPlace({ ...area, id: "t9" } as never, spot), ["ch-lantern"]), { target: area, spot });
-  // a thread's spot is the thread's view
-  const th = thread("ch-lantern", "r1");
+  // a thread's spot is the thread's view (All with the thread in focus)
+  const th = all("ch-lantern", "r1");
   assert.equal(viewOf(th), "ch-lantern|r1");
   assert.deepEqual(readUniPlace(serializeUniPlace(th, { ...spot, view: "ch-lantern|r1" }), ["ch-lantern"])?.spot?.view, "ch-lantern|r1");
   // a spot from another conversation is not this place's: it is never written, and never read back
   assert.equal(readUniPlace(serializeUniPlace(area, { ...spot, view: "ch-other|null" }), ["ch-lantern"])?.spot, null);
   assert.equal(readUniPlace(JSON.stringify({ v: 1, target: area, spot: { ...spot, view: "ch-other|null" } }), ["ch-lantern"])?.spot, null);
-  // a room that has gone: a room's place is dropped; an area keeps its place without the room (and so without a spot)
-  assert.equal(readUniPlace(serializeUniPlace(room("ch-gone"), { ...spot, view: "ch-gone|null" }), ["ch-lantern"]), null);
+  // a room that has gone: All keeps its place without the room (and so without a spot), as an area does
+  assert.deepEqual(readUniPlace(serializeUniPlace(all("ch-gone"), { ...spot, view: "ch-gone|null" }), ["ch-lantern"]), { target: { kind: "all", title: "All" }, spot: null });
   assert.deepEqual(readUniPlace(serializeUniPlace(area, spot), []), { target: { kind: "area", path: "Projects/Lantern", title: "Lantern" }, spot: null });
   // only Uni's side is a place to go back to; anything malformed is nothing
   assert.equal(readUniPlace(JSON.stringify({ v: 1, target: { kind: "messages", title: "Messages" }, spot: null }), []), null);
@@ -255,7 +249,7 @@ assert.equal(activeTab(restoreTabs(serializeTabs(resolvedTab), []))?.note?.ref, 
   for (const raw of [null, "", "{", "[]", "null", JSON.stringify({ v: 1 }), JSON.stringify({ v: 1, target: "Uni" })]) assert.equal(readUniPlace(raw, ["ch-lantern"]), null);
   for (const bad of [{ ...spot, ref: "" }, { ...spot, offset: "4" }, { ...spot, offset: null }, { ...spot, limit: 0 }, { ...spot, limit: 2.5 }, { ...spot, ref: "x".repeat(201) }])
     assert.equal(readUniPlace(JSON.stringify({ v: 1, target: area, spot: bad }), ["ch-lantern"])?.spot, null);
-  assert.deepEqual(["areas", "area", "room", "thread", "journal", "messages", "mail", "calendar", "note", "vault"].filter((kind) => isUniSide({ kind: kind as TabTarget["kind"] })), ["areas", "area", "room", "thread"]);
+  assert.deepEqual(["areas", "area", "all", "journal", "messages", "mail", "calendar", "note", "vault"].filter((kind) => isUniSide({ kind: kind as TabTarget["kind"] })), ["areas", "area", "all"]);
 }
 
 console.log("tabs tests passed");

@@ -1,25 +1,8 @@
-// The room tree's own state, per device (T-124 r7): which areas are folded, how wide the sidebar is, whether it is hidden.
-// Pure helpers (unit-tested in scripts/navtree.test.ts) and two tiny localStorage-backed hooks.
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { NavRecent } from "../navContext.ts";
-import { parseView, VIEW_KEY, type SidebarView } from "./viewsCore.ts";
+// The tree of places' own state, per device (T-124 r7): which areas are folded. Pure helpers (unit-tested in scripts/navtree.test.ts) and a
+// tiny localStorage-backed hook. T-335 one surface: the tree is never beside a room any more, so it has no width or hiding of its own.
+import { useCallback, useMemo, useState } from "react";
 
-export const SIDEBAR_KEY = "uni.sidebar.v1";
 export const FOLDS_KEY = "uni.tree.folds.v1";
-export const SIDEBAR_DEFAULT = 220;
-export const SIDEBAR_MIN = 180;
-export const SIDEBAR_MAX = 360;
-
-export type SidebarState = { width: number; hidden: boolean };
-export const clampWidth = (w: number): number => (Number.isFinite(w) ? Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(w))) : SIDEBAR_DEFAULT);
-
-export function parseSidebar(raw: string | null): SidebarState {
-  try {
-    const v = raw ? JSON.parse(raw) : null;
-    if (v && typeof v === "object") return { width: clampWidth(typeof v.width === "number" ? v.width : SIDEBAR_DEFAULT), hidden: v.hidden === true };
-  } catch { /* fall through */ }
-  return { width: SIDEBAR_DEFAULT, hidden: false };
-}
 
 /** Folds the user chose: path -> open (true) or folded (false). A path with no entry takes the default: folded, unless the open room is inside it. */
 export type Folds = Record<string, boolean>;
@@ -77,29 +60,6 @@ export function rolledNeeds(rows: readonly FoldRow[], needs: ReadonlyMap<string,
 }
 
 
-/** Recent's height with five places: the tree is "tight" when its rows would not fit beside that, and Recent then keeps to three. */
-export const RECENT_FULL_PX = 124;
-
-/**
- * The recent places as the sidebar shows them (pure): the app's list (never the place you are in, each place once, told apart by id), at most
- * `max`. A name two shown places share (or the open place's) says where each sits: its parent in the tree, or "Other rooms".
- */
-export function recentLabels(recent: readonly NavRecent[], rows: readonly (FoldRow & { name: string })[], here: string | null, max: number): { r: NavRecent; label: string }[] {
-  const shown = recent.slice(0, max);
-  const k = (t: string) => t.trim().toLowerCase();
-  const count = new Map<string, number>();
-  for (const t of [...shown.map((r) => r.title), ...(here ? [here] : [])]) count.set(k(t), (count.get(k(t)) ?? 0) + 1);
-  const parentOf = (path: string) => {
-    const i = rows.findIndex((r) => r.path === path);
-    for (let j = i - 1; i > 0 && j >= 0; j--) if (rows[j].depth < rows[i].depth) return rows[j].name;
-    return null;
-  };
-  return shown.map((r) => {
-    const where = (count.get(k(r.title)) ?? 0) > 1 ? (r.path ? parentOf(r.path) : r.room ? "Other rooms" : null) : null;
-    return { r, label: where ? `${r.title} · ${where}` : r.title };
-  });
-}
-
 const read = <T,>(key: string, parse: (raw: string | null) => T): T => { try { return parse(localStorage.getItem(key)); } catch { return parse(null); } };
 const write = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* this session only */ } };
 
@@ -116,21 +76,4 @@ export function useFolds(): [Folds, (path: string, open: boolean) => void, (path
   // an area folded by default (no choice saved) that holds the open room is open anyway (`isOpen`); a group with no such rule ("Other rooms") needs it said
   const folds = useMemo(() => { const n = { ...saved }; for (const p of revealed) if (n[p] !== true) n[p] = true; return n; }, [saved, revealed]);
   return [folds, set, reveal];
-}
-
-/** The sidebar's width as kept on this device (T-200: the tree unfolded beside a note takes it even when the sidebar is kept hidden). */
-export const storedSidebarWidth = (): number => read(SIDEBAR_KEY, parseSidebar).width;
-
-export function useSidebar(): [SidebarState, (s: Partial<SidebarState>) => void] {
-  const [state, setState] = useState<SidebarState>(() => read(SIDEBAR_KEY, parseSidebar));
-  const update = useCallback((s: Partial<SidebarState>) => setState((c) => { const n = { ...c, ...s, width: clampWidth(s.width ?? c.width) }; write(SIDEBAR_KEY, n); return n; }), []);
-  useEffect(() => { document.documentElement.style.setProperty("--th-nav-w", `${state.hidden ? 34 : state.width}px`); }, [state]);
-  return [state, update];
-}
-
-/** Rooms / Projects / Areas, remembered per device. */
-export function useSidebarView(): [SidebarView, (v: SidebarView) => void] {
-  const [view, setView] = useState<SidebarView>(() => read(VIEW_KEY, parseView));
-  const set = useCallback((v: SidebarView) => { setView(v); write(VIEW_KEY, v); }, []);
-  return [view, set];
 }

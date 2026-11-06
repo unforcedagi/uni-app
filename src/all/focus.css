@@ -94,3 +94,5 @@
 
 .all-focus .sr-chat { border-top: var(--g-hair) solid var(--g-line); }
 :root[data-screen="ink"] .all-focus .sr-chat { border-top: 0; }
+/* the details are a page that scrolls: "All of its work" sits under what it sums up, not stuck to the sheet's foot */
+.fx-cp .cp-foot { position: static; margin-top: 4px; padding: 6px 0 0; border-top: 0; background: none; }
