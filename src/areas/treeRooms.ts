@@ -115,11 +115,12 @@ function roomForms(part: string): string[] {
   return [...new Set(out.flatMap((f) => [f, f.toLowerCase()]))];
 }
 const namesIn = (v: unknown): string[] => (typeof v === "string" ? v.split(",").map((x) => roomSlug(x).replace(/\s*\(.*$/, "").trim().toLowerCase()).filter(Boolean) : []);
-const ROOM_NAMES = ["room", "rooms", "room_was", "room_renamed_from", "room_fallback"];
+// not room_fallback: that is a room it only borrows
+const ROOM_NAMES = ["room", "rooms", "room_was", "room_renamed_from"];
 const nodeRoomNames = (n: Area) => ROOM_NAMES.flatMap((k) => namesIn(n.metadata[k]));
 
 /** What a run is checked against, kept per tree: the node resolver, the rooms' other names (old and sub ones) and the folders really under a private place. */
-type RunFacts = { node: (ref: unknown) => string | null; rooms: Set<string>; folders: Set<string>; clues: Map<string, boolean> };
+type RunFacts = { node: (ref: unknown) => string | null; rooms: Set<string>; folders: Set<string>; clues: WeakMap<readonly RoomRef[], Map<string, boolean>> };
 const runFacts = new WeakMap<Tree, RunFacts>();
 const folderKey = (v: unknown) => (typeof v === "string" ? v.trim().replace(/^\/(?:home|Users)\/[^/]+\//, "~/").replace(/\/+$/, "") : "");
 function factsOf(tree: Tree): RunFacts {
@@ -130,7 +131,7 @@ function factsOf(tree: Tree): RunFacts {
   // a name a public area also goes by doesn't make a run private: that room is the public area's
   const open = new Set(known.filter((n) => n.kind === "area" && !isPrivatePath(tree, n.path)).flatMap(nodeRoomNames));
   const inside = known.filter((n) => under.has(n.path));
-  const facts: RunFacts = { node: pathResolver(known), clues: new Map(),
+  const facts: RunFacts = { node: pathResolver(known), clues: new WeakMap(),
     rooms: new Set(inside.flatMap(nodeRoomNames).filter((r) => !open.has(r))),
     folders: new Set(inside.flatMap((n) => [folderKey(n.metadata.folder), folderKey(n.metadata.repo)]).filter(Boolean)) };
   runFacts.set(tree, facts);
@@ -143,12 +144,17 @@ function factsOf(tree: Tree): RunFacts {
  */
 export function roomCluePrivate(tree: Tree | null, clue: unknown, rooms: readonly RoomRef[], uni: RoomRef | null): boolean {
   const facts = tree ? factsOf(tree) : null;
-  const key = JSON.stringify(clue ?? null);
-  const known = facts?.clues.get(key);
+  // answers hold only for these rooms: the rooms arrive after the tree, and an answer read without them says nothing about them
+  const memo = facts ? facts.clues.get(rooms) ?? new Map<string, boolean>() : null;
+  if (facts && memo) facts.clues.set(rooms, memo);
+  const key = `${uni?.id ?? ""}|${JSON.stringify(clue ?? null)}`;
+  const known = memo?.get(key);
   if (known !== undefined) return known;
   const parts = (Array.isArray(clue) ? clue : [clue]).filter((v): v is string => typeof v === "string").flatMap((v) => v.split(",")).map((v) => roomSlug(v)).filter(Boolean);
-  const out = parts.some((p) => p.split("/").some((w) => isPrivateName(w.replace(/\s*\(.*$/, "").trim())) || (!!tree && roomForms(p).some((f) => facts!.rooms.has(f) || isPrivateRoom(tree, f, rooms, uni))));
-  facts?.clues.set(key, out);
+  // a room's id is read as the room's name too: a note may hold only the id
+  const named = parts.flatMap((p) => { const r = rooms.find((x) => x.id === p); return r ? [p, roomSlug(r.name)] : [p]; });
+  const out = named.some((p) => p.split("/").some((w) => isPrivateName(w.replace(/\s*\(.*$/, "").trim())) || (!!tree && roomForms(p).some((f) => facts!.rooms.has(f) || isPrivateRoom(tree, f, rooms, uni))));
+  memo?.set(key, out);
   return out;
 }
 
@@ -161,9 +167,10 @@ export function runIsPrivate(tree: Tree, run: RunClues, rooms: readonly RoomRef[
   if (run.nodes.some((ref) => { const at = facts.node(ref); return (!!at && isPrivatePath(tree, at)) || !!looseRef(ref)?.split("/").some(isPrivateName); })) return true;
   return facts.folders.has(folderKey(run.folder));
 }
-/** The runs a level other than a private place doesn't list. Before the areas are read nothing can be told from a room's id, so any run naming a room waits (as tasks do, r21). */
-export function privateRunIds(tree: Tree | null, runs: readonly { id: string; node: string; task: string | null; rooms?: readonly unknown[]; project?: string | null; folder?: string | null }[], nodeOfTask: ReadonlyMap<string, string>, rooms: readonly RoomRef[], uni: RoomRef | null): Set<string> {
-  return new Set(runs.filter((r) => (tree
+/** The runs a level other than a private place doesn't list. Before the areas and rooms are read nothing can be told from a room's id, so any run naming a room waits (as
+ *  tasks do, r21); and before the tasks are read, any run naming a task. */
+export function privateRunIds(tree: Tree | null, runs: readonly { id: string; node: string; task: string | null; rooms?: readonly unknown[]; project?: string | null; folder?: string | null }[], nodeOfTask: ReadonlyMap<string, string>, rooms: readonly RoomRef[], uni: RoomRef | null, tasksKnown = true): Set<string> {
+  return new Set(runs.filter((r) => (!tasksKnown && !!r.task) || (tree
     ? runIsPrivate(tree, { rooms: r.rooms ?? [], nodes: [r.project, r.node, r.task ? nodeOfTask.get(r.task.toUpperCase()) : null], folder: tree.nodes.get(r.node)?.kind === "project" ? null : r.folder }, rooms, uni)
     : (r.rooms ?? []).length > 0)).map((r) => r.id));
 }

@@ -53,6 +53,9 @@ const listeners = new Set<() => void>();
 const emit = () => { for (const l of listeners) l(); };
 const set = (next: Partial<WorkState>) => { state = { ...state, ...next }; emit(); };
 let tasks: { rows: RawNote[]; whole: boolean; at: number } | null = null;
+/** The account's rooms (the app tells the store), and the notes of the last read: the rooms often arrive just after it. Memory only. */
+let hubRooms: readonly { id: string; name: string }[] = [];
+let lastRead: Sources | null = null;
 let inflight: Promise<void> | null = null;
 /** Whose work this is: the identity, set by the app (null: signed out or not known yet, so nothing is read or shown). */
 let identity: string | null = null;
@@ -169,7 +172,8 @@ export function refreshWork(): Promise<void> {
       }
       if (fresh || !taskRead.whole) tasks = { rows: taskRows, whole: taskRead.whole, at: fresh ? Date.now() : tasks!.at };
       const src: Sources = { nodes: nodes.rows, runs: runs.rows, tasks: taskRows };
-      const work = workFrom(src);
+      lastRead = src;
+      const work = workFrom({ ...src, rooms: hubRooms });
       const partial = [...(nodes.complete ? [] : ["Some projects aren't loaded"]), ...runs.partial,
         ...(missing ? [`${missing} session${missing === 1 ? "" : "s"} couldn't be placed under a project`] : [])];
       writeCache(owner, { work, at: t0, partial });
@@ -185,7 +189,7 @@ export function refreshWork(): Promise<void> {
 /** The work of a new owner (or none): what this device kept for that owner, never another's. Reads still out are dropped. */
 function adopt(owner: string | null, notify = true) {
   generation++;
-  loadedFor = owner; tasks = null; inflight = null;
+  loadedFor = owner; tasks = null; inflight = null; lastRead = null;
   // T-304: a session's steps are the same owner's, and go with the work
   setFeedOwner(owner, owner ? activeProfile().vault : "");
   for (const t of later) clearTimeout(t);
@@ -215,9 +219,16 @@ export function setWorkOwner(id: string | null) {
   if (owner && users > 0) void refreshWork();
 }
 
+/** The account's rooms, which say what a room's id on a run note is. New rooms place the last read again, at once. */
+export function setWorkRooms(rooms: readonly { id: string; name: string }[]) {
+  hubRooms = rooms;
+  if (lastRead && loadedFor && loadedFor === currentOwner()) set({ work: workFrom({ ...lastRead, rooms }) });
+}
+
 /** Forget this device key: the device copies (every owner's), the work in memory, the pending asks, and any read still out. */
 export function forgetWork() {
   identity = null;
+  hubRooms = [];
   adopt(null);
   dropCaches();
 }

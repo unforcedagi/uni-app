@@ -22,7 +22,8 @@ import { END_WHYS, isFolder, makeProject, ModelError, UNFILED, type Area, type E
 export type Gap = { name: string; area: string | null; areaPath: string | null; why: "no folder" | "no area" | "area has no room" };
 export type LiveArea = Area & { private: boolean };
 export type LiveWork = Work & { areas: LiveArea[]; gaps: Gap[] };
-export type Sources = { nodes: readonly RawNote[]; runs: readonly RawNote[]; tasks: readonly RawNote[] };
+export type Sources = { nodes: readonly RawNote[]; runs: readonly RawNote[]; tasks: readonly RawNote[];
+  /** The rooms the account has, by id and name: a run note may hold only a room's id, and a node may hold only its name. */ rooms?: readonly { id: string; name: string }[] };
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 const meta = (n: RawNote): Record<string, unknown> => (n.metadata && typeof n.metadata === "object" ? (n.metadata as Record<string, unknown>) : {});
@@ -241,7 +242,11 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const up = n ? areaUp(n) : null;
     return reachable(up) ? up : null;
   };
-  const areaOfRoom = (v: unknown): string | null => { const hit = roomKey(v) ? byRoom.get(roomKey(v)) ?? null : null; return reachable(hit) ? hit : null; };
+  const areaOfRoom = (v: unknown): string | null => {
+    const key = roomKey(v);
+    const hit = key ? byRoom.get(key) ?? byRoom.get(roomKey(src.rooms?.find((r) => r.id === str(v))?.name)) ?? null : null;
+    return reachable(hit) ? hit : null;
+  };
   const projectArea = new Map(projects.map((p) => [p.id, p.area]));
   /** The area a run with no project belongs to, from the surest clue on it down; null when nothing says. */
   const areaOfRun = (m: Record<string, unknown>, task: string | null, viaFolder: string[] | undefined): string | null => {
@@ -249,7 +254,7 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     return areaOfNode(str(m.project)) ?? areaOfNode(str(m.node)) ?? (task ? areaOfNode(taskNode.get(task) ?? null) : null) ?? (reachable(shared) ? shared : null)
       ?? areaOfRoom(m.channel) ?? areaOfRoom(m.starter_channel) ?? areaOfRoom(m.room) ?? areaOfRoom(m.starter_room);
   };
-  const roomRefs = src.nodes.flatMap((n) => { const c = str(meta(n).channel); return c ? c.split(",").map((id) => ({ id: id.trim(), name: (str(meta(n).room) ?? lastName(str(n.path) ?? "")).split(",")[0].trim() })) : []; });
+  const roomRefs = [...(src.rooms ?? []), ...src.nodes.flatMap((n) => { const c = str(meta(n).channel); return c ? c.split(",").map((id) => ({ id: id.trim(), name: (str(meta(n).room) ?? lastName(str(n.path) ?? "")).split(",")[0].trim() })) : []; })];
   /** Whether any clue on a run touches a private place: the same rule the app's other lists use. A folder counts only when no node says where it belongs. */
   const touchesPrivate = (m: Record<string, unknown>, task: string | null, byNode: string | null) => {
     const refs = [str(m.project), str(m.node), task ? taskNode.get(task) ?? null : null];

@@ -292,6 +292,25 @@ check("no run is ever invisible: its project, else its area (node, task's node, 
     assert.deepEqual([...privateRunIds(t, rows, new Map([["T-960", "Areas/Sanctum/A note beneath"]]), [], null)].sort(), ["done", "named", "sub", "task"], "the public one stays listed");
     assert.deepEqual([...privateRunIds(null, rows, new Map(), [], null)].sort(), ["pub", "sub", "task"], "with no tree, any room clue waits");
   });
+  check("a note holding only a room's id: the account's rooms say what it is, for a sub-room, an old name and a room only a private project names", () => {
+    const withRoomOnly = [...nodes, note("p-roomonly", "Projects/Room only", ["node", "project"], { parent: "area-sanctum", room: "room-only-vow", folder: "~/quiet/only" })];
+    const rooms = [{ id: "hub-sub", name: "stillwater/build" }, { id: "hub-old", name: "old-stillwater" }, { id: "hub-only", name: "room-only-vow" }, { id: "hub-guild", name: "guild" }];
+    const placed = (channel: string) => { const w = workFrom({ nodes: withRoomOnly, runs: [run("r-id", { node: "node-uni", channel, starter_room: "uni" })], tasks, rooms }, NOW); return w.projects.find((p) => p.id === w.sessions[0].project)!.area; };
+    for (const c of ["hub-sub", "hub-old", "hub-only"]) assert.equal(placed(c), "area-sanctum", c);
+    assert.equal(placed("hub-guild"), "area-guild", "and a public room's id places it in its area");
+  });
+  check("an answer read before the rooms arrived isn't kept once they have", () => {
+    const list = nodes.flatMap((n) => { const a = parseArea(n as never) ?? parseProject(n as never); return a ? [a] : []; });
+    const t = buildTree(list);
+    const row = [{ id: "by-id", node: "", task: null, rooms: ["hub-sub"] }];
+    assert.deepEqual([...privateRunIds(t, row, new Map(), [], null)], [], "with no rooms, an id says nothing");
+    assert.deepEqual([...privateRunIds(t, row, new Map(), [{ id: "hub-sub", name: "stillwater/build" }], null)], ["by-id"], "the same tree, the rooms here: private");
+  });
+  check("before the tasks are read, a run naming a task waits", () => {
+    const list = nodes.flatMap((n) => { const a = parseArea(n as never) ?? parseProject(n as never); return a ? [a] : []; });
+    const rows = [{ id: "tasked", node: "Areas/Guild", task: "T-960", rooms: ["guild"] }, { id: "free", node: "Areas/Guild", task: null, rooms: ["guild"] }];
+    assert.deepEqual([...privateRunIds(buildTree(list), rows, new Map(), [], null, false)], ["tasked"]);
+  });
   check("a run on a public project keeps its project when only a shared folder could say otherwise", () => {
     const w = workFrom({ nodes, runs: [run("r-shared", { node: "p-shared-a", folder: "~/both/here" })], tasks }, NOW);
     assert.equal(w.sessions[0].project, "p-shared-a");

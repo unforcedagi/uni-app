@@ -49,6 +49,7 @@ import { AllFocusSheet, type AllFocusState } from "../all/AllFocus";
 import { AllEmpty, FrontDoor, type Door, type Needs, type NewRoom } from "../projects/FrontDoor";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
+import { setWorkRooms } from "../projects/store";
 import { plainWords } from "../projects/live";
 import "./tree.css";
 
@@ -333,7 +334,10 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
    *  node with no row counts on its nearest ancestor's (r13), so the dots under a level add up to its Needs you. */
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
   // the runs that are a private place's by any clue on them (the same rule as the sessions), kept off every other level's lists
-  const privateRuns = useMemo(() => privateRunIds(data?.tree ?? null, tasks.runs, new Map(tasks.tasks.flatMap((t): [string, string][] => { const id = taskTitle(t.title).id?.toUpperCase(); return id ? [[id, t.node]] : []; })), roomRefs, uniRef), [data?.tree, tasks.runs, tasks.tasks, roomRefs, uniRef]);
+  // (every task read, snoozed ones too: `tasks.tasks` holds only what shows now)
+  const privateRuns = useMemo(() => privateRunIds(roomsPending ? null : data?.tree ?? null, tasks.runs, new Map((tasks.all ?? []).flatMap((t): [string, string][] => { const id = taskTitle(t.title).id?.toUpperCase(); return id ? [[id, t.node]] : []; })), roomRefs, uniRef, tasks.ready), [roomsPending, data?.tree, tasks.runs, tasks.all, tasks.ready, roomRefs, uniRef]);
+  // the sessions read the rooms' names too, for a run note that holds only a room's id
+  useEffect(() => { setWorkRooms(roomRefs); }, [roomRefs]);
   const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), confirm.of, tasks.runs), [tasks.tasks, tasks.runs, rowPaths, tasks.tree, data?.tree, confirm.of]); // eslint-disable-line react-hooks/exhaustive-deps
   // T-335: what is new in each room (the rooms list's counts; opening a room marks it read, which clears them), and the approvals waiting
   // in each room (the key badge, apart from the tasks' dot): on the owning node's row, or on the room itself when no node owns it
