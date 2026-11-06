@@ -383,8 +383,8 @@ test('Two quick taps on delete take one section', async ({ page }) => {
   const box = (await button(page, 'Delete section 2').boundingBox())!;
   const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
   const tap = () => touch ? page.touchscreen.tap(x, y) : page.mouse.click(x, y);
-  await tap();
-  await tap();
+  // sent together: on a busy box two awaited taps can land further apart than a person's double tap
+  await Promise.all([tap(), tap()]);
   await wait(page, 300);
   await expect(card.getByRole('listitem')).toHaveCount(2);
 });
