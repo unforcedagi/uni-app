@@ -5,8 +5,9 @@
 import { useCallback, useEffect, useState } from "react";
 
 const KEY = "ta-grey";
-/** The Daylight's model name as device listings give it. Only ever read to choose the look of the games. */
-const GREY_MODELS = /(^|[^a-z0-9])(dc-?1|daylight)([^a-z0-9]|$)/i;
+/** The Daylight, by the names it goes by: DC-1 in device listings, jagar as its device codename. Its exact model string
+ *  isn't confirmed from a real one, so the switch on the home stays the sure way. Only ever read to choose the look. */
+const GREY_MODELS = /(^|[^a-z0-9])(dc-?0?1|daylight|jagar)([^a-z0-9]|$)/i;
 
 export type GreyWhy = "ink" | "monochrome" | "model";
 
