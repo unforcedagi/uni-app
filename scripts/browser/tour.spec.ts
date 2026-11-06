@@ -396,7 +396,7 @@ test('50-confirm-dialog-unsaved', async ({ page }) => {
   await tap(page, pane.getByRole('button', { name: 'Edit' }));
   await pane.getByRole('textbox', { name: 'Note content' }).fill('# Spring planting plan\n\nA changed line.');
   await tap(page, pane.getByRole('button', { name: 'Close note' }));
-  await expect(page.getByRole('alertdialog', { name: 'Confirm tab close' })).toBeVisible();
+  await expect(page.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeVisible();
   await snap(page, '50-confirm-dialog-unsaved');
 });
 
