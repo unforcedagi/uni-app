@@ -5,7 +5,7 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas, leaveFrontDoor, showTree, toOldHome } from './areasFixture';
-import { railGo } from './railGo';
+import { openRailMore, railGo } from './railGo';
 
 const SHOTS = 'scripts/browser/__shots__/simple';
 /** r27: `__arrive(…, -426600)` puts a message at 2026-10-14 08:30Z (the fixture's clock is pinned at Oct 9 10:00Z): after a record written at 08:00 that day */
@@ -147,7 +147,7 @@ test.describe('simple', () => {
     await shot(page, 'companion');
     // an item opens its task sheet
     await needs.locator('.cp-need[data-id="T-07"]').click();
-    await expect(taskDialog(page).first()).toContainText('T-07');
+    await expect(taskDialog(page).first()).not.toContainText('T-07'); // T-335 as Aaron: never a task number
     await page.keyboard.press('Escape');
   });
 
@@ -677,7 +677,7 @@ test.describe('simple', () => {
     await rail.getByRole('button', { name: 'Journal' }).click();
     await expect(page.locator('.journal-tab-content')).toBeVisible();
     await shot(page, 'journal');
-    await rail.getByRole('button', { name: 'Settings' }).click();
+    await railGo(page, 'Settings');
     await expect(page.locator('.settings')).toBeVisible();
     // r12: one layout. No Home layout picker, no Map, Octopus or Classic anywhere
     await expect(page.locator('.settings')).not.toContainText(/Home layout|Octopus|Classic|Map \(/);
@@ -783,11 +783,12 @@ test.describe('simple', () => {
     const rail = page.getByRole('navigation', { name: 'Main navigation' });
     await expect(rail.getByRole('button', { name: 'Rooms' })).toHaveCount(0);
     // every place the rail offers, on a phone too (Vault and Search are on the rail now that Rooms is gone)
+    await openRailMore(page);
     for (const n of ['Uni', 'Journal', 'Vault', 'Search', 'Settings']) await expect(rail.getByRole('button', { name: n, exact: true })).toBeVisible();
     await expect(page.locator('aside.rooms .room-text small')).toHaveCount(0); // no avatar list with previews
     await expect(page.locator('section.conversation')).toHaveCSS('animation-name', 'none');
     await rail.getByRole('button', { name: 'Settings' }).click();
-    await expect(page.locator('.settings .connection')).toBeVisible();
+    await expect(page.locator('.settings .connection')).toHaveCount(1); // quiet when all is fine; there for a screen reader
     await expect(page.locator('.settings .identity')).toBeVisible();
   });
 
@@ -1432,13 +1433,13 @@ test.describe('simple', () => {
     await expect(sheet.locator('.task-steps li').first()).toHaveText('Read Follow-up notes');
     // r22 (Codex 7): the request is said once; the record's title is in Details
     await expect(sheet.locator('.task-sub-title')).toHaveText('Review the ATLAS follow-up'); // r26: the title is the quiet line under the heading
-    await expect(sheet.locator('.task-record')).toHaveText('Task T-13: Review the ATLAS follow-up');
+    await expect(sheet.locator('.task-record')).toHaveText('Review the ATLAS follow-up');
     await expect(sheet.locator('.task-steps')).toContainText('Follow-up notes'); // the note id reads as its title, and opens
     await expect(sheet).not.toContainText(/T-13|cdf67944|via api|Changed by|01M3ZK2R6A6C62M1ANJCSQNG3M/, { useInnerText: true });
     const details = sheet.locator('details.task-details');
     await expect(details).not.toHaveAttribute('open', '');
     await details.locator('summary').click();
-    await expect(details).toContainText('Task T-13');
+    await expect(details).not.toContainText('T-13');
     await expect(details).toContainText(/Last changed, /);
     await expect(details).not.toContainText(/cdf67944|api/);
     // after this device writes to a task, it says "by you"
@@ -1543,7 +1544,7 @@ test.describe('simple', () => {
 
   test('r12: with the tree taller than the column, Recent keeps to three places and never takes the tree\'s room', async ({ page }) => {
     test.skip(!wide(page), 'sidebar column');
-    await page.setViewportSize({ width: 1280, height: 480 });
+    await page.setViewportSize({ width: 1280, height: 410 });
     await boot(page);
     const nav = scope(page);
     for (const name of ['ATLAS', 'Learn Vibe Build', 'Techne', 'Atlas Institute', 'Unforced Development', 'Atlas']) await openRoom(page, name);
@@ -1668,7 +1669,7 @@ test.describe('simple', () => {
     // the action leads, the title sits under it, and its own action fills the room's composer (never sends); "I did this" stays secondary
     await expect(sheet.locator('h2')).toHaveText('Say go to send the SOW to Casey');
     await expect(sheet.locator('.task-record')).toContainText('SOW for the commons grant'); // r22: the title is in Details
-    await expect(sheet.locator('.task-facts')).toContainText('due Oct 20');
+    await expect(sheet.locator('.task-facts dd').last()).toHaveText('Oct 20');
     // r26: the task changed under the open sheet: it says so, and its answers wait for a reload
     await expect(sheet.locator('[data-moved]')).toHaveText(/^This changed since you opened it\./);
     await expect(sheet.locator('.task-do.primary')).toHaveCount(0);
@@ -2457,7 +2458,7 @@ test.describe('r17', () => {
     const msg = chat.locator('.message').filter({ hasText: 'The hosting call is yours' });
     // the marker is not shown in the text; the card names the task it decides
     await expect(msg.locator('.md')).not.toContainText('T-140');
-    await expect(msg.locator('.decision-card .cc-meta')).toContainText('Decision · T-140'); // T-335: the compact card's meta line
+    await expect(msg.locator('.decision-card .cc-meta')).toContainText('Decision ·'); // T-335: the compact card's meta line, no task number
     await expect(msg.getByRole('group', { name: /^Pick one:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
     await expect(chat.locator('.message .decision-card')).toHaveCount(1);
     // the decision's sheet (Needs you) still answers it, with the same options
@@ -2878,7 +2879,7 @@ test.describe('r19', () => {
     expect(seen[1]).toEqual(seen[0]);
     expect(seen[2]).toEqual(seen[0]);
     expect(seen[0][0]).toBe('Reply to Sebastian in your existing thread that the PTSA letter went out Oct 2, before the Oct 20 ZBA meeting (skip if already done)');
-    expect(seen[0][1]).toBe(`Task ${title.replace(/^(T-\d+) /, '$1: ')}`);
+    expect(seen[0][1]).toBe(title.replace(/^T-\d+ /, ''));
   });
 
   test('in a short window the sheet\'s primary action and "I did this" stay in view: a sticky footer', async ({ page }) => {
@@ -3672,7 +3673,7 @@ test.describe('r22', () => {
     const text = await sheet.evaluate((el) => (el as HTMLElement).innerText);
     expect(text.split('Forward #cohere').length - 1).toBe(1);
     await sheet.locator('.task-details summary').click();
-    await expect(sheet.locator('.task-record')).toHaveText(/^Task T-113: Companion Today redesign/);
+    await expect(sheet.locator('.task-record')).toHaveText(/^Companion Today redesign/);
     // the link opens (nothing is written)
     await open.click();
     await expect.poll(async () => (await calls(page, 'open_link')).length).toBeGreaterThan(0);
