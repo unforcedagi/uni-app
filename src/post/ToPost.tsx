@@ -3,6 +3,7 @@
 // the post as it will look, whose voice it is in a word and a shape, and Approve, Schedule, Edit, Not this.
 // Approve and Schedule go to Rust, which re-reads the note, checks it, asks this device to confirm, and signs Aaron's
 // approval over exactly that post; uni-post on uni posts it only on that signature. Nothing here posts anything.
+import { RefreshIcon } from "../Icons";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { splitLinks } from "../areas/linkText";
@@ -135,7 +136,7 @@ export default function ToPost({ vault, node, backTo, onBack }: { vault: string;
     <header className="note-bar tp-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
       <span className="tp-title"><strong>To post</strong>{node && <small> · {node.split("/").pop()}</small>}</span>
-      <button className="note-action" onClick={() => void load()}>Refresh</button>
+      <button className="note-action note-refresh" aria-label="Refresh" title="Refresh" onClick={() => void load()}><RefreshIcon /></button>
     </header>
     {said && <p className="tp-said" role="status">{said}</p>}
     {problem && <p className="note-error" role="alert">Couldn't read the posts: {problem}</p>}

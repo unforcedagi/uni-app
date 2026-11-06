@@ -243,7 +243,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
     <div ref={box} className="task-sheet" role="dialog" aria-modal="true" aria-labelledby="task-sheet-title" tabIndex={-1}>
       {/* r23: the body scrolls in its own region above the footer, so nothing in it (a cue, a step) is ever drawn under the footer */}
       <div className="task-body">
-      <p className="task-kind">{decision ? `Decision${dflt ? ` (${dflt})` : ""}` : "Task"}{` · in ${room ? `#${room.name.replace(/^#/, "")}` : nodeName(task.node)}`}</p>
+      <p className="task-kind">{decision ? `Decision${dflt ? ` · ${dflt}` : ""}` : "Task"}{` · in ${room ? `#${room.name.replace(/^#/, "")}` : nodeName(task.node)}`}</p>
       {/* r27: when it was asked, first: an unconfirmed request says so in this one quiet line (no cue, no "nothing related found") */}
       {unconfirmed ? <p className="task-asked task-unconfirmed" data-fresh="unconfirmed" data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{unconfirmedLine(asked, conf.why)}</p>
         : (asked || overdue) && <p className="task-asked" data-fresh={gated ? (fresh === "confirmed" ? "current" : "unconfirmed") : undefined} data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{capFirst((overdue ? dueLine(task.due) : asked) ?? "")}</p>}
@@ -304,9 +304,10 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       {decideError && !gone && <p className="task-gone task-changed" data-moved={moved || undefined} role="alert">{decideError}{moved && <> <button type="button" className="task-link" onClick={reload}>Reload</button></>}</p>}
       <dl className="task-facts">
         {/* r19: a record to tidy is Uni's to fix, never "Needs your decision"; r20: nor is one not read yet */}
-        <dt>Status</dt><dd>{missing ? "Can't be checked: a note is missing" : decision && (checking || unavailable) ? "Not read yet" : tidy ? "Needs rewording by its room: not a request yet" : stateLine(task, (w) => isMe(w), OWNER)}</dd>
+        {(() => { const line = missing ? "Can't be checked: a note is missing" : decision && (checking || unavailable) ? "Not read yet" : tidy ? "Needs rewording by its room: not a request yet" : stateLine(task, (w) => isMe(w), OWNER);
+          return line === "Open" || line === "Needs your decision" ? null : <><dt>Status</dt><dd>{line}</dd></>; })()}
         {!isMe(task.owner) && <><dt>{isMe(task.waitingOn) ? "Task of" : "With"}</dt><dd>{OWNER(task.owner)}</dd></>}
-        {task.due && <><dt>Due</dt><dd>{dueLine(task.due)}</dd></>}
+        {task.due && <><dt>Due</dt><dd>{dueLine(task.due)?.replace(/^due /, "")}</dd></>}
       </dl>
       {/* r17: housekeeping sits below the real action, smaller and quieter. r20: inside the scrolling body, above the sticky footer, so a short
           window never hides it behind the footer */}
@@ -321,7 +322,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
         {/* r18: the note's own words (the wall a row used to carry under its action) and, under "Check", the step it doubts */}
         {about && <p className="task-about"><RefText text={about} vault={vault} /></p>}
         {(unsure || (decision && tidy)) && !checking && task.next && <p className="task-about">Its step: <RefText text={task.next} vault={vault} /> <button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>This task's note ›</button></p>}
-        {(tid || act) && <p className="task-record">{decision ? "Decision" : "Task"}{tid ? ` ${tid}` : ""}{act ? `: ${withoutCut(rest)}` : ""}</p>}
+        {act && <p className="task-record">{withoutCut(rest)}</p>}
         {at && <p>Last changed{by ? ` by ${by}` : ""}, {at}</p>}
       </details>}
       </div>

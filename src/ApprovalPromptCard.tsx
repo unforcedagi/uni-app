@@ -13,7 +13,7 @@ export type PromptState = "waiting" | "checking" | "unchecked" | "past" | Approv
 
 export function ApprovalPromptCard({ a, state }: { a: Approval; state: PromptState }) {
   const cmd = commandLine(a);
-  const lead = a.kind === "smart-deny" ? "Override needs your OK" : "Hermes needs your OK";
+  const lead = a.kind === "smart-deny" ? "Override needs your OK" : "Uni needs your OK";
   const label = `${lead}: ${cmd}`;
   const details = <>
     <pre className="cc-pre">{a.command}</pre>

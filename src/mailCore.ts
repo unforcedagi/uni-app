@@ -42,7 +42,7 @@ export function scopeKey(s: Scope): string {
 
 /** The tag on every row, group and header: a word, not a colour. */
 export function whoTag(who: Who): string {
-  return who === "uni" ? "UNI" : "YOU";
+  return who === "uni" ? "Uni" : "You";
 }
 
 /** "Your mail" / "Uni's mail", for labels that are read aloud. */

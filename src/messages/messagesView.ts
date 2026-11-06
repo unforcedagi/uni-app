@@ -130,11 +130,11 @@ export function sendWords(s: SendState): string | null {
 export function statusWords(s: Status | null): string {
   if (!s) return "";
   switch (s.state) {
-    case "live": return "LIVE";
-    case "connecting": return "CONNECTING";
-    case "offline": return "OFFLINE";
-    case "error": return "NOT SYNCING";
-    case "signed_out": return "SIGNED OUT";
+    case "live": return "Live";
+    case "connecting": return "Connecting";
+    case "offline": return "Offline";
+    case "error": return "Not syncing";
+    case "signed_out": return "Signed out";
   }
 }
 
@@ -235,9 +235,9 @@ export const shownFlows = (network: string, flows: Flow[]) => flows.filter((f) =
 export function linkWords(s: LinkState): string {
   switch (s) {
     case "checking": return "CHECKING";
-    case "linked": return "LINKED";
-    case "not_linked": return "NOT LINKED";
-    case "needs_attention": return "NEEDS ATTENTION";
+    case "linked": return "Linked";
+    case "not_linked": return "Not linked";
+    case "needs_attention": return "Needs attention";
     case "unavailable": return "NOT RUNNING";
   }
 }

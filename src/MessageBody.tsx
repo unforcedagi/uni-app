@@ -6,6 +6,7 @@ import { useNoteOpener } from "./noteLinks";
 import { splitMarkers } from "./chatMarkers";
 import { useNoteTitle } from "./areas/noteRefs";
 import { CodeBlock } from "./CodeBlock";
+import { refLabel } from "./vaultlinks";
 
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 /** A cell that is a number (an amount, a count, a share, a measure). */
@@ -32,13 +33,13 @@ function TableWrap({ children }: { children: ReactNode }) {
  *  the chip's tooltip). */
 function NoteChipLabel({ id, vault }: { id: string; vault: string }) {
   const t = useNoteTitle({ vault, id });
-  return <>{t ?? "the linked note"}</>;
+  return <>{t?.replace(/^\d{4}-\d{2}-\d{2}\s+/, "") ?? "the linked note"}</>;
 }
 const bareId = (n: { ref: { ref: string; vault: string }; c: Inline[] }): string | null => {
   const id = n.ref.ref.trim();
   if (!ULID.test(id) || n.c.length !== 1 || n.c[0].t !== "text") return null;
   const label = n.c[0].v.trim();
-  return label === id || label === `${n.ref.vault}:${id}` ? id : null;
+  return label === id || label === `${n.ref.vault}:${id}` || label === refLabel({ hub: null, vault: n.ref.vault, ref: id }) ? id : null;
 };
 
 function openLink(e: React.MouseEvent, href: string) {

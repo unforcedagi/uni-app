@@ -6,6 +6,7 @@
 // T-335 All v2: All is a place on the rail, reachable from every room and back, never where the app opens. A tap or a swipe on a message
 // replies in that room (or its thread) with no routing at all; the room's label is the way into the room. An unaddressed message gets the word
 // match at once and the small model's route if it answers in time (modelRoute.ts).
+import { roomTint as tint } from "../glow/roomTint";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -165,7 +166,7 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   const done = attempt && attempt.body === text ? attempt.done : null;
   // a partial send's rooms are skipped only for its own route; a reply goes where it says
   const left = target ? to : to.filter((id) => !done?.has(id));
-  const why = chosen ? "your choice" : picks.length ? picks.filter((p) => p.sure).map((p) => p.why).filter((w, i, a) => a.indexOf(w) === i).join(", ") : "";
+  const why = chosen ? "your choice" : picks.length ? picks.filter((p) => p.sure && !p.named).map((p) => p.why).filter((w, i, a) => a.indexOf(w) === i).join(", ") : "";
   // the route moved by itself just now (the model answered, a room's words changed), with the words the same: a Send already on its way was aimed
   // at the old one, so it waits a moment
   const routeKey = to.join(",");
@@ -317,7 +318,6 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
 /** T-335 chat feel: a reply this long shows its start in All, and a way into its room for the rest. */
 const isLong = (body: string) => body.length > 320 || body.split("\n").filter((l) => l.trim()).length > 4;
 /** A room's own tint, from its id: the dot on its label. */
-const tint = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 38% 42%)`; };
 
 const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named, targeted, onOpen, onTap }: { m: Message; place: string; address: string; mine: boolean; me: string | null;
   /** The first message of a run from one room: it carries the room's label. */ run: boolean; /** Says who and when (a new author, or a pause). */ named: boolean;

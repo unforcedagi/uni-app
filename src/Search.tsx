@@ -123,7 +123,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
       </label>
     </div>
     <details className="search-narrow" open={narrowed || undefined}>
-      <summary>Narrow the notes</summary>
+      <summary>Filters</summary>
       <div className="search-filters"><div role="group" aria-label="How notes match">{(["meaning", "keyword"] as const).map((m) => <button key={m} className="note-action" aria-pressed={mode === m} onClick={() => setMode(m)}>{m === "meaning" ? "Similar meaning" : "Exact words"}</button>)}</div>
       <label>Vault <select value={vault} onChange={(e) => setVault(e.target.value)}><option value="">All vaults</option>{[...new Set([...vaults, ...(initialVault ? [initialVault] : [])])].map((v) => <option key={v} value={v}>{v}</option>)}</select></label>
       <label>Folder <input value={pathPrefix} placeholder="Any folder" onChange={(e) => setPathPrefix(e.target.value)} /></label></div>
@@ -133,17 +133,15 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
         <h2 className="search-recent-h">Recent places</h2>
         <ul className="search-recent">{recent.slice(0, 5).map((r) => <li key={r.key}><button type="button" onClick={() => { r.go(); onClose(); }}>{r.title}</button></li>)}</ul>
       </>}
-      {!q && <div className="search-empty">
-        <p><strong>Search conversations and notes.</strong> Every room and thread on this device, including edits.</p>
-        <p>Notes are found by what they mean, or by their exact words.</p>
-      </div>}
+      {!q && !recent.length && <p className="search-empty">Every room on this device, and your notes.</p>}
       {q && <>
-        <h2 className="search-section">Messages{state === "searching" ? " · searching…" : state === "done" ? ` · ${hits.length}${hits.length >= 60 ? "+" : ""}` : ""}</h2>
+        {/* one line when nothing is found anywhere, a section only for what has something to show */}
+        {state === "done" && noteState === "done" && hits.length === 0 && notes.length === 0 ? <div className="search-nothing"><p>Nothing here for “{q}”.</p><small>Only rooms already on this device are searched; older history may not be here yet.</small><button type="button" className="note-action" onClick={() => void ask()} disabled={asking || asked === q}>{asked === q ? "✓ Asked Uni" : asking ? "Asking…" : "Ask Uni to look"}</button></div>
+        : (state !== "done" || hits.length > 0) && <h2 className="search-section">Messages{state === "searching" ? " · searching…" : state === "done" ? ` · ${hits.length}${hits.length >= 60 ? "+" : ""}` : ""}</h2>}
         {/* r21 (Codex 7): a failed search says so in words, with Retry; the technical reason is a detail */}
         {state === "error" && <div className="note-error" role="alert"><p>Couldn't search messages just now. <button type="button" className="cp-retry" onClick={() => setRetry((n) => n + 1)}>Retry</button></p>
           {error && <details className="note-error-more"><summary>Details</summary><p className="note-error-detail">{error}</p></details>}</div>}
-        {state === "done" && hits.length === 0 && <p className="search-none">No messages match “{q}”. Only conversations already on this device are searched; older history may not be here yet.</p>}
-        {groups.map((g) => <div key={g.channel} className="search-group">
+                {groups.map((g) => <div key={g.channel} className="search-group">
           <h3>#{g.name}</h3>
           {g.hits.map((h) => {
             const t = hitTarget(h.message);
@@ -154,13 +152,12 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
             </button>;
           })}
         </div>)}
-        <h2 className="search-section">Notes{noteState === "searching" ? " · searching…" : noteState === "done" ? ` · ${notes.length}${notes.length && notes.every((n) => n.mode === "keyword") ? " · keyword" : ""}` : ""}</h2>
-        {noteState === "done" && notes.length === 0 && <p className="search-none">No notes match “{q}”.</p>}
-        {notes.length > 0 && <div className="search-group">
+        {(noteState !== "done" || notes.length > 0) && <h2 className="search-section">Notes{noteState === "searching" ? " · searching…" : noteState === "done" ? ` · ${notes.length}` : ""}</h2>}
+                {notes.length > 0 && <div className="search-group">
           {notes.map((n) => <button key={`${n.vault}:${n.id}`} className="search-hit" onClick={() => onOpenNote(n)}
             aria-label={`Note ${n.path || n.id} in ${n.vault}`}>
             <span className="search-hit-meta"><strong>{n.path.split("/").pop() || n.id}</strong><span className="search-tag">{n.vault}</span></span>
-            <span className="search-snippet">{n.path.includes("/") && <span className="search-path">{n.path.split("/").slice(0, -1).join("/")} · </span>}{plainSnippet(n.snippet)}</span>
+            {n.path.includes("/") && <span className="search-path">{n.path.split("/").slice(0, -1).join(" › ")}</span>}<span className="search-snippet">{plainSnippet(n.snippet)}</span>
           </button>)}
         </div>}
         {noteState === "error" && <div className="search-notes">

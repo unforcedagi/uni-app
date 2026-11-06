@@ -164,7 +164,7 @@ export function DecisionCard({ id, vault, post }: Props) {
   // T-335: open, one short row: the question, its task and Context, then its media (T-260: what it's about is seen) and the options. Its
   // notes are behind details; so is the words field, which shows anyway once it holds words (they go with a tap, so never out of sight)
   return <PendingCard className="decision-card" label={`Decision: ${d.question}`} icon="❓" what={<span className="decision-q">{d.question}</span>}
-    meta={<>Decision{d.task ? ` · ${d.task}` : ""}{context && <> · {context}</>} · </>}
+    meta={<>Decision{context && <> · {context}</>} · </>}
     below={(open) => <>
       {media}
       {d.options.length >= 2

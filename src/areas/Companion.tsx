@@ -875,7 +875,7 @@ export function CompanionStrip({ open, onToggle, onSheet, behind = false, ...p }
   // r18: folded, the line is the sentence cut on a whole word (never "underway ac…"); open, it is the dated heading. r19: when anything needs
   // the user, the folded line says what is waiting first ("Needs you · 2: Say go on the deploy…"), never only a dot behind a chevron
   const waiting = p.ready && !p.note ? waitingLine(p.feed) : null;
-  const folded = p.note ?? (p.ready ? (p.stands ? (p.stands.written ? `${lastWritten(p.stands.asOf, p.stands.by)} ${withoutRawIds(p.stands.text)}` : withoutRawIds(p.stands.text)) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
+  const folded = p.note ?? (p.ready ? (p.stands ? (p.stands.written && p.stands.asOf && (p.stands.age ?? 0) >= 2 ? `${p.stands.asOf}: ${withoutRawIds(p.stands.text)}` : withoutRawIds(p.stands.text)) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
   const lineRef = useRef<HTMLParagraphElement | null>(null);
   const lineTokens = [...(p.scope ? [{ node: <b className="cp-scope">{`${p.scope}:`}</b>, space: false }] : []), ...wordTokens(folded).map((w, i) => (i === 0 && p.scope ? { ...w, space: true } : w))];
   const label = <span className="cp-line-text" title={p.stands?.text}>{open ? heading

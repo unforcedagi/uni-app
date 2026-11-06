@@ -58,7 +58,7 @@ function RoomItem({ r, selected, now, mark, onOpen }: { r: RoomRow; selected: bo
         {mark && net.mark && <><span className="msgs-net" aria-hidden="true">{net.mark}</span><span className="msgs-sr">on {net.label}</span></>}
         <time>{rowTime(r.ts, now)}</time></span>
       <span className="msgs-row-bottom">
-        {r.invited && <span className="msgs-tag">INVITE</span>}
+        {r.invited && <span className="msgs-tag">Invite</span>}
         <span className="msgs-row-preview">{previewLine(r)}</span>
         {r.unread > 0 && <span className="msgs-count" aria-label={`${r.unread} unread`}>{r.unread}</span>}
       </span>
@@ -175,10 +175,10 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
     <div className="msgs-thread-bar">
       <button type="button" className="note-action msgs-thread-back" onClick={onBack}>← Conversations</button>
       <h2 className="msgs-thread-name">{room.name}</h2>
-      {room.encrypted ? <span className="msgs-tag" title="End-to-end encrypted between the people's devices">ENCRYPTED</span>
-        : <span className="msgs-tag msgs-tag-open" title="Not end-to-end encrypted: the homeserver can read it">NOT ENCRYPTED</span>}
+      {room.encrypted ? <span className="msgs-tag" title="End-to-end encrypted between the people's devices">Encrypted</span>
+        : <span className="msgs-tag msgs-tag-open" title="Not end-to-end encrypted: the homeserver can read it">Not encrypted</span>}
     </div>
-    <p className="msgs-private" role="note"><span className="msgs-tag msgs-tag-private">PRIVATE</span> Uni can't read this conversation.</p>
+    <p className="msgs-private" role="note">Uni can't read this conversation.</p>
     {room.invited ? <div className="msgs-invite">
       <p>{room.inviter ? `${room.inviter} invited you to talk.` : "You're invited to this conversation."}</p>
       <button type="button" className="send" onClick={() => void join(room.id).catch((err) => onProblem(asMessagesErr(err)))}>Accept</button>
@@ -343,7 +343,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
   return <section className="msgs" aria-label="Messages" data-pane={pane}>
     <header className="note-bar msgs-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
-      <span className="msgs-title"><strong>Messages</strong>{signedIn && <small className="msgs-account">{status?.user_id} · <span className={`msgs-live st-${status?.state}`} role="status">{statusWords(status)}</span></small>}</span>
+      <span className="msgs-title"><strong>Messages</strong>{signedIn && <small className="msgs-account">{status?.user_id}<span className={`msgs-live st-${status?.state}`} role="status">{status?.state === "live" ? "" : ` · ${statusWords(status)}`}</span></small>}</span>
       {signedIn ? <button className="note-quiet" onClick={() => void out()}>Sign out</button> : <span className="msgs-bar-gap" />}
     </header>
     {!status && !problem ? <p className="msgs-loading" role="status">Opening Messages…</p>

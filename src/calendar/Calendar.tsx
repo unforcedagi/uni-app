@@ -5,6 +5,7 @@
 // records the sync adapters leave are listed. Offline it shows the last snapshot, read-only. Only the ops the door's
 // session offers this key are shown. Layout and marks are lifted from the T-229 prototype: shape and word before
 // colour, so it reads on the Daylight, where nothing moves.
+import { RefreshIcon } from "../Icons";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { addDays, dayKey, dayLabel, dayStart, HOUR, layoutDay, MIN, rangeLabel, ruleLabel, timeLabel, wall, zoned, type EventNote, type Instance, type Scope, type Visibility } from "./calCore.ts";
 import { allDayMoved, dragTarget, inviteWords, asCalErr, attendeesText, can, daysBetween, daysFor, DEFAULT_TZ, formTimes, fromSnapshot, sameTime, inviteeLine, invitees, invitesWaiting, newOpId, parseAttendees, partstatWords, problemText, stepFor, toShown, who, windowFor, type CalErr, type Session, type Shown, type View } from "./calView.ts";
@@ -31,11 +32,10 @@ type Ask = { verb: "Move" | "Change" | "Cancel"; inst: Shown; thisOk: boolean; r
 /** Word marks, never colour alone (e-ink). */
 function Marks({ i, short }: { i: Pick<Shown, "status" | "show_as" | "visibility">; short?: boolean }) {
   return <>
-    {i.status === "tentative" && <span className="cal-tag tag-tentative">{short ? "?" : "TENTATIVE"}</span>}
-    {i.status === "cancelled" && <span className="cal-tag tag-cancelled">{short ? "✕" : "CANCELLED"}</span>}
-    {i.show_as === "free" && !short && <span className="cal-tag tag-free">FREE</span>}
-    {i.visibility === "public" && !short && <span className="cal-tag tag-public">PUBLIC</span>}
-    {i.visibility === "shared" && !short && <span className="cal-tag tag-shared">SHARED</span>}
+    {i.status === "tentative" && <span className="cal-tag tag-tentative">{short ? "?" : "Maybe"}</span>}
+    {i.status === "cancelled" && <span className="cal-tag tag-cancelled">{short ? "✕" : "Cancelled"}</span>}
+        {i.visibility === "public" && !short && <span className="cal-tag tag-public">Public</span>}
+    {i.visibility === "shared" && !short && <span className="cal-tag tag-shared">Shared</span>}
   </>;
 }
 
@@ -202,7 +202,7 @@ function Detail({ inst, note, sess, offline, tz, error, onClose, onEdit, onMove,
   return <aside className="cal-detail" role="dialog" aria-label={`Event: ${inst.title}`}>
     <header><h2>{inst.title}</h2><button className="icon-button" aria-label="Close event" onClick={onClose}>×</button></header>
     <p className="cal-detail-when">{rangeLabel(asInst(inst), tz)}</p>
-    <p className="cal-detail-marks"><Marks i={inst} />{inst.status === "confirmed" && <span className="cal-tag">CONFIRMED</span>}</p>
+    <p className="cal-detail-marks"><Marks i={inst} />{inst.status === "confirmed" && <span className="cal-tag">Confirmed</span>}</p>
     {error && <p className="cal-error" role="alert">{error}</p>}
     {waiting ? <section className="cal-invites" aria-label="Invites">
       <p>{inviteWords(note!) ?? <><strong>Invites not sent.</strong> {invitees(note!).length === 1 ? "One person is" : `${invitees(note!).length} people are`} on this event; nothing goes to them until you send it.</>}</p>
@@ -555,7 +555,7 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
     <header className="note-bar cal-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
       <span className="cal-title"><strong>Calendar</strong>{offline && <span className="cal-offline" role="status">OFFLINE{savedWords ? ` · saved ${savedWords}` : ""}</span>}{sess?.role === "uni" && <small> · as Uni</small>}</span>
-      <button className="note-action" onClick={() => void load(true)}>{offline ? "Retry" : "Refresh"}</button>
+      {offline ? <button className="note-action" onClick={() => void load(true)}>Retry</button> : <button className="note-action note-refresh" aria-label="Refresh" title="Refresh" onClick={() => void load(true)}><RefreshIcon /></button>}
     </header>
     <div className="cal-head">
       <div className="cal-nav">

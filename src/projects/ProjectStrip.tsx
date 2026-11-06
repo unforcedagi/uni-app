@@ -23,13 +23,13 @@ export function ProjectStrip({ areaPath, onOpen }: { areaPath: string; onOpen: (
   const all = projectsIn(work, area.id);
   const projects = all.filter((p) => p.status !== "archived");
   const archived = all.filter((p) => p.status === "archived");
-  if (!projects.length && !archived.length && !gaps.length) return null;
+  if (!projects.length && !archived.length) return null; // a project with no folder yet has nothing to open: no strip for it alone
   const live = projects.reduce((n, p) => n + liveSessions(work, p.id).length, 0);
   const tab = (p: (typeof all)[number]) => {
     const n = liveSessions(work, p.id).length;
     return <li key={p.id}><button type="button" className={`ps-tab ${n ? "live" : ""} ${p.status}`} data-project={p.id} onClick={() => onOpen(p.id)}
       aria-label={`${p.name}${n ? `, ${n} working` : ""}${p.status === "resting" ? ", resting" : p.status === "archived" ? ", archived" : ""}`}>
-      {n > 0 && <i className="ps-dot" aria-hidden="true" />}<span>{p.name}</span>{n > 1 && <small aria-hidden="true">×{n}</small>}
+      {n > 0 && <i className="ps-dot" aria-hidden="true" />}<span>{p.name}</span>{n > 1 && <small aria-hidden="true">{n}</small>}
     </button></li>;
   };
   return <section className={`ps ${folded ? "folded" : ""}`} aria-label={`${area.name}'s projects`} data-place="project-strip">
@@ -42,7 +42,7 @@ export function ProjectStrip({ areaPath, onOpen }: { areaPath: string; onOpen: (
       {projects.map(tab)}
       {archived.length > 0 && <li><button type="button" className="ps-tab ps-more" aria-expanded={showArchived} onClick={() => setShowArchived(!showArchived)}>Archived · {archived.length}</button></li>}
       {showArchived && archived.map(tab)}
-      {gaps.length > 0 && <li className="ps-gap" title="These projects need a folder in the vault before their sessions show here.">{gaps.map((g) => g.name).join(", ")}: no folder yet</li>}
+      {gaps.length > 0 && <li className="ps-gap" title="These projects need a folder in the vault before their sessions show here.">{gaps.map((g) => g.name).join(", ")} · not set up</li>}
     </ul>}
   </section>;
 }

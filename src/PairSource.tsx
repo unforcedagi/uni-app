@@ -133,8 +133,5 @@ export default function PairSource({ onClose }: { onClose: () => void }) {
 export function PairDeviceButton({ onOpen }: { onOpen: () => void }) {
   const [available, setAvailable] = useState(false);
   useEffect(() => { void invoke<boolean>("pair_source_available").then(setAvailable).catch(() => {}); }, []);
-  return <>
-    <button className="pairing-secondary" disabled={!available} onClick={onOpen} aria-describedby={!available ? "pair-unavailable" : undefined}>Pair a device</button>
-    {!available && <p id="pair-unavailable" className="pairing-note">Pairing from this device requires native device unlock, available on macOS and Android.</p>}
-  </>;
+  return available ? <button className="pairing-secondary" onClick={onOpen}>Pair a device</button> : null;
 }

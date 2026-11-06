@@ -9,6 +9,7 @@
 // T-213: sends from Uni's address that its outbound rules hold for you are listed under "Waiting for you" in Uni's
 // mailboxes, where the bridge offers deciding them. Each shows what it sends and why it waits; Send it (bound to the
 // fingerprint of what is shown) and Don't send each take one confirm, never from Enter, and what happened stays shown.
+import { RefreshIcon } from "./Icons";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
 import Composer, { WhoTag, type ComposeStart, type ComposerSnapshot } from "./MailCompose";
 import { invoke } from "@tauri-apps/api/core";
@@ -33,7 +34,6 @@ type Compose = { key: number; start: ComposeStart; hidden: boolean; snapshot: Co
 const remembered: { scope: Scope; query: string; open: Open | null; compose: Compose | null } = { scope: { kind: "all-inboxes" }, query: "", open: null, compose: null };
 /** A phone shows one pane at a time; a narrow tablet shows the boxes in place of the list. */
 type Pane = "boxes" | "list" | "thread";
-const LATER = "Sending comes later";
 
 function openLink(url: string) {
   void invoke("open_link", { url }).catch(() => {});
@@ -47,13 +47,6 @@ function Problem({ p, onRetry }: { p: MailProblem; onRetry: () => void }) {
     {p.retry && <p><button type="button" className="cp-retry" onClick={onRetry}>Retry</button></p>}
     <details className="note-error-more"><summary>Details</summary><p className="note-error-detail">{p.detail}</p></details>
   </div>;
-}
-
-/** New and Reply where the bridge doesn't offer sending (yet): shown so the place is learnt, disabled. `captioned` says so on the button. */
-function LaterButton({ label, className = "note-action", captioned }: { label: string; className?: string; captioned?: boolean }) {
-  return <button type="button" className={`${className} mail-later ${captioned ? "captioned" : ""}`} disabled aria-disabled="true" title={LATER} aria-label={`${label}: ${LATER.toLowerCase()}`}>
-    {captioned ? <><span>{label}</span><small>{LATER}</small></> : label}
-  </button>;
 }
 
 function PlainBody({ text }: { text: string }) {
@@ -104,11 +97,11 @@ function DraftTag({ m, acct, onOpen }: { m: MailMessage; acct: AccountBoxes; onO
   const whole = draftEditable(m);
   const elsewhere = onOpen && !whole && <span className="mail-note">It has formatting or attachments this app can't show in full: send it from your mail client.</span>;
   if (!whole) onOpen = null;
-  if (acct.who === "uni") return <p className="mail-draft-note"><span className="mail-draft-tag">UNI'S OWN DRAFT · NOT SENT</span><span>A draft in Uni's mail. You can read it here; only Uni sends it, under its rules.</span></p>;
-  if (m.uni_drafted) return <div className="mail-draft-note" role="note"><span className="mail-draft-tag">DRAFT · BY UNI · NOT SENT</span>
-    <span>Uni wrote this in your Drafts. Uni can't send as you: nothing goes out unless you send it.{!onOpen && ` ${LATER} in this app.`}</span>
+  if (acct.who === "uni") return <p className="mail-draft-note"><span className="mail-draft-tag">Uni's own draft · not sent</span><span>A draft in Uni's mail. You can read it here; only Uni sends it, under its rules.</span></p>;
+  if (m.uni_drafted) return <div className="mail-draft-note" role="note"><span className="mail-draft-tag">Draft by Uni · not sent</span>
+    <span>Uni wrote this in your Drafts. Uni can't send as you: nothing goes out unless you send it.{!onOpen && " You can send it from your mail app."}</span>
     {onOpen && <button type="button" className="note-action mail-draft-open" onClick={onOpen}>Review and send it yourself…</button>}{elsewhere}</div>;
-  return <div className="mail-draft-note"><span className="mail-draft-tag">DRAFT · NOT SENT</span>
+  return <div className="mail-draft-note"><span className="mail-draft-tag">Draft · not sent</span>
     {onOpen && <button type="button" className="note-action mail-draft-open" onClick={onOpen}>Edit draft</button>}{elsewhere}</div>;
 }
 
@@ -127,10 +120,10 @@ function MessageCard({ m, acct, accountId, overview, onOpenDraft }: { m: MailMes
   const unverified = notVerified(m, overview);
   return <article id={`mail-msg-${m.id}`} className={`mail-card ${m.draft ? "mail-card-draft" : ""} ${m.unread && !m.draft ? "mail-card-unread" : ""}`} aria-label={m.draft ? `Draft: ${subjectLabel(m.subject)}` : `Message from ${addressLine(m.from) || "(no sender)"}`}>
     {m.draft && <DraftTag m={m} acct={acct} onOpen={onOpenDraft && (() => onOpenDraft(m))} />}
-    {!m.draft && m.uni_drafted && acct.who === "owner" && <p className="mail-draft-note mail-provenance"><span className="mail-draft-tag">DRAFTED BY UNI · SENT BY YOU</span></p>}
-    {unverified && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">NOT VERIFIED</span>
+    {!m.draft && m.uni_drafted && acct.who === "owner" && <p className="mail-draft-note mail-provenance"><span className="mail-draft-tag">Drafted by Uni · sent by you</span></p>}
+    {unverified && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">Not verified</span>
       <span>This says it is from you, but the server that received it couldn't confirm that (DMARC: {m.dmarc}). Treat what it asks with care.</span></p>}
-    {place && <p className="mail-draft-note mail-place"><span className="mail-draft-tag">{place === "junk" ? "IN JUNK" : "IN TRASH"}</span>
+    {place && <p className="mail-draft-note mail-place"><span className="mail-draft-tag">{place === "junk" ? "In Junk" : "In Trash"}</span>
       <span>{place === "junk" ? "The server filed this message as junk. Treat its links and attachments with care." : "This message is in the Trash."}</span></p>}
     <dl className="mail-headers">
       <dt>From</dt><dd>{addressLine(m.from) || "(no sender)"}</dd>
@@ -182,7 +175,7 @@ function ThreadView({ t, acct, overview, note, onBack, actions }: { t: MailThrea
         {actions.archive && <button type="button" className="note-quiet" disabled={actions.busy} onClick={actions.archive}>Archive</button>}
         {actions.reply
           ? <button type="button" className="note-action mail-reply" onClick={actions.reply} aria-label={`Reply ${acct.who === "uni" ? "as Uni" : "as you"}, from ${acct.name}`}>Reply</button>
-          : <><LaterButton label="Reply" /><small className="mail-later-note">{LATER}</small></>}
+          : null}
       </span>
     </div>
     {actions.problem && <p className="note-error mail-action-problem" role="alert">{actions.problem}</p>}
@@ -191,7 +184,7 @@ function ThreadView({ t, acct, overview, note, onBack, actions }: { t: MailThrea
       <p className="mail-thread-where"><WhoTag who={acct.who} address={acct.name} /> <span>{acct.who === "uni" ? "In Uni's mail" : "In your mail"} · {real.length} {real.length === 1 ? "message" : "messages"}</span></p>
       {note && <p className="mail-triage" role="note"><span className="eyebrow">Uni's triage note</span><span>{note}</span></p>}
       {uniDraft && <button type="button" className="mail-draft-hint" onClick={() => document.getElementById(`mail-msg-${uniDraft.id}`)?.scrollIntoView({ block: "start" })}>
-        <span className="mail-draft-tag small">DRAFT BY UNI</span> Uni left a draft reply at the end of this thread. Not sent.</button>}
+        <span className="mail-draft-tag small">Draft by Uni</span> Uni left a draft reply at the end of this thread. Not sent.</button>}
       {t.messages.map((m) => <MessageCard key={m.id} m={m} acct={acct} accountId={t.account_id} overview={overview} onOpenDraft={m.draft && acct.who === "owner" ? actions.openDraft : null} />)}
     </div>
   </section>;
@@ -259,8 +252,8 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
     <div className="mail-thread-scroll">
       <h2 className="mail-subject">{subjectLabel(f?.subject ?? "")}</h2>
       <p className="mail-triage mail-held-why" role="note"><span className="eyebrow">Why it waits</span><span>{p.reason ?? "Uni's outbound rules want your approval."}</span></p>
-      {p.changed && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">CHANGED</span><span>This draft changed after Uni's rules held it, so the bridge won't send it. Don't send it, and ask Uni to send it again.</span></p>}
-      {p.problem && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">CAN'T SHOW IT</span><span>{p.problem}. Nothing can be sent from here; ask #mail.</span></p>}
+      {p.changed && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">Changed</span><span>This draft changed after Uni's rules held it, so the bridge won't send it. Don't send it, and ask Uni to send it again.</span></p>}
+      {p.problem && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">Can't show it</span><span>{p.problem}. Nothing can be sent from here; ask #mail.</span></p>}
       {f && !p.problem && !heldShownWhole(p) && <p className="mail-draft-note" role="note"><span>It may have formatting or attachments this app can't show in full, so only Don't send is offered here.</span></p>}
       {f && <article className="mail-card mail-card-draft" aria-label="What it sends">
         <dl className="mail-headers">
@@ -275,7 +268,7 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
           open={() => invoke("mail_held_file_open", { accountId: acct.id, draftId: p.draft_id, index: i, file: x })} onRefused={() => { failedHeld.add(heldKey); setFailedFile(true); }} />)}</ul>}
         {f.text ? <PlainBody text={f.text} /> : <p className="empty">This message has no text.</p>}
       </article>}
-      {failedFile && open && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">FILE NOT CHECKED</span><span>A file didn't pass the checks when opened, so Send it isn't offered. Don't send it, and ask Uni.</span></p>}
+      {failedFile && open && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">File not checked</span><span>A file didn't pass the checks when opened, so Send it isn't offered. Don't send it, and ask Uni.</span></p>}
       {e.outcome && <p className={`mail-held-outcome held-${e.outcome.kind}`} role="status">{e.outcome.text}</p>}
       {open && (approvable || declinable) && (asking
         ? <div ref={confirmBox} tabIndex={-1} className="mail-held-confirm" role="group" aria-label={asking === "approve" ? "Confirm sending" : "Confirm not sending"}>
@@ -306,7 +299,7 @@ function ThreadRow({ t, who, note, selected, onOpen }: { t: ThreadSummary; who: 
       {t.flagged && <span className="mail-row-flag" aria-hidden="true">⚑</span>}
       <time dateTime={t.received_at}>{mailDate(t.received_at)}</time>
     </span>
-    <span className="mail-row-subject">{t.uni_drafted && t.draft && <span className="mail-draft-tag small">DRAFT BY UNI</span>}{t.has_attachment && <span aria-label="Has attachment">📎 </span>}{subjectLabel(t.subject)}</span>
+    <span className="mail-row-subject">{t.uni_drafted && t.draft && <span className="mail-draft-tag small">Draft by Uni</span>}{t.has_attachment && <span aria-label="Has attachment">📎 </span>}{subjectLabel(t.subject)}</span>
     {note ? <span className="mail-row-triage"><span className="mail-row-triage-who">Uni:</span> {note}</span> : <span className="mail-row-preview">{t.preview}</span>}
   </button></li>;
 }
@@ -628,8 +621,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   return <section className="mail mail-a" aria-label="Mail" data-pane={pane} data-composing={composing && pane === "thread" ? "true" : undefined}>
     <header className="note-bar mail-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
-      <span className="mail-title"><strong>Mail</strong>{overview && <small className="mail-account" title="The address this device reads as">{overview.login}{writesOffered(overview) ? "" : " · read-only"}</small>}</span>
-      <button className="note-action" onClick={() => void refresh()} disabled={listLoading}>Refresh</button>
+      <span className="mail-title"><strong>Mail</strong>{overview && <small className="mail-account" title="The address this device reads as">{overview.login}{writesOffered(overview) ? "" : " · reading only"}</small>}</span>
+      <button className="note-action note-refresh" aria-label="Refresh" title="Refresh" onClick={() => void refresh()} disabled={listLoading}><RefreshIcon /></button>
     </header>
     {boxesProblem && !overview ? <div className="mail-scroll"><Problem p={boxesProblem} onRetry={() => void loadOverview()} /></div>
     : !overview ? <p className="mail-loading" role="status">Loading mail…</p>
@@ -674,7 +667,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
                 onChange={(e) => { setTyped(e.target.value); if (!e.target.value && query) setQuery(""); }} enterKeyHint="search" />
             </label>
             {query && <button type="button" className="note-quiet" onClick={() => { setTyped(""); setQuery(""); }}>Clear</button>}
-            <span className="mail-list-new">{senders.length > 0 ? <button type="button" className="send mail-new" onClick={newMessage}>New</button> : <LaterButton label="New" className="send mail-new" captioned />}</span>
+            <span className="mail-list-new">{senders.length > 0 && <button type="button" className="send mail-new" onClick={newMessage}>New</button>}</span>
           </form>
           {compose?.hidden && <button type="button" className="mail-resume" onClick={resume}>✎ A message in progress · Resume</button>}
           {pending.length > 0 && !composing && <div className="mail-pending" role="status">
@@ -719,9 +712,9 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
           : <p className="empty mail-pick">Pick a thread to read it.</p>}
         </section>
       </div>
-      <nav className="mail-thumb" aria-label="Mail actions">
-        <button type="button" className="note-action" onClick={toSearch}>Search</button>
-        {senders.length > 0 ? <button type="button" className="send mail-new" onClick={newMessage}>New</button> : <LaterButton label="New" className="send mail-new" captioned />}
+      <nav className="mail-thumb" aria-label="Mail actions" data-empty={pane === "list" && !senders.length ? "true" : undefined}>
+        {pane !== "list" && <button type="button" className="note-action" onClick={toSearch}>Search</button>}
+        {senders.length > 0 && <button type="button" className="send mail-new" onClick={newMessage}>New</button>}
       </nav>
     </>}
   </section>;

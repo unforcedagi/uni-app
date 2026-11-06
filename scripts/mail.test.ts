@@ -65,8 +65,8 @@ const one: Overview = { login: "test@example.com", multi: false, accounts: [two.
 assert.equal(scopeTitle({ kind: "all-inboxes" }, one, ""), "Inbox", "one account: no 'All inboxes'");
 assert.equal(scopeValid({ kind: "mailbox", accountId: "U", mailboxId: "U-in" }, one), false, "a scope in an account that went is dropped");
 assert.equal(scopeValid({ kind: "mailbox", accountId: "A", mailboxId: "A-in" }, one), true);
-assert.equal(whoTag("owner"), "YOU");
-assert.equal(whoTag("uni"), "UNI");
+assert.equal(whoTag("owner"), "You");
+assert.equal(whoTag("uni"), "Uni");
 
 // Dates: today shows a time, this week a day, this year a month and day, older the year too
 const now = new Date("2026-10-18T15:00:00");

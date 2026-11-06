@@ -74,7 +74,7 @@ function answerLine(r: SealedRow): string | null {
 }
 
 function Badge({ cls }: { cls: SealedRow["class"] }) {
-  return <span className={`sealed-badge ${cls}`}>{cls === "powerful" ? "POWERFUL" : "ROUTINE"}</span>;
+  return <span className={`sealed-badge ${cls}`}>{cls === "powerful" ? "Powerful" : "Routine"}</span>;
 }
 
 export function SealedCard({ channel, reference }: { channel: string; reference: string }) {
