@@ -508,7 +508,7 @@ Two proposals wait on a scope decision.
     w.__arrive = (channel: string, name: string, body: string, ago = 0, edited = false, root: string | null = null) => {
       const m = { ...msg('live' + Math.random().toString(36).slice(2, 8), channel, name, ago, body), edited, root, parent: root };
       (msgs[channel] ??= []).push(m);
-      if (root) { const at = msgs[channel].findIndex((x: any) => x.ref === root); const top = at >= 0 ? msgs[channel][at] : null; (threads[root] ??= top ? [top] : []).push(m); if (top) msgs[channel][at] = { ...top, reply_count: top.reply_count + 1 }; /* a new object, as every read over IPC is */ }
+      if (root) { const at = msgs[channel].findIndex((x: any) => x.ref === root); const top = at >= 0 ? msgs[channel][at] : null; (threads[root] ??= top ? [top] : []).push(m); if (top) { const now = { ...top, reply_count: top.reply_count + 1 }; msgs[channel][at] = now; threads[root] = threads[root].map((x: any) => (x.ref === root ? now : x)); /* a new object, as every read over IPC is */ } }
       const r = rooms.find((x) => x.id === channel); if (r) { r.last_message = body; r.last_ts = m.ts; if (d.unread && m.author !== U) r.unread += 1; }
       for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'message', channel, author: m.author } });
       return m.ref;
@@ -805,7 +805,7 @@ Two proposals wait on a scope decision.
           }
           case 'media_upload': return { url: 'https://example.invalid/voice.webm', mime: 'audio/webm', name: 'voice.webm', size: 4 };
           case 'prepare_voice_message': return JSON.stringify({ id: 'voice:' + args.channel + ':' + crypto.randomUUID() });
-          case 'post_message': { if (w.__postDelay) await new Promise((r) => setTimeout(r, w.__postDelay)); const ref = 'sent-' + w.__calls.length; const list = (msgs[args.channel] ??= []); const at = args.replyTo ? list.findIndex((x: any) => x.ref === args.replyTo && !x.root) : -1; const top = at >= 0 ? list[at] : null; if (args.body) { const m = msg(ref, args.channel, 'Aaron', 0, args.body); if (top) { m.root = top.ref; m.parent = top.ref; (threads[top.ref] ??= [top]).push(m); list[at] = { ...top, reply_count: top.reply_count + 1 }; } list.push(m); } return { ref, channel: args.channel }; }
+          case 'post_message': { if (w.__postDelay) await new Promise((r) => setTimeout(r, w.__postDelay)); const ref = 'sent-' + w.__calls.length; const list = (msgs[args.channel] ??= []); const at = args.replyTo ? list.findIndex((x: any) => x.ref === args.replyTo && !x.root) : -1; const top = at >= 0 ? list[at] : null; if (args.body) { const m = msg(ref, args.channel, 'Aaron', 0, args.body); if (top) { m.root = top.ref; m.parent = top.ref; (threads[top.ref] ??= [top]).push(m); const now = { ...top, reply_count: top.reply_count + 1 }; list[at] = now; threads[top.ref] = threads[top.ref].map((x: any) => (x.ref === top.ref ? now : x)); } list.push(m); } return { ref, channel: args.channel }; }
           case 'relay_origin': return 'wss://relay.test';
           case 'vault_note': {
             // r19: a note's read held back (`__noteDelay = { id: ms }`) or failing (`__noteFails = { id: true }`): what a row asserts meanwhile
