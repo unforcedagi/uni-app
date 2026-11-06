@@ -38,6 +38,7 @@ test.beforeEach(async ({ page }) => {
         const keep = () => w.uploads.push({ cmd, bytes: Array.from(new Uint8Array(args)), headers: options?.headers });
         switch (cmd) {
           case 'plugin:app|version': return '0.1.98';
+          case 'android_update_manifest': return { version: '0.1.99', url: 'https://example.com/releases/uni-v0.1.99/uni.apk' };
           case 'plugin:updater|check': return w.offerUpdate ? { rid: 7, currentVersion: '0.1.98', version: '0.1.99', date: null, body: null, rawJson: {} } : null;
           case 'identity_status': return { paired: true, pubkey: 'a'.repeat(64) };
           case 'get_identity': return 'a'.repeat(64);
@@ -407,6 +408,27 @@ test('An update waits for a recording: Restart says finish first, then restarts'
   await expect.poll(() => posts(page)).toBe(1);
   await press(page, go);
   await expect.poll(restarted).toBe(1);
+});
+
+test.describe('On Android', () => {
+  test.use({ userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 7; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/126.0.0.0 Mobile Safari/537.36' });
+  test('Download APK waits for a recording too: installing would lose it', async ({ page }) => {
+    await page.addInitScript(() => { (window as any).offerUpdate = true; });
+    await boot(page);
+    const go = page.locator('.update-notice-go');
+    await expect(go).toHaveText('Download APK', { timeout: 30000 });
+    await startInRoom(page);
+    await wait(page, 300);
+    await pause(page);
+    await press(page, go);
+    await expect(page.locator('.update-notice')).toContainText('Finish your recording first');
+    const opened = () => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'open_link').length);
+    expect(await opened()).toBe(0);
+    await press(page, button(page, 'Stop recording voice message'));
+    await expect.poll(() => posts(page)).toBe(1);
+    await press(page, go);
+    await expect.poll(opened).toBe(1);
+  });
 });
 
 test('The card fits a phone on its side, and many sections scroll', async ({ page }) => {

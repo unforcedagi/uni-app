@@ -14,6 +14,7 @@ export type RecorderOptions<Origin> = {
   join?: (blobs: Blob[]) => Promise<Blob>;
   joinTimeoutMs?: number;
   deliveryTimeoutMs?: number;
+  micHoldMs?: number;
 };
 
 const MIC = { audio: { echoCancellation: true, noiseSuppression: true } };
@@ -21,6 +22,8 @@ const MIC = { audio: { echoCancellation: true, noiseSuppression: true } };
 const JOIN_TIMEOUT_MS = 120_000;
 /** Sections going out one by one wait for each save, so its typed words land once; a save that hangs doesn't hold the rest. */
 const DELIVERY_TIMEOUT_MS = 30_000;
+/** A short pause keeps the mic so resume is instant. After this it's let go, so a recording left paused doesn't hold it; resume asks again. */
+const MIC_HOLD_MS = 60_000;
 
 /**
  * Keeps the microphone and its starting destination owned until the recording finishes.
@@ -42,6 +45,7 @@ export class RecorderSession<Origin> {
   private afterSection: "pause" | "finish" | null = null;
   private pauseLanded: (() => void) | null = null;
   private everPaused = false;
+  private micHold: ReturnType<typeof setTimeout> | null = null;
   phase: RecorderPhase = "idle";
   /** Paused because the mic went, not by choice. */
   micLost = false;
@@ -69,6 +73,25 @@ export class RecorderSession<Origin> {
   /** The phase now: it can move while a call waits on the mic. */
   private phaseNow(): RecorderPhase { return this.phase; }
   private stopStream(stream = this.stream) { stream?.getTracks().forEach((t) => t.stop()); }
+
+  private holdMic() {
+    this.keepMic();
+    this.micHold = setTimeout(() => {
+      this.micHold = null;
+      if (this.phase !== "paused") return;
+      this.stopStream();
+      this.stream = null;
+    }, this.options.micHoldMs ?? MIC_HOLD_MS);
+  }
+  private keepMic() {
+    if (this.micHold !== null) clearTimeout(this.micHold);
+    this.micHold = null;
+  }
+  private captureActive() {
+    if (this.activeSince === null) return;
+    this.activeSeconds = (this.now() - this.activeSince) / 1000;
+    this.activeSince = null;
+  }
 
   /** Seconds kept so far: paused time and deleted sections don't count. */
   elapsed(): number {
@@ -105,6 +128,7 @@ export class RecorderSession<Origin> {
       this.micLost = this.afterSection === null;
       this.afterSection = null;
       if (this.micLost) this.changed();
+      this.holdMic();
       this.setPhase("paused");
     } else {
       this.afterSection = null;
@@ -114,6 +138,7 @@ export class RecorderSession<Origin> {
   }
 
   private reset() {
+    this.keepMic();
     this.stream = null;
     this.origin = null;
     this.sections = [];
@@ -188,9 +213,8 @@ export class RecorderSession<Origin> {
 
   /** End the current section and hold the mic. Resolves once the section is in `sections`. */
   async pause(): Promise<void> {
-    if (this.phase !== "recording" || !this.recorder || this.activeSince === null) return;
-    this.activeSeconds = (this.now() - this.activeSince) / 1000;
-    this.activeSince = null;
+    if (this.phase !== "recording" || !this.recorder) return;
+    this.captureActive();
     this.afterSection = "pause";
     this.everPaused = true;
     this.setPhase("pausing");
@@ -204,6 +228,7 @@ export class RecorderSession<Origin> {
   /** Start the next section. If the mic was lost while paused it's asked for again; failing that, still paused, sections kept. */
   async resume(): Promise<void> {
     if (this.phase !== "paused") return;
+    this.keepMic();
     this.setPhase("resuming");
     try {
       let stream = this.stream;
@@ -219,7 +244,7 @@ export class RecorderSession<Origin> {
       this.changed();
       this.setPhase("recording");
     } catch (e) {
-      if (this.phaseNow() === "resuming") this.setPhase("paused");
+      if (this.phaseNow() === "resuming") { this.holdMic(); this.setPhase("paused"); }
       throw e;
     }
   }
@@ -255,10 +280,7 @@ export class RecorderSession<Origin> {
 
   stop() {
     if (this.phase === "recording" && this.recorder) {
-      if (this.activeSince !== null) {
-        this.activeSeconds = (this.now() - this.activeSince) / 1000;
-        this.activeSince = null;
-      }
+      this.captureActive();
       this.afterSection = "finish";
       this.setPhase("finishing");
       if (this.recorder.state !== "inactive") this.recorder.stop();
@@ -266,13 +288,13 @@ export class RecorderSession<Origin> {
       this.afterSection = "finish";
       this.setPhase("finishing");
     } else if (this.phase === "paused" || this.phase === "resuming") {
-      this.setPhase("finishing");
       void this.finish();
     }
   }
 
   dispose() {
     this.disposed = true;
+    this.keepMic();
     this.stopStream();
     releaseRecording(this.token);
   }

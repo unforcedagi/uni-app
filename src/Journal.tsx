@@ -274,7 +274,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
       <textarea value={text} onChange={(e) => { edit(e.target.value); if (same) { setSame(null); setStatus(""); } }} placeholder="What's here right now…" rows={4} maxLength={65536} aria-label="Journal entry"
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveText(); } }} />
       <div className="journal-actions">
-        <button className={`mic ${recorder.recording ? "on" : ""}`} onClick={() => void toggleMic()} disabled={saving && !recorder.recording} aria-label={recorder.recording ? "Stop recording and save" : "Record a journal entry"}>
+        <button className={`mic ${recorder.recording ? "on" : ""}`} onClick={() => void toggleMic()} disabled={(saving && !recorder.recording) || recorder.phase === "finishing"} aria-label={recorder.recording ? "Stop recording and save" : "Record a journal entry"}>
           {recorder.recording ? <>■ <span>{mmss(recorder.elapsed)}</span></> : <MicIcon />}
         </button>
         <span className="journal-status" role="status">{recorder.recording ? `${recorder.paused ? "Paused" : "Recording"} · ${mmss(recorder.elapsed)}${text.trim() ? " · your typed text is kept with it" : ""}` : recorder.phase === "finishing" ? "Finishing…" : status}</span>

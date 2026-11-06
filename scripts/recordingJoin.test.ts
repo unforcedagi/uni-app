@@ -257,4 +257,19 @@ function parsed(b: Uint8Array) {
   assert.ok(one > 0);
   assert.ok(Math.abs(durationMs - 2 * one) < 1, "twice the one, to the millisecond");
 }
+// 18. A section whose segment breaks with kilobytes still unread is refused too: clusters after the damage would quietly go
+{
+  const ok = file(1, [cluster(0, [block(0, 1), block(20, 2)])]);
+  const head = file(2, [cluster(0, [block(0, 3), block(20, 4)], true)], { knownSegment: true });
+  const badElement = [...idBytes(0x1254C367), 0x08, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]; // a Tags element claiming far more than the file holds
+  const body = [...info(), ...tracks(2), ...cluster(0, [block(0, 3), block(20, 4)], true), ...badElement, ...new Array(8192).fill(0)];
+  const damaged = new Uint8Array([...header(), ...el(SEGMENT, body, UNKNOWN)]);
+  assert.throws(() => joinWebm([ok, damaged]), NotJoinable, "mid-file damage after readable clusters");
+  assert.ok(joinWebm([ok, head]).bytes.length > 0, "a whole file still joins");
+}
+// 19. The Journal may keep 50 MB, but the transcriber stops at 25: no WAV over that, or its words would never come
+{
+  const m4a = () => new Blob([new Uint8Array(64)], { type: "audio/mp4" });
+  await assert.rejects(joinSections([m4a(), m4a()], { decode: async () => new Float32Array(7_000_000), wav: true, limit: 50 * 1024 * 1024 }), /too large/i);
+}
 console.log("recording join tests passed");

@@ -110,7 +110,11 @@ function readSection(bytes: Uint8Array): Section {
   const clusters: Cluster[] = [], times: number[] = [];
   for (let at = segment.body; at < limit;) {
     const e = readElement(bytes, at, limit);
-    if (!e) break;
+    // A cut at the very end stands; with more than that unread, the clusters after it would quietly go
+    if (!e || e.end > limit) {
+      if (limit - at > SECTION_SLACK) throw new NotJoinable("a damaged segment");
+      break;
+    }
     if (e.id === CLUSTER) {
       const read = readCluster(bytes, e, limit, times);
       if (read.cluster.parts.length) clusters.push(read.cluster);
@@ -118,7 +122,6 @@ function readSection(bytes: Uint8Array): Section {
       continue;
     }
     if (e.unknown) throw new NotJoinable("an element of unknown size");
-    if (e.end > limit) break;
     if (e.id === INFO) info = e;
     if (e.id === TRACKS) tracks = e;
     at = e.end;
@@ -252,6 +255,8 @@ export type Decode = (blob: Blob) => Promise<Float32Array>;
 const WAV_RATE = 16000; // what the transcriber listens at
 /** A voice message's limit. Past it a joined file can't be sent, so it isn't made: the sections go on their own. */
 const JOIN_LIMIT = 25 * 1024 * 1024;
+/** The transcriber's limit: a longer WAV could be kept but its words would never come. */
+const WAV_LIMIT = 25 * 1024 * 1024;
 
 /** A recording's audio as mono samples at `rate`, by the platform's own decoder. */
 export async function decodeMono(blob: Blob, rate = WAV_RATE): Promise<Float32Array> {
@@ -291,7 +296,7 @@ export async function joinSections(blobs: Blob[], { wav = false, limit = JOIN_LI
   for (const b of blobs) {
     const s = await decode(b);
     total += s.length * 2;
-    if (total > limit) throw tooLarge();
+    if (total > Math.min(limit, WAV_LIMIT)) throw tooLarge();
     samples.push(s);
   }
   return new Blob([encodeWav(samples, WAV_RATE) as BlobPart], { type: "audio/wav" });

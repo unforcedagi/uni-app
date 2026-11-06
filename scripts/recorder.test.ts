@@ -504,4 +504,40 @@ await editing(async ({ session, clips, rec }) => {
   assert.deepEqual(clips.map((c) => c.text), ["one", "two"]);
 }, async () => { throw new Error("cannot join"); });
 
+// Code review: a long pause lets the mic go (the OS indicator goes off); a short one keeps it, so resume is instant
+{
+  const stream = new FakeStream(), next = new FakeStream();
+  let asked = 0;
+  const previousNav = globalThis.navigator, previousRec = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: async () => asked++ === 0 ? stream : next } } });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: FakeRecorder });
+  FakeRecorder.instances = [];
+  const texts: string[] = [];
+  const session = new RecorderSession<string>((blob) => { void blob.text().then((t) => texts.push(t)); }, () => {}, { micHoldMs: 5, join: async () => new Blob(["joined"], { type: "audio/webm" }) });
+  await session.start("A", "for A");
+  const p = session.pause(); FakeRecorder.instances[0].finish("one"); await p;
+  assert.equal(stream.stopped, 0, "still held just after the pause");
+  await until(() => stream.stopped === 1);
+  assert.equal(stream.stopped, 1, "let go after a while");
+  assert.equal(recordingHolder(), "for A", "the recording is still open");
+  assert.equal(session.phase, "paused");
+  await session.resume();
+  assert.equal(asked, 2, "resume asks again");
+  assert.equal(FakeRecorder.instances[1].stream, next);
+  assert.equal(session.phase, "recording");
+  // and a resume before the time is up cancels it
+  const q = session.pause(); FakeRecorder.instances[1].finish("two"); await q;
+  await session.resume();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(next.stopped, 0, "the running mic isn't touched");
+  session.stop();
+  FakeRecorder.instances[2].finish("three");
+  await until(() => session.phase === "idle");
+  assert.equal(stream.stopped, 1, "the first stream is stopped once");
+  assert.equal(next.stopped, 1, "the second when it finishes");
+  session.dispose();
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNav });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: previousRec });
+}
+
 console.log("recorder tests passed");

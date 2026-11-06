@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { mmss } from "./journalCore";
-import type { RecorderControls } from "./recorder";
+import { DOUBLE_TAP_MS, type RecorderControls } from "./recorder";
 import type { RecordedSection } from "./recorderSession";
 import { decodeMono, peaksOf } from "./recordingJoin";
 import "./RecordingPill.css";
@@ -8,7 +8,6 @@ import "./RecordingPill.css";
 const BARS = 28;
 const PEAK_RATE = 8000; // plenty for a shape, and little to hold in memory
 const LONGEST_DRAWN_SECONDS = 600;
-const DOUBLE_TAP_MS = 350;
 const peakCache = new WeakMap<Blob, number[]>();
 
 const PlayIcon = () => <svg className="rec-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor" /></svg>;
@@ -47,12 +46,14 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
   const ready = controls.phase === "paused";
   const none = !controls.sections.length;
 
+  function letPlayerGo() {
+    if (!player.current) return;
+    player.current.audio.pause();
+    URL.revokeObjectURL(player.current.url);
+    player.current = null;
+  }
   function stopPlaying() {
-    if (player.current) {
-      player.current.audio.pause();
-      URL.revokeObjectURL(player.current.url);
-      player.current = null;
-    }
+    letPlayerGo();
     setPlaying(null);
   }
   function play(section: RecordedSection) {
@@ -71,9 +72,7 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
       setProblem("That section couldn't play here. It's still kept.");
     });
   }
-  useEffect(() => () => {
-    if (player.current) { player.current.audio.pause(); URL.revokeObjectURL(player.current.url); player.current = null; }
-  }, []);
+  useEffect(() => letPlayerGo, []);
   // The button that opened this is gone: once the section has landed, keyboard focus goes to the way back, and a screen reader hears it.
   useEffect(() => {
     if (!ready) return;
@@ -83,8 +82,8 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
 
   function remove(section: RecordedSection) {
     // The rows close up under the finger: a second quick tap isn't a second delete
-    if (Date.now() - lastDelete.current < DOUBLE_TAP_MS) return;
-    lastDelete.current = Date.now();
+    if (lastDelete.current > 0 && performance.now() - lastDelete.current < DOUBLE_TAP_MS) return;
+    lastDelete.current = performance.now();
     if (playing === section.id) stopPlaying();
     controls.removeSection(section.id);
     const left = controls.sections.length - 1;

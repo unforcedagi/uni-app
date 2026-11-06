@@ -3,7 +3,7 @@ import { RecorderSession, type RecordedSection, type RecorderPhase } from "./rec
 import { joinSections, type JoinOptions } from "./recordingJoin";
 
 /** A second tap this soon after Pause or Resume is a slip: the control under the finger has changed, and it may be Stop. */
-const DOUBLE_TAP_MS = 350;
+export const DOUBLE_TAP_MS = 350;
 
 /** What a recording's controls need, whoever owns the recorder. */
 export type RecorderControls = {
@@ -81,7 +81,7 @@ export function useRecorder<Origin = void>(onDone: (blob: Blob, mime: string, or
   }
   return {
     recording: phase === "recording" || phase === "pausing" || phase === "paused" || phase === "resuming",
-    paused: phase === "paused",
+    paused: phase === "pausing" || phase === "paused" || phase === "resuming",
     busy: phase !== "idle", phase, elapsed, sections, canUndo, micLost, start, stop,
     pause, resume,
     removeSection: (id: number) => session.current!.removeSection(id),
