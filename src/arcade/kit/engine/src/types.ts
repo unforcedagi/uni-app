@@ -95,6 +95,16 @@ export interface Card {
   private?: boolean;
 }
 
+/** The one thing a round asks about. See dimensions.ts. */
+export type Dimension = "type" | "words" | "colour" | "value" | "image" | "layout" | "design" | "motion" | "sound" | "clip" | "voice" | "systems" | "claim";
+export const DIMENSIONS: readonly Dimension[] = ["type", "words", "colour", "value", "image", "layout", "design", "motion", "sound", "clip", "voice", "systems", "claim"];
+
+/** What a round says out loud: the question, and what stays the same while you answer it. */
+export interface Ask { dimension: Dimension; prompt: string; detail: string }
+
+/** What the screen can show. `grey`: no colour. `still`: nothing moves. */
+export interface DealOptions { grey?: boolean; still?: boolean }
+
 export type ReactionKind = "pick" | "keep" | "drop" | "nudge" | "pin" | "voice" | "guess" | "claim" | "words";
 
 export type ClaimVerdict = "me" | "prune" | "not-me";
@@ -120,6 +130,10 @@ export interface Reaction {
   voice?: { ref: string; seconds?: number };
   /** strength from an import, e.g. "love" = 1.5 */
   weight?: number;
+  /** what the round was judging: only features about this are learned. Absent on imports and older reactions (all count). */
+  dimension?: Dimension;
+  /** seen on a greyscale screen: nothing about colour is learned from it */
+  grey?: boolean;
 }
 
 export type ClaimStatus = "live" | "not-me" | "pruned";
@@ -162,11 +176,11 @@ export interface Answer {
 
 /** What a game is handed to play: one round. */
 export type Round =
-  | { game: "this-or-that"; a: Card; b: Card }
-  | { game: "gallery"; card: Card }
-  | { game: "fix-it"; card: Card }
-  | { game: "who-said-it"; card: Card }
-  | { game: "ripple"; card: Card };
+  | { game: "this-or-that"; a: Card; b: Card; ask: Ask }
+  | { game: "gallery"; card: Card; ask: Ask }
+  | { game: "fix-it"; card: Card; ask: Ask }
+  | { game: "who-said-it"; card: Card; ask: Ask }
+  | { game: "ripple"; card: Card; ask: Ask };
 
 export interface Stats {
   reactions: number;

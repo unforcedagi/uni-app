@@ -1,6 +1,6 @@
 // What the games need from wherever they run. The Uni app implements this over its signed door to the owner's machine;
 // the cloud version implements it over a Worker and the browser's own storage; tests implement it in memory.
-import type { Card, GameId, Profile, Reaction, Round, Stats } from "../../engine/src/types.ts";
+import type { Card, DealOptions, GameId, Profile, Reaction, Round, Stats } from "../../engine/src/types.ts";
 
 export type PlayGame = Exclude<GameId, "garden">;
 
@@ -20,7 +20,8 @@ export interface ArcadeHost {
   owner: { name: string; you: boolean };
   /** which games this host offers (the cloud has no Who Said It about a real person, for instance) */
   games: GameId[];
-  rounds(game: PlayGame, n: number): Promise<Round[]>;
+  /** `opts`: what this screen can show (no colour, nothing moving). The host deals only what can be judged there. */
+  rounds(game: PlayGame, n: number, opts?: DealOptions): Promise<Round[]>;
   /** store reactions; ids are made by the caller (crypto.randomUUID), so a retry never doubles */
   react(reactions: Reaction[]): Promise<void>;
   /** the profile as it stands, Garden verdicts applied */
@@ -28,7 +29,7 @@ export interface ArcadeHost {
   stats(): Promise<Stats>;
   /** how many rounds of each game are still unplayed, for the Arcade home (optional; the door's /home has it). Without
    *  it the home asks rounds() and says how many are ready instead. */
-  fresh?(): Promise<Partial<Record<PlayGame, number>>>;
+  fresh?(opts?: DealOptions): Promise<Partial<Record<PlayGame, number>>>;
   /** a URL the page can load for a card's media, or null */
   mediaUrl(card: Card, which: "src" | "poster"): Promise<string | null>;
   /** Ripple by voice; without it, Ripple takes typed answers */

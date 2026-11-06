@@ -7,6 +7,7 @@ import type { GameId, Profile, Stats } from "../../engine/src/types.ts";
 import { GAMES } from "../../engine/src/types.ts";
 import type { ArcadeHost, PlayGame } from "./host.ts";
 import { Ctx, useInk, useKeys, useReducedMotion } from "./kit/hooks.ts";
+import { useGreyscale } from "./kit/screen.ts";
 import type { ArcadeCtx } from "./kit/hooks.ts";
 import { Back, Seed } from "./kit/icons.tsx";
 import { ThisOrThat } from "./games/ThisOrThat.tsx";
@@ -26,6 +27,12 @@ export interface ArcadeProps {
   /** open straight into a game */
   start?: GameId;
 }
+
+const FOUND: Record<string, string> = {
+  ink: "On because this is an ink screen.",
+  monochrome: "On because this screen reports no colour.",
+  model: "On because we found a greyscale tablet.",
+};
 
 const NAMES: Record<GameId, string> = {
   "this-or-that": "This or That", gallery: "The Gallery", "fix-it": "Fix It", "who-said-it": "Who Said It", ripple: "Ripple", garden: "Garden",
@@ -48,6 +55,8 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
   const ink = useInk();
   const reduce = useReducedMotion();
   const calm = ink || reduce;
+  const { grey, found, set: setGrey } = useGreyscale(ink);
+  const deal = useMemo(() => ({ ...(grey ? { grey: true } : {}), ...(calm ? { still: true } : {}) }), [grey, calm]);
   const [view, setView] = useState<GameId | "home">(start ?? "home");
   const [home, setHome] = useState<Home>({ stats: null, profile: null, fresh: {}, exact: true, error: false });
   const lastToy = useRef<GameId | null>(null);
@@ -58,8 +67,8 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
   const loadHome = useCallback(async () => {
     const play = games.filter((g): g is PlayGame => g !== "garden");
     const fresh = host.fresh
-      ? host.fresh().then((f) => ({ f, exact: true }))
-      : Promise.all(play.map((g) => host.rounds(g, 12).then((r) => [g, r.length] as const))).then((xs) => ({ f: Object.fromEntries(xs) as Partial<Record<PlayGame, number>>, exact: false }));
+      ? host.fresh(deal).then((f) => ({ f, exact: true }))
+      : Promise.all(play.map((g) => host.rounds(g, 12, deal).then((r) => [g, r.length] as const))).then((xs) => ({ f: Object.fromEntries(xs) as Partial<Record<PlayGame, number>>, exact: false }));
     const [s, p, f] = await Promise.allSettled([host.stats(), host.profile(), fresh]);
     setHome({
       stats: s.status === "fulfilled" ? s.value : null,
@@ -68,7 +77,7 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
       exact: f.status === "fulfilled" ? f.value.exact : true,
       error: s.status === "rejected" && p.status === "rejected",
     });
-  }, [host, games]);
+  }, [host, games, deal]);
 
   useEffect(() => { if (view === "home") void loadHome(); }, [view, loadHome]);
 
@@ -83,7 +92,7 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
 
   useKeys((e) => { if (e.key === "Escape" && view !== "home") { e.preventDefault(); goHome(); } }, view !== "home");
 
-  const ctx: ArcadeCtx = useMemo(() => ({ host, calm, ink, home: goHome, uni, burstSeconds }), [host, calm, ink, goHome, uni, burstSeconds]);
+  const ctx: ArcadeCtx = useMemo(() => ({ host, calm, ink, home: goHome, uni, burstSeconds, grey, setGrey, deal }), [host, calm, ink, goHome, uni, burstSeconds, grey, setGrey, deal]);
 
   const seeds = home.stats?.seeds ?? 0;
   const claims = home.profile?.claims ?? [];
@@ -121,6 +130,16 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
               <Seed size={22} /> <b>{seeds}</b> <span>{seeds === 1 ? "seed" : "seeds"} planted</span>
             </p>
           </header>
+          <div className="ta-grey-row">
+            <button type="button" role="switch" aria-checked={grey} className={`ta-grey-switch${grey ? " is-on" : ""}`} onClick={() => setGrey(!grey)}>
+              <span className="ta-grey-knob" aria-hidden="true" />
+              <span>Greyscale screen</span>
+              <b aria-hidden="true">{grey ? "On" : "Off"}</b>
+            </button>
+            <p className={grey && found ? "ta-grey-why" : "ta-grey-hint"}>
+              {grey && found ? FOUND[found] : grey ? "Colour turns into light and dark, and nothing here teaches colour." : "No colour on this screen? Turn this on."}
+            </p>
+          </div>
           {home.error && <p className="ta-home-error" role="status">The arcade can't reach where your taste is kept right now. The toys will fill in when it's back. <button type="button" className="ta-btn ta-btn-quiet" onClick={() => void loadHome()}>Try again</button></p>}
           <div className="ta-toys" data-count={games.length}>
             {games.map((g) => (
@@ -140,7 +159,7 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
 
   return (
     <Ctx.Provider value={ctx}>
-      <div className={`ta-arcade${calm ? " ta-calm" : ""}${ink ? " ta-ink" : ""}`} ref={root} data-view={view}>
+      <div className={`ta-arcade${calm ? " ta-calm" : ""}${ink || grey ? " ta-ink" : ""}${grey ? " ta-grey" : ""}`} ref={root} data-view={view}>
         {body}
       </div>
     </Ctx.Provider>

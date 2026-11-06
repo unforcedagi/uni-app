@@ -2,7 +2,7 @@
 // away if you know. Keys: ← or 1 for the first answer, → or 2 for the second, Enter for the next line.
 import { useEffect, useRef, useState } from "react";
 import type { Round } from "../../../engine/src/types.ts";
-import { BurstEnd, Empty, GameFrame, Loading, SaveNote } from "../kit/frame.tsx";
+import { AskLine, BurstEnd, Empty, GameFrame, Loading, SaveNote } from "../kit/frame.tsx";
 import { reaction, useArcade, useKeys, useSaver } from "../kit/hooks.ts";
 import { seedsOf } from "../kit/lesson.ts";
 import { Next, Pen, Spark } from "../kit/icons.tsx";
@@ -11,7 +11,7 @@ type Line = Extract<Round, { game: "who-said-it" }>;
 type Said = "owner" | "uni";
 
 export function WhoSaidIt() {
-  const { host, uni } = useArcade();
+  const { host, uni, deal } = useArcade();
   const cloud = host.owner.you;
   const labels: Record<Said, string> = cloud ? { owner: "The writer", uni: "The machine" } : { owner: "I wrote that", uni: `${uni ?? "Uni"} wrote it` };
   const [phase, setPhase] = useState<"loading" | "guess" | "reveal" | "end" | "empty" | "error">("loading");
@@ -28,18 +28,18 @@ export function WhoSaidIt() {
   useEffect(() => {
     let live = true;
     setPhase("loading"); setIdx(0); setScore({ right: 0, total: 0, fooled: 0 }); clear();
-    host.rounds("who-said-it", 10).then(
+    host.rounds("who-said-it", 10, deal).then(
       (rs) => { if (!live) return; const g = rs.filter((r): r is Line => r.game === "who-said-it" && !!r.card.voice); setLines(g); setPhase(g.length ? "guess" : "empty"); },
       () => { if (live) setPhase("error"); },
     );
     return () => { live = false; };
-  }, [host, run, clear]);
+  }, [host, run, clear, deal]);
 
   const commit = () => {
     const p = pending.current;
     pending.current = null;
     if (!p) return;
-    void save([reaction("who-said-it", "guess", p.card, { guess: { said: p.said, right: p.right }, ...(p.words.trim() ? { words: p.words.trim() } : {}) })]);
+    void save([reaction("who-said-it", "guess", p.card, { dimension: "voice", guess: { said: p.said, right: p.right }, ...(p.words.trim() ? { words: p.words.trim() } : {}) })]);
   };
   const commitRef = useRef(commit);
   commitRef.current = commit;
@@ -88,6 +88,7 @@ export function WhoSaidIt() {
       {phase === "empty" && <Empty title="No lines yet."><p>Who Said It needs some lines to guess at. There aren't any yet.</p></Empty>}
       {(phase === "guess" || phase === "reveal") && line && (
         <div className={`ta-who${phase === "reveal" ? (right ? " is-right" : " is-wrong") : ""}`} data-by={phase === "reveal" ? by : undefined}>
+          {phase === "guess" && <AskLine ask={line.ask} />}
           <figure className="ta-who-line" key={line.card.id}>
             <blockquote>{line.card.text ?? line.card.title}</blockquote>
             {phase === "reveal" && <span className="ta-who-stamp" aria-hidden="true">{by === "owner" ? <Pen size={22} /> : <Spark size={22} />}</span>}

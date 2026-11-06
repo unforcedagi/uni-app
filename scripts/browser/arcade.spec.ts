@@ -7,12 +7,16 @@ import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
 
 const pal = (id: string, title: string, colors: string[], features: string[]) => ({ id, kind: 'palette', domain: 'visual', title, features, source: 'generated', palette: colors });
+const ASK = { dimension: 'colour', prompt: 'Which colours feel more like you?', detail: 'Same little landscape on both. Only the colours change.' };
+const ASK_GREY = { dimension: 'value', prompt: 'Which light and dark feels more like you?', detail: 'Same little landscape, in greys. Only the tones change.' };
+const TONAL = [pal('t-ember', 'Ember', ['#6b6b6b', '#cccccc', '#444444'], ['visual:dark']), pal('t-glacier', 'Glacier', ['#c0c0c0', '#f8f8f8', '#555555'], ['visual:light-paper'])];
 const CARDS = [
   pal('t-ember', 'Ember', ['#a3542a', '#e8c48f', '#5b3a29'], ['visual:warm', 'visual:earthy']),
   pal('t-glacier', 'Glacier', ['#9ec9e6', '#f4f8fb', '#3c5a73'], ['visual:cool', 'visual:clinical']),
   pal('t-moss', 'Moss', ['#4f6b3a', '#c9d3a8', '#2c3a22'], ['visual:earthy', 'visual:muted']),
   pal('t-neon', 'Neon', ['#ff2bd6', '#1b1b3a', '#2bfff1'], ['visual:neon', 'visual:vivid']),
 ];
+const ASK_Q = { dimension: 'systems', prompt: 'How should this work?', detail: "No right answer. It's your system, in your words." };
 const QUESTION = { id: 't-q1', kind: 'question', domain: 'systems', title: 'Away', text: 'When you are away for a week, what should happen to what arrives?', features: ['systems:calm'], source: 'generated' };
 const CLAIMS = [
   { id: 'visual:warm+', domain: 'visual', text: 'Warm colour: clay, ember, late sun.', weight: 0.7, evidence: 6, status: 'live', quotes: ['made-up words about sun'] },
@@ -22,7 +26,7 @@ const CLAIMS = [
 const NOTE_ID = '01M6QAF6FYXD39R6BP1TW2TEST';
 
 async function boot(page: Page) {
-  await page.addInitScript(({ cards, question, claims, noteId }) => {
+  await page.addInitScript(({ cards, tonal, ask, askGrey, askQ, question, claims, noteId }) => {
     const w = window as any;
     w.__arcadeBurst = 6;
     w.__arcade = [];
@@ -36,8 +40,9 @@ async function boot(page: Page) {
     w.__extraInvoke = async (cmd: string, args: any) => {
       if (cmd === 'arcade_home') return { stats: stats(), fresh: { 'this-or-that': 2, gallery: 0, 'fix-it': 0, 'who-said-it': 0, ripple: 1 }, games: {}, profile: {} };
       if (cmd === 'arcade_rounds') {
-        if (args.game === 'this-or-that') return { rounds: Array.from({ length: args.n }, (_, i) => { const a = cards[(2 * i + n++) % 4], b = cards[(2 * i + 1 + n) % 4]; return { game: 'this-or-that', a, b: b.id === a.id ? cards[(cards.indexOf(a) + 1) % 4] : b }; }) };
-        if (args.game === 'ripple') return { rounds: [{ game: 'ripple', card: question }] };
+        if (args.game === 'this-or-that' && args.grey) return { rounds: Array.from({ length: args.n }, () => ({ game: 'this-or-that', a: tonal[0], b: tonal[1], ask: askGrey })) };
+        if (args.game === 'this-or-that') return { rounds: Array.from({ length: args.n }, (_, i) => { const a = cards[(2 * i + n++) % 4], b = cards[(2 * i + 1 + n) % 4]; return { game: 'this-or-that', a, b: b.id === a.id ? cards[(cards.indexOf(a) + 1) % 4] : b, ask }; }) };
+        if (args.game === 'ripple') return { rounds: [{ game: 'ripple', card: question, ask: askQ }] };
         return { rounds: [] };
       }
       if (cmd === 'arcade_react') { w.__arcade.push(...args.reactions); return { ok: true, stored: args.reactions.length, stats: stats() }; }
@@ -51,7 +56,7 @@ async function boot(page: Page) {
     // a microphone that hears a quiet tone, so the app's own recorder session runs for real
     const md = navigator.mediaDevices ?? ((navigator as any).mediaDevices = {});
     md.getUserMedia = async () => { const ctx = new AudioContext(); const o = ctx.createOscillator(); const d = ctx.createMediaStreamDestination(); o.connect(d); o.start(); return d.stream; };
-  }, { cards: CARDS, question: QUESTION, claims: CLAIMS, noteId: NOTE_ID });
+  }, { cards: CARDS, tonal: TONAL, ask: ASK, askGrey: ASK_GREY, askQ: ASK_Q, question: QUESTION, claims: CLAIMS, noteId: NOTE_ID });
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true });
   await page.locator('[data-place="front-door"]').waitFor();
 }
@@ -87,6 +92,36 @@ test('the Arcade opens from the app, a burst saves each pick once, and the way b
   await tap(page, page.locator('.ta-arcade').getByRole('button', { name: 'Arcade' }).first());
   await tap(page, page.locator('.ta-home').getByRole('button', { name: /leave|back|close/i }).first());
   await expect(page.locator('.arcade-place')).toHaveCount(0);
+});
+
+test('in the app: a pair says what it asks; the greyscale switch reaches the door, and a pick is marked', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="this-or-that"]'));
+  await expect(page.locator('.ta-ask h2')).toHaveText('Which colours feel more like you?');
+  await expect(page.locator('.ta-tot')).toHaveAttribute('data-dimension', 'colour');
+  // his way out on a screen with no colour
+  await tap(page, page.getByRole('button', { name: /Switch to greyscale/ }));
+  await expect(page.locator('.ta-ask h2')).toHaveText('Which light and dark feels more like you?');
+  expect((await calls(page, 'arcade_rounds')).pop()).toMatchObject({ game: 'this-or-that', grey: true });
+  await tap(page, page.locator('.ta-side-hit').first());
+  await expect.poll(async () => (await reactions(page)).length).toBe(1);
+  expect((await reactions(page))[0]).toMatchObject({ grey: true, dimension: 'value' });
+  // the home asks for what greyscale can deal, and the switch shows on
+  await tap(page, page.locator('.ta-arcade').getByRole('button', { name: 'Arcade' }).first());
+  await expect(page.getByRole('switch', { name: /Greyscale screen/ })).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(async () => (await calls(page, 'arcade_home')).pop()).toMatchObject({ grey: true });
+  if (process.env.T335_SHOTS) await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-arcade-grey.png` });
+});
+
+test('the calm screen (how a Daylight is set up) plays in greyscale without being asked', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('uni.motion', 'calm'));
+  await boot(page);
+  await openArcade(page);
+  await expect(page.getByRole('switch', { name: /Greyscale screen/ })).toHaveAttribute('aria-checked', 'true');
+  await tap(page, page.locator('[data-toy="this-or-that"]'));
+  await expect(page.locator('.ta-tot')).toHaveAttribute('data-dimension', 'value');
+  expect((await calls(page, 'arcade_rounds')).pop()).toMatchObject({ grey: true, still: true });
 });
 
 test('Ripple out loud files a journal voice entry; the reaction names the note, never its words', async ({ page }) => {

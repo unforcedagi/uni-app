@@ -2,7 +2,7 @@
 // No timer; the seconds only count up so you know it's listening.
 import { useEffect, useRef, useState } from "react";
 import type { Round } from "../../../engine/src/types.ts";
-import { BurstEnd, Empty, GameFrame, Loading, SaveNote } from "../kit/frame.tsx";
+import { AskLine, BurstEnd, Empty, GameFrame, Loading, SaveNote } from "../kit/frame.tsx";
 import { reaction, useArcade, useSaver } from "../kit/hooks.ts";
 import { seedsOf } from "../kit/lesson.ts";
 import { Keyboard, Mic, Next } from "../kit/icons.tsx";
@@ -15,7 +15,7 @@ function clock(s: number): string {
 }
 
 export function Ripple() {
-  const { host, calm } = useArcade();
+  const { host, calm, deal } = useArcade();
   const voice = host.voice;
   const [phase, setPhase] = useState<Phase>("loading");
   const [qs, setQs] = useState<Q[]>([]);
@@ -32,12 +32,12 @@ export function Ripple() {
   useEffect(() => {
     let live = true;
     setPhase("loading"); setIdx(0); clear();
-    host.rounds("ripple", 5).then(
+    host.rounds("ripple", 5, deal).then(
       (rs) => { if (!live) return; const g = rs.filter((r): r is Q => r.game === "ripple"); setQs(g); setPhase(g.length ? "ask" : "empty"); },
       () => { if (live) setPhase("error"); },
     );
     return () => { live = false; };
-  }, [host, run, clear]);
+  }, [host, run, clear, deal]);
 
   // while listening: the seconds, and the rings following the voice's level
   useEffect(() => {
@@ -86,7 +86,7 @@ export function Ripple() {
     try {
       const got = await voice.stop();
       if (!got) { setNote("Nothing was kept. Try again, or write it."); setPhase("ask"); return; }
-      const ok = await save([reaction("ripple", "voice", q.card.id, { voice: { ref: got.ref, seconds: Math.round(got.seconds) }, ...(got.transcript?.trim() ? { words: got.transcript.trim() } : {}) })]);
+      const ok = await save([reaction("ripple", "voice", q.card.id, { dimension: "systems", voice: { ref: got.ref, seconds: Math.round(got.seconds) }, ...(got.transcript?.trim() ? { words: got.transcript.trim() } : {}) })]);
       setNote(keptLine("voice", ok));
       setPhase("kept");
     } catch (e) {
@@ -108,7 +108,7 @@ export function Ripple() {
       setPhase("ask");
       return;
     }
-    const ok = await save([reaction("ripple", "words", q.card.id, { words: t })]);
+    const ok = await save([reaction("ripple", "words", q.card.id, { dimension: "systems", words: t })]);
     setNote(keptLine("typed", ok));
     setText("");
     setPhase("kept");
@@ -130,7 +130,8 @@ export function Ripple() {
       {phase === "empty" && <Empty title="No questions yet."><p>Ripple asks how things should work. There aren't any questions yet.</p></Empty>}
       {q && (phase === "ask" || phase === "listening" || phase === "saving" || phase === "kept") && (
         <div className={`ta-rip${phase === "listening" ? " is-listening" : ""}`}>
-          <h2 className="ta-rip-q">{q.card.text ?? q.card.title}</h2>
+          <AskLine ask={q.ask} />
+          <p className="ta-rip-q">{q.card.text ?? q.card.title}</p>
           {phase === "kept" ? (
             <div className="ta-rip-kept" role="status">
               <span className="ta-rip-stone" aria-hidden="true" />

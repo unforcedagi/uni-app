@@ -1,5 +1,6 @@
 // Reactions -> evidence per feature. Plain arithmetic, so a profile can always be rebuilt from the reaction log.
 import type { Card, Reaction } from "./types.ts";
+import { isColourFeature, judgedFeatures } from "./dimensions.ts";
 
 export interface FeatureEvidence {
   feature: string;
@@ -47,29 +48,31 @@ export function evidence(cards: Iterable<Card> | Map<string, Card>, reactions: r
   for (const r of reactions) {
     const k = r.weight ?? 1;
     const card = byId.get(r.card);
+    // only what this reaction was judging, and no colour from a screen without it
+    const features = (c: Card | undefined) => (c ? judgedFeatures(c, r.dimension, r.grey) : []);
     switch (r.kind) {
       case "pick": {
         const other = r.other ? byId.get(r.other) : undefined;
-        const win = new Set(card?.features ?? []);
-        const lose = new Set(other?.features ?? []);
+        const win = new Set(features(card));
+        const lose = new Set(features(other));
         for (const f of win) if (!lose.has(f)) touch(f, STRENGTH.pick * k, r.words);
         for (const f of lose) if (!win.has(f)) touch(f, -STRENGTH.loser * k);
         break;
       }
       case "keep": case "pin": {
         const s = (r.kind === "pin" ? STRENGTH.pin : STRENGTH.keep) * k;
-        for (const f of card?.features ?? []) touch(f, s, r.words);
+        for (const f of features(card)) touch(f, s, r.words);
         break;
       }
       case "drop":
-        for (const f of card?.features ?? []) touch(f, -STRENGTH.drop * k, r.words);
+        for (const f of features(card)) touch(f, -STRENGTH.drop * k, r.words);
         break;
       case "nudge": {
         const axes = card?.artifact?.axes ?? [];
         for (const [key, raw] of Object.entries(r.nudges ?? {})) {
           const axis = axes.find((a) => a.key === key);
           const v = Math.max(-MAX_NUDGE, Math.min(MAX_NUDGE, Number(raw) || 0));
-          if (axis && Math.abs(v) >= 0.15) touch(axis.feature, v * k, r.words);
+          if (axis && Math.abs(v) >= 0.15 && !(r.grey && isColourFeature(axis.feature))) touch(axis.feature, v * k, r.words);
         }
         break;
       }
@@ -81,8 +84,8 @@ export function evidence(cards: Iterable<Card> | Map<string, Card>, reactions: r
       }
       case "guess": {
         // a line by Uni that fooled them sounds like them: its features lean their way, a little
-        if (card?.voice?.by === "uni" && r.guess && !r.guess.right) for (const f of card.features) touch(f, 0.5, r.words);
-        if (card?.voice?.by === "uni" && r.guess?.right) for (const f of card.features) touch(f, -0.25, r.words);
+        if (card?.voice?.by === "uni" && r.guess && !r.guess.right) for (const f of features(card)) touch(f, 0.5, r.words);
+        if (card?.voice?.by === "uni" && r.guess?.right) for (const f of features(card)) touch(f, -0.25, r.words);
         break;
       }
       default:

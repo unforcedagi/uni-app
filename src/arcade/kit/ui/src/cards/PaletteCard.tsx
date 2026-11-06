@@ -17,17 +17,19 @@ function hill(r: () => number, y: number, amp: number): string {
   return pts.join(" ");
 }
 
-export function PaletteCard({ card }: { card: Card }) {
+export function PaletteCard({ card, bare }: { card: Card; bare?: boolean }) {
   const cols = (card.palette ?? []).slice(0, 6);
   const scene = useMemo(() => {
-    const r = rng(hash(card.id));
+    // a pair draws the one scene with three hills: only the colours differ
+    const r = rng(hash(bare ? "pair" : card.id));
     const sky = cols[0] ?? "#ccc";
     const sun = cols[1] ?? sky;
     const rest = cols.slice(2);
-    const layers = rest.length ? rest : [sun];
+    const own = rest.length ? rest : [sun];
+    const layers = bare ? [0, 1, 2].map((i) => own[i % own.length]) : own;
     const hills = layers.map((c, i) => ({ c, d: hill(r, 92 + i * (90 / layers.length), 26 + r() * 22) }));
     return { sky, sun, sunX: 70 + r() * 180, sunY: 46 + r() * 22, sunR: 22 + r() * 16, hills };
-  }, [card.id, cols.join(",")]);
+  }, [card.id, cols.join(","), bare]);
   return (
     <figure className="ta-card ta-card-palette" data-kind="palette">
       <div className="ta-media-frame">
@@ -38,8 +40,8 @@ export function PaletteCard({ card }: { card: Card }) {
         </svg>
       </div>
       <figcaption className="ta-card-cap">
-        <span className="ta-swatches" aria-hidden="true">{cols.map((c) => <i key={c} style={{ background: c }} />)}</span>
-        {card.title}
+        <span className="ta-swatches" aria-hidden="true">{cols.map((c, i) => <i key={`${c}-${i}`} style={{ background: c }} />)}</span>
+        {!bare && card.title}
       </figcaption>
     </figure>
   );

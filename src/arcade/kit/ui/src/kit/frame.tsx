@@ -1,7 +1,7 @@
 // The frame every game sits in (a way back, its name, its own corner), and the end of a burst.
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
-import type { GameId } from "../../../engine/src/types.ts";
+import type { Ask, GameId } from "../../../engine/src/types.ts";
 import { useArcade } from "./hooks.ts";
 import { Back, Seed } from "./icons.tsx";
 
@@ -20,6 +20,16 @@ export function GameFrame({ game, title, corner, children, wide }: { game: GameI
       </header>
       <div className="ta-game-body">{children}</div>
     </section>
+  );
+}
+
+/** What this round is judging, in plain words: the question, and what stays the same. */
+export function AskLine({ ask }: { ask: Ask }) {
+  return (
+    <div className="ta-ask" data-dimension={ask.dimension}>
+      <h2>{ask.prompt}</h2>
+      <p>{ask.detail}</p>
+    </div>
   );
 }
 

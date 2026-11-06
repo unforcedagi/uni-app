@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Artifact, Card, Round } from "../../../engine/src/types.ts";
 import { ArtifactView } from "../cards/ArtifactView.tsx";
-import { BurstEnd, Empty, GameFrame, Loading, SaveNote } from "../kit/frame.tsx";
+import { AskLine, BurstEnd, Empty, GameFrame, Loading, SaveNote } from "../kit/frame.tsx";
 import { reaction, useArcade, useSaver } from "../kit/hooks.ts";
 import { andList, noticed, seedsOf } from "../kit/lesson.ts";
 import { Next } from "../kit/icons.tsx";
@@ -35,7 +35,7 @@ function Slider({ axis, value, onChange }: { axis: Artifact["axes"][number]; val
 }
 
 export function FixIt() {
-  const { host, uni } = useArcade();
+  const { host, uni, deal } = useArcade();
   const [phase, setPhase] = useState<"loading" | "fix" | "reveal" | "end" | "empty" | "error">("loading");
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [idx, setIdx] = useState(0);
@@ -48,13 +48,14 @@ export function FixIt() {
   useEffect(() => {
     let live = true;
     setPhase("loading"); setIdx(0); clear();
-    host.rounds("fix-it", 4).then(
+    host.rounds("fix-it", 4, deal).then(
       (rs) => { if (!live) return; const g = rs.filter((r): r is Piece => r.game === "fix-it" && !!r.card.artifact); setPieces(g); setPhase(g.length ? "fix" : "empty"); },
       () => { if (live) setPhase("error"); },
     );
     return () => { live = false; };
-  }, [host, run, clear]);
+  }, [host, run, clear, deal]);
 
+  const ask = pieces[idx]?.ask;
   const card: Card | undefined = pieces[idx]?.card;
   const art = card?.artifact;
   useEffect(() => {
@@ -65,7 +66,7 @@ export function FixIt() {
     if (!card || !art) return;
     const nudges = Object.fromEntries(art.axes.map((a) => [a.key, round2((params[a.key] ?? 0) - (art.params[a.key] ?? 0))]));
     const w = words.trim();
-    void save([reaction("fix-it", "nudge", card.id, { nudges, ...(w ? { words: w } : {}) })]);
+    void save([reaction("fix-it", "nudge", card.id, { nudges, ...(ask ? { dimension: ask.dimension } : {}), ...(w ? { words: w } : {}) })]);
     setLast({ nudges, words: w });
     setPhase("reveal");
   };
@@ -90,13 +91,14 @@ export function FixIt() {
             <ArtifactView card={card} params={params} />
           </div>
           <div className="ta-fix-tools">
-            <p className="ta-fix-ask">{card.title}. <span>Something's a little off. Slide it until it feels right.</span></p>
+            {ask && <AskLine ask={ask} />}
+            <p className="ta-fix-what">{card.title}. Something's a little off.</p>
             <div className="ta-axes">
               {art.axes.map((a) => <Slider key={a.key} axis={a} value={params[a.key] ?? 0} onChange={(v) => setParams((p) => ({ ...p, [a.key]: v }))} />)}
             </div>
             <label className="ta-field">
               <span>In your words <small>(optional)</small></span>
-              <input type="text" value={words} maxLength={400} placeholder="less corporate" onChange={(e) => setWords(e.target.value)}
+              <input type="text" value={words} maxLength={400} placeholder={ask?.dimension === "words" ? "less corporate" : ask?.dimension === "motion" ? "calmer, it fusses" : "more room to breathe"} onChange={(e) => setWords(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") done(); }} />
             </label>
             <div className="ta-fix-go">

@@ -233,6 +233,7 @@ export function distillPrompt(input: { profile: Profile; evidenceLines: string[]
     "Rules:",
     "- Every claim is one plain sentence a designer, musician or writer could act on. Specific beats general (\"clay and late-sun oranges\" beats \"warm colours\").",
     "- Quotes must be copied word for word from THEIR WORDS below, or left out. Never invent or paraphrase a quote.",
+    "- A line in THEIR WORDS marked 'judging <x>' is about that one thing, whatever else the card shows. One marked 'seen in greyscale' says nothing about colour: write no colour claim from it.",
     "- Never re-assert anything listed under HELD BACK (they said 'not me' or let it go), in any wording.",
     `- At most ${MAX_PER_DOMAIN} claims per domain. Weight 0..1 is how sure the evidence makes you.`,
     "- The summary is two or three sentences, plain, in the third person.",
@@ -259,7 +260,8 @@ export function theirWords(reactions: readonly Reaction[], cardList: Iterable<Ca
     const w = r.words?.trim();
     if (!w) continue;
     const c = cards.get(r.card);
-    const about = c ? ` [${r.kind} on ${c.kind} "${clean(c.title, 60)}"]` : "";
+    const seen = [r.dimension ? `judging ${r.dimension}` : "", r.grey ? "seen in greyscale" : ""].filter(Boolean).join(", ");
+    const about = c ? ` [${r.kind} on ${c.kind} "${clean(c.title, 60)}"${seen ? `, ${seen}` : ""}]` : "";
     const line = `${clean(w, 600)}${about}`;
     if (!out.includes(line)) out.push(line);
   }

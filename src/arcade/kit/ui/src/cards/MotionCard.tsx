@@ -97,7 +97,7 @@ export function MotionStage({ spec, label }: { spec: MotionSpec; label: string }
   );
 }
 
-export function MotionCard({ card }: { card: Card }) {
+export function MotionCard({ card, bare }: { card: Card; bare?: boolean }) {
   const spec: MotionSpec = card.motion ?? { scene: "ripple", duration: 2, easing: "ease-in-out", amplitude: 0.5 };
   const pace = spec.duration >= 3 ? "slow" : spec.duration <= 1 ? "quick" : "easy";
   return (
@@ -105,7 +105,7 @@ export function MotionCard({ card }: { card: Card }) {
       <div className="ta-media-frame">
         <MotionStage spec={spec} label={`${card.title}: a ${pace} ${spec.scene}, ${easingWord(spec.easing)}`} />
       </div>
-      <figcaption className="ta-card-cap">{card.title} <small>{spec.duration}s, {easingWord(spec.easing)}</small></figcaption>
+      {!bare && <figcaption className="ta-card-cap">{card.title} <small>{spec.duration}s, {easingWord(spec.easing)}</small></figcaption>}
     </figure>
   );
 }

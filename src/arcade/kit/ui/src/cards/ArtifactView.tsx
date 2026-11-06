@@ -5,13 +5,14 @@ import type { CSSProperties } from "react";
 import type { Artifact, Axis, Card, MotionSpec } from "../../../engine/src/types.ts";
 import { MotionStage } from "./MotionCard.tsx";
 
-export type Role = "warmth" | "pace" | "loud" | "room" | "soft" | "play" | "size" | "spring" | "length";
+export type Role = "face" | "warmth" | "pace" | "loud" | "room" | "soft" | "play" | "size" | "spring" | "length";
 
 const ROLES: { role: Role; any: RegExp; pos: RegExp; neg: RegExp }[] = [
+  { role: "face", any: /serif|typeface|font|\bsans\b/, pos: /\bsans\b/, neg: /serif/ },
   { role: "warmth", any: /warm|cool|cold|hue|temperat|earth|sun|ice/, pos: /warm|earth|sun|golden|ember/, neg: /cool|cold|ice|blue|clinical/ },
   { role: "pace", any: /slow|fast|speed|tempo|pace|quick|hurr|calm|rush|snap/, pos: /slow|calm|gentle|unhurr|lazy|easy/, neg: /fast|quick|snap|hurr|rush|brisk/ },
   { role: "spring", any: /bounc|spring|smooth|elastic|jump|jitter/, pos: /bounc|spring|elastic|jump|jitter|playful/, neg: /smooth|still|fluid|steady/ },
-  { role: "loud", any: /loud|quiet|bold|vivid|saturat|bright|muted|intens|volume|shout|calm/, pos: /loud|bold|vivid|saturat|bright|intens|shout/, neg: /quiet|muted|soft|calm|whisper|subtle/ },
+  { role: "loud", any: /contrast|punch|loud|quiet|bold|vivid|saturat|bright|muted|intens|volume|shout|calm/, pos: /punch|contrast|loud|bold|vivid|saturat|bright|intens|shout/, neg: /quiet|muted|soft|calm|whisper|subtle/ },
   { role: "room", any: /dense|sparse|space|air|room|crowd|busy|cramp|tight|breath/, pos: /sparse|space|air|room|breath|open/, neg: /dense|crowd|busy|cramp|tight|packed/ },
   { role: "soft", any: /round|sharp|hard|organic|geometric|corner|edge|soft/, pos: /round|organic|soft|curv/, neg: /sharp|hard|geometric|square|angular/ },
   { role: "play", any: /play|serious|corporate|formal|casual|friendly|stiff|whims|human|warm-earnest|tone/, pos: /play|casual|friendly|whims|human|earnest|warm/, neg: /serious|corporate|formal|stiff|business/ },
@@ -41,7 +42,7 @@ export function readAxes(axes: Axis[]): { axis: Axis; role: Role; sign: 1 | -1 }
 
 /** -1..1 per role from the params (missing roles sit at 0). */
 export function roleValues(art: Artifact, params: Record<string, number>): Record<Role, number> & { has: Set<Role> } {
-  const v: Record<Role, number> & { has: Set<Role> } = { warmth: 0, pace: 0, loud: 0, room: 0, soft: 0, play: 0, size: 0, spring: 0, length: 0, has: new Set() };
+  const v: Record<Role, number> & { has: Set<Role> } = { face: 0, warmth: 0, pace: 0, loud: 0, room: 0, soft: 0, play: 0, size: 0, spring: 0, length: 0, has: new Set() };
   for (const { axis, role, sign } of readAxes(art.axes)) { v[role] = Math.max(-1, Math.min(1, (params[axis.key] ?? 0) * sign)); v.has.add(role); }
   return v;
 }
@@ -53,8 +54,9 @@ function palette(v: Record<Role, number> & { has: Set<Role> }) {
   // loudness turns up saturation and contrast
   const hue = v.has.has("warmth") ? lerp(212, 26, v.warmth) : 34;
   const sat = lerp(14, 72, v.loud);
-  const bg = `hsl(${hue.toFixed(0)} ${(sat * 0.7).toFixed(0)}% ${lerp(90, 82, v.loud).toFixed(0)}%)`;
-  const ink = `hsl(${hue.toFixed(0)} ${(sat * 0.5).toFixed(0)}% ${lerp(26, 14, v.loud).toFixed(0)}%)`;
+  // and the distance between ground and ink, so it reads with no colour at all
+  const bg = `hsl(${hue.toFixed(0)} ${(sat * 0.7).toFixed(0)}% ${lerp(76, 92, v.loud).toFixed(0)}%)`;
+  const ink = `hsl(${hue.toFixed(0)} ${(sat * 0.5).toFixed(0)}% ${lerp(44, 8, v.loud).toFixed(0)}%)`;
   const mark = `hsl(${((hue + 18) % 360).toFixed(0)} ${sat.toFixed(0)}% ${lerp(62, 50, v.loud).toFixed(0)}%)`;
   const mark2 = `hsl(${((hue + 330) % 360).toFixed(0)} ${(sat * 0.8).toFixed(0)}% ${lerp(72, 58, v.loud).toFixed(0)}%)`;
   return { bg, ink, mark, mark2 };
@@ -73,8 +75,11 @@ function styleVars(v: Record<Role, number> & { has: Set<Role> }): CSSProperties 
     ["--a-tilt" as string]: `${lerp(0, -5, v.play).toFixed(2)}deg`,
     ["--a-track" as string]: `${lerp(0.06, -0.02, v.play).toFixed(3)}em`,
     ["--a-soft" as string]: lerp(0, 100, v.play).toFixed(0),
+    ...(v.has.has("face") ? { ["--a-face" as string]: v.face < 0 ? "var(--ta-read)" : "var(--ta-ui)" } : {}),
   };
 }
+
+const STEADY = { face: 0, warmth: 0, pace: 0, loud: 0, room: 0, soft: 0, play: 0, size: 0, spring: 0, length: 0, has: new Set<Role>() };
 
 function copyFor(art: Artifact, params: Record<string, number>): string {
   const vs = art.variants ?? {};
@@ -94,8 +99,9 @@ export function ArtifactView({ card, params, small }: { card: Card; params: Reco
   const playful = v.play > 0.15;
   const label = `${card.title}, as it stands`;
   if (art.template === "copy") {
+    // judging words: the look holds still, only the wording moves
     return (
-      <figure className={`ta-art ta-art-copy${playful ? " is-playful" : ""}${small ? " is-small" : ""}`} style={style} aria-label={label}>
+      <figure className={`ta-art ta-art-copy${small ? " is-small" : ""}`} style={styleVars(STEADY)} aria-label={label}>
         <div className="ta-art-sheet">
           {art.text?.title && <p className="ta-art-kicker">{art.text.title}</p>}
           <p className="ta-art-words" aria-live={small ? undefined : "polite"}>{copyFor(art, params)}</p>

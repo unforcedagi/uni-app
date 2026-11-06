@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Card, Round } from "../../../engine/src/types.ts";
 import { CardView } from "../cards/CardView.tsx";
-import { BurstEnd, Empty, GameFrame, Loading, SaveNote, SeedCount } from "../kit/frame.tsx";
+import { AskLine, BurstEnd, Empty, GameFrame, Loading, SaveNote, SeedCount } from "../kit/frame.tsx";
 import { reaction, tick, useArcade, useKeys, useSaver } from "../kit/hooks.ts";
 import { noticed, seedsOf } from "../kit/lesson.ts";
 import { SoundOff, SoundOn } from "../kit/icons.tsx";
@@ -32,20 +32,20 @@ function Horizon({ left, total }: { left: number; total: number }) {
   );
 }
 
-function Side({ side, card, state, onPick }: { side: "a" | "b"; card: Card; state: "" | "is-chosen" | "is-folded"; onPick: () => void }) {
+function Side({ side, card, state, onPick, long }: { side: "a" | "b"; card: Card; state: "" | "is-chosen" | "is-folded"; onPick: () => void; long: boolean }) {
   const key = side === "a" ? "A" : "L";
   return (
     <div className={`ta-side ${state}`} data-side={side}>
       <button type="button" className="ta-side-hit" onClick={onPick} disabled={state !== ""}
         aria-label={`This one: ${card.title}`} aria-keyshortcuts={side === "a" ? "ArrowLeft A" : "ArrowRight L"} />
-      <CardView card={card} />
+      <CardView card={card} bare long={long} />
       <span className="ta-side-key" aria-hidden="true">{side === "a" ? "←" : "→"} {key}</span>
     </div>
   );
 }
 
 export function ThisOrThat() {
-  const { host, calm, burstSeconds } = useArcade();
+  const { host, calm, burstSeconds, grey, setGrey, deal } = useArcade();
   const total = burstSeconds * 1000;
   const [phase, setPhase] = useState<Phase>("loading");
   const [rounds, setRounds] = useState<Pair[]>([]);
@@ -70,7 +70,7 @@ export function ThisOrThat() {
     const mine = reset ? ++gen.current : gen.current;
     if (!reset) refilling.current = true;
     try {
-      const got = (await host.rounds("this-or-that", BATCH)).filter((r): r is Pair => r.game === "this-or-that");
+      const got = (await host.rounds("this-or-that", BATCH, deal)).filter((r): r is Pair => r.game === "this-or-that");
       if (mine !== gen.current) return;
       if (reset) { setRounds(got); setPhase(got.length ? "play" : "empty"); return; }
       // the host doesn't know what's queued here: skip pairs still waiting or just played
@@ -85,7 +85,7 @@ export function ThisOrThat() {
     } finally {
       if (!reset && mine === gen.current) refilling.current = false;
     }
-  }, [host]);
+  }, [host, deal]);
 
   useEffect(() => {
     setPhase("loading"); setIdx(0); setPicked(null); setLeft(total); ending.current = false; clear();
@@ -117,10 +117,14 @@ export function ThisOrThat() {
   };
 
   const round = rounds[idx];
+  const long = !!round && [round.a, round.b].some((c) => (c.text ?? "").length > 140);
   idxRef.current = idx;
   const count = useRef(0);
   count.current = rounds.length;
   useEffect(() => { if (round) { seen.current.set(round.a.id, round.a); seen.current.set(round.b.id, round.b); } }, [round]);
+  // scrolled down to the note below the game? each new pair brings its question back
+  const askEl = useRef<HTMLDivElement>(null);
+  useEffect(() => { askEl.current?.scrollIntoView?.({ block: "nearest" }); }, [idx]);
 
   const advance = () => {
     setPicked(null);
@@ -134,7 +138,7 @@ export function ThisOrThat() {
     if (phase !== "play" || picked || !round) return;
     const win = side === "a" ? round.a : round.b;
     const lose = side === "a" ? round.b : round.a;
-    void save([reaction("this-or-that", "pick", win.id, { other: lose.id })]);
+    void save([reaction("this-or-that", "pick", win.id, { other: lose.id, dimension: round.ask.dimension })]);
     setPicked(side);
     setSaid(`Picked ${win.title}.`);
     if (sound) tick(side === "a" ? 1 : 1.12);
@@ -180,13 +184,15 @@ export function ThisOrThat() {
       {phase === "play" && round && (
         <>
           <Horizon left={left} total={total} />
-          <div className="ta-tot" data-picked={picked ?? ""} data-kind={round.a.kind}>
-            <Side key={`a-${idx}`} side="a" card={round.a} state={picked === "a" ? "is-chosen" : picked === "b" ? "is-folded" : ""} onPick={() => choose("a")} />
+          <div ref={askEl} className="ta-ask-wrap"><AskLine ask={round.ask} /></div>
+          <div className="ta-tot" data-picked={picked ?? ""} data-kind={round.a.kind} data-dimension={round.ask.dimension}>
+            <Side key={`a-${idx}`} side="a" card={round.a} state={picked === "a" ? "is-chosen" : picked === "b" ? "is-folded" : ""} onPick={() => choose("a")} long={long} />
             <span className="ta-tot-or" aria-hidden="true">or</span>
-            <Side key={`b-${idx}`} side="b" card={round.b} state={picked === "b" ? "is-chosen" : picked === "a" ? "is-folded" : ""} onPick={() => choose("b")} />
+            <Side key={`b-${idx}`} side="b" card={round.b} state={picked === "b" ? "is-chosen" : picked === "a" ? "is-folded" : ""} onPick={() => choose("b")} long={long} />
           </div>
           <div className="ta-tot-foot">
             <button type="button" className="ta-btn ta-btn-quiet" onClick={skip} disabled={!!picked} aria-keyshortcuts="ArrowDown S">Neither, skip</button>
+            {round.ask.dimension === "colour" && !grey && <button type="button" className="ta-btn ta-btn-quiet" onClick={() => setGrey(true)}>No colour here? Switch to greyscale</button>}
           </div>
           <p className="ta-sr" aria-live="polite">{said}</p>
         </>

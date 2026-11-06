@@ -1,6 +1,6 @@
 // Small shared hooks: calm mode (reduced motion or the ink screen), media URLs, saving reactions with retry, a soft tick.
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import type { Card, GameId, Reaction, ReactionKind } from "../../../engine/src/types.ts";
+import type { Card, DealOptions, GameId, Reaction, ReactionKind } from "../../../engine/src/types.ts";
 import type { ArcadeHost } from "../host.ts";
 import { newId } from "../host.ts";
 
@@ -15,6 +15,11 @@ export interface ArcadeCtx {
   uni: string | null;
   /** This or That's burst, in seconds */
   burstSeconds: number;
+  /** this screen shows no colour: what's dealt changes, and every reaction is marked */
+  grey: boolean;
+  setGrey(on: boolean): void;
+  /** what to ask the host for, from grey and calm */
+  deal: DealOptions;
 }
 
 export const Ctx = createContext<ArcadeCtx | null>(null);
@@ -85,7 +90,7 @@ export function reaction(game: GameId, kind: ReactionKind, card: string, extra: 
  * stable, so a retry never doubles); the game keeps playing either way.
  */
 export function useSaver() {
-  const { host } = useArcade();
+  const { host, grey } = useArcade();
   const [session, setSession] = useState<Reaction[]>([]);
   const [failed, setFailed] = useState<Reaction[]>([]);
   const [busy, setBusy] = useState(false);
@@ -107,9 +112,11 @@ export function useSaver() {
   }, [host]);
 
   const save = useCallback((rs: Reaction[]) => {
-    setSession((s) => [...s, ...rs]);
-    return send(rs);
-  }, [send]);
+    // seen on a screen with no colour: said on the reaction, so colour taste isn't learned from it
+    const marked = grey ? rs.map((r) => ({ ...r, grey: true })) : rs;
+    setSession((s) => [...s, ...marked]);
+    return send(marked);
+  }, [send, grey]);
 
   const retry = useCallback(async () => {
     const list = failedRef.current;

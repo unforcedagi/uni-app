@@ -107,6 +107,39 @@ pub fn check_game(game: &str) -> ArcadeResult<&str> {
         .ok_or_else(|| invalid("not a game"))
 }
 
+/// What this screen can show, so the door deals only what can be judged on it.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Screen {
+    /// No colour (a greyscale tablet, or asked for in the Arcade).
+    pub grey: bool,
+    /// Nothing moves (a calm screen).
+    pub still: bool,
+}
+
+impl Screen {
+    fn query(self, first: char) -> String {
+        let flags: Vec<&str> = [(self.grey, "grey=1"), (self.still, "still=1")]
+            .iter()
+            .filter(|(on, _)| *on)
+            .map(|(_, f)| *f)
+            .collect();
+        if flags.is_empty() {
+            String::new()
+        } else {
+            format!("{first}{}", flags.join("&"))
+        }
+    }
+}
+
+fn rounds_path(game: &str, n: u32, screen: Screen) -> ArcadeResult<String> {
+    Ok(format!(
+        "/arcade/v1/rounds?game={}&n={}{}",
+        check_game(game)?,
+        n.clamp(1, 60),
+        screen.query('&')
+    ))
+}
+
 /// A client for one door origin, signing as `keys`.
 pub struct ArcadeDoor<'a> {
     base: String,
@@ -135,16 +168,13 @@ impl<'a> ArcadeDoor<'a> {
         self
     }
 
-    pub async fn home(&self) -> ArcadeResult<Value> {
-        self.json("GET", "/arcade/v1/home", None).await
+    pub async fn home(&self, screen: Screen) -> ArcadeResult<Value> {
+        let path = format!("/arcade/v1/home{}", screen.query('?'));
+        self.json("GET", &path, None).await
     }
 
-    pub async fn rounds(&self, game: &str, n: u32) -> ArcadeResult<Value> {
-        let path = format!(
-            "/arcade/v1/rounds?game={}&n={}",
-            check_game(game)?,
-            n.clamp(1, 60)
-        );
+    pub async fn rounds(&self, game: &str, n: u32, screen: Screen) -> ArcadeResult<Value> {
+        let path = rounds_path(game, n, screen)?;
         self.json("GET", &path, None).await
     }
 
@@ -314,6 +344,19 @@ mod tests {
         );
         assert_eq!(door_url("https://notes.example.com"), None);
         assert_eq!(door_url("http://box.example.ts.net"), None);
+    }
+
+    #[test]
+    fn a_screen_is_told_to_the_door_in_the_signed_path() {
+        let plain = Screen::default();
+        let grey = Screen { grey: true, still: false };
+        let both = Screen { grey: true, still: true };
+        assert_eq!(rounds_path("gallery", 5, plain).unwrap(), "/arcade/v1/rounds?game=gallery&n=5");
+        assert_eq!(rounds_path("gallery", 5, grey).unwrap(), "/arcade/v1/rounds?game=gallery&n=5&grey=1");
+        assert_eq!(rounds_path("gallery", 5, both).unwrap(), "/arcade/v1/rounds?game=gallery&n=5&grey=1&still=1");
+        assert_eq!(both.query('?'), "?grey=1&still=1");
+        assert_eq!(plain.query('?'), "");
+        assert!(rounds_path("garden", 5, grey).is_err());
     }
 
     #[test]

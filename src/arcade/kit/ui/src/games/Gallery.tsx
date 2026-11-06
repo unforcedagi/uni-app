@@ -1,9 +1,9 @@
 // The Gallery: a slow wander, one thing at a time with the next one waiting at the edge. Sounds play softly when they
 // come into focus, clips loop quietly. Pin what pulls, with a few words if they come. No timer; leave any time.
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Round } from "../../../engine/src/types.ts";
+import type { Dimension, Round } from "../../../engine/src/types.ts";
 import { CardView } from "../cards/CardView.tsx";
-import { BurstEnd, Empty, GameFrame, Loading, SaveNote } from "../kit/frame.tsx";
+import { AskLine, BurstEnd, Empty, GameFrame, Loading, SaveNote } from "../kit/frame.tsx";
 import { reaction, useArcade, useKeys, useSaver } from "../kit/hooks.ts";
 import { noticed, seedsOf } from "../kit/lesson.ts";
 import { Back, Next, Pin } from "../kit/icons.tsx";
@@ -11,7 +11,7 @@ import { Back, Next, Pin } from "../kit/icons.tsx";
 type Item = Extract<Round, { game: "gallery" }>;
 
 export function Gallery() {
-  const { host } = useArcade();
+  const { host, deal } = useArcade();
   const [phase, setPhase] = useState<"loading" | "wander" | "end" | "empty" | "error">("loading");
   const [items, setItems] = useState<Item[]>([]);
   const [idx, setIdx] = useState(0);
@@ -22,25 +22,25 @@ export function Gallery() {
   const [run, setRun] = useState(0);
   const { session, save, retry, clear, failed, busy } = useSaver();
   // what to commit when the card is left: a pin waits for its words until then
-  const pending = useRef<{ card: string; words: string } | null>(null);
+  const pending = useRef<{ card: string; words: string; dimension: Dimension } | null>(null);
   const doneIds = useRef(new Set<string>());
 
   useEffect(() => {
     let live = true;
     setPhase("loading"); setIdx(0); setPins(0); clear();
-    host.rounds("gallery", 14).then(
+    host.rounds("gallery", 14, deal).then(
       (rs) => { if (!live) return; const g = rs.filter((r): r is Item => r.game === "gallery"); setItems(g); setPhase(g.length ? "wander" : "empty"); },
       () => { if (live) setPhase("error"); },
     );
     return () => { live = false; };
-  }, [host, run, clear]);
+  }, [host, run, clear, deal]);
 
   const commit = () => {
     const p = pending.current;
     pending.current = null;
     if (!p || doneIds.current.has(p.card)) return;
     doneIds.current.add(p.card);
-    void save([reaction("gallery", "pin", p.card, p.words.trim() ? { words: p.words.trim() } : {})]);
+    void save([reaction("gallery", "pin", p.card, { dimension: p.dimension, ...(p.words.trim() ? { words: p.words.trim() } : {}) })]);
   };
 
   // leaving the Gallery mid-wander still keeps the pin
@@ -55,7 +55,7 @@ export function Gallery() {
   const togglePin = () => {
     if (!item || kept) return;
     if (pinned) { pending.current = null; setPinned(false); setPins((n) => n - 1); setSaid("Unpinned."); return; }
-    pending.current = { card: item.card.id, words };
+    pending.current = { card: item.card.id, words, dimension: item.ask.dimension };
     setPinned(true);
     setPins((n) => n + 1);
     setSaid(`Pinned ${item.card.title}.`);
@@ -99,6 +99,7 @@ export function Gallery() {
             )}
           </div>
           <div className="ta-gal-tray">
+            <AskLine ask={item.ask} />
             <p className="ta-gal-title">
               <span>{item.card.title}</span>
               {item.card.blurb && <small>{item.card.blurb}</small>}
@@ -110,7 +111,7 @@ export function Gallery() {
               {pinned && !kept && (
                 <label className="ta-field ta-gal-words">
                   <span>What pulls you? <small>(optional)</small></span>
-                  <input type="text" value={words} maxLength={400} placeholder="the light on the left"
+                  <input type="text" value={words} maxLength={400} placeholder={item.ask.dimension === "sound" ? "the low hum under it" : "the light on the left"}
                     onChange={(e) => { setWords(e.target.value); if (pending.current) pending.current.words = e.target.value; }}
                     onKeyDown={(e) => { if (e.key === "Enter") go(1); }} />
                 </label>

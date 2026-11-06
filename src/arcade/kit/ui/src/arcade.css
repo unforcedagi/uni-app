@@ -74,6 +74,14 @@
   --ta-shadow-1: none; --ta-shadow-2: none; --ta-hair: var(--g-hair, 1.5px);
   --ta-focus: #000;
 }
+/* a greyscale screen asked for by name: the ink look, on white whatever the host's day or night tokens say */
+.ta-arcade.ta-grey {
+  color-scheme: light;
+  --ta-ground: #fff; --ta-paper: #fff; --ta-sunk: #eee;
+  --ta-ink: #000; --ta-ink-2: #262626; --ta-ink-3: #4a4a4a;
+  --ta-line: rgba(0, 0, 0, .35); --ta-line-strong: rgba(0, 0, 0, .7); --ta-hair: 1.5px;
+}
+.ta-ink .ta-media-frame > img, .ta-ink .ta-media-frame > video { filter: grayscale(1); }
 .ta-arcade *, .ta-arcade *::before, .ta-arcade *::after { box-sizing: border-box; }
 .ta-arcade ::selection { background: var(--ta-sun-soft); color: var(--ta-ink); }
 .ta-ink ::selection { background: #000; color: #fff; }
@@ -324,6 +332,26 @@
 .ta-ink .ta-m-stalk { background: #000; }
 .ta-ink .ta-m-wave { border-color: #000; }
 
+/* ── What's being judged ────────────────────────────────────── */
+.ta-ask { width: 100%; max-width: 44ch; margin: 0 auto 12px; padding: 0 20px; text-align: center; }
+.ta-ask-wrap { scroll-margin-top: 80px; }
+.ta-ask h2 { margin: 0; font: 560 clamp(23px, 2.7vw, 30px)/1.14 var(--ta-display); letter-spacing: -.015em; font-variation-settings: "SOFT" 100; text-wrap: balance; color: var(--ta-ink); }
+.ta-ask p { margin: 4px 0 0; font: 400 15px/1.4 var(--ta-ui); color: var(--ta-ink-2); text-wrap: pretty; }
+.ta-gal-tray .ta-ask, .ta-fix-tools .ta-ask { max-width: none; margin: 0; padding: 0; text-align: left; }
+.ta-gdn-panel .ta-ask { max-width: none; margin: 0 0 6px; padding: 0; text-align: left; }
+.ta-gdn-panel .ta-ask h2 { font-size: 15px; font-family: var(--ta-ui); font-weight: 600; letter-spacing: 0; color: var(--ta-ink-2); }
+.ta-rip .ta-ask h2 { font-size: 17px; font-family: var(--ta-ui); font-weight: 600; letter-spacing: 0; color: var(--ta-ink-2); }
+.ta-rip .ta-ask p { font-size: 14px; }
+.ta-who .ta-ask { margin-bottom: 18px; }
+
+/* ── Greyscale switch ───────────────────────────────────────── */
+.ta-grey-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 20px; }
+.ta-grey-switch { display: inline-flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 16px 0 10px; border-radius: 999px; border: var(--ta-hair) solid var(--ta-line-strong); background: var(--ta-paper); color: var(--ta-ink); font: 600 15px/1 var(--ta-ui); cursor: pointer; }
+.ta-grey-switch b { min-width: 2.2em; font-weight: 700; text-align: right; }
+.ta-grey-knob { position: relative; flex: none; width: 26px; height: 26px; border-radius: 50%; border: 2px solid currentColor; background: linear-gradient(90deg, transparent 50%, currentColor 50%); }
+.ta-grey-switch.is-on .ta-grey-knob { background: currentColor; box-shadow: inset 0 0 0 4px var(--ta-paper); }
+.ta-grey-why, .ta-grey-hint { margin: 0; font: 400 14px/1.4 var(--ta-ui); color: var(--ta-ink-2); }
+
 /* ── This or That ───────────────────────────────────────────── */
 .ta-horizon { position: relative; width: min(520px, calc(100% - 64px)); height: 42px; margin: 2px auto 10px; }
 .ta-horizon svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
@@ -350,7 +378,7 @@
 .ta-side.is-chosen .ta-card { box-shadow: 0 0 0 5px var(--ta-sun), var(--ta-shadow-2); }
 .ta-side.is-chosen::after { content: ""; position: absolute; inset: -6px; border-radius: 30px; border: 3px solid var(--ta-sun); animation: ta-petal 460ms var(--ta-ease) both; pointer-events: none; }
 .ta-side.is-folded { transform: rotateX(68deg) scale(.86); transform-origin: 50% 100%; opacity: 0; }
-.ta-tot-foot { display: flex; justify-content: center; align-items: center; gap: 16px; padding: 46px 16px 22px; }
+.ta-tot-foot { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 16px; padding: 46px 16px 22px; }
 .ta-ink .ta-side.is-chosen .ta-card { box-shadow: none; outline: 5px solid #000; outline-offset: 3px; }
 .ta-ink .ta-side.is-chosen::after { display: none; }
 .ta-ink .ta-side.is-folded { opacity: .3; transform: none; }
@@ -388,8 +416,7 @@
 .ta-fix-bench .ta-art { width: min(100%, 520px); }
 .ta-fix-tools { display: grid; gap: 22px; padding: 26px; border-radius: 22px; background: var(--ta-paper); box-shadow: var(--ta-shadow-1); }
 .ta-ink .ta-fix-tools { border: 1.5px solid #000; }
-.ta-fix-ask { margin: 0; font: 560 26px/1.15 var(--ta-display); letter-spacing: -.015em; font-variation-settings: "SOFT" 100; }
-.ta-fix-ask span { display: block; margin-top: 8px; font: 400 16px/1.5 var(--ta-read); color: var(--ta-ink-2); letter-spacing: 0; }
+.ta-fix-what { margin: -10px 0 0; font: 400 15px/1.4 var(--ta-read); color: var(--ta-ink-2); }
 .ta-axes { display: grid; gap: 18px; }
 .ta-axis { display: grid; gap: 4px; }
 .ta-axis-ends { display: flex; justify-content: space-between; font: 600 14px/1.2 var(--ta-ui); color: var(--ta-ink-2); }
@@ -414,14 +441,13 @@
 .ta-art-shapes i:nth-child(1) { width: 46%; aspect-ratio: 1; top: 9%; left: 9%; background: var(--a-mark); }
 .ta-art-shapes i:nth-child(2) { width: 30%; aspect-ratio: 1; top: 22%; right: 10%; background: var(--a-mark2); transform: rotate(var(--a-tilt)); }
 .ta-art-shapes i:nth-child(3) { width: 64%; height: 6%; top: 52%; left: 18%; background: var(--a-ink); opacity: .14; }
-.ta-art-title { position: relative; margin: 0; font-family: var(--ta-ui); font-size: calc(2.7em * var(--a-scale)); font-weight: var(--a-weight); line-height: var(--a-lead); letter-spacing: var(--a-track); transform: rotate(var(--a-tilt)); transform-origin: left bottom; text-wrap: balance; }
+.ta-art-title { position: relative; margin: 0; font-family: var(--a-face, var(--ta-ui)); font-size: calc(2.7em * var(--a-scale)); font-weight: var(--a-weight); line-height: var(--a-lead); letter-spacing: var(--a-track); transform: rotate(var(--a-tilt)); transform-origin: left bottom; text-wrap: balance; }
 .ta-art.is-playful .ta-art-title { font-family: var(--ta-display); font-variation-settings: "SOFT" var(--a-soft), "WONK" 1; letter-spacing: -.02em; }
-.ta-art-body { position: relative; margin: 0; font: 400 1.05em/1.45 var(--ta-ui); opacity: .82; max-width: 30ch; }
+.ta-art-body { position: relative; margin: 0; font: 400 1.05em/1.45 var(--a-face, var(--ta-ui)); opacity: .82; max-width: 30ch; }
 .ta-art.is-playful .ta-art-body { font-family: var(--ta-read); }
 .ta-art-copy .ta-art-sheet { display: grid; gap: calc(var(--a-gap) * 1.4); min-height: 18em; align-content: center; }
 .ta-art-kicker { margin: 0; font: 600 .95em/1.2 var(--ta-ui); opacity: .7; }
 .ta-art-words { margin: 0; font-family: var(--ta-ui); font-size: calc(1.75em * var(--a-scale)); font-weight: calc(var(--a-weight) * .8); line-height: calc(var(--a-lead) + .1); letter-spacing: var(--a-track); text-wrap: pretty; }
-.ta-art-copy.is-playful .ta-art-words { font-family: var(--ta-read); font-weight: 420; letter-spacing: 0; }
 .ta-art-button { justify-self: start; padding: .7em 1.4em; border-radius: max(4px, var(--a-radius)); background: var(--a-ink); color: var(--a-bg); font: 600 .95em/1 var(--ta-ui); }
 .ta-art-motion .ta-art-sheet { aspect-ratio: 4 / 3; padding: 0; }
 .ta-art-motion .ta-motion { background: var(--a-bg); }
@@ -714,7 +740,8 @@
   .ta-seedcount span { display: none; }
 
   .ta-horizon { width: calc(100% - 40px); height: 30px; margin-bottom: 6px; }
-  .ta-tot { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr); gap: 0; padding: 0 16px; min-height: 0; }
+  /* a floor for each side: a picture has no height of its own, and a page that grows with its content (the cloud) gives it none */
+  .ta-tot { grid-template-columns: 1fr; grid-template-rows: minmax(min(34dvh, 300px), 1fr) auto minmax(min(34dvh, 300px), 1fr); gap: 0; padding: 0 16px; min-height: 0; }
   .ta-tot-or { justify-self: center; width: 40px; height: 40px; margin: -12px 0; z-index: 3; position: relative; font-size: 18px; }
   .ta-side { min-height: 0; }
   .ta-side .ta-card { border-radius: 20px; }
@@ -741,8 +768,6 @@
   .ta-fix-bench .ta-art { width: min(100%, 300px); }
   .ta-art { font-size: 12px; }
   .ta-fix-tools { padding: 18px; gap: 16px; }
-  .ta-fix-ask { font-size: 22px; }
-  .ta-fix-ask span { font-size: 15px; }
   .ta-fix-reveal { padding: 16px 18px 28px; }
   .ta-art.is-small { font-size: 5.5px; }
   .ta-fix-hunch { font-size: 19px; }
@@ -780,4 +805,21 @@
 @media (max-width: 380px) {
   .ta-home-title { font-size: 50px; }
   .ta-toy { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
+}
+
+/* an upright tablet (the Daylight): two toys a row, so a name and its line never run out of room */
+@media (min-width: 761px) and (max-width: 1000px) {
+  .ta-toys[data-count="6"] { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(220px, auto); }
+  .ta-toys[data-count="6"] > .ta-toy { grid-column: auto; grid-row: auto; }
+  .ta-toys[data-count="6"] > [data-toy="garden"], .ta-toys[data-count="6"] > [data-toy="ripple"] { grid-column: 1 / -1; }
+  .ta-toy[data-toy="gallery"] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto; }
+  .ta-toy[data-toy="gallery"] .ta-toy-art { order: 2; }
+}
+/* upright, a pair stacks: two tall slivers side by side would crop what's in them */
+@media (min-width: 761px) and (max-width: 1000px) and (orientation: portrait) {
+  .ta-tot { grid-template-columns: 1fr; grid-template-rows: minmax(min(30dvh, 360px), 1fr) auto minmax(min(30dvh, 360px), 1fr); gap: 0; padding: 0 28px; min-height: 0; }
+  .ta-tot-or { justify-self: center; width: 44px; height: 44px; margin: -14px 0; z-index: 3; position: relative; font-size: 19px; }
+  .ta-side { min-height: 0; }
+  .ta-side-key { display: none; }
+  .ta-tot-foot { padding: 12px 16px 16px; }
 }

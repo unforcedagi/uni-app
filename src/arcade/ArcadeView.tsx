@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Arcade } from "./kit/ui/src/index.ts";
 import type { ArcadeHost, PlayGame, VoiceCapture } from "./kit/ui/src/index.ts";
-import type { Card, GameId, Profile, Reaction, Round, Stats } from "./kit/engine/src/types.ts";
+import type { Card, DealOptions, GameId, Profile, Reaction, Round, Stats } from "./kit/engine/src/types.ts";
 import { RecorderSession } from "../recorderSession.ts";
 import { newDraft, type FlushReport } from "../journalCore.ts";
 import { arcadeError, journalRef, mediaType, typedAnswer } from "./arcadeCore.ts";
@@ -77,27 +77,37 @@ export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: strin
   voice.current ??= journalVoice();
   // a typed Ripple answer is filed as a journal entry; the door hears where it landed, never the words (as for voice)
   const typedRef = useRef(new Map<string, string>());
+  // the home asks for stats and fresh together: stats share the answer fresh asked for
+  const lastDeal = useRef<DealOptions | undefined>(undefined);
   const host = useMemo<ArcadeHost>(() => {
     const call = async <T,>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
       try { return await invoke<T>(cmd, args); } catch (e) { throw new Error(arcadeError(e)); }
     };
+    const screen = (o?: DealOptions) => ({ grey: !!o?.grey, still: !!o?.still });
     let home: Promise<Home> | null = null;
-    const fetchHome = () => (home ??= call<Home>("arcade_home").then(
-      (h) => { setTimeout(() => { home = null; }, 2000); return h; },
-      (e) => { home = null; throw e; },
-    ));
+    let homeFor = "";
+    const fetchHome = (o?: DealOptions) => {
+      // a short cache for the home's two asks at once; another screen (the greyscale switch) is another answer
+      const key = JSON.stringify(screen(o));
+      if (key !== homeFor) { home = null; homeFor = key; }
+      const mine: Promise<Home> = home ??= call<Home>("arcade_home", screen(o)).then(
+        (h) => { setTimeout(() => { if (home === mine) home = null; }, 2000); return h; },
+        (e) => { if (home === mine) home = null; throw e; },
+      );
+      return mine;
+    };
     return {
       owner: { name: ownerName ?? "you", you: false },
       games: GAMES,
-      rounds: async (game, n) => (await call<{ rounds: Round[] }>("arcade_rounds", { game, n })).rounds,
+      rounds: async (game, n, o) => (await call<{ rounds: Round[] }>("arcade_rounds", { game, n, ...screen(o) })).rounds,
       react: async (reactions: Reaction[]) => {
         const out = reactions.map((r) => typedAnswer(r, typedRef.current)).filter((r): r is Reaction => r !== null);
         if (out.length) await call("arcade_react", { reactions: out });
         home = null;
       },
       profile: async () => (await call<{ profile: Profile }>("arcade_profile")).profile,
-      stats: async () => (await fetchHome()).stats,
-      fresh: async () => (await fetchHome()).fresh ?? {},
+      stats: async () => (await fetchHome(lastDeal.current)).stats,
+      fresh: async (o) => { lastDeal.current = o; return (await fetchHome(o)).fresh ?? {}; },
       mediaUrl: (card: Card, which: "src" | "poster") => {
         const name = which === "src" ? card.media?.src : card.media?.poster;
         if (!name) return Promise.resolve(null);

@@ -105,7 +105,7 @@ export function Garden() {
    *  it comes back a little stronger, as the engine's own rules say. */
   const verdict = async (c: Claim, v: ClaimVerdict, text = "", undo = false) => {
     const w = text.trim();
-    const r = reaction("garden", "claim", c.id, { claim: { id: c.id, verdict: v }, ...(w ? { words: w } : {}) });
+    const r = reaction("garden", "claim", c.id, { dimension: "claim", claim: { id: c.id, verdict: v }, ...(w ? { words: w } : {}) });
     setProfile((p) => (p ? applyVerdicts(p, [r]) : p));
     setPick(null);
     setWords("");
@@ -186,7 +186,8 @@ export function Garden() {
               <div className="ta-gdn-panel" ref={panel} tabIndex={-1} role="region" aria-label={chosen ? "The plant you picked" : stone ? "The answer you picked" : "Pick a plant"}>
                 {chosen ? (
                   <>
-                    <h2 className="ta-gdn-claim">{chosen.text}</h2>
+                    <div className="ta-ask" data-dimension="claim"><h2>Is this you?</h2></div>
+                    <p className="ta-gdn-claim">{chosen.text}</p>
                     <p className="ta-gdn-meta">{DOMAIN_NAMES[chosen.domain as Domain]}: a {strengthWord(chosen.weight)} {isAgainst(chosen) ? "push away" : "pull"}, from {chosen.evidence} {chosen.evidence === 1 ? "reaction" : "reactions"}.</p>
                     {chosen.quotes.length > 0 && <div className="ta-gdn-quotes">{chosen.quotes.map((q) => <blockquote key={q}>{q}</blockquote>)}</div>}
                     <label className="ta-field">

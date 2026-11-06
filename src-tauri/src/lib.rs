@@ -1911,14 +1911,16 @@ where
 
 /// Seeds, the profile's headline and how many fresh rounds each game has.
 #[tauri::command]
-async fn arcade_home(app: tauri::AppHandle) -> Result<serde_json::Value, ArcadeError> {
-    arcade_io(&app, |door| tauri::async_runtime::block_on(door.home())).await
+async fn arcade_home(app: tauri::AppHandle, grey: Option<bool>, still: Option<bool>) -> Result<serde_json::Value, ArcadeError> {
+    let screen = uni_core::arcade::Screen { grey: grey.unwrap_or(false), still: still.unwrap_or(false) };
+    arcade_io(&app, move |door| tauri::async_runtime::block_on(door.home(screen))).await
 }
 
 /// Rounds to play for one game.
 #[tauri::command]
-async fn arcade_rounds(app: tauri::AppHandle, game: String, n: u32) -> Result<serde_json::Value, ArcadeError> {
-    arcade_io(&app, move |door| tauri::async_runtime::block_on(door.rounds(&game, n))).await
+async fn arcade_rounds(app: tauri::AppHandle, game: String, n: u32, grey: Option<bool>, still: Option<bool>) -> Result<serde_json::Value, ArcadeError> {
+    let screen = uni_core::arcade::Screen { grey: grey.unwrap_or(false), still: still.unwrap_or(false) };
+    arcade_io(&app, move |door| tauri::async_runtime::block_on(door.rounds(&game, n, screen))).await
 }
 
 /// Store reactions (the door skips ids it has seen, so a retry never doubles).

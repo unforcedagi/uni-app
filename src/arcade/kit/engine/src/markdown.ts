@@ -134,6 +134,11 @@ function describe(r: Reaction, cards: Map<string, Card>): string {
   }
 }
 
+function seenAs(r: Reaction): string {
+  const parts = [r.dimension && r.dimension !== "claim" ? `judging ${r.dimension}` : "", r.grey ? "seen in greyscale" : ""].filter(Boolean);
+  return parts.length ? ` (${parts.join(", ")})` : "";
+}
+
 /** Everything they gave, as one markdown file they can keep: the profile, then every reaction in order. */
 export function exportMarkdown(p: Profile, reactions: readonly Reaction[], cardList: Iterable<Card>): string {
   const cards = new Map<string, Card>();
@@ -141,7 +146,7 @@ export function exportMarkdown(p: Profile, reactions: readonly Reaction[], cardL
   const lines = [renderProfile(p, { title: "My taste" }).trimEnd(), "", "## Every reaction", ""];
   for (const r of reactions) {
     const when = r.at.slice(5, 16).replace("T", " ");
-    lines.push(`- ${when}, ${GAME_NAMES[r.game] ?? r.game}: ${describe(r, cards)}${r.words?.trim() ? `: "${clean(r.words, 2000)}"` : ""}`);
+    lines.push(`- ${when}, ${GAME_NAMES[r.game] ?? r.game}: ${describe(r, cards)}${seenAs(r)}${r.words?.trim() ? `: "${clean(r.words, 2000)}"` : ""}`);
   }
   if (!reactions.length) lines.push("_None yet._");
   lines.push("", "_Made with Taste Arcade. Your reactions stay yours: this file is all of them._", "");

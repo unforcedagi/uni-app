@@ -6,7 +6,7 @@ import { Pause, Play } from "../kit/icons.tsx";
 
 const BARS = 32;
 
-export function SoundCard({ card, autoPlay = false, volume = 0.6 }: { card: Card; autoPlay?: boolean; volume?: number }) {
+export function SoundCard({ card, autoPlay = false, volume = 0.6, bare }: { card: Card; autoPlay?: boolean; volume?: number; bare?: boolean }) {
   const { url, state } = useMediaUrl(card, "src");
   const { calm } = useArcade();
   const el = useRef<HTMLAudioElement>(null);
@@ -14,14 +14,15 @@ export function SoundCard({ card, autoPlay = false, volume = 0.6 }: { card: Card
   const [progress, setProgress] = useState(0);
   const [failed, setFailed] = useState(false);
   const bars = useMemo(() => {
-    const r = rng(hash(card.id));
+    // the drawn wave isn't the sound: on a pair both are drawn alike, so only the sound differs
+    const r = rng(hash(bare ? "pair" : card.id));
     let prev = 0.5;
     return Array.from({ length: BARS }, (_, i) => {
       prev = Math.max(0.12, Math.min(1, prev + (r() - 0.5) * 0.55));
       const env = Math.sin(Math.PI * (i + 0.5) / BARS) * 0.5 + 0.5;
       return Math.round(prev * env * 100) / 100;
     });
-  }, [card.id]);
+  }, [card.id, bare]);
 
   useEffect(() => {
     const a = el.current;
@@ -58,10 +59,12 @@ export function SoundCard({ card, autoPlay = false, volume = 0.6 }: { card: Card
           ))}
         </div>
       </div>
-      <figcaption className="ta-card-cap">
-        {card.title}
-        {(failed || (state === "none")) && <small> This sound won't play here.</small>}
-      </figcaption>
+      {(!bare || failed || state === "none") && (
+        <figcaption className="ta-card-cap">
+          {!bare && card.title}
+          {(failed || (state === "none")) && <small> This sound won't play here.</small>}
+        </figcaption>
+      )}
     </figure>
   );
 }
