@@ -142,7 +142,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   const liveOf = (d: Door) => { const a = areaAt.get(d.path); return (a ? liveInArea(work, a.id).length : 0) + (d.room && turns.has(d.room) ? 1 : 0); };
   const moving = doors.filter((d) => liveOf(d) > 0).length;
   // the sentence never says less than the doors and the cards beside it
-  const needN = Math.max(needs ? needs.rows.length + needs.privates.reduce((k, p) => k + p.count, 0) : 0, doors.reduce((k, d) => k + (d.needs ?? 0), 0), alsoNeeds);
+  const needN = Math.max((needs ? needs.rows.length + needs.privates.reduce((k, p) => k + p.count, 0) : 0) + alsoNeeds, doors.reduce((k, d) => k + (d.needs ?? 0), 0));
   if (all && view === "all") return <div className="fd fd-all" data-place="front-door" data-view="all">
     <header className="fd-head fd-allhead">
       <div className="fd-mark"><h1 className="fd-title"><Enso />All</h1><span className="fd-date">Every room, newest at the bottom</span></div>

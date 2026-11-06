@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Locator } from '@playwright/test';
 import { bootRail } from './railFixture';
+import { railGo } from './railGo';
 
 test('All reading surfaces fit the screen', async ({ page }, info) => {
   await bootRail(page);
@@ -29,7 +30,7 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
   // The rail holds Uni, Journal, For you, Vault, Search and Settings at every width it shows. A short landscape screen hides the rail (r13):
   // a room's header opens the drawer with the app's places, the tree home shows them itself, and Journal goes back to Uni.
   const place = async (name: 'Uni' | 'Journal' | 'For you' | 'Settings' | 'Search') => {
-    if (!short) { await rail.getByRole('button', { name, exact: true }).click(); return; }
+    if (!short) { await railGo(page, name); return; }
     await expect(rail).toBeHidden();
     if (name === 'Uni') { const back = page.getByRole('button', { name: /^Back to / }); if (await back.isVisible()) await back.click(); return; }
     // from the Journal (not a room), Uni first

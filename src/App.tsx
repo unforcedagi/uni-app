@@ -133,6 +133,7 @@ const clock = (ts: number) => clockFormat.format(new Date(ts * 1000));
 const hue = (pk: string) => parseInt(pk.slice(0, 6), 16) % 360;
 
 
+const UNSAVED_NOTE = "This note has changes you haven't saved. Your draft stays on this device.";
 function App() {
   const [paired, setPaired] = useState<boolean | null>(null);
   /** The key could not be read (not the same as having none): say so and retry, never send the user to pairing. */
@@ -310,7 +311,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const dirtyNotes = useRef(new Map<string, Set<string>>());
   const [, setDirtyTabs] = useState(new Set<string>());
   const editOnOpen = useRef(new Set<string>());
-  const [confirmation, setConfirmation] = useState<{ text: string; run: () => void; notice?: string; /** the words on the button that goes ahead */ go?: string } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ text: string; run: () => void; notice?: string; /** the words on the button that goes ahead */ go: string } | null>(null);
   const [creating, setCreating] = useState<{ vault: string; path: string } | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
@@ -318,7 +319,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useEffect(() => {
     let live = true;
     setVaultError(null);
-    invoke<string[]>("vault_list").then((names) => { if (live) setVaults(names); }).catch((e) => { if (live) setVaultError(String(e)); });
+    invoke<string[]>("vault_list").then((names) => { if (live) setVaults(names); }).catch((e) => { if (live) { setVaultError(String(e)); if (vaultRefresh > 0) setToast("Couldn't look for new vaults"); } });
     return () => { live = false; };
   }, [vaultRefresh]);
   function reportDirty(tabId: string, ref: string, dirty: boolean) {
@@ -360,7 +361,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** The rail is hidden on short windows up to 950px (one rule, r14): the room then shows its Places drawer. */
   const railHidden = useRailHidden();
   const [railMore, setRailMore] = useState(false);
-  useEffect(() => { if (!railMore) return; const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRailMore(false); }; const onSize = () => setRailMore(false); window.addEventListener("keydown", onKey); window.addEventListener("resize", onSize); return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("resize", onSize); }; }, [railMore]);
+  useEffect(() => { if (!railMore) return; const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRailMore(false); }; const width = window.innerWidth; const onSize = () => { if (window.innerWidth !== width) setRailMore(false); }; window.addEventListener("keydown", onKey); window.addEventListener("resize", onSize); return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("resize", onSize); }; }, [railMore]);
   const forYouBack = useRef("Uni");
   const forYouReturn = useRef<string | null>(null);
   const [journalFocus, setJournalFocus] = useState(false);
@@ -627,7 +628,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const top = cur?.[cur.length - 1];
     if (top && top.vault === target.vault && resolveNote(top, aliases.current).ref === target.ref) return;
     if (!confirmed && cur && paneDraft(cur)) {
-      setConfirmation({ text: "This note has changes you haven't saved. Your draft stays on this device.", go: "Close note", run: () => openAside(room, target, true) }); return;
+      setConfirmation({ text: UNSAVED_NOTE, go: "Close note", run: () => openAside(room, target, true) }); return;
     }
     asideAhead.current.delete(room);
     putAside(room, [target]);
@@ -637,7 +638,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const cur = asidesRef.current[room];
     if (!cur) return;
     if (!confirmed && paneDraft(all ? cur : cur.slice(-1))) {
-      setConfirmation({ text: "This note has changes you haven't saved. Your draft stays on this device.", go: "Close note", run: () => backAside(room, all, true) }); return;
+      setConfirmation({ text: UNSAVED_NOTE, go: "Close note", run: () => backAside(room, all, true) }); return;
     }
     if (all) asideAhead.current.delete(room);
     else asideAhead.current.set(room, [...(asideAhead.current.get(room) ?? []), cur].slice(-20));
@@ -772,7 +773,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setError("Stop the recording before replacing its tab."); return;
     }
     if (!confirmed && removed.some(isTabDirty)) {
-      setConfirmation({ text: "This note has changes you haven't saved. Your draft stays on this device.", go: "Leave note", run: () => openTarget(target, mode, true, fromHistory) }); return;
+      setConfirmation({ text: UNSAVED_NOTE, go: "Leave note", run: () => openTarget(target, mode, true, fromHistory) }); return;
     }
     removed.forEach((t) => dirtyNotes.current.delete(t.id));
     const tab = activeTab(next);
@@ -786,7 +787,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   function closeTabById(id: string, confirmed = false) {
     const closing = tabsRef.current.tabs.find((t) => t.id === id);
     if (!confirmed && closing && isTabDirty(closing)) {
-      setConfirmation({ text: "This note has changes you haven't saved. Your draft stays on this device.", go: "Close note", run: () => closeTabById(id, true) }); return;
+      setConfirmation({ text: UNSAVED_NOTE, go: "Close note", run: () => closeTabById(id, true) }); return;
     }
     if (!recordingTabCanClose(id, recordingOrigin.current?.tabId ?? null)) {
       setError("Stop the voice recording before closing its tab."); return;
@@ -2531,6 +2532,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setOtherVaultsExpanded(next);
     try { localStorage.setItem(OTHER_VAULTS_KEY, String(next)); } catch { /* Storage may be unavailable. */ }
   }
+  /** One vault: nothing to choose, straight in (and it still looks for new ones). More than one: the panel; from the rail, a second tap closes it. */
+  function openVaultPlace(toggle: boolean) {
+    setSearchOpen(false);
+    if (vaults.length === 1) { setPanel(null); setVaultRefresh((n) => n + 1); openTarget({ kind: "vault", vault: vaults[0], title: vaults[0] }, "new"); return; }
+    setPanel(toggle && panel === "vault" ? null : "vault");
+  }
   const vaultRow = (vault: string) => <button key={vault} className={`room ${active?.kind === "vault" && active.vault === vault ? "selected" : ""}`} aria-label={vault}
     aria-current={active?.kind === "vault" && active.vault === vault ? "page" : undefined}
     onClick={() => openTarget({ kind: "vault", vault, title: vault }, "new")}><span className="avatar" aria-hidden="true">▤</span><span className="room-text"><strong>{vault}</strong></span></button>;
@@ -2547,7 +2554,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       ...(calOn ? [{ label: "Calendar", go: () => openTarget({ kind: "calendar", title: "Calendar" }) }] : []),
       ...(msgsOn ? [{ label: "Messages", go: () => openTarget({ kind: "messages", title: "Messages" }) }] : []),
       ...(showUniGlue(lifeVault) ? [{ label: "All", go: () => openTarget({ kind: "all", title: "All" }) }, { label: "For you", go: openForYou }, { label: "To post", go: () => openTarget({ kind: "posts", title: "To post" }) }] : []),
-      { label: "Vault", go: () => { setSearchOpen(false); if (vaults.length === 1) { setPanel(null); setVaultRefresh((n) => n + 1); openTarget({ kind: "vault", vault: vaults[0], title: vaults[0] }, "new"); } else setPanel("vault"); } },
+      { label: "Vault", go: () => openVaultPlace(false) },
       { label: "Search", go: openFind },
       { label: "Settings", go: () => { setSearchOpen(false); setPanel("settings"); setForgetArmed(false); } },
     ],
@@ -2574,10 +2581,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {msgsOn && <button aria-label="Messages" aria-current={!panel && !searchOpen && (active?.kind === "messages" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "messages", title: "Messages" })}><i><MessagesIcon /></i><span>Messages</span></button>}
       {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>}
       {showUniGlue(lifeVault) && <button aria-label="To post" aria-current={!panel && !searchOpen && (active?.kind === "posts" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "posts", title: "To post" })}><i aria-hidden="true"><ToPostIcon /></i><span>To post</span></button>}
-      <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={vaults.length === 1 ? undefined : panel === "vault"} onClick={() => { setSearchOpen(false);
-        // one vault: nothing to choose, straight in
-        if (vaults.length === 1) { setPanel(null); setVaultRefresh((n) => n + 1); openTarget({ kind: "vault", vault: vaults[0], title: vaults[0] }, "new"); return; }
-        setPanel(panel === "vault" ? null : "vault"); }}><i><VaultIcon /></i><span>Vault</span></button>
+      <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={vaults.length === 1 ? undefined : panel === "vault"} onClick={() => openVaultPlace(true)}><i><VaultIcon /></i><span>Vault</span></button>
       <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} aria-keyshortcuts="Control+K Meta+K" onClick={openFind}><i><SearchIcon /></i><span>Search</span></button>
       <button className="rail-settings" aria-label="Settings" aria-expanded={panel === "settings"} onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setForgetArmed(false); }}><i><SettingsIcon /></i><span>Settings</span></button>
       </div>
@@ -2672,7 +2676,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         onTitle={(t) => rememberTitle(noteKey(topNote), t)} />
     </section>}
     {creating && <SurfaceModal onCancel={() => { if (!createBusy) setCreating(null); }}><form role="dialog" aria-modal="true" aria-label="New note" onSubmit={(e) => { e.preventDefault(); void createNote(); }}><h2>New note in {creating.vault}</h2><label>Name, with any folders before it<input autoFocus placeholder="Projects/Glaze Tests/Firing notes" value={creating.path} disabled={createBusy} onChange={(e) => setCreating({ ...creating, path: e.target.value })} /></label>{createError && <p className="error" role="alert">{createError}</p>}<button disabled={createBusy} type="submit">{createBusy ? "Creating…" : "Create note"}</button><button disabled={createBusy} type="button" onClick={() => setCreating(null)}>Cancel</button></form></SurfaceModal>}
-    {confirmation && <SurfaceModal onCancel={() => setConfirmation(null)}><div role="alertdialog" aria-modal="true" aria-label="Unsaved changes">{confirmation.notice && <p role="status">{confirmation.notice}</p>}<p>{confirmation.text}</p><button autoFocus onClick={() => setConfirmation(null)}>Keep editing</button><button onClick={() => { const run = confirmation.run; setConfirmation(null); run(); }}>{confirmation.go ?? "Leave it"}</button></div></SurfaceModal>}
+    {confirmation && <SurfaceModal onCancel={() => setConfirmation(null)}><div role="alertdialog" aria-modal="true" aria-label="Unsaved changes">{confirmation.notice && <p role="status">{confirmation.notice}</p>}<p>{confirmation.text}</p><button autoFocus onClick={() => setConfirmation(null)}>Keep editing</button><button onClick={() => { const run = confirmation.run; setConfirmation(null); run(); }}>{confirmation.go}</button></div></SurfaceModal>}
     {toast && <div className="toast" role="status">{toast}</div>}
   </main></NoteOpener.Provider></NavContext.Provider></ApprovalsContext.Provider>;
 }

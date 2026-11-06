@@ -1,6 +1,6 @@
 // T-301/T-302: one quiet strip under the room's header: the area's projects, each a small tab that opens it in place. A project with
 // live sessions carries a small live mark. Archived projects sit behind one "Archived" tab at the end (they open the same way, to be
-// brought back); a project the vault hasn't given a folder yet is named once, plainly, so it isn't silently missing. Folds to one line,
+// brought back). A project the vault hasn't given a folder yet is named once, under all of the room's work (ProjectGaps). Folds to one line,
 // remembered on this device.
 import { useState } from "react";
 import { liveSessions, projectsIn } from "./model";
@@ -14,6 +14,7 @@ const readFold = () => { try { return localStorage.getItem(FOLD_KEY) === "1"; } 
 export function ProjectGaps({ areaPath }: { areaPath: string }) {
   const { work } = useWork();
   const gaps = work.gaps.filter((g) => g.areaPath === areaPath);
+  if (!work.areas.some((a) => a.path === areaPath)) return null; // the strip says "this area has no room yet"
   return gaps.length ? <p className="wv-gaps">{gaps.map((g) => g.name).join(", ")}: not set up yet, so sessions there won't show here.</p> : null;
 }
 

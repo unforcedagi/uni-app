@@ -376,7 +376,7 @@ function Conflicts({ list, tz, onOpen, onClose }: { list: Conflict[]; tz: string
       <p><strong>{c.title}</strong>{c.created && <small> · {dayLabel(dayKey(Date.parse(c.created), tz), "short")}</small>}</p>
       <div className="cal-conflict-sides">
         <div><span className="cal-tag">Kept</span> {span(c.vault)}{c.vault.location ? ` · ${c.vault.location}` : ""}</div>
-        <div><span className="cal-tag tag-free">{from(c.adapter).toUpperCase().split(" ")[0]}</span> {span(c.outside)}{c.outside.location ? ` · ${c.outside.location}` : ""} <small>({from(c.adapter)})</small></div>
+        <div><span className="cal-tag tag-free">{from(c.adapter).split(" ")[0]}</span> {span(c.outside)}{c.outside.location ? ` · ${c.outside.location}` : ""} <small>({from(c.adapter)})</small></div>
       </div>
       <button className="cal-link" onClick={() => onOpen(c)}>Show the event ›</button>
     </li>)}</ul>

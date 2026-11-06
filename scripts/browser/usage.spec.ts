@@ -5,6 +5,7 @@
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { railGo } from './railGo';
 
 const FIXTURE = JSON.parse(readFileSync(new URL('../fixtures/usage-note.json', import.meta.url), 'utf8'));
 const NOW = new Date('2026-10-26T18:00:00Z'); // the fixture's Monday, noon in Denver
@@ -53,7 +54,7 @@ async function boot(page: Page, w: World) {
 }
 
 async function openSettings(page: Page) {
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await railGo(page, 'Settings');
   return page.getByRole('region', { name: 'Claude accounts' }).or(page.locator('section.usage-card'));
 }
 
@@ -225,7 +226,7 @@ test.describe('fixture', () => {
 
   test('no usage note on this install: Settings has no card', async ({ page }) => {
     await boot(page, { note: null, conflictOnce: false, calls: [] });
-    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await railGo(page, 'Settings');
     await expect(page.getByRole('button', { name: /Forget this device key/ })).toBeVisible();
     await expect(page.locator('section.usage-card')).toHaveCount(0);
   });

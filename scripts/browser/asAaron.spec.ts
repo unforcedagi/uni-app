@@ -348,6 +348,11 @@ test('Search: nothing found is one line and a next step; a found note\'s folder 
   const path = page.locator('.search-path').first();
   await expect(path).toHaveCSS('display', 'block');
   await expect(page.getByText('Narrow the notes')).toHaveCount(0);
+  // typing on from a query that found nothing never shows "nothing" for words not yet searched
+  await field.fill('zzzqqq nothing like this');
+  await expect(none).toContainText('Nothing here for');
+  await field.pressSequentially(' again');
+  await expect(page.locator('.search-nothing')).toHaveCount(0);
 });
 
 // ---------------------------------------------------------------- the home
@@ -370,6 +375,15 @@ test('the home never says less than the cards beside it: an approval waiting is 
   await page.evaluate(([c, n, b]) => (window as any).__arrive(c, n, b), ['ch-garden', 'Uni', PROMPTS.prompts.two_answers_30min] as const);
   await expect(page.locator('.cp-approval')).toBeVisible();
   await expect(page.locator('.fd-statement')).not.toContainText('Nothing needs you');
+});
+
+test('a re-read that fails after a good one doesn\'t leave the home saying nothing needs you (code review)', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__extraInvoke = async (cmd: string, a: any) => { if (cmd.startsWith('vault_query') && ['task', 'decision'].includes(a.tag) && (window as any).__failTasks) throw new Error('the vault did not answer'); if (cmd.startsWith('vault_query') && ['task', 'decision'].includes(a.tag)) return []; return undefined; }; });
+  await bootAreas(page, 'seed', { tree: true, tasks: true, uniMember: true });
+  await page.locator('[data-place="front-door"]').waitFor();
+  await expect(page.locator('.fd-statement')).toContainText('Nothing needs you');
+  await page.evaluate(() => { (window as any).__failTasks = true; document.dispatchEvent(new Event('visibilitychange')); });
+  await expect(page.locator('.fd-statement')).toContainText("Couldn't check what needs you.", { timeout: 80_000 });
 });
 
 test('a failed read of what needs you says so and offers another try, instead of "Nothing needs you" (review round 3)', async ({ page }) => {

@@ -33,7 +33,7 @@ function TableWrap({ children }: { children: ReactNode }) {
  *  the chip's tooltip). */
 function NoteChipLabel({ id, vault }: { id: string; vault: string }) {
   const t = useNoteTitle({ vault, id });
-  return <>{t?.replace(/^\d{4}-\d{2}-\d{2}\s+/, "") ?? "the linked note"}</>;
+  return <>{t ?? "the linked note"}</>;
 }
 const bareId = (n: { ref: { ref: string; vault: string }; c: Inline[] }): string | null => {
   const id = n.ref.ref.trim();

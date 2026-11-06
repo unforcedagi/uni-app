@@ -317,7 +317,6 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
 
 /** T-335 chat feel: a reply this long shows its start in All, and a way into its room for the rest. */
 const isLong = (body: string) => body.length > 320 || body.split("\n").filter((l) => l.trim()).length > 4;
-/** A room's own tint, from its id: the dot on its label. */
 
 const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named, targeted, onOpen, onTap }: { m: Message; place: string; address: string; mine: boolean; me: string | null;
   /** The first message of a run from one room: it carries the room's label. */ run: boolean; /** Says who and when (a new author, or a pause). */ named: boolean;

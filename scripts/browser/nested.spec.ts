@@ -21,7 +21,7 @@ test.describe('nested rooms', () => {
     await showTree(page); // T-302: the tree is in a room (beside it, or the Places drawer on a phone)
     const scope = wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
     for (let i = 0; i < 12; i++) { await scope.locator('.th-row.d1').first().waitFor(); const f = scope.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
-    await expect(scope.locator('.th-go[aria-label^="Atlas,"]')).toContainText('atlas');
+    await expect(scope.locator('.th-go[aria-label^="Atlas,"]')).toHaveAttribute('aria-label', /room #atlas/); // its second line only shows when it adds something (T-335 as Aaron)
     await expect(scope.locator('.th-go[aria-label^="ATLAS,"]')).toContainText('atlas/build');
     await expect(scope.locator('.th-go[aria-label^="ATLAS,"]')).not.toContainText('atlas/atlas');
     await expect(scope.locator('.th-go[aria-label^="Learn Vibe Build,"]')).toContainText('atlas/teach');

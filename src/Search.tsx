@@ -65,6 +65,9 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
   const [asking, setAsking] = useState(false);
   const [notes, setNotes] = useState<NoteHit[]>([]);
   const [noteState, setNoteState] = useState<"idle" | "searching" | "done" | "error">("idle");
+  /** the query each answer was for: state stays "done" through the wait before the next search */
+  const [msgFor, setMsgFor] = useState<string | null>(null);
+  const [noteFor, setNoteFor] = useState<string | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
   /** r21 (Codex 7): Retry after a failed search runs both searches again */
   const [retry, setRetry] = useState(0);
@@ -81,7 +84,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
     const t = setTimeout(() => {
       setState("searching");
       invoke<SearchHit[]>("search", { query: q, limit: 60 })
-        .then((rows) => { if (current) { setHits(rows); setState("done"); setError(null); } })
+        .then((rows) => { if (current) { setHits(rows); setState("done"); setError(null); setMsgFor(q); } })
         .catch((e) => { if (current) { setError(String(e)); setState("error"); } });
     }, DEBOUNCE_MS);
     return () => { current = false; clearTimeout(t); };
@@ -96,7 +99,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
     const t = setTimeout(() => {
       setNoteState("searching");
       invoke<NoteHit[]>("vault_search", { query: q, limit: 20, mode, vault: vault.trim() || null, pathPrefix: pathPrefix || null })
-        .then((rows) => { if (current) { setNotes(rows); setNoteState("done"); setNoteError(null); } })
+        .then((rows) => { if (current) { setNotes(rows); setNoteState("done"); setNoteError(null); setNoteFor(q); } })
         .catch((e) => { if (current) { setNotes([]); setNoteError(String(e)); setNoteState("error"); } });
     }, NOTE_DEBOUNCE_MS);
     return () => { current = false; clearTimeout(t); };
@@ -136,9 +139,10 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
       {!q && !recent.length && <p className="search-empty">Every room on this device, and your notes.</p>}
       {q && <>
         {/* one line when nothing is found anywhere, a section only for what has something to show */}
-        {state === "done" && noteState === "done" && hits.length === 0 && notes.length === 0 ? <div className="search-nothing"><p>Nothing here for “{q}”.</p><small>Only rooms already on this device are searched; older history may not be here yet.</small><button type="button" className="note-action" onClick={() => void ask()} disabled={asking || asked === q}>{asked === q ? "✓ Asked Uni" : asking ? "Asking…" : "Ask Uni to look"}</button></div>
+        {state === "done" && noteState === "done" && msgFor === q && noteFor === q && hits.length === 0 && notes.length === 0 ? <div className="search-nothing"><p>Nothing here for “{q}”.</p><small>Only rooms already on this device are searched; older history may not be here yet.</small><button type="button" className="note-action" onClick={() => void ask()} disabled={asking || asked === q}>{asked === q ? "✓ Asked Uni" : asking ? "Asking…" : "Ask Uni to look"}</button></div>
         : (state !== "done" || hits.length > 0) && <h2 className="search-section">Messages{state === "searching" ? " · searching…" : state === "done" ? ` · ${hits.length}${hits.length >= 60 ? "+" : ""}` : ""}</h2>}
         {/* r21 (Codex 7): a failed search says so in words, with Retry; the technical reason is a detail */}
+        {state === "done" && msgFor === q && hits.length === 0 && noteState === "error" && <p className="search-none">No messages match “{q}”. Only rooms already on this device are searched.</p>}
         {state === "error" && <div className="note-error" role="alert"><p>Couldn't search messages just now. <button type="button" className="cp-retry" onClick={() => setRetry((n) => n + 1)}>Retry</button></p>
           {error && <details className="note-error-more"><summary>Details</summary><p className="note-error-detail">{error}</p></details>}</div>}
                 {groups.map((g) => <div key={g.channel} className="search-group">
@@ -152,7 +156,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
             </button>;
           })}
         </div>)}
-        {(noteState !== "done" || notes.length > 0) && <h2 className="search-section">Notes{noteState === "searching" ? " · searching…" : noteState === "done" ? ` · ${notes.length}` : ""}</h2>}
+        {(noteState !== "done" || notes.length > 0) && <h2 className="search-section">Notes{noteState === "searching" ? " · searching…" : noteState === "done" ? ` · ${notes.length}${mode === "meaning" && notes.length && notes.every((n) => n.mode === "keyword") ? " · by exact words" : ""}` : ""}</h2>}
                 {notes.length > 0 && <div className="search-group">
           {notes.map((n) => <button key={`${n.vault}:${n.id}`} className="search-hit" onClick={() => onOpenNote(n)}
             aria-label={`Note ${n.path || n.id} in ${n.vault}`}>
