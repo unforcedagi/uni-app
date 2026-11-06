@@ -557,6 +557,19 @@ fn journal_base_for_notes(e: &QueuedEntry) -> Option<String> {
         .filter(|b| check_path(b).is_ok())
 }
 
+/// The attachment's file extension: a recording's name says what it is.
+fn audio_extension(mime: &str) -> &'static str {
+    if mime.contains("mp4") || mime.contains("m4a") {
+        "m4a"
+    } else if mime.contains("ogg") {
+        "ogg"
+    } else if mime.contains("wav") {
+        "wav"
+    } else {
+        "webm"
+    }
+}
+
 async fn send_one(store: &Store, client: &VaultClient, e: &QueuedEntry) -> Result<String> {
     let note_id = match &e.note_id {
         Some(id) => id.clone(),
@@ -579,13 +592,7 @@ async fn send_one(store: &Store, client: &VaultClient, e: &QueuedEntry) -> Resul
         }
     };
     if let Some((bytes, mime)) = store.journal_audio(&e.entry_id)? {
-        let ext = if mime.contains("mp4") || mime.contains("m4a") {
-            "m4a"
-        } else if mime.contains("ogg") {
-            "ogg"
-        } else {
-            "webm"
-        };
+        let ext = audio_extension(&mime);
         client
             .upload_audio(&note_id, &format!("voice.{ext}"), &mime, bytes)
             .await?;
@@ -618,6 +625,15 @@ async fn create_on_free_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_recordings_name_follows_its_type() {
+        assert_eq!(audio_extension("audio/webm;codecs=opus"), "webm");
+        assert_eq!(audio_extension("audio/mp4"), "m4a");
+        assert_eq!(audio_extension("audio/ogg"), "ogg");
+        // a paused recording that couldn't be remuxed is joined as WAV
+        assert_eq!(audio_extension("audio/wav"), "wav");
+    }
 
     const ID: &str = "7d6f2c1e-0a4b-4f7e-9c2d-1b3a5e7f9a0b";
 

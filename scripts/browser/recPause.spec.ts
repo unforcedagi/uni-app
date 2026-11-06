@@ -8,13 +8,27 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 const press = (page: Page, target: Locator) => test.info().project.name === 'mobile' ? target.tap() : target.click();
 const button = (page: Page, name: string) => page.getByRole('button', { name, exact: true });
 const wait = (page: Page, ms: number) => page.waitForTimeout(ms);
+/** With REC_SHOTS set, the screens in light and dark. Never into the repo. */
+async function shot(page: Page, name: string) {
+  const dir = process.env.REC_SHOTS;
+  if (!dir) return;
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    await page.screenshot({ path: `${dir}/${test.info().project.name}-${name}-${colorScheme}.png` });
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+}
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const w = window as any;
-    w.calls = []; w.uploads = []; w.recorders = 0;
+    w.calls = []; w.uploads = []; w.recorders = 0; w.spans = [];
     const Native = window.MediaRecorder;
     window.MediaRecorder = new Proxy(Native, { construct(target, args) { w.recorders++; return new (target as any)(...args); } });
+    // when each real recorder ran: the box may be slow to tap, so what the file must match is what was really captured
+    const start = Native.prototype.start, stop = Native.prototype.stop;
+    Native.prototype.start = function (...a: any[]) { w.spans.push({ recorder: this, from: performance.now(), to: null }); return (start as any).apply(this, a); };
+    Native.prototype.stop = function () { const span = w.spans.find((x: any) => x.recorder === this); if (span && span.to === null) span.to = performance.now(); return stop.call(this); };
     if (sessionStorage.getItem('noWebm')) { const real = Native.isTypeSupported.bind(Native); Native.isTypeSupported = (t: string) => !t.includes('webm') && real(t); }
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
@@ -32,10 +46,11 @@ test.beforeEach(async ({ page }) => {
           case 'get_messages': return [];
           case 'vault_list': return [];
           case 'journal_config': return { hub: 'test', vault: 'test' };
-          case 'journal_queue': case 'journal_list': return [];
+          case 'journal_pending': case 'journal_list': return [];
+          case 'journal_flush': return { sent: [], remaining: 0, error: null };
           case 'refresh': return { pubkey: 'a'.repeat(64), total_items: 0, channel_errors: {}, truncated_channels: [] };
           case 'media_upload': keep(); return { url: 'https://example.invalid/v.webm', mime: 'audio/webm', name: 'v.webm', size: 4 };
-          case 'journal_save_voice': keep(); return {};
+          case 'journal_save_voice': keep(); return { sent: ['entry'], remaining: 0, error: null };
           case 'prepare_voice_message': return JSON.stringify({ id: 'voice:' + crypto.randomUUID() });
           case 'post_message': return { ref: 'audio-message-ref', channel: args.channel };
           default: return null;
@@ -66,6 +81,13 @@ const resume = async (page: Page) => {
 };
 const uploads = (page: Page): Promise<{ cmd: string; bytes: number[]; headers: Record<string, string> }[]> => page.evaluate(() => (window as any).uploads);
 const posts = (page: Page) => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message').length);
+
+/** Seconds each recorder really ran, and the seconds between the first start and the last stop. */
+const spans = async (page: Page) => {
+  const all: { from: number; to: number }[] = await page.evaluate(() => (window as any).spans.map((x: any) => ({ from: x.from, to: x.to })));
+  return { seconds: all.map((x) => (x.to - x.from) / 1000), wall: (all[all.length - 1].to - all[0].from) / 1000 };
+};
+const CLOSE = 0.5; // a recorder takes a moment to start and flush
 
 /** The whole of what ffmpeg sees in a file: its length, its streams, every packet, and a full decode that must be clean. */
 function probe(bytes: number[], ext: string) {
@@ -119,8 +141,10 @@ test('Record, pause, resume, stop: one clean file as long as the time recorded',
   expect(out.format).toContain('webm');
   expect(out.streams).toBe(1);
   expect(out.codec).toBe('opus');
-  expect(out.duration).toBeGreaterThan(3.5);
-  expect(out.duration).toBeLessThan(4.7); // the 1.5 s pause is not in it
+  const ran = await spans(page);
+  expect(ran.seconds).toHaveLength(2);
+  expect(Math.abs(out.duration - (ran.seconds[0] + ran.seconds[1]))).toBeLessThan(CLOSE);
+  expect(ran.wall - out.duration).toBeGreaterThan(1.3); // the 1.5 s pause is not in it
   expect(out.pts.every((t: number, i: number) => i === 0 || t > out.pts[i - 1])).toBe(true);
   expect(out.biggestGap).toBeLessThan(0.2); // the join is seamless: no hole where the pause was
   expect(Math.abs(await chromiumDuration(page, all[0].bytes, 'audio/webm') - out.duration)).toBeLessThan(0.25);
@@ -132,22 +156,28 @@ test('Record, pause, resume, delete the last section, send: the deleted part is 
   await boot(page);
   await startInRoom(page);
   await wait(page, 1500);
+  await shot(page, 'running');
   await pause(page);
   await resume(page);
   await wait(page, 2500);
   await pause(page);
   const card = page.getByRole('group', { name: 'Paused recording' });
   await expect(card.getByRole('listitem')).toHaveCount(2);
+  await wait(page, 400); // the waveforms draw
+  await shot(page, 'paused-two');
   await press(page, button(page, 'Delete section 2'));
   await expect(card.getByRole('listitem')).toHaveCount(1);
   await expect(button(page, 'Undo delete')).toBeVisible();
+  await shot(page, 'deleted');
   await resume(page);
   await wait(page, 1500);
   await press(page, page.getByRole('button', { name: 'Stop recording voice message', exact: true }));
   await expect.poll(() => posts(page)).toBe(1);
   const out = probe((await uploads(page))[0].bytes, 'webm');
-  expect(out.duration).toBeGreaterThan(2.6);
-  expect(out.duration).toBeLessThan(3.7); // 1.5 + 1.5; the 2.5 s section is gone
+  const ran = await spans(page);
+  expect(ran.seconds).toHaveLength(3);
+  expect(ran.seconds[1]).toBeGreaterThan(2.4);
+  expect(Math.abs(out.duration - (ran.seconds[0] + ran.seconds[2]))).toBeLessThan(CLOSE); // the second, deleted section is gone
   expect(out.biggestGap).toBeLessThan(0.2);
 });
 
@@ -167,8 +197,10 @@ test('Delete any section, undo it, and stop from the card', async ({ page }) => 
   await press(page, button(page, 'Stop recording for Test room'));
   await expect.poll(() => posts(page)).toBe(1);
   const out = probe((await uploads(page))[0].bytes, 'webm');
-  expect(out.duration).toBeGreaterThan(1.2);
-  expect(out.duration).toBeLessThan(2.3);
+  const ran = await spans(page);
+  expect(ran.seconds).toHaveLength(3);
+  expect(ran.seconds[1]).toBeGreaterThan(1.7);
+  expect(Math.abs(out.duration - (ran.seconds[0] + ran.seconds[2]))).toBeLessThan(CLOSE);
 });
 
 test('Delete every section and stop: nothing is sent and the composer is free again', async ({ page }) => {
@@ -217,8 +249,8 @@ test('A recorder that can only write MP4 still gives one file: WAV', async ({ pa
   expect(up.headers['x-file-mime']).toBe('audio/wav');
   const out = probe(up.bytes, 'wav');
   expect(out.format).toBe('wav');
-  expect(out.duration).toBeGreaterThan(2.4);
-  expect(out.duration).toBeLessThan(3.6);
+  const ran = await spans(page);
+  expect(Math.abs(out.duration - (ran.seconds[0] + ran.seconds[1]))).toBeLessThan(CLOSE);
 });
 
 test('Journal: pause and resume there too, saved as one recording', async ({ page }) => {
@@ -238,8 +270,8 @@ test('Journal: pause and resume there too, saved as one recording', async ({ pag
   const [up] = await uploads(page);
   expect(up.cmd).toBe('journal_save_voice');
   const out = probe(up.bytes, 'webm');
-  expect(out.duration).toBeGreaterThan(1.9);
-  expect(out.duration).toBeLessThan(3);
+  const ran = await spans(page);
+  expect(Math.abs(out.duration - (ran.seconds[0] + ran.seconds[1]))).toBeLessThan(CLOSE);
 });
 
 test('On a phone the controls are big enough to hit and the card fits', async ({ page }) => {

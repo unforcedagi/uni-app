@@ -55,8 +55,9 @@ import { decisionRefsIn, unreferenced } from "./decisionView";
 import { findUniMember, findUniRoom, searchHandoffText } from "./uniActions";
 import Search from "./Search";
 import Journal from "./Journal";
-import { AREA_ASK, areaRooms, mmss, shareText, type JournalNote } from "./journalCore";
-import { useRecorder, voiceFileName } from "./recorder";
+import { AREA_ASK, areaRooms, shareText, type JournalNote } from "./journalCore";
+import { useRecorder, voiceFileName, type RecorderControls } from "./recorder";
+import RecordingPill from "./RecordingPill";
 import { attachmentBlocksSend, enterInsertsNewline, manualAttachments } from "./composerCore";
 import PairSource, { PairDeviceButton } from "./PairSource";
 import { UpdateBanner, UpdateSettings } from "./UpdateNotice";
@@ -423,7 +424,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     openTarget({ kind: "note", note: { hub: null, vault: "uni", ref: FOR_YOU_ID }, title: "For you" }, "new");
     if (topNote?.vault === "uni" && topNote.ref === FOR_YOU_ID && isRecommendationNew(forYou.updatedAt, renderedForYou.current)) setForYouReload((n) => n + 1);
   }
-  const [journalRecording, setJournalRecording] = useState<{ elapsed: number; stop: () => void } | null>(null);
+  const [journalRecording, setJournalRecording] = useState<{ controls: RecorderControls } | null>(null);
   const journalRecordingRef = useRef(false);
   const [channel, setChannel] = useState<string | null>(null);
   const [root, setRoot] = useState<string | null>(null);
@@ -1700,7 +1701,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const id = crypto.randomUUID();
     changePending(origin.key, (items) => [...items, { id, file, preview: null, state: "uploading", created: (voiceCreated.current = Math.max(Date.now(), voiceCreated.current + 1)), voice: { channel: origin.channel, replyTo: origin.replyTo, notifyUni: origin.notifyUni } }]);
     void (async () => { await voiceRestored.current; if (voiceMounted.current) queueVoice(origin.key, id); })();
-  }, `for #${rooms.find((r) => r.id === channel)?.name ?? "room"}`);
+  }, `for #${rooms.find((r) => r.id === channel)?.name ?? "room"}`, (origin) => {
+    if (recordingOrigin.current === origin) recordingOrigin.current = null;
+    setVoiceStatus("Recording deleted");
+  });
   async function toggleRecording() {
     if (sendingRef.current) return;
     if (recordingOrigin.current) {
@@ -2553,8 +2557,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** The open utility panel's own name (r14): its frame says where you are. */
   const panelTitle = searchOpen ? "Search" : panel === "settings" ? "Settings" : panel === "vault" ? "Vault" : "Places";
   const recordingTab = recordingOrigin.current;
-  const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
-    journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
+  const pill = recordingTab && recorder.busy ? { title: recordingTab.title, tabId: recordingTab.tabId, controls: recorder as RecorderControls, finish: "send" as const } :
+    journalRecording && journalTab ? { title: "Journal", tabId: journalTab.id, controls: journalRecording.controls, finish: "save" as const } : null;
   return <ApprovalsContext.Provider value={approvalsView}><NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault" || active?.kind === "mail" || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
     <nav ref={railRef} className="rail" aria-label="Main navigation">
       {/* T-294: from another side (Messages, Mail…) Uni goes back to where you were on its side; at Uni already, home to Uni */}
@@ -2600,7 +2604,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     <section className="conversation" aria-label={journalOpen ? "Journal" : active?.kind === "mail" ? "Mail" : active?.kind === "calendar" ? "Calendar" : active?.kind === "messages" ? "Messages" : active?.kind === "posts" ? "To post" : shellOpen ? "Uni" : active?.kind === "note" ? "Note" : "Conversation"}>
       {/* T-335: an update is a line at the top, in the flow: never over the composer */}
       <UpdateBanner />
-      {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} backTo={originTitle} onBack={() => openTarget(origin())} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
+      {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} backTo={originTitle} onBack={() => openTarget(origin())} onRecordingChange={(on, controls) => { journalRecordingRef.current = on; setJournalRecording(on && controls ? { controls } : null); }} /></div>}
       {active?.kind === "mail" ? <Mail backTo={originTitle} onBack={() => openTarget(origin())} />
       : active?.kind === "calendar" ? <Calendar backTo={originTitle} onBack={() => openTarget(origin())} />
       : active?.kind === "messages" ? <Messages backTo={originTitle} onBack={() => openTarget(origin())} />
@@ -2624,13 +2628,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         openTarget({ kind: "note", note, title }, "new");
       }}
       onDirty={(ref, dirty) => { const k = noteKey(ref); if (dirty) asideDirty.current.add(k); else asideDirty.current.delete(k); }} />}
-    {pill && <div className={`recording-pill ${sidebarVisible ? "over-sidebar" : ""}`} role="status" aria-live="polite">
-      <span className="recording-dot" aria-hidden="true">●</span><span>{pill.phase === "recording" ? mmss(pill.elapsed) : pill.phase === "starting" ? "Starting…" : "Finishing…"}</span>
-      <span className="recording-separator" aria-hidden="true">·</span>
-      <button className="recording-destination" onClick={() => focusTabById(pill.tabId)} aria-label={`Jump to recording in ${pill.title}`}>{pill.title}</button>
-      <span className="recording-separator" aria-hidden="true">·</span>
-      <button className="recording-stop" onClick={pill.stop} disabled={pill.phase !== "recording"} aria-label={`Stop recording for ${pill.title}`}>Stop</button>
-    </div>}
+    {pill && <RecordingPill title={pill.title} controls={pill.controls} finish={pill.finish} overSidebar={sidebarVisible} onJump={() => focusTabById(pill.tabId)} />}
     {/* A note opens over the place you were in; Back pops the note's own stack (or closes it at the first note). */}
     {topNote && !searchOpen && <section className="note-sheet" role="region" aria-label="Note">
       <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}:${topNote.ref === FOR_YOU_ID ? forYouReload : 0}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={() => { if (topNote.ref === FOR_YOU_ID && forYouReturn.current && tabsRef.current.tabs.some((t) => t.id === forYouReturn.current)) focusTabById(forYouReturn.current); else closeNote(); }}

@@ -57,6 +57,8 @@ export class RecorderSession<Origin> {
   }
   private changed() { if (!this.disposed) this.options.onChange?.(); }
   private now() { return this.options.now ? this.options.now() : performance.now(); }
+  /** The phase now: it can move while a call waits on the mic. */
+  private phaseNow(): RecorderPhase { return this.phase; }
   private stopStream(stream = this.stream) { stream?.getTracks().forEach((t) => t.stop()); }
 
   /** Seconds kept so far: paused time and deleted sections don't count. */
@@ -174,13 +176,13 @@ export class RecorderSession<Origin> {
       let stream = this.stream;
       if (!stream || !stream.getTracks().some((t) => t.readyState !== "ended")) {
         stream = await navigator.mediaDevices.getUserMedia(MIC);
-        if (this.disposed || this.phase !== "resuming") { this.stopStream(stream); return; }
+        if (this.disposed || this.phaseNow() !== "resuming") { this.stopStream(stream); return; }
         this.stream = stream;
       }
       this.beginSection(stream);
       this.setPhase("recording");
     } catch (e) {
-      if (this.phase === "resuming") this.setPhase("paused");
+      if (this.phaseNow() === "resuming") this.setPhase("paused");
       throw e;
     }
   }
