@@ -1451,7 +1451,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (box) {
         const atEnd = markFor(box.scrollTop, box.scrollHeight, box.clientHeight).atEnd;
         stickToEnd.current = atEnd;
-        settleUntil.current = 0;
+        if (!atEnd) settleUntil.current = 0;
         pinned.current = atEnd ? null : { ref: focusRef, offset: el.getBoundingClientRect().top - box.getBoundingClientRect().top, until: Date.now() + 1000 };
       }
       const t = setTimeout(() => setFocusRef(null), 2500);

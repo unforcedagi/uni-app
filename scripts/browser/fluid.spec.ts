@@ -189,6 +189,21 @@ test.describe('a long message, in place', () => {
     await expect(m.locator('.md strong').first()).toBeInViewport();
   });
 
+  test('a reply aimed with the keyboard up, then reading elsewhere: "Read the rest" stays on what you opened when the keyboard goes', async ({ page }) => {
+    test.skip(!touch(), 'touch only');
+    await boot(page);
+    await allIn(page);
+    // aimed at the newest, far below what is then opened
+    await feed(page).locator('article.all-msg').last().locator('.message-content').click();
+    await expect(field(page)).toBeFocused();
+    const m = row(page, 'long1');
+    await m.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.waitForTimeout(200);
+    await m.getByRole('button', { name: 'Read the rest' }).click();
+    await page.waitForTimeout(1100);
+    await expect(m.locator('.md strong').first()).toBeInViewport();
+  });
+
   test('a message over the length that fits anyway shows no "Read the rest"', async ({ page }) => {
     test.skip(project() !== 'desktop', 'needs the wide column');
     await boot(page);

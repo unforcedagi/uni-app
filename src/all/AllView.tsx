@@ -473,11 +473,14 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     if (row) row.scrollIntoView({ block: "nearest" });
     return !!row;
   }, []);
+  /** The tapped message is held in sight only while it is in sight: scrolled away from, the reader has moved on, and the keyboard going doesn't pull them back. */
+  const tapInSight = useRef(true);
   const targetRef = useRef(target);
   targetRef.current = target;
   const tap = useCallback((m: Message) => {
     const t = replyTargetOf(m);
     if (sameTarget(targetRef.current, t) && tappedRef.current === m.ref) { onTarget?.(null); setTapped(null); return; }
+    tapInSight.current = true;
     setTapped(m.ref);
     onTarget?.(t);
   }, [onTarget]);
@@ -550,7 +553,7 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
   useEffect(() => {
     const el = list.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => { if (restoring.current) return; if ((recededRef.current || !keepTapped()) && stick.current) toNewest(el); });
+    const ro = new ResizeObserver(() => { if (restoring.current) return; if ((recededRef.current || !tapInSight.current || !keepTapped()) && stick.current) toNewest(el); });
     ro.observe(el);
     // and when it gets longer from inside (a picture with no known size coming in): only following the newest, never back to a tapped message: you may be reading elsewhere
     const grow = new ResizeObserver(() => { if (!restoring.current && stick.current && !tappedRef.current) toNewest(el); });
@@ -580,7 +583,8 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     {reading && nameOf.has(reading) && <div className="all-reading-band"><button type="button" className="all-place all-reading" style={{ ["--room-tint" as string]: tint(reading) }} aria-label={`Focus ${nameOf.get(reading)}, at this message`} title={`Focus ${nameOf.get(reading)}`}
       onClick={(e) => { label.el = null; label.rect = e.currentTarget.getBoundingClientRect(); onOpen(reading, readingRow.current); }}>{nameOf.get(reading)}</button></div>}
     <div className="all-feed" ref={list} role="log" aria-label="All rooms, by time" aria-live="polite"
-    onScroll={(e) => { const el = e.currentTarget; const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80, up = el.scrollTop < lastTop.current - 1; lastTop.current = el.scrollTop; if (performance.now() >= readHold.current) { if (near) stick.current = true; else if (up) stick.current = false; } if (!lookFrame.current) lookFrame.current = requestAnimationFrame(lookAtTop); }}
+    onScroll={(e) => { const el = e.currentTarget; if (tappedRef.current) { const r = el.querySelector<HTMLElement>(`article[data-ref="${CSS.escape(tappedRef.current)}"]`); tapInSight.current = !!r && r.offsetTop + r.offsetHeight > el.scrollTop && r.offsetTop < el.scrollTop + el.clientHeight; }
+      const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80, up = el.scrollTop < lastTop.current - 1; lastTop.current = el.scrollTop; if (performance.now() >= readHold.current) { if (near) stick.current = true; else if (up) stick.current = false; } if (!lookFrame.current) lookFrame.current = requestAnimationFrame(lookAtTop); }}
     onPointerDown={(e) => {
       if (e.pointerType !== "touch" || e.clientX < EDGE_PX || e.clientX > innerWidth - EDGE_PX || !(e.target instanceof Element)) return;
       if (e.target.closest("pre, table, .md-table-wrap, a, button, video, audio, input, textarea, summary, .attachments")) return;
