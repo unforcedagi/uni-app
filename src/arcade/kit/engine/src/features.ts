@@ -18,7 +18,7 @@ const L: Record<string, Entry> = {
   "visual:pastel": { pos: "Soft pastels.", neg: "Pastels feel too sweet." },
   "visual:dark": { pos: "Dark grounds, light coming out of them.", neg: "Dark, night-mode looks don't pull." },
   "visual:light-paper": { pos: "Light, paper-like grounds.", neg: "Bright paper-white pages feel flat." },
-  "visual:paper": { pos: "Paper-like grounds, warm off-white.", neg: "Paper looks feel precious." },
+  "visual:paper": { pos: "Paper-like grounds, soft and light.", neg: "Paper looks feel precious." },
   "visual:monochrome": { pos: "One or two colours, used with discipline.", neg: "Monochrome feels drained." },
   "visual:high-contrast": { pos: "High contrast, decisive edges.", neg: "Harsh contrast grates." },
   "visual:low-contrast": { pos: "Low contrast: close tones, nothing stark.", neg: "Low contrast reads as washed out." },

@@ -1,6 +1,7 @@
 // Is this screen greyscale? Asked of the screen itself where it can say (a monochrome display, the app's ink screen), then
 // of the device's model (the Daylight, whose screen tells the browser it has colour). A choice made in the Arcade wins, and
-// it is this device's own: kept in this browser, never sent anywhere.
+// it is this device's own: kept in this browser, never sent anywhere. Only the ink screen can't be switched off from here:
+// the host draws it in grey, so what's seen on it is seen in grey, whatever was chosen before.
 import { useCallback, useEffect, useState } from "react";
 
 const KEY = "ta-grey";
@@ -24,7 +25,7 @@ function monochrome(): boolean {
 type UaData = { getHighEntropyValues?(hints: string[]): Promise<{ model?: string }> };
 
 /** `ink`: the host's ink screen is on. Returns whether to play in greyscale, why it was found, and the switch. */
-export function useGreyscale(ink: boolean): { grey: boolean; found: GreyWhy | null; set(on: boolean): void } {
+export function useGreyscale(ink: boolean): { grey: boolean; found: GreyWhy | null; locked: boolean; set(on: boolean): void } {
   const [choice, setChoice] = useState(readChoice);
   // a browser that hides the model from its user agent can still give it when asked, a moment later
   const [model, setModel] = useState(() => typeof navigator !== "undefined" && greyModel(navigator.userAgent));
@@ -41,5 +42,5 @@ export function useGreyscale(ink: boolean): { grey: boolean; found: GreyWhy | nu
     try { localStorage.setItem(KEY, v); } catch { /* this visit only */ }
     setChoice(v);
   }, []);
-  return { grey: choice ? choice === "on" : !!found, found, set };
+  return { grey: ink || (choice ? choice === "on" : !!found), found, locked: ink, set };
 }

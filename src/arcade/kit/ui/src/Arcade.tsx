@@ -55,7 +55,7 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
   const ink = useInk();
   const reduce = useReducedMotion();
   const calm = ink || reduce;
-  const { grey, found, set: setGrey } = useGreyscale(ink);
+  const { grey, found, locked, set: setGrey } = useGreyscale(ink);
   const deal = useMemo(() => ({ ...(grey ? { grey: true } : {}), ...(calm ? { still: true } : {}) }), [grey, calm]);
   const [view, setView] = useState<GameId | "home">(start ?? "home");
   const [home, setHome] = useState<Home>({ stats: null, profile: null, fresh: {}, exact: true, error: false });
@@ -64,12 +64,15 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
   const uni = host.owner.you ? null : "Uni";
   const games = useMemo(() => GAMES.filter((g) => host.games.includes(g)), [host]);
 
+  const homeAsk = useRef(0);
   const loadHome = useCallback(async () => {
+    const mine = ++homeAsk.current; // the switch can flip while an answer is on its way: only the latest counts
     const play = games.filter((g): g is PlayGame => g !== "garden");
     const fresh = host.fresh
       ? host.fresh(deal).then((f) => ({ f, exact: true }))
       : Promise.all(play.map((g) => host.rounds(g, 12, deal).then((r) => [g, r.length] as const))).then((xs) => ({ f: Object.fromEntries(xs) as Partial<Record<PlayGame, number>>, exact: false }));
     const [s, p, f] = await Promise.allSettled([host.stats(), host.profile(), fresh]);
+    if (mine !== homeAsk.current) return;
     setHome({
       stats: s.status === "fulfilled" ? s.value : null,
       profile: p.status === "fulfilled" ? p.value : null,
@@ -103,7 +106,7 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
     const n = home.fresh[g];
     if (n === undefined) return home.stats ? "" : "…";
     if (!home.exact) return n ? `${n >= 12 ? "12+" : n} ready` : "Nothing yet";
-    return n ? `${n} fresh` : "All played. Replays welcome";
+    return n ? `${n} fresh` : grey ? "Nothing fresh for this screen" : "All played. Replays welcome";
   };
 
   const art: Record<GameId, ReactNode> = {
@@ -131,7 +134,7 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
             </p>
           </header>
           <div className="ta-grey-row">
-            <button type="button" role="switch" aria-checked={grey} className={`ta-grey-switch${grey ? " is-on" : ""}`} onClick={() => setGrey(!grey)}>
+            <button type="button" role="switch" aria-checked={grey} disabled={locked} className={`ta-grey-switch${grey ? " is-on" : ""}`} onClick={() => setGrey(!grey)}>
               <span className="ta-grey-knob" aria-hidden="true" />
               <span>Greyscale screen</span>
               <b aria-hidden="true">{grey ? "On" : "Off"}</b>

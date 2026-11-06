@@ -84,7 +84,7 @@ export function FixIt() {
     <GameFrame game="fix-it" title="Fix It" corner={pieces.length ? <span className="ta-quiet-count">{Math.min(idx + 1, pieces.length)} of {pieces.length}</span> : null} wide>
       {phase === "loading" && <Loading what="Getting the first piece off the bench…" />}
       {phase === "error" && <Empty title="The bench is out of reach."><p>The arcade couldn't load anything to fix. Try again in a moment.</p></Empty>}
-      {phase === "empty" && <Empty title="Nothing to fix yet."><p>{uni ?? "The arcade"} hasn't made anything for you to fix. Check back later.</p></Empty>}
+      {phase === "empty" && <Empty title="Nothing to fix yet." screen><p>{uni ?? "The arcade"} hasn't made anything for you to fix. Check back later.</p></Empty>}
       {phase === "fix" && card && art && (
         <div className="ta-fix">
           <div className="ta-fix-bench">

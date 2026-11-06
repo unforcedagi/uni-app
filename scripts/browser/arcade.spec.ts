@@ -100,7 +100,7 @@ test('in the app: a pair says what it asks; the greyscale switch reaches the doo
   await tap(page, page.locator('[data-toy="this-or-that"]'));
   await expect(page.locator('.ta-ask h2')).toHaveText('Which colours feel more like you?');
   await expect(page.locator('.ta-tot')).toHaveAttribute('data-dimension', 'colour');
-  // his way out on a screen with no colour
+  // the way out for a screen with no colour
   await tap(page, page.getByRole('button', { name: /Switch to greyscale/ }));
   await expect(page.locator('.ta-ask h2')).toHaveText('Which light and dark feels more like you?');
   expect((await calls(page, 'arcade_rounds')).pop()).toMatchObject({ game: 'this-or-that', grey: true });

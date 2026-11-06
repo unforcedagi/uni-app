@@ -94,12 +94,14 @@ export function Loading({ what }: { what: string }) {
   return <div className="ta-loading" role="status"><span className="ta-loading-dot" aria-hidden="true" />{what}</div>;
 }
 
-export function Empty({ title, children }: { title: string; children?: ReactNode }) {
-  const { home } = useArcade();
+/** `screen`: nothing to deal, which on a greyscale screen may be why: said there, and not on a failure to load. */
+export function Empty({ title, children, screen }: { title: string; children?: ReactNode; screen?: boolean }) {
+  const { home, grey } = useArcade();
   return (
     <div className="ta-empty">
       <h2>{title}</h2>
       {children}
+      {screen && grey && <p>On a greyscale screen, some cards can't be shown.</p>}
       <button type="button" className="ta-btn" onClick={home}>Back to the arcade</button>
     </div>
   );

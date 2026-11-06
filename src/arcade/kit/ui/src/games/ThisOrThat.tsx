@@ -62,6 +62,9 @@ export function ThisOrThat() {
   const refilling = useRef(false);
   const idxRef = useRef(0);
   const ending = useRef(false);
+  const nextTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // leaving mid-pick: the pending move to the next pair goes too
+  useEffect(() => () => clearTimeout(nextTimer.current), []);
 
 
   const fetchMore = useCallback(async (reset: boolean) => {
@@ -88,6 +91,7 @@ export function ThisOrThat() {
   }, [host, deal]);
 
   useEffect(() => {
+    clearTimeout(nextTimer.current); // a move still waiting belongs to the old deck
     setPhase("loading"); setIdx(0); setPicked(null); setLeft(total); ending.current = false; clear();
     void fetchMore(true);
   }, [run, fetchMore, total, clear]);
@@ -142,7 +146,14 @@ export function ThisOrThat() {
     setPicked(side);
     setSaid(`Picked ${win.title}.`);
     if (sound) tick(side === "a" ? 1 : 1.12);
-    setTimeout(advance, calm ? 160 : 460);
+    nextTimer.current = setTimeout(advance, calm ? 160 : 460);
+  };
+
+  const switchToGrey = () => {
+    // the button goes away with the colour pair: focus and word go somewhere that stays
+    setSaid("Greyscale on. No more colour pairs.");
+    document.getElementById("ta-h-this-or-that")?.focus({ preventScroll: true });
+    setGrey(true);
   };
 
   const skip = () => {
@@ -180,7 +191,7 @@ export function ThisOrThat() {
     <GameFrame game="this-or-that" title="This or That" corner={corner} wide>
       {phase === "loading" && <Loading what="Laying out the first pair…" />}
       {phase === "error" && <Empty title="The pairs didn't load."><p>The arcade couldn't reach where your cards are kept. Try again in a moment.</p></Empty>}
-      {phase === "empty" && <Empty title="Nothing to compare yet."><p>This or That needs at least two things of a kind. Add some cards and come back.</p></Empty>}
+      {phase === "empty" && <Empty title="Nothing to compare yet." screen><p>This or That needs at least two things of a kind. Add some cards and come back.</p></Empty>}
       {phase === "play" && round && (
         <>
           <Horizon left={left} total={total} />
@@ -192,11 +203,11 @@ export function ThisOrThat() {
           </div>
           <div className="ta-tot-foot">
             <button type="button" className="ta-btn ta-btn-quiet" onClick={skip} disabled={!!picked} aria-keyshortcuts="ArrowDown S">Neither, skip</button>
-            {round.ask.dimension === "colour" && !grey && <button type="button" className="ta-btn ta-btn-quiet" onClick={() => setGrey(true)}>No colour here? Switch to greyscale</button>}
+            {round.ask.dimension === "colour" && !grey && <button type="button" className="ta-btn ta-btn-quiet" disabled={!!picked} onClick={switchToGrey}>No colour here? Switch to greyscale</button>}
           </div>
-          <p className="ta-sr" aria-live="polite">{said}</p>
         </>
       )}
+      <p className="ta-sr" aria-live="polite">{said}</p>
       {phase === "end" && (
         <BurstEnd
           title={left <= 0 ? "That's a minute." : "That's every pair for now."}

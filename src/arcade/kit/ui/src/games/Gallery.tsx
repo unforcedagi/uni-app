@@ -84,7 +84,7 @@ export function Gallery() {
     <GameFrame game="gallery" title="The Gallery" corner={<span className="ta-quiet-count">{pins} pinned</span>} wide>
       {phase === "loading" && <Loading what="Opening the doors…" />}
       {phase === "error" && <Empty title="The Gallery didn't open."><p>The arcade couldn't reach where your pictures and sounds are kept.</p></Empty>}
-      {phase === "empty" && <Empty title="Nothing hanging yet."><p>The Gallery shows pictures, sounds and clips. There aren't any yet.</p></Empty>}
+      {phase === "empty" && <Empty title="Nothing hanging yet." screen><p>The Gallery shows pictures, sounds and clips. There aren't any yet.</p></Empty>}
       {phase === "wander" && item && (
         <div className="ta-gal">
           <div className="ta-gal-room">

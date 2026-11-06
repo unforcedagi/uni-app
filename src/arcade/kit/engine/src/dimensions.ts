@@ -7,7 +7,7 @@ import type { Ask, Card, DealOptions, Dimension, GameId } from "./types.ts";
 // ---------- which features are about what ----------
 const COLOUR = new Set(["warm", "cool", "earthy", "earthy-natural", "vivid", "vivid-saturated", "muted", "pastel", "neon", "monochrome"].map((w) => `visual:${w}`));
 /** an importer's own slug can name a colour too ("visual:burnt-orange") */
-const COLOUR_WORD = /(^|-)(colou?rs?|colou?rful|hues?|tinted|saturated|red|orange|yellow|green|blue|teal|purple|violet|pink|magenta|turquoise)(-|$)/;
+const COLOUR_WORD = /(^|-)(colou?rs?|colou?red|colou?rful|hues?|tints?|tinted|tones|saturated|warm|cool|earth|earthy|sepia|amber|gold|golden|rust|red|orange|yellow|green|blue|teal|purple|violet|pink|magenta|turquoise)(-|$)/;
 const VALUE = new Set(["dark", "light-paper", "paper", "high-contrast", "low-contrast"].map((w) => `visual:${w}`));
 const TYPE = new Set(["serif", "book-serif", "serif-display", "clean-grotesk", "sans", "oversized-type", "small-quiet-type", "characterful-type", "mono-technical", "hand-lettered", "type-as-image"].map((w) => `visual:${w}`));
 
@@ -31,9 +31,10 @@ function about(f: string, d: Dimension): boolean {
 
 // ---------- light and dark, from a palette ----------
 function lumaOf(hex: string): number | null {
-  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})/i.exec(hex);
+  // #rgb, #rgba, #rrggbb or #rrggbbaa; alpha plays no part
+  const m = /^#(?:([0-9a-f]{6})(?:[0-9a-f]{2})?|([0-9a-f]{3})[0-9a-f]?)$/i.exec(hex);
   if (!m) return null;
-  const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join("") : m[1];
+  const h = m[1] ?? [...m[2]].map((c) => c + c).join("");
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
