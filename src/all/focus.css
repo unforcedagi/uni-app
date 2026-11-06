@@ -43,6 +43,8 @@
 @media (min-width: 900px) {
   .all-focus { inset: 12px 16px 12px auto; width: min(760px, calc(100vw - 64px - 232px)); border: var(--g-hair) solid var(--g-line-strong); border-radius: 18px; }
   .shell.composer-focused .all-focus { inset-block-start: 12px; }
+  /* a note open beside the room: the room takes what is left */
+  .shell.note-aside-beside .all-focus { inset: 12px; width: auto; }
   .all-surface[data-focus="open"] .all-behind { transform-origin: 0 50%; transform: translateX(calc(16px - .78 * (100vw - 64px - 720px) / 2)) scale(.78); }
   .all-behind { transform-origin: 0 50%; }
   .all-focus-head { padding-inline: 24px; }

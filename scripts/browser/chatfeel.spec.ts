@@ -332,10 +332,10 @@ test('All: a sure route is named on Send; with no good signal nothing is chosen 
   await expect(feed.locator('article.all-msg')).toHaveCount(13);
   // runs: a room's label only where the room changes (choir, north, kiln, bees, table, north, bees, kiln, choir)
   await expect(feed.locator('.all-place')).toHaveCount(9);
-  // a ping never shows; a long reply shows its start and a way into its room
+  // a ping never shows; a long reply shows its start and opens where it is
   await page.evaluate(() => (window as any).__arrive('ch-north', 'Uni', '⏳ Working — 3 min — iteration 4/90, terminal'));
   await page.evaluate((b) => (window as any).__arrive('ch-kiln', 'Uni', b), LONG);
-  await expect(feed.getByRole('button', { name: 'Read the rest in Kiln Studio ›' })).toBeVisible();
+  await expect(feed.getByRole('button', { name: 'Read the rest' })).toBeVisible();
   await expect(feed).not.toContainText('⏳');
   // a sure route: chosen, and Send says where
   await field.fill('Is the honey ready to jar?');

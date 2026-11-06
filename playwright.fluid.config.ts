@@ -7,7 +7,7 @@ const daylight = { browserName: 'chromium' as const, viewport: { width: 828, hei
 export default defineConfig({
   outputDir: 'test-results/fluid',
   testDir: './scripts/browser', testMatch: /fluid\.spec\.ts$/, reporter: 'list', timeout: 60_000, expect: { timeout: 10_000 }, workers: 3,
-  use: { baseURL: `http://127.0.0.1:${port}`, colorScheme: 'light', reducedMotion: 'no-preference', screenshot: 'only-on-failure' },
+  use: { baseURL: `http://127.0.0.1:${port}`, colorScheme: 'light', reducedMotion: 'no-preference', screenshot: 'only-on-failure', launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] } },
   projects: [
     { name: 'phone', use: { browserName: 'chromium', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 } },
     { name: 'daylight', use: daylight },

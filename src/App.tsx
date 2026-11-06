@@ -771,7 +771,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** `fromHistory`: Back and Forward move through the places visited; they do not add to them. */
   function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false, fromHistory = false) {
     // already in All, with a room in focus: All is what is behind it
-    if (target.kind === "all" && allFocusRef.current && activeTab(tabsRef.current)?.kind === "all") { endAllFocus(); return; }
+    if (target.kind === "all" && allFocusRef.current && activeTab(tabsRef.current)?.kind === "all") {
+      // a panel over it goes first; the room stays in focus under it
+      if (panel || searchOpen) { setPanel(null); setSearchOpen(false); setSidebarVisible(false); } else endAllFocus();
+      return;
+    }
     // a place opened from the room's page: Back from there is that place's own
     pageFromAll.current = false;
     target = resolveTarget(target);
@@ -1745,7 +1749,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (!channel) return;
     const target = root ? (messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null) : null;
     if (root && !target) { setError("Thread not in local cache. Refresh before replying."); return; }
-    const origin = { key, tabId: tab.id, title: tab.title, channel, replyTo: target, notifyUni };
+    // from a room in focus, the pill names the room, not All
+    const origin = { key, tabId: tab.id, title: allFocusRef.current ? roomsRef.current.find((r) => r.id === channel)?.name ?? tab.title : tab.title, channel, replyTo: target, notifyUni };
     recordingOrigin.current = origin;
     try { if (!await recorder.start(origin) && recordingOrigin.current === origin) recordingOrigin.current = null; }
     catch (e) { if (recordingOrigin.current === origin) recordingOrigin.current = null; setError(`Microphone unavailable: ${String(e)}`); }
@@ -1876,8 +1881,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   function focusInAll(room: string, ref: string | null = null, threadRoot: string | null = null) {
     stopLeaving();
     setAllFocus({ room, root: threadRoot, leaving: false });
-    // a pointer that doesn't bring up a keyboard goes on typing; a touch keeps the thread on screen
-    if (threadRoot || !matchMedia("(pointer: coarse)").matches) focusComposer.current = true;
+    // a pointer that doesn't bring up a keyboard goes on typing; a touch keeps the thread on screen (an approval to answer in words asks for the keys itself)
+    if (!matchMedia("(pointer: coarse)").matches) focusComposer.current = true;
     setChecking(null);
     if (channelRef.current !== room || root !== threadRoot) navigate(room, threadRoot);
     if (ref) { focusTries.current = 0; setFocusRef(ref); }
@@ -1886,6 +1891,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   function endAllFocus() {
     const f = allFocusRef.current;
     if (!f || f.leaving) return;
+    // the keyboard goes as the room does
+    if (document.activeElement instanceof HTMLElement && document.activeElement.closest(".all-focus")) document.activeElement.blur();
     setComposerFocused(false);
     const finish = () => { focusLeaving.current = null; setAllFocus(null); if (activeTab(tabsRef.current)?.kind === "all") navigate(null, null); };
     if (calmMotion()) { finish(); return; }
@@ -1927,7 +1934,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   function openThread(m: Message) {
     focusComposer.current = true;
     const threadRoot = m.root && messages.some((x) => x.ref === m.root) ? m.root : m.ref;
-    if (allFocusRef.current) { focusInAll(m.channel, null, threadRoot); return; }
+    if (allFocusRef.current) { focusComposer.current = false; focusInAll(m.channel, null, threadRoot); return; }
     openTarget({ kind: "thread", channel: m.channel, root: threadRoot, title: `Thread · ${roomsRef.current.find((r) => r.id === m.channel)?.name ?? "Room"}` }, "new");
   }
 

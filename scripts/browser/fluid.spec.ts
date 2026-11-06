@@ -370,6 +370,96 @@ test.describe('a room in focus', () => {
     await expect(page.locator('[data-view="all"]')).toBeAttached();
   });
 
+  test('a voice message started in focus keeps going when the room goes back: the pill names the room, and takes you back to its focus', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').last().click();
+    await expect(sheet(page)).toBeVisible();
+    await sheet(page).getByRole('button', { name: 'Record a voice message' }).click();
+    const jump = page.getByRole('button', { name: 'Jump to recording in kiln-studio' });
+    await expect(jump).toBeVisible();
+    await backToAll(page).click();
+    await expect(sheet(page)).toHaveCount(0);
+    await expect(jump).toBeVisible();
+    await jump.click();
+    await expect(sheet(page).getByRole('heading', { name: 'Kiln Studio' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Pause recording/ })).toBeVisible();
+  });
+
+  test('the room\'s name is the way to its page, not only the small arrow', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await row(page, 'k3').locator('.all-place').click();
+    await expect(sheet(page)).toBeVisible();
+    await page.waitForTimeout(320);
+    const box = (await sheet(page).getByRole('heading', { name: 'Kiln Studio' }).boundingBox())!;
+    if (touch()) await page.touchscreen.tap(box.x + 30, box.y + box.height / 2);
+    else await page.mouse.click(box.x + 30, box.y + box.height / 2);
+    await expect(page.locator('section.sr[data-node="Kiln Studio"]')).toBeVisible();
+  });
+
+  test('a panel opened over the focus goes first; the rail\'s All then ends the focus', async ({ page }) => {
+    test.skip(project() === 'phone', 'Settings is in the phone\'s More sheet; the rule is the same');
+    await boot(page);
+    await allIn(page);
+    await row(page, 'k3').locator('.all-place').click();
+    await expect(sheet(page)).toBeVisible();
+    await rail(page).getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
+    await expect(sheet(page)).toBeVisible();
+    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await expect(sheet(page)).toHaveCount(0);
+  });
+
+  test('on touch, opening a room or a thread leaves the keyboard down, so the thread can be read', async ({ page }) => {
+    test.skip(!touch(), 'touch only');
+    await boot(page);
+    await page.evaluate(() => (window as any).__arrive('ch-choir', 'Priya', 'Altos are short two copies.', 0, false, 'c3'));
+    await allIn(page);
+    await feed(page).locator('article.all-msg[data-room="ch-choir"] .all-place').last().click();
+    await expect(sheet(page).locator('.message-list article').first()).toBeVisible();
+    await page.waitForTimeout(250);
+    expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('TEXTAREA');
+    await sheet(page).locator('.thread-summary').first().click();
+    await expect(sheet(page).getByRole('button', { name: 'Back to Choir' })).toBeVisible();
+    await page.waitForTimeout(250);
+    expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('TEXTAREA');
+  });
+
+  test('a room read in focus counts as read', async ({ page }) => {
+    await boot(page, { unread: { 'ch-kiln': 3 } });
+    await allIn(page);
+    await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').last().click();
+    await expect(sheet(page)).toBeVisible();
+    await expect.poll(() => calls(page, 'mark_read').then((c) => c.map((x: any) => x.channel))).toContain('ch-kiln');
+  });
+
+  test('"Sent to" after a routed message opens that room in focus', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await field(page).fill('Is the honey ready to jar?');
+    await page.locator('.all-send').click();
+    await page.locator('.all-note').getByRole('button', { name: 'Bee Garden' }).click();
+    await expect(sheet(page).getByRole('heading', { name: 'Bee Garden' })).toBeVisible();
+  });
+
+  test('with a note beside it on a wide screen, the room stays whole, inside the space that is left', async ({ page }) => {
+    test.skip(project() !== 'desktop', 'wide only');
+    await boot(page);
+    await page.evaluate(() => (window as any).__arrive('ch-kiln', 'Uni', 'The plan is in [[Areas/Kiln Studio|the kiln note]].'));
+    await allIn(page);
+    await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').last().click();
+    await sheet(page).getByRole('link', { name: 'the kiln note' }).click();
+    await expect(page.locator('.note-pane-beside')).toBeVisible();
+    await page.waitForTimeout(350);
+    const s = (await sheet(page).boundingBox())!, surface = (await page.locator('.all-surface').boundingBox())!;
+    expect(s.x).toBeGreaterThanOrEqual(surface.x);
+    expect(s.x + s.width).toBeLessThanOrEqual(surface.x + surface.width);
+    await expect(roomBox(page, 'kiln-studio')).toBeInViewport();
+  });
+
   test('a private room never gets a label to focus in All', async ({ page }) => {
     await boot(page);
     await allIn(page);
