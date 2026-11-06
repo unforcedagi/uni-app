@@ -13,7 +13,7 @@
 import type { RawNote } from "../areas/taskCore.ts";
 import { parseArea, parseProject, type Area as TreeNode } from "../areas/areasCore.ts";
 import { buildTree } from "../areas/treeCore.ts";
-import { isPrivateName, isPrivatePath, roomCluePrivate } from "../areas/treeRooms.ts";
+import { isPrivateName, isPrivatePath, runIsPrivate } from "../areas/treeRooms.ts";
 import { redactRaw, safeStep } from "./sessionWords.ts";
 import { END_WHYS, isFolder, makeProject, ModelError, UNFILED, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type Work } from "./model.ts";
 
@@ -156,7 +156,10 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     areas.push({ id: keyOf(n), name, path: str(n.path)!, room, private: false });
   }
   // the app's own rules for what is private (treeRooms), over the same notes
-  const tree = buildTree(src.nodes.flatMap((n): TreeNode[] => { const a = parseArea(n as never) ?? parseProject(n as never); return a ? [a] : []; }));
+  const tree = buildTree(src.nodes.flatMap((n): TreeNode[] => {
+    if (typeof n.path !== "string" || typeof n.id !== "string") return [];
+    try { const a = parseArea({ ...n, tags: tagsOf(n) } as never) ?? parseProject({ ...n, tags: tagsOf(n) } as never); return a ? [a] : []; } catch { return []; }
+  }));
   const privatePath = (path: string) => isPrivateName(lastName(path)) || isPrivatePath(tree, path);
   for (const a of areas) a.private = privatePath(a.path);
   const areaIds = new Set(areas.map((a) => a.id));
@@ -232,7 +235,7 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
   for (const a of areas) nameRooms(a.id, [a.room, areaNote(a).room]);
   for (const a of areas) nameRooms(a.id, [areaNote(a).rooms, a.name, areaNote(a).room_was, areaNote(a).room_renamed_from]);
   // a project's own room (older ones have one) says its area too
-  for (const n of src.nodes) { const up = areaUp(n); if (up && areaIds.has(up)) nameRooms(up, [meta(n).channel, meta(n).room, meta(n).rooms]); }
+  for (const n of src.nodes) { const up = areaUp(n); if (up && areaIds.has(up)) nameRooms(up, [meta(n).channel, meta(n).room, meta(n).rooms, meta(n).room_was, meta(n).room_renamed_from]); }
   const areaOfNode = (ref: string | null): string | null => {
     const n = ref ? byKey.get(unlink(ref)) : undefined;
     const up = n ? areaUp(n) : null;
@@ -247,15 +250,18 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
       ?? areaOfRoom(m.channel) ?? areaOfRoom(m.starter_channel) ?? areaOfRoom(m.room) ?? areaOfRoom(m.starter_room);
   };
   const roomRefs = src.nodes.flatMap((n) => { const c = str(meta(n).channel); return c ? c.split(",").map((id) => ({ id: id.trim(), name: (str(meta(n).room) ?? lastName(str(n.path) ?? "")).split(",")[0].trim() })) : []; });
-  const seenClue = new Map<string, boolean>();
-  const cluePrivate = (v: unknown) => { const k = JSON.stringify(v ?? null); if (!seenClue.has(k)) seenClue.set(k, roomCluePrivate(tree, v, roomRefs, null)); return seenClue.get(k)!; };
-  const nodePrivate = (ref: string | null) => { const path = ref ? str(byKey.get(unlink(ref))?.path) : null; return !!path && privatePath(path); };
-  const projectPath = new Map(src.nodes.map((n) => [keyOf(n), str(n.path) ?? ""]));
-  /** Whether any clue on a run touches a private place. */
-  const touchesPrivate = (m: Record<string, unknown>, task: string | null, viaFolder: string[] | undefined) =>
-    [m.room, m.starter_room, m.channel, m.starter_channel].some(cluePrivate)
-    || [str(m.project), str(m.node), task ? taskNode.get(task) ?? null : null].some(nodePrivate)
-    || !!viaFolder?.some((p) => privatePath(projectPath.get(p) ?? ""));
+  /** Whether any clue on a run touches a private place: the same rule the app's other lists use. A folder counts only when no node says where it belongs. */
+  const touchesPrivate = (m: Record<string, unknown>, task: string | null, byNode: string | null) => {
+    const refs = [str(m.project), str(m.node), task ? taskNode.get(task) ?? null : null];
+    // a note the tree doesn't hold as a place (a part of something) is still under its area
+    const held = refs.map((ref) => (ref ? byKey.get(unlink(ref)) : undefined));
+    if (held.some((n) => { const up = n ? areaUp(n) : null; return !!up && !!areaPathOf.get(up) && privatePath(areaPathOf.get(up)!); })) return true;
+    return runIsPrivate(tree, {
+      rooms: [m.room, m.starter_room, m.channel, m.starter_channel].filter((v) => v !== undefined && v !== null),
+      nodes: [...refs, ...held.map((n) => (n ? str(n.path) : null))],
+      folder: byNode ? null : str(m.folder),
+    }, roomRefs, null);
+  };
   /** The private area a private run belongs to: the one its clues name, else the first that can be reached. */
   const privateHome = (m: Record<string, unknown>, task: string | null): LiveArea | null => {
     const named = [areaOfNode(str(m.project)), areaOfNode(str(m.node)), task ? areaOfNode(taskNode.get(task) ?? null) : null, ...[m.channel, m.starter_channel, m.room, m.starter_room].flatMap((v) => (Array.isArray(v) ? v : [v])).flatMap((v) => String(v ?? "").split(",")).map(areaOfRoom)];
@@ -283,10 +289,12 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const task = str(m.task)?.toUpperCase() ?? null;
     const folder = str(m.folder);
     const viaFolder = folder ? byFolder.get(folderKey(folder)) : undefined;
-    const filed = projectOfNode(str(m.project)) ?? projectOfNode(str(m.node)) ?? (task ? projectOfNode(taskNode.get(task) ?? null) : null)
-      ?? (viaFolder?.length === 1 ? viaFolder[0] : null);
+    const byNode = projectOfNode(str(m.project)) ?? projectOfNode(str(m.node)) ?? (task ? projectOfNode(taskNode.get(task) ?? null) : null);
+    const named = byNode ?? (viaFolder?.length === 1 ? viaFolder[0] : null);
+    // a project under an archived area has no door to be seen through: its run is placed as if it named none
+    const filed = named && reachable(projectArea.get(named)) ? named : null;
     // a private clue beats any public one; a project of the private place itself keeps its run
-    const secret = touchesPrivate(m, task, viaFolder);
+    const secret = touchesPrivate(m, task, byNode);
     const filedPrivately = !!filed && areas.some((a) => a.private && a.id === projectArea.get(filed));
     const hiddenArea = secret && !filedPrivately ? privateHome(m, task) : null;
     // a private place's run with no private area to go to: counted in Unfiled, with none of its words

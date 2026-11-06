@@ -23,7 +23,7 @@ import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { rolledNeeds, storedSidebarWidth } from "./sidebarState";
 import { useRailHidden, useShortTree, useTreeBesideNote, useUprightPhone, useWide } from "./homeLayout";
-import { isPrivatePath, isPrivateRoom, privateRoot, privateRootIn, roomCluePrivate, roomSlug, roomView, treeRows } from "./treeRooms";
+import { isPrivatePath, isPrivateRoom, privateRoot, privateRootIn, privateRunIds, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
 import { approvalsAt, rolledUnread, unreadByPath, unreadByRoom } from "./roomUnread";
 import { useNav, type NavControls } from "../navContext";
@@ -332,6 +332,8 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
   /** A row's dot is its own node's needs-you items (a parent never lights up for its children's), by the companion's one rule; an item on a
    *  node with no row counts on its nearest ancestor's (r13), so the dots under a level add up to its Needs you. */
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the runs that are a private place's by any clue on them (the same rule as the sessions), kept off every other level's lists
+  const privateRuns = useMemo(() => privateRunIds(data?.tree ?? null, tasks.runs, new Map(tasks.tasks.flatMap((t): [string, string][] => { const id = taskTitle(t.title).id?.toUpperCase(); return id ? [[id, t.node]] : []; })), roomRefs, uniRef), [data?.tree, tasks.runs, tasks.tasks, roomRefs, uniRef]);
   const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), confirm.of, tasks.runs), [tasks.tasks, tasks.runs, rowPaths, tasks.tree, data?.tree, confirm.of]); // eslint-disable-line react-hooks/exhaustive-deps
   // T-335: what is new in each room (the rooms list's counts; opening a room marks it read, which clears them), and the approvals waiting
   // in each room (the key badge, apart from the tasks' dot): on the owning node's row, or on the room itself when no node owns it
@@ -521,7 +523,7 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
   const feed0 = needsFeed(levelTasks.map((t) => ({ ...t, stewardRoom: roomOfNode(t.node)?.name ?? null, hasDraft: drafted.has(taskTitle(t.title).id?.toUpperCase()) })), privateOf, selfPrivate, undefined, confirm.of);
   const taskTree = tasks.tree;
   // a run from a private room may sit on the root or a public node: its room keeps it private too, unless this level is that private place
-  const runs = taskTree ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node) && (!!selfPrivate || !(r.rooms ?? []).some((c) => roomCluePrivate(tree ?? null, c, roomRefs, uniRef)))) : [];
+  const runs = taskTree ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node) && (!!selfPrivate || !privateRuns.has(r.id))) : [];
   // r28 (Codex P2-6): a run waiting on the user's answer is in the same feed, counted once with the asks
   // T-161: Uni's level holds every room's approval prompts; a level with a room of its own, that room's
   const feed = withApprovals(withWaiting(feed0, runs), approvalsAll.list.filter((a) => isRoot || a.channel === target?.id));

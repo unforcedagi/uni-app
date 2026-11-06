@@ -137,7 +137,8 @@ export function ProjectSheet({ project, talk, room, roomName, onClose, onAnswer 
   const at = asOf(ws, now);
   const area = areaOf(work, p);
   // the area's own room is where its actions go (the room this sheet is over, when it is the area's)
-  const to = area ? (room && room.id === area.room ? room : { id: area.room, name: roomName(area.room) ?? area.name }) : room;
+  // Unfiled has no room of its own, whichever room it may be over: nothing is asked of a room that doesn't hold it
+  const to = area ? (room && room.id === area.room ? room : { id: area.room, name: roomName(area.room) ?? area.name }) : isHome(p) ? null : room;
   const sessions = sessionsOf(work, p.id);
   const liveOnes = sessions.filter(isLive);
   const ended = sessions.filter((s) => !isLive(s));
