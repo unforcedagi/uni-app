@@ -4,7 +4,7 @@
 // T-304: the working mark counts the room's Uni at work on your message too, not only Claude Code sessions.
 import { roomTint } from "../glow/roomTint";
 import { sameWords } from "../areas/sameWords";
-import { useRef, useCallback, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useRef, useCallback, useMemo, useState, type ReactNode } from "react";
 import { AllComposer, AllFeed, roomWords, useEchoes, useReplyTarget, useRoomsFeed, type AllRoom } from "../all/AllView";
 import { liveInArea, span } from "./model";
 import { asOf, useWork } from "./store";
@@ -108,7 +108,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */
   all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string | null, root?: string | null) => void } | null;
   /** T-335: this is the All place (a place of its own on the rail), and the way back from it; null: the home, with the places. */
-  allPlace?: { backTo: string; onBack: () => void; receded?: boolean } | null; onComposerFocus?: (on: boolean) => void;
+  allPlace?: { backTo: string; onBack: () => void; /** A room in focus over All. */ focusRoom?: string | null } | null; onComposerFocus?: (on: boolean) => void;
   /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
   /** Your key: a turn is the room's Uni at work on your message. */ me?: string | null;
   /** T-335: the To post queue's one quiet line, under what needs you */ toPost?: ReactNode }) {
@@ -130,6 +130,10 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   const feed = useRoomsFeed(allRooms, !!all && (view === "all" || wantWords));
   const words = useMemo(() => roomWords(feed.byRoom, me), [feed.byRoom, me]);
   const openAt = all?.onOpenAt;
+  // T-335 one fluid surface: what you said in a room in focus is in All when you come back (a message of your own may bring no live event)
+  const focusRoom = allPlace?.focusRoom ?? null;
+  const focusWas = useRef<string | null>(null);
+  useEffect(() => { if (focusWas.current && focusWas.current !== focusRoom) feed.reread([focusWas.current]); focusWas.current = focusRoom; }, [focusRoom, feed.reread]); // eslint-disable-line react-hooks/exhaustive-deps
   const [target, setTarget] = useReplyTarget();
   const echoes = useEchoes(feed.byRoom);
   // the same function across redraws, so the feed's rows stay as they are
@@ -148,7 +152,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
       <div className="fd-mark"><h1 className="fd-title"><Enso />All</h1><span className="fd-date">Every room, newest at the bottom</span></div>
       <button type="button" className="note-action all-back" onClick={allPlace!.onBack}>← {allPlace!.backTo}</button>
     </header>
-    <AllFeed rooms={allRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={openFromFeed} target={target} onTarget={setTarget} echoes={echoes.shown} receded={!!allPlace?.receded} />
+    <AllFeed rooms={allRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={openFromFeed} target={target} onTarget={setTarget} echoes={echoes.shown} receded={!!focusRoom} />
     {composer}
   </div>;
   return <div className="fd" data-place="front-door" data-view="places">

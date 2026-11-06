@@ -31,6 +31,8 @@ export function AllFocusSheet({ id, name, stands, root, replies, leaving, onBack
     if (matchMedia("(pointer: coarse)").matches) sheet.current?.focus({ preventScroll: true });
     return () => labelBack();
   }, []);
+  // a pull that stepped from a thread to its room is over
+  useEffect(() => { sheet.current?.style.removeProperty("--pull"); }, [root]);
   // a swipe down on the head puts the room back
   const pull = useRef<{ id: number; y: number } | null>(null);
   const setPull = (dy: number) => {

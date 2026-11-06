@@ -590,6 +590,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [utilityOpen]);
   // Search result to scroll to and flash once its room/thread has loaded.
   const [focusRef, setFocusRef] = useState<string | null>(null);
+  const focusPlaced = useRef<string | null>(null);
   // T-335 one fluid surface: the room in focus inside All (AllFocus.tsx). The All tab stays what it is, with its feed in place behind; this room's view (messages, composer, drafts) is
   // the one the room's page uses, so one send path, one draft per room and one signer serve both.
   const [allFocus, setAllFocusState] = useState<AllFocusState | null>(null);
@@ -1430,17 +1431,24 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Jump to a search hit: once its room/thread is rendered, center and flash
   // it. If it is older than the loaded window, widen the window once.
   useEffect(() => {
-    if (!focusRef) return;
+    if (!focusRef) { focusPlaced.current = null; return; }
     // Wait until the list shows the target room (and thread), not the last one.
     if (!messages.length || messages[0].channel !== channel) return;
     if (root && !messages.some((m) => m.ref === root || m.root === root)) return;
     const el = listRef.current?.querySelector<HTMLElement>(`[data-ref="${CSS.escape(focusRef)}"]`);
     if (el) {
+      // placed once: what arrives while the mark is on doesn't send the list back to it
+      const box = focusPlaced.current === focusRef ? null : listRef.current;
+      focusPlaced.current = focusRef;
       // a message taller than the list opens at its top, where its reader starts
-      const box = listRef.current;
-      el.scrollIntoView({ block: box && el.offsetHeight > box.clientHeight - 32 ? "start" : "center" });
-      // it stays there as the rest of the list settles (the view follows the newest again when the reader scrolls down to it)
-      if (box) { stickToEnd.current = false; settleUntil.current = 0; pinned.current = { ref: focusRef, offset: el.getBoundingClientRect().top - box.getBoundingClientRect().top, until: Date.now() + 1000 }; }
+      if (box) el.scrollIntoView({ block: box && el.offsetHeight > box.clientHeight - 32 ? "start" : "center" });
+      // it stays there as the rest of the list settles, and the view follows the newest again when the reader scrolls down to it. Already at the end, it simply goes on following.
+      if (box) {
+        const atEnd = markFor(box.scrollTop, box.scrollHeight, box.clientHeight).atEnd;
+        stickToEnd.current = atEnd;
+        settleUntil.current = 0;
+        pinned.current = atEnd ? null : { ref: focusRef, offset: el.getBoundingClientRect().top - box.getBoundingClientRect().top, until: Date.now() + 1000 };
+      }
       const t = setTimeout(() => setFocusRef(null), 2500);
       return () => clearTimeout(t);
     }
@@ -1882,11 +1890,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** Puts a room (or a thread of it) in focus inside All, at a message if one is named. Works from All, from another focus, and while one is on its way out. */
   function focusInAll(room: string, ref: string | null = null, threadRoot: string | null = null) {
     stopLeaving();
+    const was = allFocusRef.current;
     setAllFocus({ room, root: threadRoot, leaving: false });
     // a pointer that doesn't bring up a keyboard goes on typing; a touch keeps the thread on screen (an approval to answer in words asks for the keys itself)
     if (!matchMedia("(pointer: coarse)").matches) focusComposer.current = true;
     setChecking(null);
-    if (channelRef.current !== room || root !== threadRoot) navigate(room, threadRoot);
+    // (the same room still leaving stays as it is; otherwise its view comes up, whatever the tab's own switch has just queued)
+    if (!was || was.room !== room || was.root !== threadRoot) navigate(room, threadRoot);
     // only this opening's message: a mark from a visit that was cut short doesn't come back
     focusTries.current = 0;
     setFocusRef(ref);

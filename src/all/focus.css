@@ -53,6 +53,13 @@
   .all-focus .composer { padding-inline: 16px; }
 }
 
+/* a short window (a phone on its side, the keyboard up): the room takes all of it */
+@media (max-height: 500px) {
+  .all-focus, .shell.composer-focused .all-focus { inset-block-start: 4px; }
+  .all-focus-head { padding-block: 2px; }
+  .all-focus-stands { display: none; }
+}
+
 /* no colour and no shadow to lean on: a black edge, and All gone pale on white */
 :root[data-screen="ink"] .all-surface[data-focus="open"] .all-behind { opacity: .28; will-change: auto; }
 :root[data-screen="ink"] .all-focus { border-color: #000; border-width: 1.5px; box-shadow: none; }

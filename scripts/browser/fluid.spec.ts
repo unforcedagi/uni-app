@@ -291,6 +291,46 @@ test.describe('a room in focus', () => {
     await expect(sheet(page).locator('article.message').filter({ hasText: 'Sent from far up the thread.' })).toBeInViewport();
   });
 
+  test('your reply from focus is in All when you come back, with no wait for the room\'s next message', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').last().click();
+    await roomBox(page, 'kiln-studio').fill('Words that should be in All.');
+    await sheet(page).getByRole('button', { name: 'Send message' }).click();
+    await expect(sheet(page).locator('.message-list')).toContainText('Words that should be in All.');
+    await backToAll(page).click();
+    await expect(sheet(page)).toHaveCount(0);
+    await expect(feed(page)).toContainText('Words that should be in All.');
+  });
+
+  test('opened at a message that is already the newest, the room still follows what arrives next', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await feed(page).evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await feed(page).locator('article.all-msg .all-place').last().click();
+    await expect(sheet(page).locator('.search-focus')).toBeVisible();
+    await page.waitForTimeout(300);
+    const room = await feed(page).locator('article.all-msg').last().getAttribute('data-room');
+    await page.evaluate((r) => (window as any).__arrive(r, 'Uni', 'FOLLOW-ME arrives while you read.'), room);
+    await expect(sheet(page).locator('article.message').filter({ hasText: 'FOLLOW-ME' })).toBeVisible();
+    await expect.poll(() => sheet(page).locator('.message-list').evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(30);
+  });
+
+  test('on a room\'s own page: the approval banner\'s Show on the newest message, and the room goes on following', async ({ page }) => {
+    await boot(page);
+    const prompt = JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8')).prompts.two_answers_30min;
+    await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
+    await expect(roomBox(page, 'kiln-studio')).toBeVisible();
+    await page.evaluate((b) => (window as any).__arrive('ch-kiln', 'Uni', b), prompt);
+    await page.locator('.composer').getByRole('button', { name: /^Show/ }).click();
+    await expect(page.locator('.search-focus')).toBeVisible();
+    await page.waitForTimeout(300);
+    await page.evaluate((b) => (window as any).__arrive('ch-kiln', 'Uni', `FOLLOW-ME\n\n${b}`), LONG);
+    await expect(page.locator('.message-list article.message').filter({ hasText: 'FOLLOW-ME' })).toBeVisible();
+    await expect.poll(() => page.locator('.message-list').evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(30);
+    await expect(page.getByRole('button', { name: /Jump to latest/ })).toHaveCount(0);
+  });
+
   test('a visit cut short leaves nothing behind: the next opening has no stale mark and no long read', async ({ page }) => {
     await boot(page);
     await allIn(page);
@@ -484,6 +524,21 @@ test.describe('a room in focus', () => {
     await jump.click();
     await expect(sheet(page).getByRole('heading', { name: 'Kiln Studio' })).toBeVisible();
     await expect(page.getByRole('button', { name: /Pause recording/ })).toBeVisible();
+  });
+
+  test('recording in focus, gone to the room\'s page: the pill still brings the focus back, with its thread and composer', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').last().click();
+    await sheet(page).getByRole('button', { name: 'Record a voice message' }).click();
+    const jump = page.getByRole('button', { name: 'Jump to recording in kiln-studio' });
+    await expect(jump).toBeVisible();
+    await sheet(page).getByRole('button', { name: "Open Kiln Studio's page" }).click();
+    await page.waitForTimeout(400);
+    await jump.click();
+    await expect(sheet(page).locator('[data-chat="open"]')).toBeVisible();
+    await expect(sheet(page).locator('.message-list')).toContainText('Three glaze tiles');
+    await expect(roomBox(page, 'kiln-studio')).toBeVisible();
   });
 
   test('the room\'s name is the way to its page, not only the small arrow', async ({ page }) => {
