@@ -327,7 +327,10 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     void readStatus().then((now) => { if (now && at === statusSeq.current) setStatus(now); }, () => {});
   };
   const openRow = thread ? list?.find((r) => r.id === thread.roomId) ?? null : null;
-  const out = async () => { try { setStatus(await signOut()); accountGone(); } catch (err) { setProblem(asMessagesErr(err)); } };
+  /** T-335 as Aaron: Sign out sits where Refresh sits everywhere else: a stray tap only asks. */
+  const [outArmed, setOutArmed] = useState(false);
+  useEffect(() => { if (!outArmed) return; const t = setTimeout(() => setOutArmed(false), 4000); return () => clearTimeout(t); }, [outArmed]);
+  const out = async () => { setOutArmed(false); try { setStatus(await signOut()); accountGone(); } catch (err) { setProblem(asMessagesErr(err)); } };
   const tabs = list ? messageTabs(list, linkRows) : [];
   const tab = shownTab(tabPick, tabs);
   const rows = list ? tabRows(list, tab) : [];
@@ -344,7 +347,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     <header className="note-bar msgs-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
       <span className="msgs-title"><strong>Messages</strong>{signedIn && <small className="msgs-account">{status?.user_id}<span className={`msgs-live st-${status?.state}`} role="status">{status?.state === "live" ? "" : ` · ${statusWords(status)}`}</span></small>}</span>
-      {signedIn ? <button className="note-quiet" onClick={() => void out()}>Sign out</button> : <span className="msgs-bar-gap" />}
+      {signedIn ? <button className="note-quiet" onClick={() => { if (outArmed) void out(); else setOutArmed(true); }}>{outArmed ? "Tap again to sign out" : "Sign out"}</button> : <span className="msgs-bar-gap" />}
     </header>
     {!status && !problem ? <p className="msgs-loading" role="status">Opening Messages…</p>
     : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={onSignedIn} /></div>

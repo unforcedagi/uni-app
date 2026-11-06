@@ -309,3 +309,9 @@ test('Mail\'s and Calendar\'s tags don\'t shout', async ({ page }) => {
   for (const t of tags) expect(t === t.toUpperCase() && t.length > 1, `"${t}" shouts`).toBe(false);
   expect(tags).not.toContain('Free');
 });
+
+test('the rail\'s Uni is the home\'s Uni: one mark', async ({ page }) => {
+  await glow(page);
+  const mark = (loc: ReturnType<Page['locator']>) => loc.locator('path').first().getAttribute('d');
+  expect(await mark(railNav(page).getByRole('button', { name: 'Uni', exact: true }))).toBe(await mark(page.locator('.fd-title .enso')));
+});

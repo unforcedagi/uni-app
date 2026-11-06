@@ -90,7 +90,7 @@ test.describe('T-278 Messages on a live homeserver', () => {
       await expect(conversation(b, room).getByText("Uni can't read this conversation.")).toBeVisible();
     } finally {
       // leave no devices behind: signing out removes each test device on the homeserver
-      for (const p of [a, b]) await p.getByRole('button', { name: 'Sign out' }).click({ timeout: 5_000 }).catch(() => {});
+      for (const p of [a, b]) { await p.getByRole('button', { name: 'Sign out' }).click({ timeout: 5_000 }).catch(() => {}); await p.getByRole('button', { name: 'Tap again to sign out' }).click({ timeout: 5_000 }).catch(() => {}); }
       await expect(a.getByRole('form', { name: 'Sign in to Messages' })).toBeVisible().catch(() => {});
       await expect(b.getByRole('form', { name: 'Sign in to Messages' })).toBeVisible().catch(() => {});
       await ctxA.close(); await ctxB.close();

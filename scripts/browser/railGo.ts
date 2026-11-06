@@ -3,8 +3,10 @@ import type { Page } from '@playwright/test';
 export const railNav = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 /** Opens More when the place is behind it (a phone), so the place's button can be seen and tapped. */
 export async function openRailMore(page: Page) {
+  if ((page.viewportSize()?.width ?? 0) >= 600) return; // a wider screen has every place on the rail
   const more = railNav(page).getByRole('button', { name: 'More', exact: true });
-  if (await more.isVisible() && (await more.getAttribute('aria-expanded')) !== 'true') await more.click();
+  await more.waitFor(); // the bar steps aside while a composer has focus
+  if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click();
 }
 export async function railGo(page: Page, name: string) {
   await openRailMore(page);

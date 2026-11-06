@@ -126,6 +126,7 @@ test.describe('T-282 Link an account, on the live bridges', () => {
         await page.evaluate((network) => (window as any).__TAURI_INTERNALS__.invoke('messages_link_cancel', { network }).catch(() => {}), n).catch(() => {});
       }
       await page.getByRole('button', { name: 'Sign out' }).click({ timeout: 5_000 }).catch(() => {});
+      await page.getByRole('button', { name: 'Tap again to sign out' }).click({ timeout: 5_000 }).catch(() => {});
       await expect(form).toBeVisible().catch(() => {});
     }
   });

@@ -5,8 +5,9 @@ export function MicIcon() {
   return <svg className="mono-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8" /></svg>;
 }
 
+/** Uni's mark on the rail is the one on the home: the one-breath brush circle. */
 export function UniIcon() {
-  return <svg className="mono-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z" /></svg>;
+  return <svg className="mono-icon" viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round"><path d="M29.5 8.8C24.6 5.2 14.8 5 9.3 11.6 4.6 17.3 5.6 27.4 12.6 32.2c7.2 4.9 17.4 2.9 21.2-4.3 3.3-6.3 1.6-13.4-3.1-17.4" /></svg>;
 }
 /** T-335: All: the rooms' lines woven into one. */
 export function AllIcon() {

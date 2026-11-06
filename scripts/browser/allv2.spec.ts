@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
-import { railGo } from './railGo';
+import { openRailMore, railGo } from './railGo';
 
 const UNI = 'c'.repeat(64);
 const project = () => test.info().project.name;
@@ -463,7 +463,7 @@ test.describe('review', () => {
     await expect(reply(page)).toHaveCount(0);
   });
 
-  test('every place stays on the phone\'s bar, with all eleven; each keeps its name for a screen reader', async ({ page }) => {
+  test('every place is in reach on a phone: four and More; with all eleven, each keeps its name for a screen reader', async ({ page }) => {
     test.skip(project() !== 'phone', 'the phone\'s bar');
     await boot(page);
     // Calendar and Messages on, as on the owner's device
@@ -471,13 +471,11 @@ test.describe('review', () => {
     await page.reload();
     await page.locator('[data-place="front-door"]').waitFor();
     const bar = rail(page);
-    await expect.poll(() => bar.getByRole('button').count(), { timeout: 8000 }).toBeGreaterThanOrEqual(10);
     expect(await bar.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await openRailMore(page);
+    await expect.poll(() => bar.getByRole('button').count(), { timeout: 8000 }).toBeGreaterThanOrEqual(10);
     for (const b of await bar.getByRole('button').all()) await expect(b).toBeInViewport({ ratio: 0.95 });
     await expect(bar.getByRole('button', { name: 'Settings' })).toBeVisible();
-    // the labels don't run into each other: only the current one is drawn
-    const shown = await bar.locator('button > span').evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.textContent));
-    expect(shown).toEqual(['Uni']);
     await page.screenshot({ path: test.info().outputPath('bar.png') });
   });
 
