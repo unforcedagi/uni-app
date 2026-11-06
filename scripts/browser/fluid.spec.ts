@@ -184,7 +184,9 @@ test.describe('a long message, in place', () => {
     await page.waitForTimeout(150);
     await m.getByRole('button', { name: 'Read the rest' }).click();
     await page.waitForTimeout(1100);
-    await expect(m.getByRole('button', { name: 'Show less' })).toBeInViewport();
+    // its start stays on screen (a long one runs on past the fold on a phone)
+    await expect(m.getByRole('button', { name: 'Show less' })).toBeVisible();
+    await expect(m.locator('.md strong').first()).toBeInViewport();
   });
 
   test('a message over the length that fits anyway shows no "Read the rest"', async ({ page }) => {
