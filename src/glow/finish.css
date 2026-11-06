@@ -128,3 +128,7 @@
 /* ── A rail dot is a dot, top right of its glyph, wherever it is ── */
 .rail i .rail-dot { top: 2px; left: auto; right: 9px; width: 8px; height: 8px; background: var(--g-accent); box-shadow: 0 0 0 2px var(--g-ground); }
 :root[data-screen="ink"] .rail i .rail-dot { background: #000; }
+
+/* ── A many-pane place's header runs the width of its panes; only a page you read keeps to the reading column ── */
+.mail-bar, .msgs-bar, .cal-bar, .vault-browser .note-bar { padding-inline: 14px; }
+@media (min-width: 600px) { .shell.panel-settings .rooms { width: 420px; max-width: calc(100% - 64px); flex-basis: 420px; } }

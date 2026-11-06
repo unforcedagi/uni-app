@@ -291,6 +291,15 @@ test('Mail that can only read has no grey New or Reply; a phone\'s list has one 
   await expect(mailMock.mail(page).getByRole('button', { name: 'Refresh' }).locator('svg')).toBeVisible();
 });
 
+test('a many-pane place\'s header runs the width of its panes on a wide screen', async ({ page }) => {
+  test.skip(phone(), 'desktop');
+  await mailMock.boot(page, 'ok');
+  await expect(mailMock.mail(page)).toBeVisible();
+  const bar = (await page.locator('.mail-bar').boundingBox())!;
+  const back = (await page.locator('.mail-bar').getByRole('button', { name: /^←/ }).boundingBox())!;
+  expect(back.x - bar.x).toBeLessThanOrEqual(20);
+});
+
 test('Mail\'s and Calendar\'s tags don\'t shout', async ({ page }) => {
   await calMock.boot(page, {});
   await expect(calMock.cal(page)).toBeVisible();

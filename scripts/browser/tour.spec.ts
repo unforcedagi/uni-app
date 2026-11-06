@@ -132,6 +132,14 @@ test('03-home-places-glow', async ({ page }) => {
   await snap(page, '03-home-places-glow');
 });
 
+test('08-more-sheet', async ({ page }) => {
+  test.skip(wide(page), 'the phone bar');
+  await glow(page);
+  await rail(page).getByRole('button', { name: 'More', exact: true }).click();
+  await expect(rail(page).getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
+  await snap(page, '08-more-sheet');
+});
+
 test('04-all-view', async ({ page }) => {
   await glow(page);
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'All', exact: true }).click();

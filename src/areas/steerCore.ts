@@ -109,7 +109,7 @@ export function parseRuns(notes: readonly RawNote[], tree: TaskTree): Run[] {
     const task = str(m.task);
     // T-304: a run note's words (its closing line, what it says it is doing, what it came back with) through redactRaw, raw, first
     const said = (v: unknown) => str(typeof v === "string" ? redactRaw(v) : v);
-    out.push({ id, path, node, task, what: said(m.summary) ?? said(m.what) ?? (task ? `Working on ${task}` : "Working on it"), by: str(m.worker) ?? str(m.by) ?? "", state: state as RunState,
+    out.push({ id, path, node, task, what: said(m.summary) ?? said(m.what) ?? "Working on it", by: str(m.worker) ?? str(m.by) ?? "", state: state as RunState,
       started: str(m.started_at) ?? str(m.started), updated: str(m.ended_at) ?? str(m.updated) ?? str(n.updatedAt), result: said(m.result), room: str(m.room)?.replace(/^#/, "") ?? null, channel: str(m.channel), message: str(m.message_ref) });
   }
   return out;

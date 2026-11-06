@@ -174,7 +174,7 @@ check("runs: the T-125 run notes (summary, worker, started_at, state decision/bl
   assert.equal(r[0].room, "atlas/build");
   assert.equal(r[0].started, iso(AT - 5000));
   assert.equal(r[1].what, "Working on it");
-  assert.equal(r[2].what, "Working on T-07");
+  assert.equal(r[2].what, "Working on it"); // never a task number
   for (const x of r) assert.ok(!/scratch|Runs\//.test(x.what), x.what);
   assert.deepEqual(runsUnder(tree, ROOT, r).map((x) => x.id), ["n1", "n2", "n3"]);
 });
