@@ -3,6 +3,7 @@
 // Builds on stewardOf's rule (talkCore.steward): a node's own room, else the nearest ancestor's, else #Uni.
 import type { Area } from "./areasCore.ts";
 import { ancestry, ROOT, type Tree } from "./treeCore.ts";
+import { pathResolver } from "./refs.ts";
 import { ownRoom, steward, type RoomNode, type RoomRef } from "./talkCore.ts";
 
 /** A room as the app writes it after "#": its real channel name, exactly (r13: never lowercased or re-spaced), without a leading "#". */
@@ -27,26 +28,33 @@ export function privateRoot(tree: Tree, path: string): { path: string; name: str
   return hit ? { path: hit.path, name: hit.name } : null;
 }
 
-/** T-335: is this node inside a private place, a done or archived one included? Those aren't in the tree's walk, so their own way up is followed. */
-export function isPrivatePath(tree: Tree, path: string): boolean {
-  if (tree.nodes.has(path)) return isPrivateNode(tree, path);
-  const byRef = new Map(tree.archived.flatMap((a) => [[a.path, a], [a.id, a]] as const));
-  const liveById = new Map([...tree.nodes.values()].map((n) => [n.id, n.path]));
-  const seen = new Set<string>();
-  const stack = [path];
-  while (stack.length) {
-    const at = stack.pop()!;
-    if (seen.has(at)) continue;
-    seen.add(at);
-    const live = tree.nodes.has(at) ? at : liveById.get(at);
-    if (live) { if (isPrivateNode(tree, live)) return true; continue; }
-    const a = byRef.get(at);
-    if (!a) continue;
-    if (isPrivateName(a.name)) return true;
-    stack.push(...[a.parent, ...(a.links ?? [])].filter((x): x is string => !!x));
+const closures = new WeakMap<Tree, Set<string>>();
+/**
+ * T-335: every node inside a private place, read from everything known, done and archived nodes included. The tree's walk stops at a node that isn't live,
+ * so a live project under a done one under a private area, or linked to an archived private area, would look top-level and public. Links are two-way here,
+ * as the tree's are. It spreads from each privately named node through projects; an area other than a privately named one is never made private by a link.
+ * It errs towards private: a project linked to a private one counts.
+ */
+function privateClosure(tree: Tree): Set<string> {
+  const hit = closures.get(tree);
+  if (hit) return hit;
+  const known = [...tree.nodes.values(), ...tree.archived];
+  const byPath = new Map(known.map((n) => [n.path, n]));
+  const resolve = pathResolver(known);
+  const near = new Map<string, Set<string>>();
+  const join = (a: string, b: string) => { if (a === b) return; (near.get(a) ?? near.set(a, new Set()).get(a)!).add(b); (near.get(b) ?? near.set(b, new Set()).get(b)!).add(a); };
+  for (const n of known) for (const ref of [n.parent, ...(n.links ?? [])]) { const to = resolve(ref); if (to && byPath.has(to)) join(n.path, to); }
+  const out = new Set(known.filter((n) => isPrivateName(n.name)).map((n) => n.path));
+  const stack = [...out];
+  while (stack.length) for (const next of near.get(stack.pop()!) ?? []) {
+    if (out.has(next) || byPath.get(next)?.kind === "area") continue;
+    out.add(next); stack.push(next);
   }
-  return false;
+  closures.set(tree, out);
+  return out;
 }
+/** T-335: is this node inside a private place, however it got there? */
+export const isPrivatePath = (tree: Tree, path: string): boolean => privateClosure(tree).has(path) || isPrivateNode(tree, path);
 /**
  * T-335: does this room belong to a private place? Named by a private node (a done or archived one too: a session can still wait in its room), or that
  * node's own. Never a room the node only borrows: a private area with no room of its own talks in Uni's, and that doesn't make Uni's private.
@@ -55,7 +63,7 @@ export function isPrivateRoom(tree: Tree, channel: string, rooms: readonly RoomR
   const room = rooms.find((r) => r.id === channel);
   const names = (n: Area) => [...n.rooms, ...n.channels, ...(typeof n.metadata.room === "string" ? [n.metadata.room] : [])].some((c) => c === channel || (!!room && roomSlug(c).toLowerCase() === roomSlug(room.name).toLowerCase()));
   for (const n of tree.nodes.values()) {
-    if (!isPrivateNode(tree, n.path)) continue;
+    if (!isPrivatePath(tree, n.path)) continue;
     const v = roomView(tree, n.path, rooms, uni);
     if ((v.own && v.target?.id === channel) || names(n)) return true;
   }

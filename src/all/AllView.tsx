@@ -243,7 +243,10 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
       if (era !== held.era) return;
       const sent = to.filter((id) => run.done.has(id));
       // you wrote more while it was out: the box isn't these words any more, so what failed is offered back on its own, never re-sent with the new ones
-      if (r.failed.length && held.text !== sentText) setHeld({ outcome: { sent, failed: [], noUni }, attempt: null, lost: [...held.lost, ...r.failed.map((f) => ({ body, target: { room: f.id, root: null }, error: f.error }))] });
+      if (r.failed.length && held.text !== sentText) {
+        const since = held.text.startsWith(sentText) ? held.text.slice(sentText.length).trimStart() : held.text;
+        setHeld({ text: since, ...(since.trim() ? {} : { chosen: null }), outcome: { sent, failed: [], noUni }, attempt: null, lost: [...held.lost, ...r.failed.map((f) => ({ body, target: { room: f.id, root: null }, error: f.error }))] });
+      }
       // a message tapped while it was out doesn't catch these words: "send again" goes where the note says
       else setHeld({ outcome: { sent, failed: r.failed, noUni }, ...(r.failed.length ? { target: null } : {}) });
       if (r.sent.length) {
@@ -298,7 +301,7 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
         {!hasText ? "↑" : sending ? "Sending…" : target ? "Send" : left.length > 1 ? `Send to ${left.length} rooms` : left.length ? `Send to ${nameOf.get(left[0])}` : "Choose a room"}
       </button>
     </div>
-    {target && !targetRoom && <p className="all-note" role="status">Nothing goes there from here. Clear this to choose another room; your words stay.</p>}
+    {target && !targetRoom && <p className="all-note" role="status">Nothing goes there from here. Clear this to route it again: your words stay, and the small model reads them to suggest a room.</p>}
     {routeMoved && <p className="all-note" role="status">The route just changed. Check it, then send.</p>}
     {!target && hasText && !to.length && <p className="all-note" role="status">Pick a room, or keep typing. Nothing is sent until you do.</p>}
     {outcome && (outcome.sent.length > 0 || outcome.noUni.length > 0 || outcome.failed.length > 0) && <p className={`all-note${outcome.failed.length ? " all-failed" : ""}`} role="status">

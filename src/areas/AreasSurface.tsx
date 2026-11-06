@@ -435,9 +435,9 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
     const doors: Door[] = doorAreas.map((a) => {
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
       const i = navRows.findIndex((r) => r.path === a.path && r.depth === 1);
-      const raw = privateRoot(data!.tree, a.path) ? null : tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
+      const raw = isPrivatePath(data!.tree, a.path) ? null : tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
       const st = raw ? plainWords(raw) : null;
-      return { path: a.path, name: a.name, about: privateRoot(data!.tree, a.path) ? null : a.purpose || null, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null,
+      return { path: a.path, name: a.name, about: isPrivatePath(data!.tree, a.path) ? null : a.purpose || null, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null,
         room: v.own ? v.target?.id ?? null : null,
         // T-335: everything new in the area's rooms (its own and its projects'); what needs you is what its Needs you lists: the tasks
         // under it, and the approval prompts in its own room (a project's own room's prompts are in that project's, Codex T-335 P2)
@@ -453,9 +453,9 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
       privates: allNeeds.privates.map((g) => ({ place: g.place, count: g.count, path: g.open.path })),
     };
     // T-335 All view: every area's own room, interleaved, with a composer that routes; a private area stays out of it
-    const allRooms: AllRoom[] = doors.filter((d) => d.room && !privateRoot(data!.tree, d.path)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, about: d.about ?? null, lastTs: d.lastTs }));
-    /** All's way back names where you came from, unless that is inside a private place (the place itself, a room or a thread of it). */
     const privateChannel = (channel: string) => isPrivateRoom(data!.tree, channel, roomRefs, uniRef);
+    const allRooms: AllRoom[] = doors.filter((d) => d.room && !isPrivatePath(data!.tree, d.path) && !privateChannel(d.room)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, about: d.about ?? null, lastTs: d.lastTs }));
+    /** All's way back names where you came from, unless that is inside a private place (the place itself, a room or a thread of it). */
     const fromPrivate = (from: { path?: string; channel?: string } | null | undefined) => !!from && (!!(from.path && isPrivatePath(data!.tree, from.path)) || (!!from.channel && privateChannel(from.channel)));
     const all = allRooms.length ? { rooms: allRooms, onOpenAt: (room: string, ref?: string) => { setDrawer(false); (actions.openRoom as (id: string, focus?: string | null) => void)(room, ref ?? null); } } : null;
     if (allPlace && !all) return <div className="areas-home tree-home-wrap"><AllEmpty reading={roomsPending} onBack={allPlace.onBack} /></div>;

@@ -59,7 +59,7 @@ LOG = tmp / "log.jsonl"
 (tmp / "runs").mkdir()
 env = {**os.environ, "TMPDIR": str(tmp / "runs"), "UNI_ROUTE_PORT": str(PORT), "UNI_ROUTE_URLS": ORIGIN, "UNI_ROUTE_ALLOW": str(tmp / "allow"), "UNI_ROUTE_LOG": str(LOG), "UNI_ROUTE_CLAUDE": str(FAKE),
        "UNI_ROUTE_DEADLINE": "1.5", "SECRET_THING": "must-not-reach-the-model", "HOME": str(tmp)}
-(tmp / "runs" / "uni-route-1-otherdoor").mkdir()                  # another door's run: not this one's to touch
+(tmp / "runs" / "uni-route-1-otherdor").mkdir()                  # another door's run: not this one's to touch
 (tmp / "runs" / f"uni-route-{PORT}-lasttime").mkdir()              # this door's, from before a crash
 out = open(tmp / "server.out", "w")
 server = subprocess.Popen([sys.executable, "-I", str(HERE / "server.py")], env=env, stdout=out, stderr=subprocess.STDOUT)
@@ -121,7 +121,7 @@ def mode(m):
 try:
     check("starts and warms a process", wait_warm())
     check("clears its own old run directory", not (tmp / "runs" / f"uni-route-{PORT}-lasttime").exists())
-    check("leaves another door's alone", (tmp / "runs" / "uni-route-1-otherdoor").exists())
+    check("leaves another door's alone", (tmp / "runs" / "uni-route-1-otherdor").exists())
     SUG, OUT = "/route/v1/suggest", "/route/v1/outcome"
     ask = {"text": f"The glaze {MARK} crawled again", "rooms": ROOMS}
 

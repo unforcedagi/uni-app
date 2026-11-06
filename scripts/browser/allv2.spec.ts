@@ -655,6 +655,18 @@ test.describe('review 4', () => {
     await expect(page.getByRole('button', { name: 'Put it back' })).toBeVisible();
   });
 
+  test('words appended during a multi-room send that partly fails: the sent words leave the box, so the next Send repeats nothing', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await page.evaluate(() => { const w = window as any; w.__postDelay = 500; const prev = w.__extraInvoke; w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'post_message' && a.channel === 'ch-north' && !w.__failedOnce) { w.__failedOnce = true; await new Promise((r) => setTimeout(r, 900)); throw 'relay said no'; } return prev(cmd, a); }; });
+    await field(page).fill('Tell Choir and North Field the hall is booked');
+    await send(page).click();
+    await field(page).press('End');
+    await field(page).pressSequentially(' and the wax', { delay: 5 });
+    await expect(page.locator('.all-note.all-failed')).toContainText('North Field', { timeout: 5000 });
+    await expect(field(page)).toHaveValue('and the wax');
+  });
+
   test('after failed asks, a new thought gets its own', async ({ page }) => {
     await boot(page, { mode: 'down' });
     await allIn(page);

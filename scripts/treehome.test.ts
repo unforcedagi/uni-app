@@ -154,5 +154,32 @@ check("T-335: a private place's rooms, done or archived ones too, and never a ro
   assert.equal(isPrivatePath(t, "Projects/Gone Work"), false);
   assert.equal(isPrivatePath(t, "Areas/Relationships"), true);
   assert.equal(isPrivatePath(t, "Areas/Boulder"), false);
+  // a live project reaches a private place only through something done or archived: the tree's walk stops there and it looks top-level
+  const rooms2 = [UNI, { id: "r-q", name: "q-room" }, { id: "r-q2", name: "q2-room" }, { id: "r-l", name: "listed" }, { id: "r-bou", name: "boulder" }, { id: "r-pub", name: "pub" }];
+  const t2 = buildTree([
+    area("a-sad", "Sanctum", { room: "sanctum", links: ["Projects/Listed"] }),
+    area("a-bou", "Boulder", { room: "boulder", links: ["Projects/Pub", "Projects/Q2"] }),                 // linking to a private project doesn't make an area private
+    proj("p-p", "Done Parent", "Areas/Sanctum", { status: "done" }),
+    proj("p-q", "Q", "Projects/Done Parent", { room: "q-room" }),                                          // live, under done, under private
+    parseProject({ id: "p-listed", path: "Projects/Listed", tags: ["project"], content: "# Listed", metadata: { status: "done", room: "listed" } })!, // only the area lists it
+    proj("p-pub", "Pub", "Areas/Boulder", { room: "pub" }),
+  ]);
+  const t3 = buildTree([
+    area("a-sad", "Sanctum", { room: "sanctum", status: "archived" }),
+    proj("p-q2", "Q2", "Areas/Sanctum", { room: "q2-room" }),                                              // live, its private area archived
+    proj("p-w", "W", "[[Areas/Sanctum]]", { room: "q-room" }),                                             // the same, written as a wikilink
+    area("a-bou", "Boulder", { room: "boulder" }),
+  ]);
+  assert.equal(isPrivatePath(t2, "Projects/Q"), true, "live, under done, under private");
+  assert.equal(isPrivateRoom(t2, "r-q", rooms2, UNI), true);
+  assert.equal(isPrivateRoom(t2, "r-l", rooms2, UNI), true, "done, listed only by the private area");
+  assert.equal(isPrivatePath(t2, "Areas/Boulder"), false, "an area stays public whatever it links to");
+  assert.equal(isPrivateRoom(t2, "r-bou", rooms2, UNI), false);
+  assert.equal(isPrivatePath(t2, "Projects/Pub"), false);
+  assert.equal(isPrivateRoom(t2, "r-pub", rooms2, UNI), false);
+  assert.equal(isPrivatePath(t3, "Projects/Q2"), true, "live, its private area archived");
+  assert.equal(isPrivateRoom(t3, "r-q2", rooms2, UNI), true);
+  assert.equal(isPrivatePath(t3, "Projects/W"), true, "by a wikilink");
+  assert.equal(isPrivatePath(t3, "Areas/Boulder"), false);
 });
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
