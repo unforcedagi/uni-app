@@ -566,8 +566,8 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     prev = m;
   }
   return <div className="all-feed-box">
-    {reading && nameOf.has(reading) && <button type="button" className="all-place all-reading" style={{ ["--room-tint" as string]: tint(reading) }} aria-label={`Focus ${nameOf.get(reading)}, at this message`} title={`Focus ${nameOf.get(reading)}`}
-      onClick={(e) => { label.el = null; label.rect = e.currentTarget.getBoundingClientRect(); onOpen(reading, readingRow.current); }}>{nameOf.get(reading)}</button>}
+    {reading && nameOf.has(reading) && <div className="all-reading-band"><button type="button" className="all-place all-reading" style={{ ["--room-tint" as string]: tint(reading) }} aria-label={`Focus ${nameOf.get(reading)}, at this message`} title={`Focus ${nameOf.get(reading)}`}
+      onClick={(e) => { label.el = null; label.rect = e.currentTarget.getBoundingClientRect(); onOpen(reading, readingRow.current); }}>{nameOf.get(reading)}</button></div>}
     <div className="all-feed" ref={list} role="log" aria-label="All rooms, by time" aria-live="polite"
     onScroll={(e) => { const el = e.currentTarget; if (performance.now() >= readHold.current) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; if (!lookFrame.current) lookFrame.current = requestAnimationFrame(lookAtTop); }}
     onPointerDown={(e) => {

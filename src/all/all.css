@@ -127,9 +127,11 @@
   .all-back, .all-chip { min-height: 44px; }
   .all-chip-x { width: 44px; height: 44px; margin: -2px -4px -2px 0; }
 }
-/* the room you are reading, when its own label has scrolled away: at the top of the column, in the label's own shape */
-.all-reading { position: absolute; top: 6px; left: max(0px, calc((100% - 720px) / 2)); z-index: 1; max-width: 70%; box-shadow: var(--g-shadow-1); animation: all-reading-in var(--g-t-quick) var(--g-ease); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the room you are reading, when its own label has scrolled away: at the top of the column, in the label's own shape; the words pass under a soft band, not behind a chip */
+.all-reading-band { position: absolute; top: 0; left: 0; right: 0; z-index: 1; height: 46px; pointer-events: none; display: flex; justify-content: center; background: linear-gradient(var(--g-ground) 62%, transparent); animation: all-reading-in var(--g-t-quick) var(--g-ease); }
+.all-surface[data-focus] .all-reading-band { background: none; }
+.all-reading { position: absolute; top: 6px; left: max(0px, calc((100% - 720px) / 2)); max-width: 70%; pointer-events: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @keyframes all-reading-in { from { opacity: 0; } }
-:root[data-screen="ink"] .all-reading { box-shadow: 0 0 0 2px #fff; }
+:root[data-screen="ink"] .all-reading-band { background: #fff; height: 40px; border-bottom: 1px solid rgba(0, 0, 0, .35); }
 @media (pointer: coarse) { .all-reading { min-height: 36px; } }
 .all-empty .all-quiet { width: 100%; max-width: 720px; margin: 24px auto; }
