@@ -12,7 +12,7 @@
 .rec-time { color: var(--g-ink-2); font-variant-numeric: tabular-nums; }
 .recording-pill.paused .recording-destination { margin-left: auto; min-height: 44px; min-width: 44px; color: var(--g-ink-2); text-decoration-color: var(--g-line-strong); }
 
-.rec-sections { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; flex: 0 1 auto; min-height: 88px; overflow-y: auto; border-top: var(--g-hair) solid var(--g-line); }
+.rec-sections { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; flex: 0 1 auto; min-height: 44px; overflow-y: auto; border-top: var(--g-hair) solid var(--g-line); }
 .rec-sections li { display: flex; align-items: center; gap: 8px; min-height: 44px; flex: none; border-bottom: var(--g-hair) solid var(--g-line); }
 .rec-sections li.playing .rec-wave { color: var(--g-accent); }
 .recording-pill .rec-row-button { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 10px; color: var(--g-ink); }
