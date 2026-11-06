@@ -1874,6 +1874,78 @@ fn relay_origin(app: tauri::AppHandle) -> String {
         .to_string()
 }
 
+// ── Taste Arcade (T-335): through the arcade door on the hub's host, NIP-98 signed with the device key. The door
+// keeps the cards, the reactions and the taste profile on the owner's machine; the webview never holds a vault token.
+
+use uni_core::arcade::{ArcadeDoor, ArcadeError};
+
+fn arcade_invalid(message: impl ToString) -> ArcadeError {
+    uni_core::arcade::invalid(message.to_string())
+}
+
+/// `UNI_ARCADE_URL` (a scratch door, no alias), else port 8543 on the hub's host, its new name first.
+fn arcade_base(app: &tauri::AppHandle) -> Result<(String, Option<String>), ArcadeError> {
+    if let Ok(v) = std::env::var(uni_core::arcade::ARCADE_URL_ENV) {
+        if !v.trim().is_empty() {
+            return Ok((v.trim().to_string(), None));
+        }
+    }
+    let hub = vault_config(app).hub;
+    uni_core::arcade::door_urls(&hub).ok_or_else(|| arcade_invalid(format!("no arcade door for the hub {hub} (it must be on the tailnet)")))
+}
+
+async fn arcade_io<T, F>(app: &tauri::AppHandle, f: F) -> Result<T, ArcadeError>
+where
+    T: Send + 'static,
+    F: FnOnce(&ArcadeDoor) -> Result<T, ArcadeError> + Send + 'static,
+{
+    secure_store::ensure_loaded(app).await.map_err(arcade_invalid)?;
+    let (base, alias) = arcade_base(app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(arcade_invalid)?;
+        f(&ArcadeDoor::new(&base, &keys)?.with_alias(alias.as_deref()))
+    })
+    .await
+    .map_err(arcade_invalid)?
+}
+
+/// Seeds, the profile's headline and how many fresh rounds each game has.
+#[tauri::command]
+async fn arcade_home(app: tauri::AppHandle) -> Result<serde_json::Value, ArcadeError> {
+    arcade_io(&app, |door| tauri::async_runtime::block_on(door.home())).await
+}
+
+/// Rounds to play for one game.
+#[tauri::command]
+async fn arcade_rounds(app: tauri::AppHandle, game: String, n: u32) -> Result<serde_json::Value, ArcadeError> {
+    arcade_io(&app, move |door| tauri::async_runtime::block_on(door.rounds(&game, n))).await
+}
+
+/// Store reactions (the door skips ids it has seen, so a retry never doubles).
+#[tauri::command]
+async fn arcade_react(app: tauri::AppHandle, reactions: serde_json::Value) -> Result<serde_json::Value, ArcadeError> {
+    arcade_io(&app, move |door| tauri::async_runtime::block_on(door.react(&reactions))).await
+}
+
+/// The taste profile, its markdown and where the note lives.
+#[tauri::command]
+async fn arcade_profile(app: tauri::AppHandle) -> Result<serde_json::Value, ArcadeError> {
+    arcade_io(&app, |door| tauri::async_runtime::block_on(door.profile())).await
+}
+
+/// Ask for a fresh read of the profile (the door rate-limits it).
+#[tauri::command]
+async fn arcade_distill(app: tauri::AppHandle, deep: Option<bool>) -> Result<serde_json::Value, ArcadeError> {
+    arcade_io(&app, move |door| tauri::async_runtime::block_on(door.distill(deep.unwrap_or(false)))).await
+}
+
+/// A card's media as raw bytes (raw IPC: a clip isn't inflated into a JSON number array). The view knows the type.
+#[tauri::command]
+async fn arcade_media(app: tauri::AppHandle, card: String, which: String) -> Result<tauri::ipc::Response, ArcadeError> {
+    let media = arcade_io(&app, move |door| tauri::async_runtime::block_on(door.media(&card, &which))).await?;
+    Ok(tauri::ipc::Response::new(media.bytes))
+}
+
 // ── Calendar (T-229): through the calendar door on the hub's host. Each
 // request is NIP-98 signed with the device key, as Mail's are; the door is
 // the only writer of event notes, so the webview never holds a vault token.
@@ -2980,6 +3052,12 @@ pub fn run() {
             note_download,
             note_share,
             relay_origin,
+            arcade_home,
+            arcade_rounds,
+            arcade_react,
+            arcade_profile,
+            arcade_distill,
+            arcade_media,
             cal_session,
             cal_events,
             cal_event,

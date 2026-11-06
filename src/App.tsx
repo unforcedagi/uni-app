@@ -27,6 +27,8 @@ import AreaSelfTest from "./interface/selftest/SelfTest";
 import LifeOsVaultSetting from "./areas/LifeOsVaultSetting";
 import { appendDraft } from "./areas/composeDraft";
 import { openDialog } from "./areas/focusTrap";
+import { ArcadeView } from "./arcade/ArcadeView.tsx";
+import { ArcadeIcon } from "./arcade/ArcadeIcon.tsx";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { draftBox, type DraftBox } from "./draftBox";
@@ -412,6 +414,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
   }, []);
+  /** T-335 Taste Arcade: the profile note opens like any note, over the Arcade */
+  const openArcadeNote = useCallback((vault: string, path: string) => { openTargetRef.current({ kind: "note", note: { hub: null, vault, ref: path }, title: "Taste profile" }, "new"); }, []);
   function openForYou() {
     if (topNote?.ref !== FOR_YOU_ID) {
       const surfaces = tabsRef.current.tabs.filter((t) => t.kind === "room" || t.kind === "thread" || t.kind === "journal");
@@ -2539,7 +2543,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       { label: "Mail", go: () => openTarget({ kind: "mail", title: "Mail" }) },
       ...(calOn ? [{ label: "Calendar", go: () => openTarget({ kind: "calendar", title: "Calendar" }) }] : []),
       ...(msgsOn ? [{ label: "Messages", go: () => openTarget({ kind: "messages", title: "Messages" }) }] : []),
-      ...(showUniGlue(lifeVault) ? [{ label: "For you", go: openForYou }, { label: "To post", go: () => openTarget({ kind: "posts", title: "To post" }) }] : []),
+      ...(showUniGlue(lifeVault) ? [{ label: "For you", go: openForYou }, { label: "To post", go: () => openTarget({ kind: "posts", title: "To post" }) }, { label: "Arcade", go: () => openTarget({ kind: "arcade", title: "Arcade" }) }] : []),
       { label: "Vault", go: () => { setSearchOpen(false); setPanel("vault"); } },
       { label: "Search", go: openFind },
       { label: "Settings", go: () => { setSearchOpen(false); setPanel("settings"); setForgetArmed(false); } },
@@ -2552,7 +2556,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
-  return <ApprovalsContext.Provider value={approvalsView}><NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault" || active?.kind === "mail" || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
+  return <ApprovalsContext.Provider value={approvalsView}><NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault" || active?.kind === "mail" || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "arcade"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
     <nav ref={railRef} className="rail" aria-label="Main navigation">
       {/* T-294: from another side (Messages, Mail…) Uni goes back to where you were on its side; at Uni already, home to Uni */}
       <button aria-label="Uni" aria-current={uniShown ? "page" : undefined} onClick={() => openTarget(uniShown ? uniHome() : origin())}><i><UniIcon /></i><span>Uni</span></button>
@@ -2562,6 +2566,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {msgsOn && <button aria-label="Messages" aria-current={!panel && !searchOpen && (active?.kind === "messages" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "messages", title: "Messages" })}><i><MessagesIcon /></i><span>Messages</span></button>}
       {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>}
       {showUniGlue(lifeVault) && <button aria-label="To post" aria-current={!panel && !searchOpen && (active?.kind === "posts" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "posts", title: "To post" })}><i aria-hidden="true">↗</i><span>To post</span></button>}
+      {/* T-335 Taste Arcade: small games that teach Uni your taste */}
+      {showUniGlue(lifeVault) && <button aria-label="Arcade" aria-current={!panel && !searchOpen && (active?.kind === "arcade" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "arcade", title: "Arcade" })}><i><ArcadeIcon /></i><span>Arcade</span></button>}
       <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
       <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} aria-keyshortcuts="Control+K Meta+K" onClick={openFind}><i>⌕</i><span>Search</span></button>
       <button className="rail-settings" aria-label="Settings" aria-expanded={panel === "settings"} onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setForgetArmed(false); }}><i><SettingsIcon /></i><span>Settings</span></button>
@@ -2592,13 +2598,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
       </section>
       </div>
     </aside>
-    <section className="conversation" aria-label={journalOpen ? "Journal" : active?.kind === "mail" ? "Mail" : active?.kind === "calendar" ? "Calendar" : active?.kind === "messages" ? "Messages" : active?.kind === "posts" ? "To post" : shellOpen ? "Uni" : active?.kind === "note" ? "Note" : "Conversation"}>
+    <section className="conversation" aria-label={journalOpen ? "Journal" : active?.kind === "mail" ? "Mail" : active?.kind === "calendar" ? "Calendar" : active?.kind === "messages" ? "Messages" : active?.kind === "posts" ? "To post" : active?.kind === "arcade" ? "Arcade" : shellOpen ? "Uni" : active?.kind === "note" ? "Note" : "Conversation"}>
       {/* T-335: an update is a line at the top, in the flow: never over the composer */}
       <UpdateBanner />
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} backTo={originTitle} onBack={() => openTarget(origin())} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "mail" ? <Mail backTo={originTitle} onBack={() => openTarget(origin())} />
       : active?.kind === "calendar" ? <Calendar backTo={originTitle} onBack={() => openTarget(origin())} />
       : active?.kind === "messages" ? <Messages backTo={originTitle} onBack={() => openTarget(origin())} />
+      : active?.kind === "arcade" ? <ArcadeView ownerName={myName ?? null} onBack={() => openTarget(origin())} onOpenNote={openArcadeNote} />
       : active?.kind === "posts" ? <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} backTo={originTitle} onBack={() => openTarget(origin())} />
       : active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} backTo={originTitle} onBack={() => openTarget(origin())} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
