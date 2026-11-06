@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { RecorderSession, type RecordedSection, type RecorderPhase } from "./recorderSession";
+import { joinSections, type JoinOptions } from "./recordingJoin";
 
 /** What a recording's controls need, whoever owns the recorder. */
 export type RecorderControls = {
@@ -17,9 +18,10 @@ export type RecorderControls = {
 
 /**
  * Voice recorder: tap to start, tap to stop; pause, resume and delete a section in between. Context belongs to the starting session.
- * `recording` stays true while paused, so whatever holds other actions back during a recording still does. `onDiscard`: it ended with nothing kept.
+ * `recording` stays true while paused, so whatever holds other actions back during a recording still does.
+ * `onDiscard`: it ended with nothing kept. `join`: what the caller can keep of a paused recording (see joinSections).
  */
-export function useRecorder<Origin = void>(onDone: (blob: Blob, mime: string, origin: Origin) => void, label = "voice", onDiscard?: (origin: Origin) => void) {
+export function useRecorder<Origin = void>(onDone: (blob: Blob, mime: string, origin: Origin) => void | Promise<void>, label = "voice", options: { onDiscard?: (origin: Origin) => void; join?: JoinOptions } = {}) {
   const [phase, setPhase] = useState<RecorderPhase>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [sections, setSections] = useState<RecordedSection[]>([]);
@@ -27,18 +29,19 @@ export function useRecorder<Origin = void>(onDone: (blob: Blob, mime: string, or
   const timer = useRef<number | null>(null);
   const done = useRef(onDone);
   done.current = onDone;
-  const discarded = useRef(onDiscard);
-  discarded.current = onDiscard;
+  const latest = useRef(options);
+  latest.current = options;
   const session = useRef<RecorderSession<Origin> | null>(null);
   if (!session.current) session.current = new RecorderSession<Origin>((blob, mime, origin) => done.current(blob, mime, origin), (next) => {
     if (next === "idle" && timer.current !== null) { clearInterval(timer.current); timer.current = null; }
     setPhase(next);
   }, {
-    onDiscard: (origin) => discarded.current?.(origin),
+    onDiscard: (origin) => latest.current.onDiscard?.(origin),
+    join: (blobs) => joinSections(blobs, latest.current.join),
     onChange: () => {
       setSections(session.current!.sections);
       setCanUndo(session.current!.canUndo);
-      setElapsed(session.current!.elapsed());
+      if (session.current!.phase !== "finishing") setElapsed(session.current!.elapsed()); // the last time stays on show while it goes
     },
   });
   useEffect(() => () => {

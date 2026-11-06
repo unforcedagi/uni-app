@@ -76,7 +76,8 @@ function readCluster(b: Uint8Array, cluster: Element, limit: number, times: numb
     const e = readElement(b, at, end);
     if (e && cluster.unknown && SEGMENT_LEVEL.has(e.id)) break;
     if (!e || e.unknown || e.end > end) {
-      if (end < b.length) throw new NotJoinable("a damaged cluster");
+      // A killed recorder cuts one block short; more than that unread is damage, and the audio after it would quietly go
+      if (end < b.length || end - at > SECTION_SLACK) throw new NotJoinable("a damaged cluster");
       at = end;
       break;
     }
@@ -264,18 +265,27 @@ export async function decodeMono(blob: Blob, rate = WAV_RATE): Promise<Float32Ar
   return out;
 }
 
-/** One file from a recording's sections. Throws when it can't make one; the sections are still whole. */
-export async function joinSections(blobs: Blob[], decode: Decode = decodeMono, limit = JOIN_LIMIT): Promise<Blob> {
+export type JoinOptions = {
+  /** Whoever keeps the file can take WAV. Rooms can't: the relay takes only WebM and Ogg Opus, so there the sections go on their own. */
+  wav?: boolean;
+  limit?: number;
+  decode?: Decode;
+};
+
+/** One file from a recording's sections. Throws when it can't make one the caller can keep; the sections are still whole. */
+export async function joinSections(blobs: Blob[], { wav = false, limit = JOIN_LIMIT, decode = decodeMono }: JoinOptions = {}): Promise<Blob> {
   const tooLarge = () => new Error("Recording too large to join");
+  let refusal: unknown = new NotJoinable("not WebM");
   if (blobs.every((b) => b.type.includes("webm"))) {
     let joined: Uint8Array | null = null;
     try { joined = joinWebm(await Promise.all(blobs.map(async (b) => new Uint8Array(await b.arrayBuffer())))).bytes; }
-    catch (e) { if (!(e instanceof NotJoinable)) throw e; }
+    catch (e) { if (!(e instanceof NotJoinable)) throw e; refusal = e; }
     if (joined) {
       if (joined.length > limit) throw tooLarge();
       return new Blob([joined as BlobPart], { type: blobs[0].type });
     }
   }
+  if (!wav) throw refusal;
   const samples: Float32Array[] = [];
   let total = 44;
   for (const b of blobs) {

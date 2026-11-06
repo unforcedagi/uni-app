@@ -19,6 +19,9 @@ function when(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+/** The vault's limit on a journal entry's audio (MAX_AUDIO_BYTES in uni-core). */
+const JOURNAL_AUDIO_LIMIT = 50 * 1024 * 1024;
+
 export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "Uni", onRecordingChange, focus, onFocus }: { focus: boolean; onFocus: () => void; rooms: Room[]; uniRoomId: string | null; onShare: ShareFn; onBack: () => void; /** r22: the place Back returns to */ backTo?: string; onRecordingChange?: (recording: boolean, controls?: RecorderControls) => void }) {
   const [cfg, setCfg] = useState<VaultConfig | null>(null);
   const [entries, setEntries] = useState<JournalNote[]>([]);
@@ -211,7 +214,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
       if (!r.error) setStatus("Journal entry saved · transcribing…");
     } catch (e) { setError(String(e)); setStatus("Journal entry not saved"); }
     finally { setSaving(false); }
-  }, "in the Journal", () => setStatus("Recording deleted"));
+  }, "in the Journal", { onDiscard: () => setStatus("Recording deleted"), join: { wav: true, limit: JOURNAL_AUDIO_LIMIT } });
   const reportRecording = useRef(onRecordingChange);
   reportRecording.current = onRecordingChange;
   useEffect(() => {
@@ -269,7 +272,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
           {recorder.recording ? <>■ <span>{mmss(recorder.elapsed)}</span></> : <MicIcon />}
         </button>
         <span className="journal-status" role="status">{recorder.recording ? `${recorder.paused ? "Paused" : "Recording"} · ${mmss(recorder.elapsed)}${text.trim() ? " · your typed text is kept with it" : ""}` : recorder.phase === "finishing" ? "Finishing…" : status}</span>
-        <button className="send" onClick={() => void saveText()} disabled={!text.trim() || saving || recorder.recording}>{saving ? "Saving…" : "Save"}</button>
+        <button className="send" onClick={() => void saveText()} disabled={!text.trim() || saving || recorder.busy}>{saving ? "Saving…" : "Save"}</button>
       </div>
       {same && <div className="journal-same" role="group" aria-label="Same words as another entry">
         <button type="button" className="note-action" onClick={() => void saveText(true)} disabled={saving}>Save another</button>

@@ -13,11 +13,14 @@ export type RecorderOptions<Origin> = {
   now?: () => number;
   join?: (blobs: Blob[]) => Promise<Blob>;
   joinTimeoutMs?: number;
+  deliveryTimeoutMs?: number;
 };
 
 const MIC = { audio: { echoCancellation: true, noiseSuppression: true } };
 /** Longer than any decode that's working: a join that never answers must not hold the mic and the recording. */
 const JOIN_TIMEOUT_MS = 120_000;
+/** Sections going out one by one wait for each save, so its typed words land once; a save that hangs doesn't hold the rest. */
+const DELIVERY_TIMEOUT_MS = 30_000;
 
 /**
  * Keeps the microphone and its starting destination owned until the recording finishes.
@@ -123,6 +126,14 @@ export class RecorderSession<Origin> {
     finally { clearTimeout(timer); }
   }
 
+  private async deliverInTurn(blob: Blob, origin: Origin) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const enough = new Promise<void>((resolve) => { timer = setTimeout(resolve, this.options.deliveryTimeoutMs ?? DELIVERY_TIMEOUT_MS); });
+    try { await Promise.race([this.onDone(blob, blob.type, origin), enough]); }
+    catch (e) { console.warn("A section's delivery failed", e); }
+    finally { clearTimeout(timer); }
+  }
+
   /**
    * Hand over what was kept. A join that fails hands over each section, in turn: nothing recorded is lost.
    * Once a join is under way it's delivered even if the owner goes away meanwhile (the Journal tab closed).
@@ -140,8 +151,8 @@ export class RecorderSession<Origin> {
         void this.onDone(sections[0].blob, sections[0].blob.type, origin); // nothing to wait for: finishes at once, as it always has
       } else {
         const joined = await this.joined(sections);
-        if (joined) await this.onDone(joined, joined.type, origin);
-        else for (const s of sections) await this.onDone(s.blob, s.blob.type, origin);
+        if (joined) void this.onDone(joined, joined.type, origin);
+        else for (const s of sections) await this.deliverInTurn(s.blob, origin);
       }
     } finally { this.reset(); }
   }

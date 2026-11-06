@@ -242,22 +242,37 @@ test('A section can be heard before deciding', async ({ page }) => {
   await expect(button(page, 'Play section 1')).toBeVisible();
 });
 
-test('A recorder that can only write MP4 still gives one file: WAV', async ({ page }) => {
+test('A recorder that can only write MP4, in a room: each section on its own, never a WAV the relay would refuse', async ({ page }) => {
   await boot(page, { noWebm: true });
   await startInRoom(page);
-  await wait(page, 1500);
+  await wait(page, 800);
   await pause(page);
   await resume(page);
-  await wait(page, 1500);
+  await wait(page, 800);
   await press(page, button(page, 'Stop recording voice message'));
-  await expect.poll(() => posts(page), { timeout: 15000 }).toBe(1);
+  await expect.poll(async () => (await uploads(page)).length, { timeout: 15000 }).toBe(2);
+  for (const up of await uploads(page)) expect(up.headers['x-file-mime']).not.toContain('wav');
+  await expect.poll(() => posts(page)).toBe(2);
+});
+
+test('A recorder that can only write MP4, in the Journal: one WAV', async ({ page }) => {
+  await boot(page, { noWebm: true });
+  const nav = page.getByRole('navigation', { name: 'Main navigation' });
+  await press(page, nav.getByRole('button', { name: 'Journal', exact: true }));
+  await press(page, button(page, 'Record a journal entry'));
+  await expect(button(page, 'Pause recording')).toBeVisible();
+  await wait(page, 1200);
+  await pause(page);
+  await resume(page);
+  await wait(page, 1200);
+  await press(page, button(page, 'Stop recording and save'));
+  await expect.poll(async () => (await uploads(page)).length, { timeout: 15000 }).toBe(1);
   const [up] = await uploads(page);
-  expect(decodeURIComponent(up.headers['x-filename'])).toMatch(/\.wav$/);
-  expect(up.headers['x-file-mime']).toBe('audio/wav');
+  expect(up.cmd).toBe('journal_save_voice');
+  expect(up.headers['x-audio-mime']).toBe('audio/wav');
   const out = probe(up.bytes, 'wav');
   expect(out.format).toBe('wav');
-  const ran = await spans(page);
-  matches(out.duration, ran.seconds);
+  matches(out.duration, (await spans(page)).seconds);
 });
 
 test('Journal: pause and resume there too, saved as one recording', async ({ page }) => {
@@ -282,23 +297,40 @@ test('Journal: pause and resume there too, saved as one recording', async ({ pag
 });
 
 test('Two quick taps on Pause never send', async ({ page }) => {
-  test.skip(test.info().project.name !== 'mobile', 'a thumb');
+  const touch = test.info().project.name === 'mobile';
   await boot(page);
   await startInRoom(page);
   for (const round of [1, 2]) { // from the second pause on, there are sections to send
     await wait(page, 700);
     const box = (await button(page, 'Pause recording').boundingBox())!;
     const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
-    await page.touchscreen.tap(x, y);
-    await page.touchscreen.tap(x, y);
+    const tap = () => touch ? page.touchscreen.tap(x, y) : page.mouse.click(x, y);
+    await tap();
+    await tap();
     await wait(page, 500);
-    await page.touchscreen.tap(x, y); // and a slow third, once the card is ready
+    await tap(); // and a slow third, once the card is ready
     await wait(page, 500);
     expect(await posts(page), `round ${round}`).toBe(0);
     // whatever the taps landed on, the recording is still open
     await expect(button(page, 'Stop recording voice message')).toBeVisible();
     if (await button(page, 'Resume recording').isVisible()) await resume(page);
   }
+});
+
+test('Two quick taps on delete take one section', async ({ page }) => {
+  const touch = test.info().project.name === 'mobile';
+  await boot(page);
+  await startInRoom(page);
+  for (let i = 0; i < 3; i++) { await wait(page, 300); await pause(page); if (i < 2) await resume(page); }
+  const card = page.getByRole('group', { name: 'Paused recording' });
+  await expect(card.getByRole('listitem')).toHaveCount(3);
+  const box = (await button(page, 'Delete section 2').boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  const tap = () => touch ? page.touchscreen.tap(x, y) : page.mouse.click(x, y);
+  await tap();
+  await tap();
+  await wait(page, 300);
+  await expect(card.getByRole('listitem')).toHaveCount(2);
 });
 
 test('An update waits for a recording: Restart says finish first, then restarts', async ({ page }) => {
@@ -311,6 +343,7 @@ test('An update waits for a recording: Restart says finish first, then restarts'
   await pause(page);
   await press(page, go);
   await expect(page.locator('.update-notice')).toContainText('Finish your recording first');
+  await expect(page.locator('.update-notice')).toContainText('Update ready', { timeout: 8000 }); // it doesn't stick
   const restarted = () => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd.includes('restart')).length);
   await wait(page, 300);
   expect(await restarted()).toBe(0);

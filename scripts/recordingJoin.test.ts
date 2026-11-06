@@ -2,6 +2,7 @@
 // The container logic behind pause/resume: the sections of one recording become one valid file.
 // Real recordings go through the same code in scripts/browser/recPause.spec.ts (ffprobe on the result).
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { encodeWav, joinSections, joinWebm, NotJoinable, peaksOf } from "../src/recordingJoin.ts";
 
 // --- a small EBML writer, the shape a MediaRecorder writes ---
@@ -150,24 +151,30 @@ function parsed(b: Uint8Array) {
   const b = new Blob([file(2, [cluster(0, [block(0, 3), block(20, 4)])])], { type: "audio/webm;codecs=opus" });
   let decodes = 0;
   const decode = async (_: Blob) => { decodes++; return new Float32Array(1600); };
-  const webm = await joinSections([a, b], decode);
+  const webm = await joinSections([a, b], { decode, wav: true });
   assert.equal(webm.type, "audio/webm;codecs=opus");
   assert.equal(decodes, 0, "WebM needs no re-encoding");
   assert.deepEqual(parsed(new Uint8Array(await webm.arrayBuffer())).blocks.map((x) => x.payload), [1, 2, 3, 4]);
 
   const m4a = () => new Blob([new Uint8Array(64)], { type: "audio/mp4" });
-  const wav = await joinSections([m4a(), m4a()], decode);
+  const wav = await joinSections([m4a(), m4a()], { decode, wav: true });
   assert.equal(wav.type, "audio/wav");
   assert.equal(decodes, 2);
   assert.equal(wav.size, 44 + 2 * 1600 * 2);
 
   // a WebM that turns out not to be joinable still gets a whole file
   const other = new Blob([file(2, [cluster(0, [block(0, 3)])], { channels: 2 })], { type: "audio/webm" });
-  assert.equal((await joinSections([a, other], decode)).type, "audio/wav");
+  assert.equal((await joinSections([a, other], { decode, wav: true })).type, "audio/wav");
 
-  await assert.rejects(joinSections([m4a(), m4a()], async () => { throw new Error("no decoder"); }), /no decoder/);
+  await assert.rejects(joinSections([m4a(), m4a()], { decode: async () => { throw new Error("no decoder"); }, wav: true }), /no decoder/);
   // a WAV past what a voice message can carry is not one: the caller keeps the sections instead
-  await assert.rejects(joinSections([m4a(), m4a()], async () => new Float32Array(7_000_000)), /too large/i);
+  await assert.rejects(joinSections([m4a(), m4a()], { decode: async () => new Float32Array(7_000_000), wav: true }), /too large/i);
+
+  // Rooms: the relay refuses WAV (and MP4), so unless a caller says WAV is fine, no WAV is made: each section goes on its own
+  decodes = 0;
+  await assert.rejects(joinSections([a, other], { decode }), NotJoinable);
+  await assert.rejects(joinSections([m4a(), m4a()], { decode }), NotJoinable);
+  assert.equal(decodes, 0, "nothing decoded for a file that couldn't be sent");
 }
 // 10. Peaks for the waveform: one 0..1 height per bucket; never a NaN, whatever the length
 {
@@ -224,7 +231,30 @@ function parsed(b: Uint8Array) {
 {
   const a = new Blob([file(1, [cluster(0, [block(0, 1), block(20, 2)])])], { type: "audio/webm" });
   const b = new Blob([file(2, [cluster(0, [block(0, 3), block(20, 4)])])], { type: "audio/webm" });
-  await assert.rejects(joinSections([a, b], undefined, 40), /too large/i);
-  assert.ok((await joinSections([a, b], undefined, 100_000)).size > 40);
+  await assert.rejects(joinSections([a, b], { limit: 40 }), /too large/i);
+  assert.ok((await joinSections([a, b], { limit: 100_000 })).size > 40);
+}
+// 16. Bad bytes inside an unknown-size cluster, far from the end, aren't a clean cut: every later cluster would quietly go
+{
+  const ok = file(1, [cluster(0, [block(0, 1), block(20, 2)])]);
+  const whole = file(2, [cluster(0, [block(0, 3), block(20, 4)])]);
+  const garbage = new Uint8Array(whole.length + 8192); garbage.set(whole);
+  assert.throws(() => joinWebm([ok, garbage]), NotJoinable, "kilobytes unread after the audio stopped making sense");
+}
+// 17. The app's own real Chromium recording, twice: one file, and nothing in it the relay's fail-closed check refuses
+//     (crates/buzz-media audio.rs: Segment holds only Info/Tracks/Cluster here; Info and Cluster only the elements below)
+{
+  const real = new Uint8Array(readFileSync(new URL("../crates/uni-core/examples/testdata/voice_chrome_mediarecorder.webm", import.meta.url)));
+  const { bytes, durationMs } = joinWebm([real, real]);
+  const top = readNodes(bytes, 0, bytes.length);
+  assert.deepEqual(top.map((n) => n.id), [EBML, SEGMENT]);
+  const kids = readNodes(bytes, top[1].bodyStart, top[1].end);
+  assert.deepEqual([...new Set(kids.map((n) => n.id))], [INFO, TRACKS, CLUSTER]);
+  const allowedInInfo = new Set([SCALE, DURATION, 0x4D80, 0x5741]), allowedInCluster = new Set([TIMECODE, BLOCK, 0xA0]);
+  for (const n of readNodes(bytes, kids[0].bodyStart, kids[0].end)) assert.ok(allowedInInfo.has(n.id), `Info holds 0x${n.id.toString(16)}`);
+  for (const c of kids.filter((n) => n.id === CLUSTER)) for (const n of readNodes(bytes, c.bodyStart, c.end)) assert.ok(allowedInCluster.has(n.id), `a cluster holds 0x${n.id.toString(16)}`);
+  const one = joinWebm([real]).durationMs;
+  assert.ok(one > 0);
+  assert.ok(Math.abs(durationMs - 2 * one) < 1, "twice the one, to the millisecond");
 }
 console.log("recording join tests passed");

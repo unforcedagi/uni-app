@@ -75,6 +75,16 @@ function restartIfFree(): boolean {
   return true;
 }
 const FINISH_FIRST = "Finish your recording first";
+/** A Restart that a recording held back: the words say so for a moment. */
+function useHeldBack(): [boolean, () => void] {
+  const [held, setHeld] = useState(false);
+  useEffect(() => {
+    if (!held) return;
+    const timer = setTimeout(() => setHeld(false), 4000);
+    return () => clearTimeout(timer);
+  }, [held]);
+  return [held, () => { if (!restartIfFree()) setHeld(true); }];
+}
 
 export function openApkDownload(url: string) {
   void invoke("open_link", { url }).catch((e) => set({ kind: "error", message: `Couldn't open the download: ${errorText(e)}` }));
@@ -90,11 +100,11 @@ export function UpdateSettings() {
   const { state: s, label, check } = useUpdater();
   const [version, setVersion] = useState<string | null>(null);
   // r14: the app plugin's version, else the app's own command; if neither answers, just "Uni" (never "version unknown" in Settings)
-  const [held, setHeld] = useState(false);
+  const [held, restart] = useHeldBack();
   useEffect(() => { getVersion().catch(() => invoke<string>("app_version")).then((v) => setVersion(v ? String(v) : ""), () => setVersion("")); }, []);
   return <div className="update-settings">
     <span className="update-version">{version ? `Uni ${version}` : version === "" ? "Uni" : "Uni …"}</span>
-    {s.kind === "ready" ? <button className="pairing-secondary" onClick={() => setHeld(!restartIfFree())}>{held ? FINISH_FIRST : `${label} — Restart`}</button>
+    {s.kind === "ready" ? <button className="pairing-secondary" onClick={restart}>{held ? FINISH_FIRST : `${label} — Restart`}</button>
       : s.kind === "available" ? <button className="pairing-secondary" onClick={() => openApkDownload(s.url)}>{label} — Download APK</button>
       : <button className="pairing-secondary" onClick={check} disabled={isBusy(s)}>{isBusy(s) ? label : "Check for updates"}</button>}
     {(s.kind === "current" || s.kind === "error") && <p className={`update-status ${s.kind === "error" ? "error" : ""}`} role="status">{label}</p>}
@@ -124,14 +134,14 @@ function subscribeLater(l: () => void) { laterListeners.add(l); return () => { l
 export function UpdateBanner() {
   const { state: s } = useUpdater();
   const later = useSyncExternalStore(subscribeLater, laterSnapshot, laterSnapshot);
-  const [held, setHeld] = useState(false);
+  const [held, restart] = useHeldBack();
   if (s.kind !== "ready" && s.kind !== "available") return null;
   const version = s.version ?? "";
   if (later !== null && later === version) return null;
   const hide = () => { laterFor = version; laterListeners.forEach((l) => l()); };
   return <div className="update-notice" role="status">
     <span className="update-notice-text">{held ? FINISH_FIRST : s.kind === "ready" ? "Update ready" : "Update available"}{version ? <small> · Uni {version}</small> : null}</span>
-    {s.kind === "ready" ? <button type="button" className="update-notice-go" onClick={() => setHeld(!restartIfFree())}>Restart</button>
+    {s.kind === "ready" ? <button type="button" className="update-notice-go" onClick={restart}>Restart</button>
       : <button type="button" className="update-notice-go" onClick={() => openApkDownload(s.url)}>Download APK</button>}
     <button type="button" className="update-notice-later" onClick={hide}>Later</button>
   </div>;

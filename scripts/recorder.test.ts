@@ -355,4 +355,78 @@ await editing(async ({ session, rec, stream, streams }) => {
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNav });
   Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: previousRec });
 }
+// Review 2: Stop or a new owner while resume waits on the mic: the mic that turns up is let go, no recorder runs with no owner
+{
+  const stream = new FakeStream(), late = new FakeStream();
+  let answer!: (s: FakeStream) => void;
+  let asked = 0;
+  const previousNav = globalThis.navigator, previousRec = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: () => asked++ === 0 ? Promise.resolve(stream) : new Promise((r) => { answer = r; }) } } });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: FakeRecorder });
+  FakeRecorder.instances = [];
+  const texts: string[] = [];
+  const session = new RecorderSession<string>((blob) => { void blob.text().then((t) => texts.push(t)); });
+  await session.start("A", "for A");
+  const p = session.pause(); FakeRecorder.instances[0].finish("one"); await p;
+  stream.ended = true;
+  const resuming = session.resume();
+  assert.equal(session.phase, "resuming");
+  session.stop();
+  await tick();
+  assert.deepEqual(texts, ["one"]);
+  assert.equal(session.phase, "idle");
+  answer(late);
+  await resuming;
+  assert.equal(late.stopped, 1, "the late mic is released");
+  assert.equal(FakeRecorder.instances.length, 1, "no recorder started");
+  assert.equal(session.phase, "idle");
+  session.dispose();
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNav });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: previousRec });
+}
+
+// Review 2: a joined recording is handed over and the mic and lock are free at once, however long the caller's save takes
+await (async () => {
+  const stream = new FakeStream();
+  const previousNav = globalThis.navigator, previousRec = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: async () => stream } } });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: FakeRecorder });
+  FakeRecorder.instances = [];
+  let handed = 0;
+  const session = new RecorderSession<string>(() => { handed++; return new Promise<void>(() => {}); }, () => {}, { join: async () => new Blob(["joined"], { type: "audio/webm" }) });
+  await session.start("A", "for A");
+  const p = session.pause(); FakeRecorder.instances[0].finish("one"); await p;
+  await session.resume();
+  session.stop();
+  FakeRecorder.instances[1].finish("two");
+  await tick(); await tick();
+  assert.equal(handed, 1);
+  assert.equal(session.phase, "idle", "a slow save doesn't hold the recorder");
+  assert.equal(recordingHolder(), null);
+  session.dispose();
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNav });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: previousRec });
+})();
+
+// Review 2: sections going out in turn wait for each save, but not forever
+{
+  const stream = new FakeStream();
+  const previousNav = globalThis.navigator, previousRec = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: async () => stream } } });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: FakeRecorder });
+  FakeRecorder.instances = [];
+  let handed = 0;
+  const session = new RecorderSession<string>(() => { handed++; return new Promise<void>(() => {}); }, () => {}, { join: async () => { throw new Error("no"); }, deliveryTimeoutMs: 5 });
+  await session.start("A", "for A");
+  const p = session.pause(); FakeRecorder.instances[0].finish("one"); await p;
+  await session.resume();
+  session.stop();
+  FakeRecorder.instances[1].finish("two");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(handed, 2);
+  assert.equal(session.phase, "idle");
+  session.dispose();
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNav });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: previousRec });
+}
 console.log("recorder tests passed");

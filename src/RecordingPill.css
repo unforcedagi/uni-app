@@ -35,8 +35,9 @@
 .recording-pill .rec-finish { border: var(--g-hair) solid var(--g-line-strong); color: var(--g-ink); }
 .recording-pill .rec-finish:hover:not(:disabled) { background: var(--g-sunk); }
 
-/* A fixed sidebar means a wide screen and a composer beside it: the taller card clears the composer */
-@media (min-width: 600px) { .recording-pill.paused.over-sidebar { bottom: calc(96px + env(safe-area-inset-bottom)); } }
+/* A fixed sidebar means a wide screen with the composer beside it: pill and card both clear it, on the same line,
+   so what a second click on Pause lands on is Resume, never the composer's mic */
+@media (min-width: 600px) { .recording-pill.over-sidebar { bottom: calc(96px + env(safe-area-inset-bottom)); } }
 
 /* A phone on its side: the card takes the height there is, over the composer, and scrolls */
 @media (max-height: 500px) {

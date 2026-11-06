@@ -8,6 +8,7 @@ import "./RecordingPill.css";
 const BARS = 28;
 const PEAK_RATE = 8000; // plenty for a shape, and little to hold in memory
 const LONGEST_DRAWN_SECONDS = 600;
+const DOUBLE_TAP_MS = 350;
 const peakCache = new WeakMap<Blob, number[]>();
 
 const PlayIcon = () => <svg className="rec-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor" /></svg>;
@@ -42,6 +43,7 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
   const [said, setSaid] = useState("");
   const player = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
   const resumeButton = useRef<HTMLButtonElement>(null);
+  const lastDelete = useRef(0);
   const ready = controls.phase === "paused";
   const none = !controls.sections.length;
 
@@ -80,6 +82,9 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
   }, [ready]);
 
   function remove(section: RecordedSection) {
+    // The rows close up under the finger: a second quick tap isn't a second delete
+    if (Date.now() - lastDelete.current < DOUBLE_TAP_MS) return;
+    lastDelete.current = Date.now();
     if (playing === section.id) stopPlaying();
     controls.removeSection(section.id);
     const left = controls.sections.length - 1;
@@ -87,6 +92,7 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
     resumeButton.current?.focus({ preventScroll: true }); // its own button is gone
   }
   function undo() {
+    lastDelete.current = 0;
     controls.undoRemove();
     setSaid(`Section back. ${controls.sections.length + 1} kept.`);
     resumeButton.current?.focus({ preventScroll: true });
@@ -120,7 +126,7 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
     <div className="rec-actions">
       {none
         ? <button className="rec-finish" onClick={() => controls.discard()} disabled={!ready} aria-label="Discard recording">Discard</button>
-        : <button className="rec-finish recording-stop" onClick={controls.stop} disabled={!ready} aria-label={`Stop and ${finish} recording for ${title}`}>Stop and {finish}</button>}
+        : <button className="rec-finish recording-stop" onClick={controls.stop} disabled={controls.phase === "pausing"} aria-label={`Stop and ${finish} recording for ${title}`}>Stop and {finish}</button>}
       <button ref={resumeButton} className="rec-resume" onClick={resume} disabled={!ready} aria-label="Resume recording">Resume</button>
     </div>
   </div>;

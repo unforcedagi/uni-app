@@ -1701,10 +1701,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const id = crypto.randomUUID();
     changePending(origin.key, (items) => [...items, { id, file, preview: null, state: "uploading", created: (voiceCreated.current = Math.max(Date.now(), voiceCreated.current + 1)), voice: { channel: origin.channel, replyTo: origin.replyTo, notifyUni: origin.notifyUni } }]);
     void (async () => { await voiceRestored.current; if (voiceMounted.current) queueVoice(origin.key, id); })();
-  }, `for #${rooms.find((r) => r.id === channel)?.name ?? "room"}`, (origin) => {
+  }, `for #${rooms.find((r) => r.id === channel)?.name ?? "room"}`, { onDiscard: (origin) => {
     if (recordingOrigin.current === origin) recordingOrigin.current = null;
     setVoiceStatus("Recording deleted");
-  });
+  } });
   async function toggleRecording() {
     if (sendingRef.current) return;
     if (recordingOrigin.current) {
