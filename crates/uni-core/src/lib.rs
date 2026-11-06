@@ -98,6 +98,9 @@ pub enum Error {
     /// Media download / verification failed.
     #[error("media: {0}")]
     Media(String),
+    /// A file the relay can't take, or a failed upload, in one plain line ready to show as it is.
+    #[error("{0}")]
+    MediaRefused(String),
     /// Parachute vault request failed.
     #[error("vault: {0}")]
     Vault(String),

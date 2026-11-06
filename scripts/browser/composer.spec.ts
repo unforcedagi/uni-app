@@ -1,4 +1,5 @@
 import { writeFile } from 'node:fs/promises';
+import { closeSync, ftruncateSync, openSync, writeFileSync } from 'node:fs';
 import { test, expect, type Page, type Locator } from '@playwright/test';
 import { railGo } from './railGo';
 
@@ -791,3 +792,69 @@ for (const failure of ['upload rejected: 401 Unauthorized', 'Recording exceeds 2
     await expect(page.locator('.compose-file')).toHaveCount(0);
   });
 }
+
+test.describe('uploads go through the normalizer in pieces', () => {
+  const pieces = (page: Page) => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'media_upload_chunk').map((c: any) => c.args.length));
+  test('a file over 50 MB goes up in pieces, whole, and comes out ready', async ({ page }, info) => {
+    const big = info.outputPath('big.mov');
+    writeFileSync(big, Buffer.alloc(52 * 1024 * 1024, 7));
+    await page.locator('input[type=file]').setInputFiles(big);
+    await expect(page.locator('.compose-file')).toContainText('Ready', { timeout: 60_000 });
+    const sizes = await pieces(page);
+    expect(sizes.length).toBe(52);
+    expect(sizes.every((n: number) => n === 1024 * 1024)).toBe(true);
+    const calls = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd.startsWith('media_upload')).map((c: any) => c.cmd));
+    expect(calls[0]).toBe('media_upload_begin');
+    expect(calls.at(-1)).toBe('media_upload');
+  });
+  test("what the relay can't take shows as one plain line, with a retry", async ({ page }) => {
+    const line = 'This video is H.265 (HEVC); Buzz only takes H.264. Convert it to H.264, then attach it again.';
+    await page.evaluate(error => { (window as any).failUpload = true; (window as any).uploadError = error; }, line);
+    await page.locator('input[type=file]').setInputFiles({ name: 'clip.mov', mimeType: 'video/quicktime', buffer: Buffer.from('made up') });
+    await expect(page.locator('.compose-file')).toContainText(`Failed: ${line}`);
+    await expect(page.locator('.compose-file')).not.toContainText('Error:');
+    await expect(page.locator('.compose-file-retry')).toBeVisible();
+  });
+  test('over the limit is refused before a byte moves, and says the size', async ({ page }, info) => {
+    const huge = info.outputPath('huge.mp4');
+    const fd = openSync(huge, 'w');
+    ftruncateSync(fd, 551 * 1024 * 1024); // sparse: no disk, no memory
+    closeSync(fd);
+    await page.locator('input[type=file]').setInputFiles(huge);
+    await expect(page.getByText(/551 MB; Buzz takes up to 500 MB/)).toBeVisible();
+    await expect(page.locator('.compose-file')).toHaveCount(0);
+    expect(await pieces(page)).toEqual([]);
+  });
+  test('removing an attachment partway stops its upload', async ({ page }) => {
+    await page.evaluate(() => { (window as any).holdUpload = true; });
+    await page.locator('input[type=file]').setInputFiles({ name: 'clip.mp4', mimeType: 'video/mp4', buffer: Buffer.from('made up') });
+    await expect.poll(() => page.evaluate(() => (window as any).calls.some((c: any) => c.cmd === 'media_upload'))).toBe(true);
+    await page.getByRole('button', { name: 'Remove clip.mp4' }).click();
+    await expect(page.locator('.compose-file')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'media_upload_abort').length)).toBe(1);
+  });
+  test('removing a voice note partway stops its upload, with no failure shown, and the next one goes', async ({ page }) => {
+    await page.evaluate(() => { (window as any).holdUpload = true; });
+    await recordClip(page);
+    await expect.poll(() => page.evaluate(() => (window as any).calls.some((c: any) => c.cmd === 'media_upload'))).toBe(true);
+    await page.locator('.compose-file-remove').click();
+    await expect(page.locator('.compose-file')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'media_upload_abort').length)).toBe(1);
+    await page.evaluate(() => { (window as any).failUpload = true; (window as any).uploadError = 'Upload stopped.'; (window as any).finishUpload(); });
+    await expect(page.locator('.voice-status')).toHaveText('Voice message removed');
+    await expect(page.getByText(/Voice message failed/)).toHaveCount(0);
+  });
+  test("a photo format the relay refuses goes as a JPEG when the platform can read it", async ({ page }) => {
+    const avif = Buffer.from('AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAAD5bWV0YQAAAAAAAAAvaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAFBpY3R1cmVIYW5kbGVyAAAAAA5waXRtAAAAAAABAAAAHmlsb2MAAAAARAAAAQABAAAAAQAAASEAAAAbAAAAKGlpbmYAAAAAAAEAAAAaaW5mZQIAAAAAAQAAYXYwMUNvbG9yAAAAAGppcHJwAAAAS2lwY28AAAAUaXNwZQAAAAAAAAAIAAAACAAAABBwaXhpAAAAAAMICAgAAAAMYXYxQ4EADAAAAAATY29scm5jbHgAAgACAAIAAAAAF2lwbWEAAAAAAAAAAQABBAECgwQAAAAjbWRhdAoFGAi/bAIyEhgAAABQAABAA1Lt5xf080WmIA==', 'base64');
+    await page.locator('input[type=file]').setInputFiles({ name: 'photo.avif', mimeType: 'image/avif', buffer: avif });
+    await expect(page.locator('.compose-file')).toContainText('Ready');
+    const sent = await page.evaluate(() => {
+      const calls = (window as any).calls;
+      const first = calls.find((c: any) => c.cmd === 'media_upload_chunk').args;
+      return { head: Array.from(first.slice(0, 3)), final: calls.findLast((c: any) => c.cmd === 'media_upload').args };
+    });
+    expect(sent.head).toEqual([0xff, 0xd8, 0xff]);
+    expect(sent.final.filename).toBe('photo.jpg');
+    expect(sent.final.mime).toBe('image/jpeg');
+  });
+});

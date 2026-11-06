@@ -24,11 +24,15 @@ keyring = { workspace = true }
 rustls = { workspace = true }
 # Authenticated Blossom media reads (same reqwest 0.13 Tauri already links).
 # TLS: our own rustls config (ring + Mozilla roots), so no platform verifier / aws-lc.
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json", "stream"] }
 webpki-roots = "1"
 # Re-encode images before upload so camera/screenshot metadata (EXIF, ICC,
 # XMP, pHYs) never reaches the relay, which rejects any metadata channel.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+# Streams an upload from disk, so a stalled connection can be noticed.
+futures-util = "0.3"
+# Names media the relay would refuse by its signature, before the upload. The relay runs the same crate and version.
+infer = "0.19"
 # Mail (T-45): message HTML is sanitized here, before it reaches the webview.
 ammonia = "4"
 memchr = "2"
@@ -43,7 +47,8 @@ crc32fast = "1"
 rustix = { version = "1", features = ["fs", "process"] }
 
 [dev-dependencies]
+# The parser the relay runs on uploaded video, to check what the normalizer writes.
+mp4 = "0.14"
 tempfile = "3"
 tokio-tungstenite = "0.29"
-futures-util = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }

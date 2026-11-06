@@ -1583,39 +1583,127 @@ fn media_protocol(
     });
 }
 
-/// Upload a picked/pasted/dropped file via raw IPC (never a JSON byte array).
-/// `x-filename` and `x-file-mime` are display/advisory hints only.
-#[tauri::command]
-async fn media_upload(
-    app: tauri::AppHandle,
-    request: tauri::ipc::Request<'_>,
-) -> Result<uni_core::MediaRef, String> {
-    let bytes = &ipc_bytes(&request, 100 * 1024 * 1024)?;
-    if bytes.is_empty() || bytes.len() > uni_core::media::MAX_UPLOAD_BYTES {
-        return Err("file is empty or exceeds 25 MB".into());
+/// Largest file accepted for staging. A little over the relay's 500 MB: cleaning up can shrink a file to fit, and the
+/// normalizer has the last word with the real size.
+const MAX_STAGED_BYTES: u64 = 550 * 1024 * 1024;
+const MAX_UPLOAD_CHUNK_BYTES: usize = 8 * 1024 * 1024;
+/// A staged file nobody came back for (the app was killed mid-upload) is cleared this long after it was last touched.
+const STAGED_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// Files on their way to the relay. The cache, so the OS may reclaim it; an upload in progress holds nothing it can't resend.
+fn upload_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_cache_dir().map_err(|e| e.to_string())?.join("uploads"))
+}
+
+fn staged_path(app: &tauri::AppHandle, id: &str) -> Result<PathBuf, String> {
+    if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Couldn't continue this upload. Attach the file again.".into());
     }
-    let header = |name: &str| {
-        request
-            .headers()
-            .get(name)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string()
-    };
-    let filename = url::form_urlencoded::parse(format!("name={}", header("x-filename")).as_bytes())
-        .find(|(k, _)| k == "name")
-        .map(|(_, v)| v.into_owned())
-        .unwrap_or_default();
-    let mime = header("x-file-mime");
-    let data = bytes.clone();
-    secure_store::ensure_loaded(&app).await?;
+    Ok(upload_dir(app)?.join(format!("staged-{id}")))
+}
+
+/// Clear what a killed app left behind: anything in the uploads folder not touched for a day.
+fn sweep_uploads(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > STAGED_MAX_AGE);
+        if old {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Start an upload. Android's IPC turns bytes into JSON numbers, which a whole video would never survive, so the webview
+/// sends a file in pieces ([`media_upload_chunk`]) on every platform and Rust works from disk.
+#[tauri::command]
+async fn media_upload_begin(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = upload_dir(&app)?;
+    blocking(move || {
+        std::fs::create_dir_all(&dir).map_err(|_| "Couldn't prepare the file on this device. Attach it again.".to_string())?;
+        sweep_uploads(&dir);
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        std::fs::write(dir.join(format!("staged-{id}")), b"").map_err(|_| "Couldn't prepare the file on this device. Attach it again.".to_string())?;
+        Ok(id)
+    })
+    .await
+}
+
+/// One piece of a staged file. `x-upload-offset` says where it goes, so a piece sent twice lands in the same place.
+#[tauri::command]
+async fn media_upload_chunk(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let bytes = ipc_bytes(&request, MAX_UPLOAD_CHUNK_BYTES)?;
+    let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let path = staged_path(&app, &header("x-upload-id"))?;
+    let offset: u64 = header("x-upload-offset").parse().map_err(|_| "Couldn't continue this upload. Attach the file again.".to_string())?;
+    if offset.saturating_add(bytes.len() as u64) > MAX_STAGED_BYTES {
+        return Err("This file is larger than Buzz allows (500 MB).".into());
+    }
+    blocking(move || {
+        use std::io::{Seek as _, Write as _};
+        let failed = |e: std::io::Error| {
+            if e.kind() == std::io::ErrorKind::StorageFull {
+                "There isn't enough free space on this device to prepare the file.".to_string()
+            } else {
+                "Couldn't prepare the file on this device. Attach it again.".to_string()
+            }
+        };
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).map_err(failed)?;
+        if file.metadata().map_err(failed)?.len() < offset {
+            return Err("Couldn't continue this upload. Attach the file again.".to_string());
+        }
+        file.set_len(offset).map_err(failed)?;
+        file.seek(std::io::SeekFrom::Start(offset)).map_err(failed)?;
+        file.write_all(&bytes).map_err(failed)
+    })
+    .await
+}
+
+/// Uploads in progress, by staged id, so that removing an attachment can stop one.
+static UPLOAD_CANCELS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Notify>>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Clean up the staged file for the relay and upload it. The staged file goes either way: a retry sends the file again.
+#[tauri::command]
+async fn media_upload(app: tauri::AppHandle, id: String, filename: String, mime: String) -> Result<uni_core::MediaRef, String> {
+    let path = staged_path(&app, &id)?;
+    let cancel = std::sync::Arc::new(tokio::sync::Notify::new());
+    if let Ok(mut uploads) = UPLOAD_CANCELS.lock() {
+        uploads.insert(id.clone(), cancel.clone());
+    }
+    let work_dir = upload_dir(&app)?;
+    let key_store = secure_store::ensure_loaded(&app).await;
     let relay = relay_url(&app);
     blocking(move || {
-        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
-        tauri::async_runtime::block_on(uni_core::media::upload_media(
-            &relay, &keys, data, &mime, &filename,
-        ))
-        .map_err(|e| e.to_string())
+        let result = (|| {
+            key_store.map_err(|_| "Couldn't read this device's key, so the file can't be signed. Retry.".to_string())?;
+            let (keys, _) = uni_core::load_keys(false).map_err(|_| "Couldn't read this device's key, so the file can't be signed. Retry.".to_string())?;
+            tauri::async_runtime::block_on(async {
+                // Dropping the upload stops it: the request hangs up, and its rewritten copy is removed.
+                tokio::select! {
+                    result = uni_core::media::upload_media_file(&relay, &keys, &path, &mime, &filename, &work_dir) => result.map_err(|e| e.to_string()),
+                    () = cancel.notified() => Err("Upload stopped.".to_string()),
+                }
+            })
+        })();
+        let _ = std::fs::remove_file(&path);
+        if let Ok(mut uploads) = UPLOAD_CANCELS.lock() {
+            uploads.remove(&id);
+        }
+        result
+    })
+    .await
+}
+
+/// Forget a staged file, and stop its upload if one has started: the attachment was removed, or the webview gave up partway.
+#[tauri::command]
+async fn media_upload_abort(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let path = staged_path(&app, &id)?;
+    if let Some(cancel) = UPLOAD_CANCELS.lock().ok().and_then(|uploads| uploads.get(&id).cloned()) {
+        cancel.notify_one();
+    }
+    blocking(move || {
+        let _ = std::fs::remove_file(&path);
+        Ok(())
     })
     .await
 }
@@ -3006,6 +3094,11 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .register_asynchronous_uri_scheme_protocol("unimedia", media_protocol)
         .setup(|_app| {
+            if let Ok(dir) = upload_dir(_app.handle()) {
+                // Nothing can be on its way as the app starts, so whatever's here was left by a killed one. Done before
+                // the webview can start an upload, and quick: a few unlinks.
+                let _ = std::fs::remove_dir_all(&dir);
+            }
             #[cfg(mobile)]
             _app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
             // T-124 r22 (Codex 6): the app has no tabs, so macOS keeps its own menu: File and Window say "Close Window" (Cmd+W), which is what
@@ -3089,7 +3182,10 @@ pub fn run() {
             media_stream,
             media_pin,
             media_release,
+            media_upload_begin,
+            media_upload_chunk,
             media_upload,
+            media_upload_abort,
             voice_transcribe,
             media_save,
             media_open,

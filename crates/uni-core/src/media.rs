@@ -28,9 +28,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
 
-/// Largest blob we download into memory: images and PDF previews (Buzz
-/// desktop allows 50 MB; a phone needs less).
-pub const MAX_MEDIA_BYTES: u64 = 25 * 1024 * 1024;
+pub mod normalize;
+
+pub use normalize::sanitize_image_for_upload;
+
+/// Largest blob we download into memory: images and PDF previews. The relay's own
+/// image limit: anything smaller can be sent, so anything smaller has to show.
+pub const MAX_MEDIA_BYTES: u64 = 50 * 1024 * 1024;
 /// Largest video, audio or file we stream to the disk cache (T-172: Buzz
 /// videos are routinely 30–50 MB). Played and opened from disk, never held whole.
 pub const MAX_STREAM_MEDIA_BYTES: u64 = 500 * 1024 * 1024;
@@ -39,8 +43,45 @@ pub const MEDIA_CACHE_BUDGET: u64 = 2 * 1024 * 1024 * 1024;
 /// Most bytes one local playback response carries; players ask for the rest
 /// with further `Range` requests (Tauri's asset protocol uses ~1 MB too).
 pub const MAX_RANGE_CHUNK: u64 = 1024 * 1024;
-/// Upload cap keeps the raw IPC payload and Rust/relay buffers practical on mobile.
-pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
+/// How long an upload token stays good. The relay checks it when the body has arrived, and allows a video an hour.
+const MEDIA_UPLOAD_AUTH_EXPIRY_SECS: u64 = 3600;
+/// Whole-transfer limit for video, inside that hour.
+const VIDEO_UPLOAD_TIMEOUT: Duration = Duration::from_secs(55 * 60);
+/// The relay gives anything but video ten minutes, checked after the last byte, however fast the start was.
+const OTHER_UPLOAD_TIMEOUT: Duration = Duration::from_secs(590);
+const UPLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+const UPLOAD_ANSWER_BODY_LIMIT: Duration = Duration::from_secs(30);
+/// Sent data the network hasn't acknowledged for this long means the connection is dead, however slow it was before.
+/// The kernel's check, on the platforms that have it: a slow link and a relay still storing the file both pass, where
+/// anything measured from here would have to guess. (A relay that stops reading altogether for this long is cut too, and
+/// the relay streams uploads to disk, so it doesn't.)
+#[cfg(any(target_os = "android", target_os = "linux"))]
+const UPLOAD_UNACKED_LIMIT: Duration = Duration::from_secs(60);
+/// The backstop everywhere: this long since the upload last took a piece of the file. A full socket buffer drains for a long
+/// time on a slow link and the relay then checks and stores the file, so this has to allow for both. It stops two dead
+/// uploads from holding every slot of [`UPLOAD_GATE`] for the whole-transfer limit.
+const UPLOAD_QUIET_LIMIT: Duration = Duration::from_secs(10 * 60);
+/// Connections lost partway that are worth another try before giving up.
+const UPLOAD_RESETS_ALLOWED: u32 = 2;
+/// Waits after the relay says "too many uploads" (429). It counts per minute, so together these outlast one window.
+const UPLOAD_BUSY_WAITS: [Duration; 6] = [
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(15),
+    Duration::from_secs(20),
+    Duration::from_secs(30),
+];
+/// The relay allows one sender two uploads at a time, and answers a third with 429 before reading it. The turn starts
+/// before a file is rewritten, so this is also the limit on how many are: a large photo takes a couple of hundred MB to
+/// decode, and a queued video would otherwise sit on disk in two copies.
+static UPLOAD_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+/// Large files take one turn at a time, leaving the other for what's quick: a voice note shouldn't wait behind two videos.
+static LARGE_UPLOAD_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+const LARGE_UPLOAD_BYTES: u64 = 25 * 1024 * 1024;
+/// Past this much sent, a lost connection isn't retried by itself: the whole file would go again, on someone's phone data,
+/// with nothing on screen. Below it is where a relay hanging up on a file it won't read shows up. Retry is one tap.
+const UPLOAD_RESET_RETRY_BYTES: u64 = 16 * 1024 * 1024;
 /// Lifetime of a `t=get` token (Buzz: `MEDIA_GET_AUTH_EXPIRY_SECS`).
 pub const MEDIA_GET_AUTH_EXPIRY_SECS: u64 = 600;
 /// Most `imeta` entries kept per message.
@@ -227,7 +268,7 @@ pub fn sign_blossom_upload(keys: &Keys, relay_url: &str, sha: &str) -> Result<St
     if server.is_empty() {
         return Err(Error::Invalid("cannot derive server authority".into()));
     }
-    let exp = (Timestamp::now().as_secs() + MEDIA_GET_AUTH_EXPIRY_SECS).to_string();
+    let exp = (Timestamp::now().as_secs() + MEDIA_UPLOAD_AUTH_EXPIRY_SECS).to_string();
     let tag = |parts: [&str; 2]| Tag::parse(parts).map_err(|e| Error::Invalid(e.to_string()));
     let event = EventBuilder::new(Kind::from(24242), "Upload file")
         .tags([
@@ -244,72 +285,265 @@ pub fn sign_blossom_upload(keys: &Keys, relay_url: &str, sha: &str) -> Result<St
     ))
 }
 
-/// Upload raw bytes from the file picker, paste, drag/drop or future voice input.
-/// The relay sniffs the bytes and returns canonical MIME, size and dimensions;
-/// never construct imeta from untrusted browser MIME hints. No redirects may
-/// carry Blossom authorization off-origin. The legacy route only supports images.
-pub async fn upload_media(
+/// A rewritten file that goes away with the upload, however it ends.
+struct RemoveOnDrop(Option<PathBuf>);
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        if let Some(p) = &self.0 {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
+/// The name for `imeta`: no folder part or control characters, not empty, at most the relay's 255 bytes.
+fn upload_filename(filename: &str) -> String {
+    let name: String = filename.rsplit(['/', '\\']).next().unwrap_or(filename).trim().chars().filter(|c| !c.is_control()).collect();
+    let mut end = name.len().min(255);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    let name = name[..end].trim_end();
+    if name.is_empty() { "file".to_string() } else { name.to_string() }
+}
+
+/// What a relay refusal means, in one line. The normalizer should have caught all of these first, so reaching one means
+/// the relay's rules and ours have parted, or something changed between devices. Never the relay's raw body.
+fn relay_refusal(status: u16, body: &str) -> String {
+    let said = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+        .unwrap_or_default();
+    let has = |needle: &str| said.contains(needle);
+    if has("moov atom") || has("metadata") {
+        "The relay still refused this file after it was cleaned up, so its rules may have changed.".into()
+    } else if has("media codec") {
+        "Buzz only takes H.264 video with AAC sound, and this file uses something else.".into()
+    } else if has("too long") {
+        "Buzz takes videos up to 10 minutes, and this one is longer.".into()
+    } else if has("resolution") {
+        "Buzz takes videos up to 3840x2160, and this one is larger.".into()
+    } else if has("unsupported container") {
+        "Buzz only takes MP4 video, and this file is something else.".into()
+    } else if has("invalid video") || has("invalid image") {
+        "This file is damaged or incomplete, so it can't be sent.".into()
+    } else if has("image dimensions") {
+        "Buzz takes images up to 25 megapixels, and this one is larger.".into()
+    } else if status == 413 || has("file too large") {
+        "This file is larger than Buzz allows.".into()
+    } else if let Some(kind) = said.strip_prefix("disallowed content type: ") {
+        format!("Buzz doesn't take this kind of file ({kind}).")
+    } else if has("unknown content type") {
+        "Buzz can't tell what kind of file this is, so it won't take it.".into()
+    } else if status == 401 {
+        "The relay didn't accept this device's sign-in. Retry; if it keeps happening, check this device's time and pairing.".into()
+    } else if status == 403 {
+        "This account can't upload to this relay.".into()
+    } else if status == 429 {
+        "Too many uploads right now. Retry in a minute.".into()
+    } else if status >= 500 {
+        "The relay couldn't store this file just now. Retry in a moment.".into()
+    } else {
+        format!("The relay refused this file (error {status}).")
+    }
+}
+
+/// A failed connection in one line. Voice retries itself when `netError.ts` finds these words, so they stay.
+/// `out_of_time`: the attempt used its whole limit. A dead connection is a timeout too, and that's not the file's fault.
+fn unreachable_line(e: &reqwest::Error, relay_video: bool, out_of_time: bool) -> String {
+    if e.is_timeout() && out_of_time && !relay_video {
+        "The upload timed out: Buzz allows ten minutes for anything but video, and this connection is too slow for this file.".into()
+    } else if e.is_timeout() {
+        "Can't reach Buzz: the upload timed out. Is Tailscale on? Retry when you're back online.".into()
+    } else {
+        "Can't reach Buzz: error sending request. Is Tailscale on? Retry when you're back online.".into()
+    }
+}
+
+fn stalled_line() -> String {
+    "Can't reach Buzz: the upload timed out when the connection stopped moving. Is Tailscale on? Retry when you're back online.".into()
+}
+
+enum UploadFailure {
+    /// Trying again here would only do the same.
+    Final(Error),
+    /// The connection broke partway; the line to show if it keeps happening.
+    Reset(String),
+}
+
+/// When the upload last took a piece of the file.
+struct UploadProgress {
+    started: std::time::Instant,
+    last_ms: std::sync::atomic::AtomicU64,
+    taken_bytes: std::sync::atomic::AtomicU64,
+}
+
+impl UploadProgress {
+    fn new() -> Self {
+        Self { started: std::time::Instant::now(), last_ms: 0.into(), taken_bytes: 0.into() }
+    }
+    fn moved(&self) {
+        let now = self.started.elapsed().as_millis() as u64;
+        self.last_ms.store(now, std::sync::atomic::Ordering::Relaxed);
+    }
+    /// Finishes once the upload has been quiet for too long. The other half of a `select!` with the request.
+    async fn stalled(&self, limit: Duration) {
+        loop {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            let last = Duration::from_millis(self.last_ms.load(std::sync::atomic::Ordering::Relaxed));
+            if self.started.elapsed().saturating_sub(last) > limit {
+                return;
+            }
+        }
+    }
+}
+
+/// The file as a request body that reports each piece taken: HTTP asks for the next when the socket has room.
+fn watched_body(file: tokio::fs::File, progress: Arc<UploadProgress>) -> reqwest::Body {
+    use tokio::io::AsyncReadExt as _;
+    let pieces = futures_util::stream::unfold((file, progress), |(mut file, progress)| async move {
+        let mut buf = vec![0u8; 256 * 1024];
+        match file.read(&mut buf).await {
+            Ok(0) => None,
+            Ok(n) => {
+                buf.truncate(n);
+                progress.moved();
+                progress.taken_bytes.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+                Some((Ok::<Vec<u8>, std::io::Error>(buf), (file, progress)))
+            }
+            Err(e) => Some((Err(e), (file, progress))),
+        }
+    });
+    reqwest::Body::wrap_stream(pieces)
+}
+
+/// Upload a picked, pasted, dropped, shared or recorded file: the one way media reaches the relay.
+///
+/// The file is normalized first ([`normalize`]), so the relay's rules are met or the reason is known before any bytes
+/// move, and streamed from disk, so a large file is never held in memory. The relay sniffs the bytes and returns the
+/// canonical MIME, size and dimensions; never construct imeta from untrusted browser MIME hints. No redirects may carry
+/// Blossom authorization off-origin. The legacy route only supports images.
+///
+/// Every error is one plain line ([`Error::MediaRefused`]), ready to show.
+pub async fn upload_media_file(
     relay_url: &str,
     keys: &Keys,
-    bytes: Vec<u8>,
+    input: &Path,
     mime: &str,
     filename: &str,
+    work_dir: &Path,
 ) -> Result<MediaRef> {
-    if bytes.is_empty() || bytes.len() > MAX_UPLOAD_BYTES {
-        return Err(Error::Media("file is empty or exceeds 25 MB".into()));
-    }
-    let filename: String = filename
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(filename)
-        .trim()
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(255)
-        .collect();
-    let filename = if filename.is_empty() {
-        "file".to_string()
+    upload_with_quiet_limit(relay_url, keys, input, mime, filename, work_dir, UPLOAD_QUIET_LIMIT).await
+}
+
+async fn upload_with_quiet_limit(
+    relay_url: &str,
+    keys: &Keys,
+    input: &Path,
+    mime: &str,
+    filename: &str,
+    work_dir: &Path,
+    quiet_limit: Duration,
+) -> Result<MediaRef> {
+    let name = upload_filename(filename);
+    let large = std::fs::metadata(input).is_ok_and(|m| m.len() > LARGE_UPLOAD_BYTES);
+    let (input, for_normalize, work_dir) = (input.to_path_buf(), name.clone(), work_dir.to_path_buf());
+    let _large_turn = if large {
+        Some(LARGE_UPLOAD_GATE.acquire().await.map_err(|_| normalize::refuse("Couldn't start the upload. Attach it again."))?)
     } else {
-        filename
+        None
     };
-    let bytes = sanitize_image_for_upload(bytes)?;
-    let sha = sha256_hex(&bytes);
+    let _turn = UPLOAD_GATE.acquire().await.map_err(|_| normalize::refuse("Couldn't start the upload. Attach it again."))?;
+    let joined = tokio::task::spawn_blocking(move || {
+        let n = normalize::normalize_file(&input, &for_normalize, &work_dir)?;
+        let cleanup = RemoveOnDrop(n.rewritten.then(|| n.path.clone()));
+        let sha = file_sha256(&n.path).map_err(normalize::io_failed)?;
+        let size = std::fs::metadata(&n.path).map_err(normalize::io_failed)?.len();
+        Ok::<_, Error>((n, cleanup, sha, size))
+    })
+    .await
+    .map_err(|_| normalize::refuse("Couldn't prepare the file on this device. Attach it again."))?;
+    let (normalized, _cleanup, sha, size) = joined?;
     crate::init_crypto();
-    let auth = sign_blossom_upload(keys, relay_url, &sha)?;
-    let origin = relay_http_origin(relay_url)?;
+    let origin = relay_http_origin(relay_url).map_err(|_| normalize::refuse("This device has no valid relay address."))?;
     let base = origin.as_str().trim_end_matches('/');
     // The relay treats Content-Type as advisory and validates the actual bytes.
-    let hint = if mime.is_empty() || mime.contains(['\r', '\n']) {
-        "application/octet-stream"
-    } else {
-        mime
+    let hint = if mime.is_empty() || mime.contains(['\r', '\n']) { "application/octet-stream" } else { mime };
+    // Long enough for a large file, but a phone with no route to the relay finds out in seconds, not an hour.
+    let builder = client_builder(reqwest::redirect::Policy::none())?.connect_timeout(UPLOAD_CONNECT_TIMEOUT);
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    let builder = builder.tcp_user_timeout(UPLOAD_UNACKED_LIMIT);
+    let client = builder.build().map_err(|_| normalize::refuse("Couldn't start the upload. Attach it again."))?;
+    let limit = if normalized.relay_video { VIDEO_UPLOAD_TIMEOUT } else { OTHER_UPLOAD_TIMEOUT };
+
+    let put = |route: &'static str| {
+        let (client, path, sha, hint) = (client.clone(), normalized.path.clone(), sha.clone(), hint.to_string());
+        let url = format!("{base}{route}");
+        let relay_video = normalized.relay_video;
+        async move {
+            // Signed for each try: the relay wants a token minted within minutes of its arrival.
+            let auth = sign_blossom_upload(keys, relay_url, &sha).map_err(|e| UploadFailure::Final(normalize::refuse(e.to_string())))?;
+            let file = tokio::fs::File::open(&path).await.map_err(|e| UploadFailure::Final(normalize::io_failed(e)))?;
+            let progress = Arc::new(UploadProgress::new());
+            let started = std::time::Instant::now();
+            let request = client
+                .put(url)
+                .timeout(limit)
+                .header("Authorization", &auth)
+                .header("Content-Type", &hint)
+                .header("Content-Length", size)
+                .header("X-SHA-256", &sha)
+                .body(watched_body(file, progress.clone()))
+                .send();
+            tokio::select! {
+                result = request => result.map_err(|e| {
+                    let line = unreachable_line(&e, relay_video, started.elapsed() + Duration::from_secs(5) >= limit);
+                    // Connecting failed, or time ran out: a retry here would only do the same. Otherwise the connection
+                    // broke, as when a relay turns a file down without reading it all, and early on it's worth another go.
+                    if e.is_connect() || e.is_timeout() || progress.taken_bytes.load(std::sync::atomic::Ordering::Relaxed) > UPLOAD_RESET_RETRY_BYTES {
+                        UploadFailure::Final(normalize::refuse(line))
+                    } else {
+                        UploadFailure::Reset(line)
+                    }
+                }),
+                () = progress.stalled(quiet_limit) => Err(UploadFailure::Final(normalize::refuse(stalled_line()))),
+            }
+        }
     };
-    let client = http_client()?;
-    let mut response = client
-        .put(format!("{base}/upload"))
-        .header("Authorization", &auth)
-        .header("Content-Type", hint)
-        .header("X-SHA-256", &sha)
-        .body(bytes.clone())
-        .send()
-        .await
-        .map_err(|e| Error::Media(format!("upload failed: {e}")))?;
-    if matches!(response.status().as_u16(), 404 | 405) {
-        response = client
-            .put(format!("{base}/media/upload"))
-            .header("Authorization", &auth)
-            .header("Content-Type", hint)
-            .header("X-SHA-256", &sha)
-            .body(bytes)
-            .send()
-            .await
-            .map_err(|e| Error::Media(format!("upload failed: {e}")))?;
-    }
+    let mut waits = UPLOAD_BUSY_WAITS.iter();
+    let mut resets = 0;
+    let mut told_busy = false;
+    let response = loop {
+        let mut attempt = put("/upload").await;
+        if matches!(&attempt, Ok(r) if matches!(r.status().as_u16(), 404 | 405)) {
+            attempt = put("/media/upload").await;
+        }
+        match attempt {
+            Ok(r) if r.status().as_u16() == 429 => {
+                told_busy = true;
+                match waits.next() {
+                    Some(wait) => tokio::time::sleep(*wait).await,
+                    None => break r,
+                }
+            }
+            Ok(r) => break r,
+            Err(UploadFailure::Final(e)) => return Err(e),
+            Err(UploadFailure::Reset(line)) => {
+                resets += 1;
+                if resets > UPLOAD_RESETS_ALLOWED {
+                    return Err(normalize::refuse(line));
+                }
+                // A relay turning down a large file hangs up without reading it, and which arrives first is a race: after
+                // one "too busy", this may well be another, so it gets the same wait.
+                let wait = if told_busy { waits.next().copied() } else { None };
+                tokio::time::sleep(wait.unwrap_or(UPLOAD_BUSY_WAITS[0])).await;
+            }
+        }
+    };
     if !response.status().is_success() {
-        let status = response.status();
-        let reason = response.text().await.unwrap_or_default();
-        let brief: String = reason.chars().take(400).collect();
-        return Err(Error::Media(format!("upload rejected ({status}): {brief}")));
+        let status = response.status().as_u16();
+        // The answer's status is known: its body gets a short wait, so a connection dying now can't hold a turn.
+        let reason = tokio::time::timeout(UPLOAD_ANSWER_BODY_LIMIT, response.text()).await.ok().and_then(|r| r.ok()).unwrap_or_default();
+        return Err(normalize::refuse(relay_refusal(status, &reason)));
     }
     #[derive(serde::Deserialize)]
     struct BlobDescriptor {
@@ -321,20 +555,18 @@ pub async fn upload_media(
         dim: Option<String>,
         blurhash: Option<String>,
     }
-    let d: BlobDescriptor = response
-        .json()
+    let inconsistent = || normalize::refuse("The relay answered with details that don't match the file, so it wasn't attached. Retry.");
+    let d: BlobDescriptor = tokio::time::timeout(UPLOAD_ANSWER_BODY_LIMIT, response.json())
         .await
-        .map_err(|e| Error::Media(format!("invalid upload response: {e}")))?;
+        .map_err(|_| inconsistent())?
+        .map_err(|_| inconsistent())?;
     if d.sha256 != sha
-        || d.size == 0
-        || d.size > MAX_UPLOAD_BYTES as u64
+        || d.size != size
         || media_sha_from_url(relay_url, &d.url).ok().as_deref() != Some(&sha)
         || !d.mime.contains('/')
         || d.mime.contains(['\r', '\n'])
     {
-        return Err(Error::Media(
-            "relay returned inconsistent upload metadata".into(),
-        ));
+        return Err(inconsistent());
     }
     Ok(MediaRef {
         url: d.url,
@@ -344,96 +576,8 @@ pub async fn upload_media(
         dim: d.dim.filter(|v| parse_dim(v).is_some()),
         blurhash: d.blurhash,
         alt: None,
-        filename: Some(filename),
+        filename: Some(normalized.filename),
     })
-}
-
-/// PNG ancillary chunks that affect only rendering and that the relay accepts.
-/// Everything else ancillary (eXIf, iCCP, iTXt/tEXt/zTXt, pHYs, tIME, vendor
-/// chunks such as Apple's iDOT) is a metadata channel the relay rejects.
-const PNG_KEEP_ANCILLARY: [&[u8; 4]; 11] = [
-    b"cHRM", b"gAMA", b"sBIT", b"sRGB", b"bKGD", b"hIST", b"tRNS", b"sPLT", b"acTL", b"fcTL",
-    b"fdAT",
-];
-
-/// Remove metadata from PNG structurally: keep critical chunks and the
-/// rendering/animation chunks above, drop the rest and anything after IEND.
-/// Pixels (and APNG frames) are untouched, so this is lossless and cheap even
-/// for large screenshots. Returns None when the bytes aren't a well-formed PNG.
-fn strip_png_metadata(bytes: &[u8]) -> Option<Vec<u8>> {
-    const SIG: &[u8] = b"\x89PNG\r\n\x1a\n";
-    if !bytes.starts_with(SIG) {
-        return None;
-    }
-    let mut out = Vec::with_capacity(bytes.len());
-    out.extend_from_slice(SIG);
-    let mut i = SIG.len();
-    loop {
-        let header = bytes.get(i..i + 8)?;
-        let len = u32::from_be_bytes(header[..4].try_into().ok()?) as usize;
-        let kind: &[u8; 4] = header[4..8].try_into().ok()?;
-        let end = i.checked_add(12)?.checked_add(len)?;
-        if end > bytes.len() {
-            return None;
-        }
-        let ancillary = kind[0] & 0x20 != 0;
-        if !ancillary || PNG_KEEP_ANCILLARY.contains(&kind) {
-            out.extend_from_slice(&bytes[i..end]);
-        }
-        if kind == b"IEND" {
-            return Some(out);
-        }
-        i = end;
-    }
-}
-
-/// Make an image acceptable to Buzz's relay, which refuses any upload that
-/// carries metadata (EXIF location, camera/device details, colour profiles,
-/// XMP) rather than silently storing it. Mirrors Buzz desktop's
-/// `sanitize_image_for_upload`:
-/// - PNG (incl. macOS screenshots and APNG): lossless structural strip.
-/// - JPEG / WebP: decode, bake in EXIF orientation, re-encode clean.
-/// - Anything else (GIF, audio, video, files) passes through; the relay's
-///   own validator stays the authority.
-pub fn sanitize_image_for_upload(bytes: Vec<u8>) -> Result<Vec<u8>> {
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return strip_png_metadata(&bytes)
-            .ok_or_else(|| Error::Media("image is not a valid PNG".into()));
-    }
-    let format = if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
-        image::ImageFormat::Jpeg
-    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
-        // Animated WebP would be flattened by a re-encode; leave it to the relay.
-        if bytes.windows(4).any(|w| w == b"ANIM") {
-            return Ok(bytes);
-        }
-        image::ImageFormat::WebP
-    } else {
-        return Ok(bytes);
-    };
-    use image::ImageDecoder as _;
-    let bad = |what: &str| Error::Media(format!("could not {what} while removing image metadata"));
-    let mut decoder = image::ImageReader::with_format(std::io::Cursor::new(&bytes), format)
-        .into_decoder()
-        .map_err(|_| bad("decode the image"))?;
-    decoder
-        .set_limits(image::Limits::default())
-        .map_err(|_| bad("decode an image this large"))?;
-    let orientation = decoder.orientation().map_err(|_| bad("read orientation"))?;
-    let mut img =
-        image::DynamicImage::from_decoder(decoder).map_err(|_| bad("decode the image"))?;
-    img.apply_orientation(orientation);
-    let mut out = std::io::Cursor::new(Vec::new());
-    if format == image::ImageFormat::Jpeg {
-        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 92);
-        img.to_rgb8()
-            .write_with_encoder(enc)
-            .map_err(|_| bad("re-encode the image"))?;
-    } else {
-        img.write_to(&mut out, format)
-            .map_err(|_| bad("re-encode the image"))?;
-    }
-    Ok(out.into_inner())
 }
 
 /// Lowercase hex SHA-256.
@@ -1210,7 +1354,7 @@ mod tests {
             .parse()
             .unwrap();
         let now = Timestamp::now().as_secs();
-        assert!(exp > now && exp <= now + MEDIA_GET_AUTH_EXPIRY_SECS);
+        assert!(exp > now && exp <= now + MEDIA_UPLOAD_AUTH_EXPIRY_SECS);
         ev.verify().unwrap();
     }
 
@@ -1259,12 +1403,16 @@ mod tests {
             .unwrap();
         });
         let keys = Keys::generate();
-        let media = upload_media(
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.pdf");
+        std::fs::write(&file, &data).unwrap();
+        let media = upload_media_file(
             &format!("ws://127.0.0.1:{port}"),
             &keys,
-            data.clone(),
+            &file,
             "application/pdf",
             "../a].pdf",
+            dir.path(),
         )
         .await
         .unwrap();
@@ -1372,11 +1520,11 @@ mod tests {
         assert!(seen.try_recv().is_err());
     }
 
-    /// T-172: Aaron's teaching videos are 30–46 MB. They stream to the hash
+    /// T-172: Buzz videos run past what we hold in memory. They stream to the hash
     /// file with the same Blossom auth and SHA-256 check as images.
     #[tokio::test]
-    async fn relay_video_over_25mb_streams_to_the_cache() {
-        let body: Vec<u8> = (0..30 * 1024 * 1024u32).map(|i| (i % 251) as u8).collect();
+    async fn relay_video_over_the_image_limit_streams_to_the_cache() {
+        let body: Vec<u8> = (0..51 * 1024 * 1024u32).map(|i| (i % 251) as u8).collect();
         let sha = sha256_hex(&body);
         let (port, mut seen) = serve("200 OK", body.clone()).await;
         let relay = format!("ws://127.0.0.1:{port}");
@@ -1402,7 +1550,7 @@ mod tests {
         let err = fetch_media(&relay, &keys, &url, None, dir.path())
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("too large (over 25 MB)"), "{err}");
+        assert!(err.to_string().contains("too large (over 50 MB)"), "{err}");
         assert!(path.exists());
 
         // A cached file that no longer hashes to its name is fetched again.
@@ -1730,5 +1878,242 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("redirect"), "{err}");
+    }
+
+    // ── Uploads: the relay's answers, and what the user reads ─────────────
+    /// A relay answering each upload in turn: `Some` as given, `None` with a true descriptor of the bytes it received.
+    /// Reports each body it was sent.
+    async fn relay_answering(answers: Vec<(u16, Option<String>)>) -> (u16, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            for (status, answer) in answers {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = Vec::new();
+                let mut chunk = vec![0u8; 1024 * 1024];
+                let end = loop {
+                    if let Some(p) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break p + 4;
+                    }
+                    let n = sock.read(&mut chunk).await.unwrap();
+                    buf.extend_from_slice(&chunk[..n]);
+                };
+                let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
+                let len: usize = head.lines().find_map(|l| l.strip_prefix("content-length:")).unwrap().trim().parse().unwrap();
+                while buf.len() - end < len {
+                    let n = sock.read(&mut chunk).await.unwrap();
+                    buf.extend_from_slice(&chunk[..n]);
+                }
+                let got = buf[end..].to_vec();
+                let body = answer.unwrap_or_else(|| {
+                    let sha = sha256_hex(&got);
+                    serde_json::json!({"url":format!("http://127.0.0.1:{port}/media/{sha}.bin"),"sha256":sha,"size":got.len(),"type":"application/octet-stream"}).to_string()
+                });
+                let _ = tx.send(got);
+                let reply = format!("HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                sock.write_all(reply.as_bytes()).await.unwrap();
+                let _ = sock.shutdown().await;
+            }
+        });
+        (port, rx)
+    }
+
+    #[tokio::test]
+    async fn a_relay_refusal_is_one_plain_line_never_its_json() {
+        let cases = [
+            (422, r#"{"error":"moov atom not at front of file (not fast-start)"}"#, "after it was cleaned up"),
+            (422, r#"{"error":"media contains metadata or a non-canonical metadata channel"}"#, "after it was cleaned up"),
+            (415, r#"{"error":"unsupported media codec: only H.264 video and AAC audio are accepted"}"#, "H.264"),
+            (415, r#"{"error":"disallowed content type: audio/mpeg"}"#, "audio/mpeg"),
+            (401, r#"{"error":"authentication failed"}"#, "sign-in"),
+            (500, r#"{"error":"internal error"}"#, "Retry"),
+            (502, "<html>bad gateway</html>", "Retry"),
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("notes.txt");
+        std::fs::write(&file, "made up").unwrap();
+        for (status, body, expect) in cases {
+            let (port, _seen) = relay_answering(vec![(status, Some(body.to_string()))]).await;
+            let err = upload_media_file(&format!("ws://127.0.0.1:{port}"), &Keys::generate(), &file, "", "notes.txt", dir.path())
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(expect), "{err}");
+            assert!(!err.contains('{') && !err.contains('<') && !err.contains("media:") && !err.contains('\n'), "{err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn too_many_uploads_waits_its_turn_instead_of_failing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("notes.txt");
+        std::fs::write(&file, "made up").unwrap();
+        let busy = Some(r#"{"error":"upload concurrency limit reached"}"#.to_string());
+        let (port, mut seen) = relay_answering(vec![(429, busy), (200, None)]).await;
+        let media = upload_media_file(&format!("ws://127.0.0.1:{port}"), &Keys::generate(), &file, "", "notes.txt", dir.path())
+            .await
+            .unwrap();
+        assert_eq!(media.filename.as_deref(), Some("notes.txt"));
+        assert_eq!(seen.recv().await.unwrap(), b"made up");
+        assert_eq!(seen.recv().await.unwrap(), b"made up", "the whole file again on the second try");
+    }
+
+    #[tokio::test]
+    async fn no_relay_is_a_line_the_voice_retry_still_recognises() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("notes.txt");
+        std::fs::write(&file, "made up").unwrap();
+        let err = upload_media_file(&format!("ws://127.0.0.1:{port}"), &Keys::generate(), &file, "", "notes.txt", dir.path())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("error sending request"), "netError.ts looks for these words: {err}");
+        assert!(!err.contains("127.0.0.1") && !err.contains("media:"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_relay_that_goes_quiet_lets_go_of_the_upload() {
+        let dir = tempfile::tempdir().unwrap();
+        // Takes the headers and the file, then never answers.
+        let quiet = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = quiet.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut sock, _) = quiet.accept().await.unwrap();
+            let mut buf = vec![0u8; 1024 * 1024];
+            while sock.read(&mut buf).await.unwrap_or(0) > 0 {}
+        });
+        let small = dir.path().join("notes.txt");
+        std::fs::write(&small, "made up").unwrap();
+        let err = tokio::time::timeout(
+            Duration::from_secs(20),
+            upload_with_quiet_limit(&format!("ws://127.0.0.1:{port}"), &Keys::generate(), &small, "", "notes.txt", dir.path(), Duration::from_secs(1)),
+        )
+        .await
+        .expect("gave up by itself")
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("timed out"), "voice retries on these words: {err}");
+
+        // Takes the headers, then stops reading: the file stops moving partway.
+        let stuck = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = stuck.local_addr().unwrap().port();
+        let holder = tokio::spawn(async move {
+            let (sock, _) = stuck.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            drop(sock);
+        });
+        let big = dir.path().join("big.txt");
+        std::fs::write(&big, vec![b'x'; 40 * 1024 * 1024]).unwrap();
+        let err = tokio::time::timeout(
+            Duration::from_secs(20),
+            upload_with_quiet_limit(&format!("ws://127.0.0.1:{port}"), &Keys::generate(), &big, "", "big.txt", dir.path(), Duration::from_secs(1)),
+        )
+        .await
+        .expect("gave up by itself")
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("timed out"), "{err}");
+        holder.abort();
+    }
+
+    /// A slow relay isn't a dead one: it has taken the whole file and is still storing it.
+    #[tokio::test]
+    async fn a_relay_that_answers_late_within_the_limit_is_waited_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("notes.txt");
+        std::fs::write(&file, "made up").unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let sha = sha256_hex(b"made up");
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut got = Vec::new();
+            while !got.ends_with(b"made up") {
+                let n = sock.read(&mut buf).await.unwrap();
+                got.extend_from_slice(&buf[..n]);
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let body = serde_json::json!({"url":format!("http://127.0.0.1:{port}/media/{sha}.bin"),"sha256":sha,"size":7,"type":"application/octet-stream"}).to_string();
+            let reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            sock.write_all(reply.as_bytes()).await.unwrap();
+        });
+        let media = upload_with_quiet_limit(&format!("ws://127.0.0.1:{port}"), &Keys::generate(), &file, "", "notes.txt", dir.path(), Duration::from_secs(30)).await.unwrap();
+        assert_eq!(media.size, Some(7));
+    }
+
+    #[tokio::test]
+    async fn a_connection_lost_partway_is_tried_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("notes.txt");
+        std::fs::write(&file, "made up").unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let sha = sha256_hex(b"made up");
+        tokio::spawn(async move {
+            // The first connection closes without an answer, like a relay refusing a file it won't read.
+            let (first, _) = listener.accept().await.unwrap();
+            drop(first);
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut got = Vec::new();
+            while !got.ends_with(b"made up") {
+                let n = sock.read(&mut buf).await.unwrap();
+                got.extend_from_slice(&buf[..n]);
+            }
+            let body = serde_json::json!({"url":format!("http://127.0.0.1:{port}/media/{sha}.bin"),"sha256":sha,"size":7,"type":"application/octet-stream"}).to_string();
+            let reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            sock.write_all(reply.as_bytes()).await.unwrap();
+        });
+        let media = upload_media_file(&format!("ws://127.0.0.1:{port}"), &Keys::generate(), &file, "", "notes.txt", dir.path()).await.unwrap();
+        assert_eq!(media.size, Some(7));
+    }
+
+    /// Over the old 25 MB limit, by far: the file goes up whole from disk.
+    #[tokio::test]
+    async fn a_large_file_goes_up_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("big.txt");
+        let data: Vec<u8> = (0..60 * 1024 * 1024u32).map(|i| b"abcdefg\n"[(i % 8) as usize]).collect();
+        std::fs::write(&file, &data).unwrap();
+        let (port, mut seen) = relay_answering(vec![(200, None)]).await;
+        let media = upload_media_file(&format!("ws://127.0.0.1:{port}"), &Keys::generate(), &file, "", "big.txt", dir.path()).await.unwrap();
+        assert_eq!(media.size, Some(data.len() as i64));
+        assert!(seen.recv().await.unwrap() == data);
+    }
+
+    /// The cleaned copy is what's sent, what the descriptor is checked against, and it's gone afterwards.
+    #[tokio::test]
+    async fn the_rewritten_copy_is_what_goes_up_and_it_leaves_nothing_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        let file = dir.path().join("p.png");
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbImage::new(2, 2).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let mut png = png.into_inner();
+        png.splice(33..33, png_chunk(b"tEXt", b"Comment\0made up"));
+        std::fs::write(&file, &png).unwrap();
+        for answers in [vec![(200, None)], vec![(422, Some(r#"{"error":"invalid image data"}"#.to_string()))]] {
+            let ok = answers[0].0 == 200;
+            let (port, mut seen) = relay_answering(answers).await;
+            let result = upload_media_file(&format!("ws://127.0.0.1:{port}"), &Keys::generate(), &file, "", "p.png", &work).await;
+            assert_eq!(result.is_ok(), ok);
+            assert!(!seen.recv().await.unwrap().windows(7).any(|w| w == b"made up"));
+            assert_eq!(std::fs::read_dir(&work).unwrap().count(), 0, "nothing left in the work folder");
+        }
+        assert_eq!(std::fs::read(&file).unwrap(), png, "the original is left alone");
+    }
+
+    #[test]
+    fn upload_names_fit_the_relays_limit_in_bytes() {
+        assert_eq!(upload_filename("/a/b\\c.mp4"), "c.mp4");
+        assert_eq!(upload_filename("  \n "), "file");
+        let long = "é".repeat(200);
+        let cut = upload_filename(&long);
+        assert!(cut.len() <= 255 && cut.chars().all(|c| c == 'é'));
     }
 }

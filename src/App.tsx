@@ -83,6 +83,7 @@ import { validateNotePath } from "./noteEdit";
 import { NoteOpener } from "./noteLinks";
 import { sameHub, type VaultRef } from "./vaultlinks";
 import { attachmentKind, formatSize } from "./media";
+import { tooLargeLine, uploadMedia } from "./mediaUpload";
 import { Attachments, attachmentBody, modalCount, useRelayOrigin, type MediaRef } from "./Attachments";
 import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 import { SmallLine } from "./areas/Companion";
@@ -115,7 +116,9 @@ type IdentityStatus = { paired: boolean; pubkey: string | null };
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
 
 type PendingFile = { owner?: string; relay?: string; created?: number; signedEvent?: string; id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string; voice?: { channel: string; replyTo: string | null; notifyUni: boolean } };
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+/** A voice message's limit, the same as the recorder's join limit and the transcriber's. */
+const MAX_VOICE_BYTES = 25 * 1024 * 1024;
+const invokeIpc = invoke as (cmd: string, args?: unknown, options?: { headers: Record<string, string> }) => Promise<unknown>;
 const MAX_ATTACHMENTS = 20;
 const OTHER_VAULTS_KEY = "uni:other-vaults-expanded";
 
@@ -467,6 +470,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const voiceJobs = useRef(new Set<string>());
   const voiceRetryTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const voiceRetryAttempts = useRef(new Map<string, number>());
+  /** Attachments on their way, so that removing one stops it: up to 500 MB of a phone's data for something no longer wanted. */
+  const uploadAborts = useRef(new Map<string, AbortController>());
   const [voiceStatus, setVoiceStatus] = useState("");
   const [voiceStorageWarning, setVoiceStorageWarning] = useState("");
   const voiceOutbox = useRef(new VoiceOutbox(() => setVoiceStorageWarning("Voice storage unavailable. Recordings are kept only until this app closes.")));
@@ -1650,6 +1655,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     voiceRetryTimers.current.delete(id);
     voiceRetryAttempts.current.delete(id);
     void voiceOutbox.current.remove(id);
+    uploadAborts.current.get(id)?.abort();
     changePending(key, (items) => {
       const item = items.find((x) => x.id === id);
       if (item?.preview) URL.revokeObjectURL(item.preview);
@@ -1658,12 +1664,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   async function uploadFile(key: string, id: string, file: File) {
     changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "uploading", error: undefined } : x));
+    const controller = new AbortController();
+    uploadAborts.current.set(id, controller);
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const media = await invoke<MediaRef>("media_upload", bytes, { headers: { "x-filename": encodeURIComponent(file.name), "x-file-mime": file.type || "application/octet-stream" } });
+      const media = await uploadMedia(file, file.name, file.type || "application/octet-stream", invokeIpc, controller.signal);
       changePending(key, (items) => items.map((x) => x.id === id ? { ...x, media, state: "ready" } : x));
     } catch (e) {
-      changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: String(e) } : x));
+      changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: e instanceof Error ? e.message : String(e) } : x));
+    } finally {
+      if (uploadAborts.current.get(id) === controller) uploadAborts.current.delete(id);
     }
   }
   function addFiles(files: File[]) {
@@ -1673,7 +1682,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const room = MAX_ATTACHMENTS - current.length;
     if (files.length > room) setError(`Up to ${MAX_ATTACHMENTS} attachments per message.`);
     for (const file of files.slice(0, Math.max(0, room))) {
-      if (!file.size || file.size > MAX_FILE_BYTES) { setError(`${file.name}: file is empty or exceeds 25 MB.`); continue; }
+      const refused = file.size ? tooLargeLine(file.size) : "This file is empty.";
+      if (refused) { setError(`${file.name}: ${refused}`); continue; }
       const id = crypto.randomUUID();
       const preview = /^image\/(png|jpeg|gif|webp)$/.test(file.type) ? URL.createObjectURL(file) : null;
       changePending(key, (items) => [...items, { id, file, preview, state: "uploading" }]);
@@ -1696,10 +1706,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
       let outcome = "Voice message removed";
       try {
         if (!voiceMounted.current || !pendingStore.current.get(key)?.some((x) => x.id === id)) return;
-        if (clip.file.size > MAX_FILE_BYTES) throw new Error("Recording exceeds 25 MB.");
+        if (clip.file.size > MAX_VOICE_BYTES) throw new Error("Recording exceeds 25 MB.");
         await persistVoice(key, id);
-        const bytes = new Uint8Array(await clip.file.arrayBuffer());
-        const media = clip.media ?? await invoke<MediaRef>("media_upload", bytes, { headers: { "x-filename": encodeURIComponent(clip.file.name), "x-file-mime": clip.file.type } });
+        if (!pendingStore.current.get(key)?.some((x) => x.id === id)) return; // removed while it was being saved
+        const controller = new AbortController();
+        uploadAborts.current.set(id, controller);
+        const media = await Promise.resolve(clip.media ?? uploadMedia(clip.file, clip.file.name, clip.file.type, invokeIpc, controller.signal))
+          .finally(() => { if (uploadAborts.current.get(id) === controller) uploadAborts.current.delete(id); });
         changePending(key, (items) => items.map((x) => x.id === id ? { ...x, media } : x));
         if (!voiceMounted.current || !pendingStore.current.get(key)?.some((x) => x.id === id)) return;
         await persistVoice(key, id);
@@ -1733,6 +1746,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
         void loadRooms().catch(() => {});
       } catch (e) {
         if (!voiceMounted.current) return;
+        // Removed while it was going up: that's the end of it, and the next voice note can have its turn.
+        if (!pendingStore.current.get(key)?.some((x) => x.id === id)) return;
         changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: String(e) } : x));
         await persistVoice(key, id).catch(() => {});
         setError(`Voice message failed: ${netError(e)}`);
@@ -2131,7 +2146,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // T-132: from here no draft is saved (a send still on its way, or an identity arriving, would otherwise save one back after the wipe);
     // a failed Forget gives saving back
     draftsForgotten.current = true;
-    try { voiceMounted.current = false; await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
+    try { voiceMounted.current = false; uploadAborts.current.forEach((upload) => upload.abort()); await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
       forgetDrafts(); forgetComposer(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar(); forgetMessages(); forgetWork(); forgetUsage();
       try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith(CHAT_DRAFT_PREFIX) || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY || key === UNI_PLACE_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
       onForget(); } catch (e) { voiceMounted.current = true; draftsForgotten.current = false; setError(String(e)); }

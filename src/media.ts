@@ -26,8 +26,10 @@ function urlPath(url: string): string {
   try { return new URL(url).pathname; } catch { return ""; }
 }
 
-export function attachmentKind(m: Pick<MediaRef, "url" | "mime">): AttachmentKind {
+export function attachmentKind(m: Pick<MediaRef, "url" | "mime"> & { filename?: string | null; dim?: string | null }): AttachmentKind {
   const mime = (m.mime ?? "").toLowerCase();
+  // Sound the app wrapped with a still frame, since the relay refuses an MP4 with no picture: it's still sound.
+  if (mime === "video/mp4" && m.dim === "640x360" && /\.m4a$/i.test(m.filename ?? "")) return "audio";
   // SVG can carry script; never render it as an image.
   if (mime === "image/svg+xml") return "file";
   if (mime.startsWith("image/")) return "image";

@@ -52,7 +52,9 @@ test.beforeEach(async ({ page }) => {
           case 'journal_pending': case 'journal_list': return [];
           case 'journal_flush': return { sent: [], remaining: 0, error: null };
           case 'refresh': return { pubkey: 'a'.repeat(64), total_items: 0, channel_errors: {}, truncated_channels: [] };
-          case 'media_upload': keep(); return { url: 'https://example.invalid/v.webm', mime: 'audio/webm', name: 'v.webm', size: 4 };
+          // A room's upload moves in pieces; what reaches Rust at the end is the pieces, with the name and type beside them.
+          case 'media_upload_chunk': w.staged = [...(w.staged ?? []), ...args]; return null;
+          case 'media_upload': w.uploads.push({ cmd, bytes: w.staged ?? [], headers: { 'x-filename': encodeURIComponent(args.filename), 'x-file-mime': args.mime } }); w.staged = []; return { url: 'https://example.invalid/v.webm', mime: 'audio/webm', name: 'v.webm', size: 4 };
           case 'journal_save_voice': keep(); return { sent: ['entry'], remaining: 0, error: null };
           case 'prepare_voice_message': return JSON.stringify({ id: 'voice:' + crypto.randomUUID() });
           case 'post_message': return { ref: 'audio-message-ref', channel: args.channel };

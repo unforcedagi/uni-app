@@ -10,6 +10,9 @@ const ref = (url: string, extra: Partial<MediaRef> = {}): MediaRef => ({ url, mi
 assert.equal(attachmentKind(ref("x", { mime: "image/png" })), "image");
 assert.equal(attachmentKind(ref("x", { mime: "image/svg+xml" })), "file");
 assert.equal(attachmentKind(ref("x", { mime: "video/mp4" })), "video");
+assert.equal(attachmentKind(ref("x", { mime: "video/mp4", filename: "memo.m4a", dim: "640x360" })), "audio", "sound the app wrapped with a still frame");
+assert.equal(attachmentKind(ref("x", { mime: "video/mp4", filename: "odd.m4a", dim: "1920x1080" })), "video", "a real picture under an odd name stays a picture");
+assert.equal(attachmentKind(ref("x", { mime: "video/mp4", filename: "clip.mp4" })), "video");
 assert.equal(attachmentKind(ref("x", { mime: "audio/ogg" })), "audio");
 assert.equal(attachmentKind(ref("x", { mime: "application/pdf" })), "file");
 assert.equal(attachmentKind(ref(`${O}/media/${H}.webp`)), "image");
