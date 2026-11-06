@@ -79,7 +79,7 @@ test('the Mac and the Pixel keep their motion: buttons answer, the toast rises',
   test.skip(info.project.name === 'daylight', 'the Mac and the Pixel (an Android phone: its user agent says Android too)');
   await boot(page);
   expect(await calmOnRoot(page)).toBeNull();
-  const button = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true });
+  const button = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true, includeHidden: true });
   expect(parseFloat(await button.evaluate((b) => getComputedStyle(b).transitionDuration))).toBeGreaterThan(0);
   await openSettings(page);
   await expect(page.getByRole('checkbox', { name: /Calm screen/ })).not.toBeChecked();

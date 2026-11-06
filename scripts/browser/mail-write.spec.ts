@@ -16,14 +16,14 @@ const newButton = (page: Page) => (stacked(page) ? page.getByRole('navigation', 
 
 test('with no writes offered, nothing in Mail writes and opening a thread leaves it unread', async ({ page }) => {
   await boot(page);
-  await expect(mail(page).locator('.mail-account')).toHaveText('robin@example.com · read-only');
+  await expect(mail(page).locator('.mail-account')).toHaveText('robin@example.com · reading only');
   await rows(page).nth(0).click();
   const thread = page.getByRole('region', { name: 'Thread: Planning the garden week' });
-  await expect(thread.locator('.mail-card').last()).toContainText('DRAFT · BY UNI · NOT SENT');
+  await expect(thread.locator('.mail-card').last()).toContainText('Draft by Uni · not sent');
   await expect(thread.getByRole('button', { name: /Review and send/ })).toHaveCount(0);
   for (const name of ['Mark unread', 'Mark read', '⚐ Flag', 'Archive']) await expect(thread.getByRole('button', { name, exact: true })).toHaveCount(0);
-  await expect(thread.getByRole('button', { name: /^Reply/ })).toBeDisabled();
-  await expect(newButton(page)).toBeDisabled();
+  await expect(thread.getByRole('button', { name: /^Reply/ })).toHaveCount(0);
+  await expect(newButton(page)).toHaveCount(0);
   await page.waitForTimeout(300);
   for (const cmd of writeCmds) expect(await calls(page, cmd), cmd).toEqual([]);
 });
@@ -75,10 +75,10 @@ test("Uni's draft: you review exactly what will go, send it yourself once, and t
   await expect(thread.locator('.mail-card-draft')).toHaveCount(2);
   await thread.locator('.mail-card').last().getByRole('button', { name: 'Review and send it yourself…' }).click();
   const draft = page.getByRole('region', { name: "Review Uni's draft" });
-  await expect(draft.getByRole('group', { name: 'From' })).toContainText('YOU');
+  await expect(draft.getByRole('group', { name: 'From' })).toContainText('You');
   await expect(draft.getByRole('group', { name: 'From' })).toContainText('robin@example.com');
   await expect(draft.getByRole('group', { name: 'From' }).getByRole('radio')).toHaveCount(0);
-  await expect(draft).toContainText('DRAFT · BY UNI · NOT SENT');
+  await expect(draft).toContainText('Draft by Uni · not sent');
   await expect(draft).toContainText("Sending this discards Uni's 1 earlier draft in this thread.");
   await expect(draft.getByRole('textbox', { name: 'To' })).toHaveValue('Mara Quill <mara@example.org>');
   await draft.getByRole('textbox', { name: 'Message' }).fill('Monday suits me. See you at nine.\n\nRobin');
@@ -108,7 +108,7 @@ test("Uni's draft: you review exactly what will go, send it yourself once, and t
   await review.getByRole('button', { name: 'Close' }).click();
   // the thread again: the sent copy says Uni drafted it and you sent it; Uni's older draft went with it
   await expect(thread.locator('.mail-card-draft')).toHaveCount(0);
-  await expect(thread.locator('.mail-card').last()).toContainText('DRAFTED BY UNI · SENT BY YOU');
+  await expect(thread.locator('.mail-card').last()).toContainText('Drafted by Uni · sent by you');
   await shot(page, 'w4-sent');
 });
 
@@ -136,7 +136,7 @@ test("a new message from the combined view has no sender until you pick one, and
   await c.getByRole('button', { name: /^Send as Uni/ }).click();
   const review = page.getByRole('region', { name: 'Review before sending' });
   await expect(review).toContainText("Uni's outbound rules check this before it goes.");
-  await expect(review.getByRole('group', { name: 'From' })).toContainText('UNI');
+  await expect(review.getByRole('group', { name: 'From' })).toContainText('Uni');
   await review.getByRole('button', { name: 'Send as Uni, from uni@example.com' }).click();
   await expect(review.getByText('Sent as Uni.')).toBeVisible();
   const asUni = await calls(page, 'mail_send_as_uni');
@@ -160,7 +160,7 @@ test("a reply goes from the thread's mailbox; a retry is the same send; an unkno
   await row(page, 'Question about the reading group').click();
   await page.getByRole('region', { name: 'Thread: Question about the reading group' }).getByRole('button', { name: 'Reply as Uni, from uni@example.com' }).click();
   let c = page.getByRole('region', { name: 'Reply' });
-  await expect(c.getByRole('group', { name: 'From' })).toContainText('UNI');
+  await expect(c.getByRole('group', { name: 'From' })).toContainText('Uni');
   await expect(c.getByRole('group', { name: 'From' })).toContainText('the mailbox this thread is in');
   await expect(c.getByRole('radio')).toHaveCount(0);
   await expect(c.getByRole('textbox', { name: 'To' })).toHaveValue('Ada Moss <ada@example.org>');
@@ -344,10 +344,10 @@ test("a send as Uni that got no answer can't be edited or sent under a new id, a
 test('the composer offers only what the bridge offers', async ({ page }) => {
   // your account offers save and send but not review: nothing can be sent from it, so neither New nor Reply opens
   await boot(page, 'ok', { ops: { A: ['mark_seen', 'draft.save', 'send', 'send.check'], U: ['mark_seen'] } });
-  await expect(newButton(page)).toBeDisabled();
+  await expect(newButton(page)).toHaveCount(0);
   await rows(page).nth(0).click();
   const thread = page.getByRole('region', { name: 'Thread: Planning the garden week' });
-  await expect(thread.getByRole('button', { name: /^Reply/ })).toBeDisabled();
+  await expect(thread.getByRole('button', { name: /^Reply/ })).toHaveCount(0);
   await expect(thread.getByRole('button', { name: /Review and send/ })).toHaveCount(0);
   await expect(thread.getByRole('button', { name: 'Archive' })).toHaveCount(0);
   await expect(thread.getByRole('button', { name: '⚐ Flag' })).toHaveCount(0);

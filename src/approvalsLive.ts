@@ -71,7 +71,7 @@ export function useApprovals(opts: { identity: string | null; enabled: boolean; 
     const fresh = list.filter((a) => !done.includes(a.ref));
     if (!fresh.length) return;
     localStorage.setItem(NOTIFIED_KEY, JSON.stringify([...done, ...fresh.map((a) => a.ref)].slice(-200)));
-    for (const a of fresh) void notifyPlain({ author: "Hermes", room: optsRef.current.roomName(a.channel) ?? "a room", preview: `Needs your OK to run: ${commandLine(a)}`, looking: optsRef.current.looking(a.channel, a.root) });
+    for (const a of fresh) void notifyPlain({ author: "Uni", room: optsRef.current.roomName(a.channel) ?? "a room", preview: `Needs your OK to run: ${commandLine(a)}`, looking: optsRef.current.looking(a.channel, a.root) });
   }, [list, opts.roomsReady]);
   return { list, ended, failed };
 }

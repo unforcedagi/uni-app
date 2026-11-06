@@ -33,7 +33,7 @@ export function ApprovalRows({ approvals, className = "cp-list cp-approvals" }: 
     }
     const how = `Reply ${answersLine(a)} · ${endsLine(a, clock)}`;
     return <li key={a.ref} className="cp-approval" data-ref={a.ref} data-channel={a.channel}>
-      <button type="button" className="cp-need cp-approval-open" aria-label={`Hermes needs your OK in ${where} to run ${a.command}. ${a.why ? `Flagged: ${a.why}. ` : ""}${how}`} onClick={() => open(a)}>
+      <button type="button" className="cp-need cp-approval-open" aria-label={`Uni needs your OK in ${where} to run ${a.command}. ${a.why ? `Flagged: ${a.why}. ` : ""}${how}`} onClick={() => open(a)}>
         <i aria-hidden="true">!</i>
         <span className="cp-approval-text">
           <span className="cp-approval-lead">{a.kind === "smart-deny" ? "Override needs your OK" : "Needs your OK"} in <b>{where}</b></span>
@@ -56,7 +56,7 @@ export function ApprovalBanner({ approvals, onShow }: { approvals: readonly Appr
     <button type="button" className="approval-banner-show" onClick={() => onShow(a)}>Show</button>
   </div>;
   return <div className="approval-banner" role="status" data-ref={a.ref}>
-    <span className="approval-banner-text"><b>Hermes needs your OK</b> to run <code>{commandLine(a)}</code>. Reply {answersLine(a)} below · {endsLine(a, clock)}{approvals.length > 1 ? ` · ${approvals.length - 1} more waiting` : ""}</span>
+    <span className="approval-banner-text"><b>Uni needs your OK</b> to run <code>{commandLine(a)}</code>. Reply {answersLine(a)} below · {endsLine(a, clock)}{approvals.length > 1 ? ` · ${approvals.length - 1} more waiting` : ""}</span>
     <button type="button" className="approval-banner-show" onClick={() => onShow(a)}>Show</button>
   </div>;
 }

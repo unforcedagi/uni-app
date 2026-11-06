@@ -15,8 +15,8 @@ test('the full flow: switch accounts and the combined view, open a thread, searc
   const order = ["Your mail. Mara Quill: Re: Planning the garden week", "Uni's mail. Monitor: Server report", "Uni's mail. Ada Moss: Question about the reading group",
     "Your mail. Theo Brandt: Workshop photos", "Your mail. Riverside Library: Your hold", "Uni's mail. Billing: Invoice for October"];
   for (const [i, name] of order.entries()) await expect(rows(page).nth(i)).toHaveAccessibleName(new RegExp(name.replace(/[.?]/g, '\\$&')));
-  await expect(rows(page).nth(0).locator('.mail-who')).toHaveText('YOU');
-  await expect(rows(page).nth(1).locator('.mail-who')).toHaveText('UNI');
+  await expect(rows(page).nth(0).locator('.mail-who')).toHaveText('You');
+  await expect(rows(page).nth(1).locator('.mail-who')).toHaveText('Uni');
   await expect(rows(page).nth(0)).toContainText('Uni: Needs you: Mara asks which day to start.');
   await expect(rows(page).nth(3)).toContainText('<b>Two files</b> pass the checks', { useInnerText: true });
   await expect(rows(page).nth(3).locator('b')).toHaveCount(0, { timeout: 1 });
@@ -28,11 +28,11 @@ test('the full flow: switch accounts and the combined view, open a thread, searc
   await pickBox(page, "Uni's mailboxes", 'Inbox');
   await expect(m.locator('.mail-list-head strong')).toHaveText('Uni · Inbox');
   await expect(rows(page)).toHaveCount(3);
-  for (const t of await rows(page).locator('.mail-who').allInnerTexts()) expect(t).toBe('UNI');
+  for (const t of await rows(page).locator('.mail-who').allInnerTexts()) expect(t).toBe('Uni');
   await pickBox(page, 'Your mailboxes', 'Inbox');
   await expect(m.locator('.mail-list-head strong')).toHaveText('Your · Inbox');
   await expect(rows(page)).toHaveCount(3);
-  for (const t of await rows(page).locator('.mail-who').allInnerTexts()) expect(t).toBe('YOU');
+  for (const t of await rows(page).locator('.mail-who').allInnerTexts()) expect(t).toBe('You');
   await pickBox(page, "Uni's mailboxes", 'Drafts');
   await expect(rows(page)).toHaveCount(1);
   await expect(rows(page).first()).toHaveAccessibleName(/^Uni's mail\. Draft\. To Ada Moss/);
@@ -41,8 +41,8 @@ test('the full flow: switch accounts and the combined view, open a thread, searc
   // each group has its tag in its head
   if (boxesHidden(page)) await page.getByRole('button', { name: '☰ Mailboxes' }).click();
   const nav = page.getByRole('navigation', { name: 'Mailboxes' });
-  await expect(nav.getByRole('group', { name: 'Your mailboxes' }).locator('.mail-acct-head')).toHaveText(/YOU\s*robin@example\.com/);
-  await expect(nav.getByRole('group', { name: "Uni's mailboxes" }).locator('.mail-acct-head')).toHaveText(/UNI\s*uni@example\.com/);
+  await expect(nav.getByRole('group', { name: 'Your mailboxes' }).locator('.mail-acct-head')).toHaveText(/You\s*robin@example\.com/);
+  await expect(nav.getByRole('group', { name: "Uni's mailboxes" }).locator('.mail-acct-head')).toHaveText(/Uni\s*uni@example\.com/);
   await expect(nav.getByRole('group', { name: "Uni's mailboxes" }).locator('.who-uni').first()).toHaveCSS('border-top-style', 'dashed');
   await shot(page, '2-mailboxes');
   if (boxesHidden(page)) await nav.getByRole('button', { name: /^All inboxes/ }).click();
@@ -51,7 +51,7 @@ test('the full flow: switch accounts and the combined view, open a thread, searc
   await rows(page).nth(0).click();
   const thread = page.getByRole('region', { name: 'Thread: Planning the garden week' });
   await expect(thread.getByRole('heading', { name: 'Planning the garden week' })).toBeVisible();
-  await expect(thread.locator('.mail-thread-where')).toContainText('YOU');
+  await expect(thread.locator('.mail-thread-where')).toContainText('You');
   await expect(thread.locator('.mail-thread-where')).toContainText('In your mail · 3 messages');
   await expect(thread.locator('.mail-card')).toHaveCount(4);
   await expect(thread.locator('.mail-card').nth(0)).toContainText('marmalade jars');
@@ -228,10 +228,10 @@ test("Refresh after Uni's mailbox stops being shared shows none of it, and never
   await page.evaluate(() => { (window as any).__uniGone = true; (window as any).__threadsDelay = 2500; });
   await page.getByRole('button', { name: 'Refresh' }).click();
   await expect(rows(page)).toHaveCount(3, { timeout: 1500 });
-  for (const t of await rows(page).locator('.mail-who').allInnerTexts()) expect(t).toBe('YOU');
+  for (const t of await rows(page).locator('.mail-who').allInnerTexts()) expect(t).toBe('You');
   await page.waitForTimeout(1500);
   await expect(rows(page)).toHaveCount(3);
-  for (const t of await rows(page).locator('.mail-who').allInnerTexts()) expect(t).toBe('YOU');
+  for (const t of await rows(page).locator('.mail-who').allInnerTexts()) expect(t).toBe('You');
   await expect(page.getByText('Monitor')).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Thread: Server report for Tuesday' })).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
@@ -252,9 +252,9 @@ test("Uni's own draft, in Uni's mail, reads as Uni's and not sent", async ({ pag
   await boot(page);
   await rows(page).nth(2).click();
   const thread = page.getByRole('region', { name: 'Thread: Question about the reading group' });
-  await expect(thread.locator('.mail-thread-where')).toContainText('UNI');
+  await expect(thread.locator('.mail-thread-where')).toContainText('Uni');
   await expect(thread.locator('.mail-thread-where')).toContainText("In Uni's mail · 2 messages");
-  await expect(thread.locator('.mail-card-draft')).toContainText("UNI'S OWN DRAFT · NOT SENT");
+  await expect(thread.locator('.mail-card-draft')).toContainText("Uni's own draft · not sent");
   await expect(thread.getByRole('note').filter({ hasText: "Uni's triage note" })).toHaveCount(0);
 });
 
@@ -302,10 +302,7 @@ test('on a phone one pane shows at a time, with Search and New at the bottom', a
   await boot(page);
   await expect(page.locator('.mail-boxes')).toBeHidden();
   const bar = page.getByRole('navigation', { name: 'Mail actions' });
-  await expect(bar).toBeVisible();
-  const barBox = (await bar.boundingBox())!;
-  const listBox = (await page.locator('.mail-list').boundingBox())!;
-  expect(barBox.y).toBeGreaterThanOrEqual(listBox.y + listBox.height - 1);
+  await expect(bar).toBeHidden(); // T-335 as Aaron: reading only, on the list: its own field is the search, and there's nothing to send
   await rows(page).first().click();
   await expect(page.locator('.mail-list')).toBeHidden();
   await bar.getByRole('button', { name: 'Search' }).click();

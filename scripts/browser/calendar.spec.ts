@@ -3,6 +3,7 @@
 // the times read are Denver's. Run: pnpm test:calendar (CAL_SHOTS=<dir> keeps a screenshot of each step).
 import { expect, test } from '@playwright/test';
 import { beside, boot, cal, detail, ev, isPhone, noSidewaysScroll, ops, pickView, shot } from './calMock';
+import { railGo } from './railGo';
 
 test.describe('T-229 Calendar', () => {
   test('every view shows the door\'s events in the calendar\'s zone', async ({ page }) => {
@@ -197,7 +198,7 @@ test.describe('T-229 Calendar', () => {
     await vis.getByRole('radio', { name: /^Public/ }).check();
     await shot(page, 'visibility');
     await vis.getByRole('button', { name: 'Save who can see it' }).click();
-    await expect(detail(page).locator('.cal-detail-marks')).toContainText('PUBLIC');
+    await expect(detail(page).locator('.cal-detail-marks')).toContainText('Public');
     expect(ops(d).at(-1)).toMatchObject({ fields: { visibility: 'public', shared_with: [] } });
     await vis.getByRole('radio', { name: /^Private/ }).check();
     await vis.getByRole('button', { name: 'Save who can see it' }).click();
@@ -311,8 +312,8 @@ test.describe('T-229 Calendar', () => {
   test('the rail shows Calendar only once the door has answered this key', async ({ page }) => {
     const d = await boot(page, { open: false });
     const rail = page.getByRole('navigation', { name: 'Main navigation' });
-    await expect(rail.getByRole('button', { name: 'Calendar' })).toBeVisible({ timeout: 8000 });
-    await rail.getByRole('button', { name: 'Calendar' }).click();
+    await expect(rail.getByRole('button', { name: 'Calendar', includeHidden: true })).toHaveCount(1, { timeout: 8000 });
+    await railGo(page, 'Calendar');
     await expect(cal(page)).toBeVisible();
     await noSidewaysScroll(page);
     // a door that stops taking this key: gone from the rail at the next start

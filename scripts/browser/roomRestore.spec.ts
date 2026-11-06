@@ -39,7 +39,7 @@ async function boot(page: Page) {
   await fakeMessages(page);
   await bootAreas(page, 'seed', { tree: true, atlas: true, longChat: true, pinned: true });
   // Messages joins the rail once its door has answered (a few seconds after start)
-  await expect(rail(page).getByRole('button', { name: 'Messages' })).toBeVisible({ timeout: 10_000 });
+  await expect(rail(page).getByRole('button', { name: 'Messages', includeHidden: true })).toHaveCount(1, { timeout: 10_000 });
 }
 
 /** Open a room from the room tree (a phone opens the tree first, from the room's header). */
@@ -148,7 +148,7 @@ test.describe('T-294 back to the room you were in', () => {
     await flip(page, 'hidden');
     await page.reload();
     await expect(messagesView(page)).toBeVisible();
-    await expect(rail(page).getByRole('button', { name: 'Messages' })).toBeVisible({ timeout: 10_000 });
+    await expect(rail(page).getByRole('button', { name: 'Messages', includeHidden: true })).toHaveCount(1, { timeout: 10_000 });
     await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
     await expectSamePlace(page, was);
   });

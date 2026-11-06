@@ -66,7 +66,7 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await row.getByRole('button').click();
     const prompt = page.locator(`.message.approval-waiting[data-ref="${ref}"]`);
     await expect(prompt).toBeVisible();
-    await expect(page.locator('.approval-banner')).toContainText('Hermes needs your OK to run git branch -D feature/example-cleanup. Reply /approve, /approve session or /deny below');
+    await expect(page.locator('.approval-banner')).toContainText('Uni needs your OK to run git branch -D feature/example-cleanup. Reply /approve, /approve session or /deny below');
     await expect.poll(() => composerFocused(page)).toBe(true);
     expect(await page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').length)).toBe(0);
     await shot(page, '02-room');

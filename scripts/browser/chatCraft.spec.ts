@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { openRailMore } from './railGo';
 
 // T-132: code blocks you can read and copy, and composer drafts that survive a reload without crossing rooms, threads or identities.
 // The real app path in the browser; only the Tauri IPC (and the clipboard behind it) is faked. Synthetic data only.
@@ -326,6 +327,7 @@ test.describe('drafts', () => {
     const saved = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('uni.chatDraft.')).length);
     expect(await saved()).toBe(2);
     await composer(page).blur(); // a phone hides its bottom bar while the composer has focus
+    await openRailMore(page);
     await press(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }));
     await press(page.getByRole('button', { name: 'Forget this device key', exact: true }));
     await press(page.getByRole('button', { name: /Tap again to forget/ }));
@@ -390,6 +392,7 @@ test.describe('drafts', () => {
     await expect(garden).toHaveValue(INDENTED);
     await garden.blur(); // a phone hides its bottom bar while the composer has focus
     const saved = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('uni.chatDraft.')).length);
+    await openRailMore(page);
     await press(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }));
     await press(page.getByRole('button', { name: 'Forget this device key', exact: true }));
     await press(page.getByRole('button', { name: /Tap again to forget/ }));
@@ -414,6 +417,7 @@ test.describe('drafts', () => {
     await expect(page.locator('[data-outgoing="true"]')).toBeVisible();
     await garden.blur();
     const saved = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('uni.chatDraft.')).length);
+    await openRailMore(page);
     await press(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }));
     await press(page.getByRole('button', { name: 'Forget this device key', exact: true }));
     await press(page.getByRole('button', { name: /Tap again to forget/ }));

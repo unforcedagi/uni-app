@@ -152,7 +152,7 @@ test('a held draft that changed after you saw it is refused and never sent; one 
   await page.evaluate(() => { (window as any).__msgs.find((m: any) => m.id === 'h2').text += '\nP.S. And our bank details.'; });
   await mail(page).getByRole('button', { name: 'Refresh' }).click();
   const other = await openHeld(page, QUOTE);
-  await expect(other.locator('.mail-unverified')).toContainText("CHANGEDThis draft changed after Uni's rules held it, so the bridge won't send it.");
+  await expect(other.locator('.mail-unverified')).toContainText("ChangedThis draft changed after Uni's rules held it, so the bridge won't send it.");
   await expect(other.locator('.mail-text')).toContainText('P.S. And our bank details.');
   await expect(other.getByRole('button', { name: /^Send it/ })).toHaveCount(0);
   await expect(other.getByRole('button', { name: /^Don't send/ })).toBeVisible();
@@ -279,7 +279,7 @@ test("a file whose bytes aren't the listed ones doesn't open, and says so", asyn
   await expect(h.getByRole('button', { name: 'Open supper-budget.pdf' })).toContainText('PDF · 13 KB · Not opened');
   // the listing it was shown is stale: Send it waits for a new one, Don't send stays
   await expect(h.getByRole('button', { name: /^Send it/ })).toHaveCount(0);
-  await expect(h.getByRole('note').filter({ hasText: 'FILE NOT CHECKED' })).toContainText("so Send it isn't offered");
+  await expect(h.getByRole('note').filter({ hasText: 'File not checked' })).toContainText("so Send it isn't offered");
   await expect(h.getByRole('button', { name: /^Don't send/ })).toBeVisible();
 });
 
@@ -295,7 +295,7 @@ test("a file whose contents don't match its name withholds Send it; a network fa
   await expect(q.getByRole('button', { name: /^Send it/ })).toBeVisible();
   // coming back to the first doesn't offer Send it again
   const again = await openHeld(page, ROTA);
-  await expect(again.getByRole('note').filter({ hasText: 'FILE NOT CHECKED' })).toBeVisible();
+  await expect(again.getByRole('note').filter({ hasText: 'File not checked' })).toBeVisible();
   await expect(again.getByRole('button', { name: /^Send it/ })).toHaveCount(0);
 });
 
