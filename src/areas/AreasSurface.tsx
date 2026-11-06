@@ -105,7 +105,8 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
   /** T-335: this surface is the All place: every area's room at once, with the way back to where you came from. */
   allPlace?: { backTo: string; from?: { path?: string; channel?: string } | null; onBack: () => void;
     /** T-335 one fluid surface: the room in focus over All, how to put one there and how it ends; `onPage`: from focus to that room's own page. */
-    focus: AllFocusState | null; onFocus: (room: string, ref?: string | null, root?: string | null) => void; onUnfocus: () => void; onPage: (room: string) => void } | null;
+    focus: AllFocusState | null; onFocus: (room: string, ref?: string | null, root?: string | null) => void;
+    /** Ends the focus (a tap on All behind it). */ onUnfocus: () => void; /** One step: a thread to its room, the room to All. */ onFocusBack: () => void; onPage: (room: string) => void } | null;
   identity: string | null;
   /** T-200: a note is open beside the conversation. The chat keeps the room: the companion folds to its tab, and the tree to its icons
    *  on a window under 1400px. Either unfolds again for as long as the note is open; the choices kept on this device stay as they were. */
@@ -481,7 +482,7 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
     return <div className="areas-home tree-home-wrap all-surface" data-focus={focus ? (focus.leaving ? "leaving" : "open") : undefined}>
       <div className="all-behind" inert={!!focus && !focus.leaving}>{home}</div>
       {focus && <><button type="button" className="all-focus-scrim" aria-label="Back to All" tabIndex={-1} onClick={allPlace.onUnfocus} />
-        <AllFocusSheet key={focus.room} id={focus.room} name={focusName} stands={focusDoor?.stands ?? null} root={focus.root} replies={focusReplies} leaving={focus.leaving} onBack={allPlace.onUnfocus} onPage={() => allPlace.onPage(focus.room)}>
+        <AllFocusSheet key={focus.room} id={focus.room} name={focusName} stands={focusDoor?.stands ?? null} root={focus.root} replies={focusReplies} leaving={focus.leaving} onBack={allPlace.onFocusBack} onPage={() => allPlace.onPage(focus.room)}>
           <ApprovalElsewhere approvals={approvalsAll.list.filter((x) => !privateChannel(x.channel))} here={focus.room} />
           <div className="sr-chat" data-chat={focusChat ? "open" : "waiting"}>{focusChat ? focusChat.render(null, focusSlug ? `Message #${focusSlug}` : undefined, focusName) : <ChatWait placeholder={focusSlug ? `Message #${focusSlug}` : "Message"} retry={null} />}</div>
         </AllFocusSheet></>}

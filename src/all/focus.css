@@ -10,10 +10,11 @@
 .all-surface[data-focus="open"] .all-behind { opacity: .3; transform: translateY(-12px) scale(.94); will-change: transform, opacity; pointer-events: none; user-select: none; }
 .all-surface[data-focus="leaving"] .all-behind { transition-duration: 170ms; }
 
-.all-focus-scrim { all: unset; position: absolute; inset: 0; z-index: 1; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+/* No z-index on these two: they paint over All by their order, and what opens inside the room (its message sheet) still stands over the rail, as on a room's page. */
+.all-focus-scrim { all: unset; position: absolute; inset: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .all-surface[data-focus="leaving"] .all-focus-scrim { display: none; }
 
-.all-focus { position: absolute; inset: 46px 0 0; z-index: 2; display: flex; flex-direction: column; min-height: 0; overflow: hidden; outline: none; background: var(--g-ground);
+.all-focus { position: absolute; inset: 46px 0 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; outline: none; background: var(--g-ground);
   border-top: var(--g-hair) solid var(--g-line-strong); border-radius: 18px 18px 0 0; box-shadow: var(--g-shadow-2);
   animation: all-focus-in 240ms var(--g-ease); }
 .all-focus[data-leaving] { pointer-events: none; animation: all-focus-out 170ms var(--g-ease) forwards; }

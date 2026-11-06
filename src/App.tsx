@@ -700,7 +700,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const room = chatRoom();
     if (room && by < 0 && asidesRef.current[room]) { backAside(room); return; }
     if (room && by > 0 && forwardAside(room)) return;
-    if (by < 0 && allFocusRef.current) { stepBackInFocus(); return; }
+    if (by < 0 && allFocusRef.current) { if (panel || searchOpen) { setPanel(null); setSearchOpen(false); } else stepBackInFocus(); return; }
     const hop = histStep(histRef.current, by);
     if (!hop) return;
     histRef.current = hop.history; setHist(hop.history);
@@ -1298,7 +1298,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // and the newest is a tap away (Jump to latest)
     // (a follow-up sent while an answer is held from its top anchors too: that reader is in the conversation, not the history)
     const list = listRef.current, holding = !!anchor.current && anchor.current.view === view && !anchor.current.free;
-    if (list && !stickToEnd.current && !holding && list.scrollHeight - list.scrollTop - list.clientHeight > list.clientHeight / 2) return;
+    // (a reply from a room in focus, opened at an older message, is the conversation: it shows; with a note beside it, that reader keeps the place too)
+    const reading = !allFocusRef.current || !!asidesRef.current[allFocusRef.current.room];
+    if (reading && list && !stickToEnd.current && !holding && list.scrollHeight - list.scrollTop - list.clientHeight > list.clientHeight / 2) return;
     anchor.current = { view, ref: null, placed: false };
     stickToEnd.current = false; settleUntil.current = 0; pinned.current = null;
   }
@@ -1885,7 +1887,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (!matchMedia("(pointer: coarse)").matches) focusComposer.current = true;
     setChecking(null);
     if (channelRef.current !== room || root !== threadRoot) navigate(room, threadRoot);
-    if (ref) { focusTries.current = 0; setFocusRef(ref); }
+    // only this opening's message: a mark from a visit that was cut short doesn't come back
+    focusTries.current = 0;
+    setFocusRef(ref);
   }
   /** Ends the focus: All is in reach at once; the room's pane goes when it has finished leaving. */
   function endAllFocus() {
@@ -1894,6 +1898,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // the keyboard goes as the room does
     if (document.activeElement instanceof HTMLElement && document.activeElement.closest(".all-focus")) document.activeElement.blur();
     setComposerFocused(false);
+    setFocusRef(null);
     const finish = () => { focusLeaving.current = null; setAllFocus(null); if (activeTab(tabsRef.current)?.kind === "all") navigate(null, null); };
     if (calmMotion()) { finish(); return; }
     setAllFocus({ ...f, leaving: true });
@@ -2712,7 +2717,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       : active?.kind === "posts" ? <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} backTo={originTitle} onBack={() => openTarget(origin())} />
       : active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} backTo={originTitle} onBack={() => openTarget(origin())} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : shellOpen && active ? <AreasSurface allPlace={allOpen ? { backTo: originTitle, from: uniPlace.current, onBack: () => openTarget(origin()), focus: allFocus, onFocus: focusInAll, onUnfocus: endAllFocus, onPage: (id) => { openTarget(roomTarget(id), "focus"); pageFromAll.current = true; } } : null} noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} loose={shellLoose} thread={shellThread} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
+      : shellOpen && active ? <AreasSurface allPlace={allOpen ? { backTo: originTitle, from: uniPlace.current, onBack: () => openTarget(origin()), focus: allFocus, onFocus: focusInAll, onUnfocus: endAllFocus, onFocusBack: stepBackInFocus, onPage: (id) => { openTarget(roomTarget(id), "focus"); pageFromAll.current = true; } } : null} noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} loose={shellLoose} thread={shellThread} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>

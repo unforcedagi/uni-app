@@ -248,6 +248,86 @@ test.describe('a room in focus', () => {
     expect(Math.abs(await feed(page).evaluate((el) => el.scrollTop) - was)).toBeLessThan(2);
   });
 
+  test('the head\'s own Back steps the same way: a thread to its room, the room to All', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => (window as any).__arrive('ch-choir', 'Priya', 'Altos are short two copies.', 0, false, 'c3'));
+    await allIn(page);
+    await row(page, 'c3').getByRole('button', { name: '1 reply' }).click();
+    await sheet(page).getByRole('button', { name: 'Back to Choir' }).click();
+    await expect(sheet(page).getByRole('button', { name: 'Back to All' })).toBeVisible();
+    await expect(sheet(page).locator('.message-list')).toContainText('Sheet music');
+    await backToAll(page).click();
+    await expect(sheet(page)).toHaveCount(0);
+  });
+
+  test('your reply is on screen after you send it, even from an older message', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await middleOn(page, 'c1');
+    await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').first().click();
+    await expect(sheet(page).locator('.search-focus')).toBeVisible();
+    await roomBox(page, 'kiln-studio').fill('Sent from far up the thread.');
+    await sheet(page).getByRole('button', { name: 'Send message' }).click();
+    await expect(sheet(page).locator('article.message').filter({ hasText: 'Sent from far up the thread.' })).toBeInViewport();
+  });
+
+  test('a visit cut short leaves nothing behind: the next opening has no stale mark and no long read', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').first().click();
+    await expect(sheet(page).locator('.search-focus')).toBeVisible();
+    await backToAll(page).click();
+    await expect(sheet(page)).toHaveCount(0);
+    await page.waitForTimeout(100);
+    // a way in that names no message
+    await field(page).fill('Tell Long Table the bowls are washed');
+    await page.locator('.all-send').click();
+    await page.locator('.all-note').getByRole('button', { name: 'Long Table' }).click();
+    await expect(sheet(page).getByRole('heading', { name: 'Long Table' })).toBeVisible();
+    await page.waitForTimeout(300);
+    await expect(sheet(page).locator('.search-focus')).toHaveCount(0);
+    expect((await calls(page, 'get_messages')).filter((a: any) => a.limit >= 3000)).toEqual([]);
+  });
+
+  test('a long press in focus: the whole message sheet stands over the phone\'s bar, as on a room\'s page', async ({ page }) => {
+    test.skip(!touch(), 'touch only');
+    await boot(page);
+    await allIn(page);
+    await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').last().click();
+    await expect(sheet(page)).toBeVisible();
+    await page.waitForTimeout(320);
+    const mine = sheet(page).locator('article.message.mine').first();
+    await mine.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    const b = (await mine.boundingBox())!;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: b.x + b.width / 2, y: b.y + b.height / 2 }] });
+    await page.waitForTimeout(700);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    const rows = page.locator('.msg-sheet button');
+    await expect(rows.last()).toBeVisible();
+    await page.waitForTimeout(300);
+    // the last row is itself what a finger reaches, and no rail is drawn over it
+    const hit = await rows.last().evaluate((el) => { const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); const rail = document.querySelector('.rail')!.getBoundingClientRect(); return { same: el === top || el.contains(top), railZ: getComputedStyle(document.querySelector('.rail')!).zIndex, bottom: r.bottom, h: innerHeight, railTop: rail.top }; });
+    expect(hit.same).toBe(true);
+    expect(hit.bottom).toBeLessThanOrEqual(hit.h);
+    const covered = await page.evaluate(() => { const sheet = document.querySelector('.msg-sheet')!; const rail = document.querySelector('.rail')!.getBoundingClientRect(); const top = document.elementFromPoint(rail.left + rail.width / 2, rail.top + rail.height / 2); return !!top && (sheet.contains(top) || !!top.closest('.msg-sheet')) ; });
+    if (project() === 'phone') expect(covered).toBe(true);
+  });
+
+  test('history Back with a panel open closes the panel; the room stays in focus', async ({ page }) => {
+    test.skip(project() !== 'desktop', 'the keys');
+    await boot(page);
+    await allIn(page);
+    await row(page, 'k3').locator('.all-place').click();
+    await rail(page).getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+    await page.keyboard.press('Alt+ArrowLeft');
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
+    await expect(sheet(page)).toBeVisible();
+    await page.keyboard.press('Alt+ArrowLeft');
+    await expect(sheet(page)).toHaveCount(0);
+  });
+
   test('in focus, a thread opened from the room stays in focus', async ({ page }) => {
     await boot(page);
     await page.evaluate(() => (window as any).__arrive('ch-choir', 'Priya', 'Altos are short two copies.', 0, false, 'c3'));
@@ -458,6 +538,19 @@ test.describe('a room in focus', () => {
     expect(s.x).toBeGreaterThanOrEqual(surface.x);
     expect(s.x + s.width).toBeLessThanOrEqual(surface.x + surface.width);
     await expect(roomBox(page, 'kiln-studio')).toBeInViewport();
+  });
+
+  test('a room that turns out to be private leaves focus at once, and its name goes with it', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await row(page, 'k3').locator('.all-place').click();
+    await expect(sheet(page).getByRole('heading', { name: 'Kiln Studio' })).toBeVisible();
+    // the room is renamed to a private name while it is open (the fixture's rooms list, as the store would answer)
+    await page.evaluate(() => { const w = window as any; const next = w.__extraInvoke; let reading = false; w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'get_rooms' && !reading) { reading = true; const rooms = await w.__TAURI_INTERNALS__.invoke('get_rooms'); reading = false; return rooms.map((r: any) => (r.id === 'ch-kiln' ? { ...r, name: 'sanctum' } : r)); } return next(cmd, a); }; });
+    await page.evaluate(() => (window as any).__arrive('ch-kiln', 'Uni', 'One more line.'));
+    await expect(sheet(page)).toHaveCount(0, { timeout: 15000 });
+    await expect(feed(page)).toBeVisible();
+    expect(await feed(page).evaluate((el) => !!el.closest('[inert]'))).toBe(false);
   });
 
   test('a private room never gets a label to focus in All', async ({ page }) => {

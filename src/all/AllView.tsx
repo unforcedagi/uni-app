@@ -488,9 +488,10 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
   }, [receded]);
   // leaving All: where it was, for coming back
   useLayoutEffect(() => {
-    const el = list.current;
+    const el = list.current, era = held.era;
     return () => {
-      if (!el) return;
+      // nothing of a forgotten key's reading is kept
+      if (!el || held.era !== era) return;
       const was = heldSpot.current;
       feedMemory.spot = was ? (was.stick ? null : was.spot) : restoring.current ?? (stick.current ? null : spotIn(el));
       feedMemory.at = Date.now();
