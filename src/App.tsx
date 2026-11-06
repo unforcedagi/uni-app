@@ -1463,6 +1463,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
         if (atEnd) pinned.current = null;
         setAwayView(atEnd ? null : currentView);
       }
+      // the mark lasts its time from then: a slow read mustn't end it before that decision is made
+      if (focusDecided.current !== focusRef) return;
       const t = setTimeout(() => setFocusRef(null), 2500);
       return () => clearTimeout(t);
     }
