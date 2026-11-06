@@ -181,5 +181,45 @@ check("T-335: a private place's rooms, done or archived ones too, and never a ro
   assert.equal(isPrivateRoom(t3, "r-q2", rooms2, UNI), true);
   assert.equal(isPrivatePath(t3, "Projects/W"), true, "by a wikilink");
   assert.equal(isPrivatePath(t3, "Areas/Boulder"), false);
+  // private only by the tree's walk: what hangs off it is private too
+  const roomsN = [UNI, { id: "r-d", name: "d-room" }, { id: "r-r2", name: "r2-room" }, { id: "r-bou", name: "boulder" }];
+  const t4 = buildTree([
+    area("a-sad", "Sanctum", { room: "sanctum" }),
+    area("a-in", "Inner", { parent: "Areas/Sanctum" }),
+    proj("p-d", "Done Under", "Areas/Inner", { room: "d-room", status: "done" }),
+    proj("p-lv", "Live Under", "Areas/Inner"),
+    parseProject({ id: "p-r2", path: "Projects/R2", tags: ["project"], content: "# R2", metadata: { status: "foreground", room: "r2-room", links: ["Projects/Live Under"] } })!,
+    area("a-bou", "Boulder", { room: "boulder" }),
+  ]);
+  assert.equal(isPrivateRoom(t4, "r-d", roomsN, UNI), true, "done, under a node private by the walk");
+  assert.equal(isPrivatePath(t4, "Projects/R2"), true, "linked to a live project under it");
+  assert.equal(isPrivatePath(t4, "Areas/Boulder"), false);
+  // an area's own parent counts, its links don't
+  const t5 = buildTree([
+    area("a-sad", "Sanctum", { room: "sanctum" }),
+    area("a-old", "Old", { parent: "Areas/Sanctum", status: "done" }),
+    proj("p-q", "Q", "Areas/Old", { room: "q-room" }),
+    proj("p-dn", "Done Here", "Areas/Sanctum", { status: "done" }),
+    area("a-up", "Upward", { parent: "Projects/Done Here", room: "up" }),
+    area("a-kid", "Kid", { parent: "Areas/Sanctum", links: ["Projects/Q"], room: "kid" }),
+    area("a-bou", "Boulder", { room: "boulder", links: ["Projects/Q"] }),
+  ]);
+  assert.equal(isPrivatePath(t5, "Projects/Q"), true, "live, under a done area under private");
+  assert.equal(isPrivatePath(t5, "Areas/Upward"), true, "an area whose parent is a done private project");
+  assert.equal(isPrivatePath(t5, "Areas/Kid"), true, "an area under a private one, with links of its own");
+  assert.equal(isPrivatePath(t5, "Areas/Boulder"), false, "links never make an area private");
+  // however the reference is written
+  for (const ref of ["areas/sanctum", "AREAS/SANCTUM", "[[Sanctum]]", "Sanctum", "[[Areas/Sanctum#top]]", "Areas/Sanctum.md", "[[Areas/Sanctum|the quiet]]", "/Areas/Sanctum/"]) {
+    const live = buildTree([area("a-sad", "Sanctum", { room: "sanctum" }), proj("p-q", "Q", ref, { room: "q-room" }), area("a-bou", "Boulder", { room: "boulder" })]);
+    assert.equal(isPrivatePath(live, "Projects/Q"), true, `parent written ${ref}`);
+    const gone = buildTree([proj("p-q", "Q", ref, { room: "q-room" }), area("a-bou", "Boulder", { room: "boulder" })]);
+    assert.equal(isPrivatePath(gone, "Projects/Q"), true, `parent written ${ref}, the area not even known`);
+    assert.equal(isPrivatePath(live, "Areas/Boulder"), false);
+  }
+  const filed = buildTree([parseProject({ id: "p-f", path: "Projects/Sanctum/Part", tags: ["project"], content: "# Part", metadata: { status: "foreground", parent: "Nowhere/At all", room: "q-room" } })!, area("a-bou", "Boulder", { room: "boulder" })]);
+  assert.equal(isPrivatePath(filed, "Projects/Sanctum/Part"), true, "filed under a private name, with a reference to nothing");
+  // no private name anywhere, a cycle: nothing is hidden, and it ends
+  const plain = buildTree([area("a-bou", "Boulder", { room: "boulder", links: ["Projects/A"] }), proj("p-a", "A", "Projects/B", { room: "a" }), proj("p-b", "B", "Projects/A", { room: "b" })]);
+  for (const n of plain.nodes.keys()) assert.equal(isPrivatePath(plain, n), false, n);
 });
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

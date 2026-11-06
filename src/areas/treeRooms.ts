@@ -29,26 +29,46 @@ export function privateRoot(tree: Tree, path: string): { path: string; name: str
 }
 
 const closures = new WeakMap<Tree, Set<string>>();
+/** A way of writing a reference, reduced: no brackets, alias, anchor, extension, outer slashes or case. Used only to err towards private. */
+const looseRef = (ref: unknown): string | null => {
+  if (typeof ref !== "string") return null;
+  const s = ref.trim().replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0].split("#")[0].trim().replace(/\.md$/i, "").replace(/^\/+|\/+$/g, "").toLowerCase();
+  return s || null;
+};
 /**
  * T-335: every node inside a private place, read from everything known, done and archived nodes included. The tree's walk stops at a node that isn't live,
- * so a live project under a done one under a private area, or linked to an archived private area, would look top-level and public. Links are two-way here,
- * as the tree's are. It spreads from each privately named node through projects; an area other than a privately named one is never made private by a link.
- * It errs towards private: a project linked to a private one counts.
+ * and treats a reference it can't resolve as no link, so a live project under a done one under a private area, or linked to an archived private area, would
+ * look top-level and public. Here a reference counts however it is written. It starts from every node named privately, filed under a privately named path,
+ * pointing at one, or private by the tree's own walk, and spreads through projects over two-way links, and into an area only by that area's own `parent`: an
+ * area is never made private by what it links to. It errs towards private: a project linked to a private one counts.
  */
 function privateClosure(tree: Tree): Set<string> {
   const hit = closures.get(tree);
   if (hit) return hit;
   const known = [...tree.nodes.values(), ...tree.archived];
   const byPath = new Map(known.map((n) => [n.path, n]));
-  const resolve = pathResolver(known);
+  const exact = pathResolver(known);
+  const loose = new Map<string, Set<string>>();
+  const index = (k: string, path: string) => { const key = k.toLowerCase(); (loose.get(key) ?? loose.set(key, new Set()).get(key)!).add(path); };
+  for (const n of known) { index(n.path, n.path); index(n.id, n.path); index(n.name, n.path); index(n.path.split("/").pop()!, n.path); }
+  const targets = (ref: unknown): string[] => {
+    const hit1 = exact(ref), key = looseRef(ref);
+    return [...new Set([...(hit1 && byPath.has(hit1) ? [hit1] : []), ...(key ? loose.get(key) ?? [] : [])])];
+  };
+  const refsOf = (n: Area): unknown[] => [n.parent, ...(n.kind === "area" ? [] : n.links ?? [])];
   const near = new Map<string, Set<string>>();
   const join = (a: string, b: string) => { if (a === b) return; (near.get(a) ?? near.set(a, new Set()).get(a)!).add(b); (near.get(b) ?? near.set(b, new Set()).get(b)!).add(a); };
-  for (const n of known) for (const ref of [n.parent, ...(n.links ?? [])]) { const to = resolve(ref); if (to && byPath.has(to)) join(n.path, to); }
-  const out = new Set(known.filter((n) => isPrivateName(n.name)).map((n) => n.path));
+  for (const n of known) for (const ref of [n.parent, ...(n.links ?? [])]) for (const to of targets(ref)) join(n.path, to);
+  const parents = new Map(known.map((n) => [n.path, new Set(targets(n.parent))]));
+  const namesPrivate = (ref: unknown) => !!looseRef(ref)?.split("/").some(isPrivateName);
+  const out = new Set(known.filter((n) => isPrivateName(n.name) || n.path.split("/").some(isPrivateName) || refsOf(n).some(namesPrivate) || (tree.nodes.has(n.path) && isPrivateNode(tree, n.path))).map((n) => n.path));
   const stack = [...out];
-  while (stack.length) for (const next of near.get(stack.pop()!) ?? []) {
-    if (out.has(next) || byPath.get(next)?.kind === "area") continue;
-    out.add(next); stack.push(next);
+  while (stack.length) {
+    const at = stack.pop()!;
+    for (const next of near.get(at) ?? []) {
+      if (out.has(next) || (byPath.get(next)?.kind === "area" && !parents.get(next)?.has(at))) continue;
+      out.add(next); stack.push(next);
+    }
   }
   closures.set(tree, out);
   return out;

@@ -245,7 +245,7 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
       // you wrote more while it was out: the box isn't these words any more, so what failed is offered back on its own, never re-sent with the new ones
       if (r.failed.length && held.text !== sentText) {
         const since = held.text.startsWith(sentText) ? held.text.slice(sentText.length).trimStart() : held.text;
-        setHeld({ text: since, ...(since.trim() ? {} : { chosen: null }), outcome: { sent, failed: [], noUni }, attempt: null, lost: [...held.lost, ...r.failed.map((f) => ({ body, target: { room: f.id, root: null }, error: f.error }))] });
+        flushSync(() => setHeld({ text: since, ...(since.trim() ? {} : { chosen: null }), outcome: { sent, failed: [], noUni }, attempt: null, lost: [...held.lost, ...r.failed.map((f) => ({ body, target: { room: f.id, root: null }, error: f.error }))] }));
       }
       // a message tapped while it was out doesn't catch these words: "send again" goes where the note says
       else setHeld({ outcome: { sent, failed: r.failed, noUni }, ...(r.failed.length ? { target: null } : {}) });
