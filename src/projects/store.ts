@@ -69,7 +69,7 @@ const currentOwner = () => ownerOf(identity, activeProfile().vault);
 
 const ownerOf = (id: string | null, vault: string) => (id && vault ? `${id}:${vault}` : null);
 const CACHE_PREFIX = "uni.work.";
-const cacheKey = (owner: string) => `${CACHE_PREFIX}v3:${owner}`;
+const cacheKey = (owner: string) => `${CACHE_PREFIX}v4:${owner}`;
 type Saved = { work: LiveWork; at: number | null; partial: string[] };
 function readCache(owner: string): Saved | null {
   try {
@@ -211,7 +211,7 @@ onVaultChange(() => {
 /** The app's identity (null when signed out or not read yet). Called on every change; another identity sees none of this one's work. */
 export function setWorkOwner(id: string | null) {
   // the copies kept before round 3 were keyed by the vault alone: no owner can be sure they are theirs
-  try { for (const k of Object.keys(localStorage)) if (/^uni\.work\.v[12]:/.test(k)) localStorage.removeItem(k); } catch { /* private storage */ }
+  try { for (const k of Object.keys(localStorage)) if (/^uni\.work\.v[123]:/.test(k)) localStorage.removeItem(k); } catch { /* private storage */ }
   if (id === identity) return;
   identity = id;
   const owner = ownerOf(id, activeProfile().vault);
@@ -221,8 +221,14 @@ export function setWorkOwner(id: string | null) {
 
 /** The account's rooms, which say what a room's id on a run note is. New rooms place the last read again, at once. */
 export function setWorkRooms(rooms: readonly { id: string; name: string }[]) {
+  // the rooms list is new with every message: only new ids or names place anything again
+  const same = rooms.length === hubRooms.length && rooms.every((r, i) => r.id === hubRooms[i].id && r.name === hubRooms[i].name);
   hubRooms = rooms;
-  if (lastRead && loadedFor && loadedFor === currentOwner()) set({ work: workFrom({ ...lastRead, rooms }) });
+  if (same || !lastRead || !loadedFor || loadedFor !== currentOwner()) return;
+  const work = workFrom({ ...lastRead, rooms });
+  // the device copy too: the next launch paints from it
+  writeCache(loadedFor, { work, at: state.at, partial: state.partial });
+  set({ work });
 }
 
 /** Forget this device key: the device copies (every owner's), the work in memory, the pending asks, and any read still out. */

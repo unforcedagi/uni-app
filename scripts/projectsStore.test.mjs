@@ -45,7 +45,7 @@ try {
     store.setWorkOwner("A");
     await store.refreshWork();
     assert.deepEqual(store.workSnapshot().work.projects.map((p) => p.name), ["Jam labels"]);
-    assert.deepEqual(keys(), ["uni.work.v3:A:uni"]);
+    assert.deepEqual(keys(), ["uni.work.v4:A:uni"]);
   });
 
   await check("the vault changes while a read of the old one is out: the old vault's work is gone at once, and the late answer is dropped", async () => {
@@ -65,7 +65,7 @@ try {
     hold = false; for (const r of held.splice(0)) r();
     await p; await settle();
     assert.deepEqual(store.workSnapshot().work.projects, [], "the late answer of vault uni is not published under vault other");
-    assert.ok(!keys().includes("uni.work.v3:A:other"), "nor kept under vault other");
+    assert.ok(!keys().includes("uni.work.v4:A:other"), "nor kept under vault other");
   });
 
   const feed = await server.ssrLoadModule("/src/projects/feed.ts");

@@ -97,6 +97,30 @@ test("a run from a private room stays out of a public area's work view; a public
   await expect(view).not.toContainText('Quiet letter');
 });
 
+test("a run naming its room only by id waits, with no words, until the rooms are read, on the screen and in the device's copy", async ({ page }) => {
+  const idOnly = (now: number) => [run(now, 'run-id-only', 'A walk by the still lake', { node: 'node-uni', channel: 'hub-quiet-sub', starter_room: 'uni', doing_now: 'Reading lake.md' })];
+  const saved = () => page.evaluate(() => Object.entries(localStorage).filter(([k]) => k.startsWith('uni.work.')).map(([, v]) => v as string).join(''));
+  await bootProjects(page, { moreRuns: idOnly, moreRooms: [{ id: 'hub-quiet-sub', name: 'sanctum/build' }], holdRooms: true });
+  await page.goto('/');
+  await expect.poll(saved).toContain('run-id-only');
+  expect(await saved()).not.toContain('still lake');
+  expect(await saved()).not.toContain('lake.md');
+  expect(await saved()).toContain("A session whose room isn't read yet");
+  await expect(page.locator('body')).not.toContainText('still lake');
+});
+
+test('the same run, with the rooms read: the id says it is private, so it never shows its words', async ({ page }) => {
+  const idOnly = (now: number) => [run(now, 'run-id-only', 'A walk by the still lake', { node: 'node-uni', channel: 'hub-quiet-sub', starter_room: 'uni', doing_now: 'Reading lake.md' })];
+  await bootProjects(page, { moreRuns: idOnly, moreRooms: [{ id: 'hub-quiet-sub', name: 'sanctum/build' }] });
+  await page.goto('/');
+  const line = page.getByRole('button', { name: /^Unfiled sessions/ });
+  await line.click();
+  const sheet = page.getByRole('dialog', { name: /Unfiled sessions/ });
+  await expect(sheet.locator('.pj-session[data-session="run-id-only"]')).toContainText('A session in a private place');
+  await expect(sheet).not.toContainText('still lake');
+  await expect.poll(() => page.evaluate(() => Object.entries(localStorage).filter(([k]) => k.startsWith('uni.work.')).map(([, v]) => v as string).join(''))).toContain('A session in a private place');
+});
+
 test('nothing unfiled: the home says nothing about it, and a room with only projects has no extra tab', async ({ page }) => {
   await bootProjects(page);
   await page.goto('/');

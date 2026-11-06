@@ -267,6 +267,9 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
       folder: byNode ? null : str(m.folder),
     }, roomRefs, null);
   };
+  /** Rooms not read yet: a run whose only word on its room is an id that no note names can't be told from a private one, so it waits, with no words, until they are. */
+  const roomIds = new Set(roomRefs.map((r) => r.id));
+  const roomUnread = (m: Record<string, unknown>) => !src.rooms?.length && !str(m.room) && [m.channel, m.starter_channel].some((c) => { const id = str(c); return !!id && !roomIds.has(id); });
   /** The private area a private run belongs to: the one its clues name, else the first that can be reached. */
   const privateHome = (m: Record<string, unknown>, task: string | null): LiveArea | null => {
     const named = [areaOfNode(str(m.project)), areaOfNode(str(m.node)), task ? areaOfNode(taskNode.get(task) ?? null) : null, ...[m.channel, m.starter_channel, m.room, m.starter_room].flatMap((v) => (Array.isArray(v) ? v : [v])).flatMap((v) => String(v ?? "").split(",")).map(areaOfRoom)];
@@ -303,9 +306,10 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const filedPrivately = !!filed && areas.some((a) => a.private && a.id === projectArea.get(filed));
     const hiddenArea = secret && !filedPrivately ? privateHome(m, task) : null;
     // a private place's run with no private area to go to: counted in Unfiled, with none of its words
-    const sealed = secret && !filedPrivately && !hiddenArea;
+    const waiting = roomUnread(m);
+    const sealed = waiting || (secret && !filedPrivately && !hiddenArea);
     const areaId = filed || secret ? null : areaOfRun(m, task, viaFolder);
-    const project = (filedPrivately || !secret ? filed : null) ?? homeOf(hiddenArea ?? areas.find((a) => a.id === areaId) ?? null);
+    const project = waiting ? homeOf(null) : (filedPrivately || !secret ? filed : null) ?? homeOf(hiddenArea ?? areas.find((a) => a.id === areaId) ?? null);
     // a run stopped by hand closes as failed with the launcher's "stopped" line: it was stopped, not a failure
     // a note marked running stays "running" here with its heartbeat (nowAt); freshen() below decides, from the clock, whether it is
     // still heard from (the same rule re-applied to a saved copy, so a cached session can't stay "working" forever)
@@ -313,7 +317,7 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const live = state === "running";
     const ended = live ? null : time(m.ended_at) ?? time(r.updatedAt) ?? startedAt;
     const title = plainTitle((str(r.path) ?? "").replace(/^Runs\/\d{4}-\d{2}-\d{2}\s*/, ""));
-    const ask = sealed ? "A session in a private place" : title || (task ? taskTitle.get(task) : null) || "A session";
+    const ask = waiting ? "A session whose room isn't read yet" : sealed ? "A session in a private place" : title || (task ? taskTitle.get(task) : null) || "A session";
     const steps = typeof m.steps === "number" && Number.isFinite(m.steps) ? Math.max(0, Math.floor(m.steps)) : 0;
     sessions.push({
       id, project, state, ask,

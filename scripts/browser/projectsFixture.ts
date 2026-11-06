@@ -12,7 +12,9 @@ export type LiveRead = { nodes: any[]; runs: any[]; tasks: any[]; usage: any | n
 /** `bigRuns`: this many more finished runs, a month old, listed before every other run (a ledger longer than the pages the app reads). */
 export type Boot = { live?: LiveRead; bigRuns?: number;
   /** this many more tasks, listed before every other task (a task list longer than the pages the app reads) */ bigTasks?: number;
-  /** T-304: more run notes, made from the clock at boot */ moreRuns?: (now: number) => any[] };
+  /** T-304: more run notes, made from the clock at boot */ moreRuns?: (now: number) => any[];
+  /** more rooms on the account */ moreRooms?: { id: string; name: string }[];
+  /** the rooms aren't read yet: the app sees none, until `window.__roomsOpen` */ holdRooms?: boolean };
 
 export async function bootProjects(page: Page, opts: Boot = {}) {
   const now = Date.now();
@@ -24,9 +26,10 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
     const old = new Date(now - 30 * 86_400_000).toISOString(), done = new Date(now - 30 * 86_400_000 + 600_000).toISOString();
     world.runs = [...Array.from({ length: opts.bigRuns }, (_, i) => ({ id: `run-old-${i}`, path: `Runs/2026-09-20 Old tidy ${i}`, tags: ['run'], metadata: { node: 'p-seeds', state: 'done', started_at: old, ended_at: done, summary: 'mts aaaabbbb: completed' }, createdAt: old, updatedAt: done })), ...world.runs];
   }
+  if (opts.moreRooms) world.rooms = [...world.rooms, ...opts.moreRooms];
   if (opts.moreRuns) world.runs = [...world.runs, ...opts.moreRuns(now)];
   if (opts.bigTasks) world.tasks = [...Array.from({ length: opts.bigTasks }, (_, i) => ({ id: `t-old-${i}`, path: `Tasks/T-${5000 + i} Old placeholder ${i}`, tags: ['task'], metadata: { node: 'p-seeds', state: 'done', owner: 'uni' }, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' })), ...world.tasks];
-  const data = { now, world, asks, talk: opts.live ? [] : demoTalk(now), readOnly: !!opts.live };
+  const data = { now, world, asks, talk: opts.live ? [] : demoTalk(now), readOnly: !!opts.live, holdRooms: !!opts.holdRooms };
   await page.addInitScript((d: any) => {
     const w = window as any;
     // round 3 test seams: sessionStorage 't.identity' signs in as another key; 't.offline' fails the work's reads (node, run, task), 't.hang'
@@ -97,7 +100,7 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
           case 'identity_status': return { paired: true, pubkey: ME };
           case 'get_identity': return ME;
           case 'get_npub': return 'test';
-          case 'get_rooms': return rooms();
+          case 'get_rooms': return d.holdRooms && !w.__roomsOpen ? [] : rooms();
           case 'get_messages': return args.root ? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
           case 'approval_messages': return [];
           case 'get_members': return [{ pubkey: ME, name: 'Robin', named: true }, { pubkey: UNI, name: 'Uni', named: true }];

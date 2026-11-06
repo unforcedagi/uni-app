@@ -299,6 +299,14 @@ check("no run is ever invisible: its project, else its area (node, task's node, 
     for (const c of ["hub-sub", "hub-old", "hub-only"]) assert.equal(placed(c), "area-sanctum", c);
     assert.equal(placed("hub-guild"), "area-guild", "and a public room's id places it in its area");
   });
+  check("a note holding only an id no note names waits, with no words, until the rooms are read; with a name or a known id it doesn't wait", () => {
+    const place = (md: Record<string, unknown>, rooms?: { id: string; name: string }[]) => workFrom({ nodes, runs: [run("r-w", md)], tasks, rooms }, NOW).sessions[0];
+    const waiting = place({ node: "area-guild", channel: "hub-who", starter_room: "uni" });
+    assert.deepEqual([waiting.project, waiting.ask, waiting.now, waiting.feed], [UNFILED, "A session whose room isn't read yet", null, null]);
+    assert.equal(place({ node: "area-guild", channel: "hub-who" }, [{ id: "hub-who", name: "guild" }]).project, "home:area-guild", "the rooms read: placed");
+    assert.equal(place({ node: "area-guild", channel: "demo-guild" }).project, "home:area-guild", "an id a note names needs no rooms");
+    assert.equal(place({ node: "area-guild", channel: "hub-who", room: "guild" }).project, "home:area-guild", "a name is enough");
+  });
   check("an answer read before the rooms arrived isn't kept once they have", () => {
     const list = nodes.flatMap((n) => { const a = parseArea(n as never) ?? parseProject(n as never); return a ? [a] : []; });
     const t = buildTree(list);
