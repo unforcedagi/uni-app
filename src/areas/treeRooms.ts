@@ -107,6 +107,15 @@ export function isPrivateRoom(tree: Tree, channel: string, rooms: readonly RoomR
   return tree.archived.some((a) => isPrivatePath(tree, a.path) && counts(a) && names(a));
 }
 
+/**
+ * Does a run's room clue (a room's id or name, however a note wrote it: "#x", "x/build", "x, y", a list) touch a private place? Any one part is enough: a run
+ * launched from a private room stays private even when it also names a public room or sits on a public node. With no tree yet, the names alone are read.
+ */
+export function roomCluePrivate(tree: Tree | null, clue: unknown, rooms: readonly RoomRef[], uni: RoomRef | null): boolean {
+  const parts = (Array.isArray(clue) ? clue : [clue]).filter((v): v is string => typeof v === "string").flatMap((v) => v.split(",")).map((v) => roomSlug(v)).filter(Boolean);
+  return parts.some((p) => p.split("/").some((w) => isPrivateName(w.trim())) || (!!tree && [p, p.toLowerCase()].some((x) => isPrivateRoom(tree, x, rooms, uni))));
+}
+
 /** r21: the same, read from the task tree (its nodes and parents), for while the areas aren't read yet: privacy never waits on them. */
 export function privateRootIn(tasks: { byPath: ReadonlyMap<string, { path: string; name: string }>; parent: ReadonlyMap<string, string> }, path: string): { path: string; name: string } | null {
   let hit: { path: string; name: string } | null = null;

@@ -1201,14 +1201,17 @@ export const superseded = (next: string | null | undefined): boolean => /^\s*(?:
 export function closedTask(t: Partial<Pick<Task, "state" | "next">>): boolean {
   return t.state === "done" || t.state === "archived" || (t.state as string | undefined) === "decided" || superseded(t.next);
 }
+const TASKLESS_BLOCKED_MS = 7 * 86_400_000;
 /**
  * r26: the runs that are still about something open. A run names its task (`T-13`, or words); one whose task is finished, archived or
  * superseded is history, and so is one whose `T-NN` is in a complete list of the open tasks and decisions yet matches none of them. A run that
  * names no `T-NN`, or is checked against a list that wasn't read in full, stays.
  */
-export function liveRuns<R extends { task: string | null }>(runs: readonly R[], tasks: readonly (Partial<Pick<Task, "title" | "state" | "next" | "forTask">>)[], complete: boolean): R[] {
+export function liveRuns<R extends { task: string | null; state?: string; updated?: string | null }>(runs: readonly R[], tasks: readonly (Partial<Pick<Task, "title" | "state" | "next" | "forTask">>)[], complete: boolean, nowMs = Date.now()): R[] {
   return runs.filter((r) => {
     const id = /\bT-\d+\b/i.exec(r.task ?? "")?.[0]?.toUpperCase();
+    // no task can close a run that names none: one that ended blocked goes to history after a while, rather than read as running for good
+    if (!r.task && r.state === "blocked" && nowMs - Date.parse(r.updated ?? "") > TASKLESS_BLOCKED_MS) return false;
     if (!id) return true;
     const mine = tasks.filter((t) => taskTitle(t.title ?? "").id?.toUpperCase() === id || t.forTask?.toUpperCase() === id);
     if (mine.some((t) => closedTask(t) && taskTitle(t.title ?? "").id?.toUpperCase() === id)) return false;

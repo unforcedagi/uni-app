@@ -128,6 +128,10 @@ check("a run about a closed or missing task is not running; one about an open ta
     { title: "T-14 Old", state: "done" as const, next: "" },
   ];
   assert.deepEqual(liveRuns(runs, tasks, true).map((r) => r.id), ["b", "c"]);
+  // no task can close a run that names none: blocked, it goes to history after a week rather than read as running for good
+  const old = new Date(Date.now() - 8 * 86_400_000).toISOString(), lately = new Date(Date.now() - 86_400_000).toISOString();
+  const loose = [{ id: "old", task: null, state: "blocked", updated: old }, { id: "new", task: null, state: "blocked", updated: lately }, { id: "working", task: null, state: "running", updated: old }];
+  assert.deepEqual(liveRuns(loose, [], true).map((r) => r.id), ["new", "working"]);
   assert.deepEqual(liveRuns(runs, tasks, false).map((r) => r.id), ["a", "b", "c", "d"], "a list not read in full hides only what it names as closed");
   assert.deepEqual(liveRuns(runs, [{ title: "T-13 Self-hosted mail: approved 10-02", state: "archived" as const, next: "x" }, ...tasks], false).map((r) => r.id), ["b", "c", "d"]);
 });

@@ -145,7 +145,8 @@ export function FrontDoor({ onOpenProject, doors, needs, onOpen, me = null, newR
     target={target} onTarget={setTarget} echo={echoes.send} onKeyboard={onComposerFocus} />;
   // T-335 glow-up: how many places are moving (a session or the room's Uni at work), for the home's one sentence
   const liveOf = (d: Door) => { const a = areaAt.get(d.path); return (a ? liveInArea(work, a.id).length : 0) + (d.room && turns.has(d.room) ? 1 : 0); };
-  const moving = doors.filter((d) => liveOf(d) > 0).length;
+  // working sessions with no area are somewhere moving too
+  const moving = doors.filter((d) => liveOf(d) > 0).length + (liveSessions(work, UNFILED).length > 0 ? 1 : 0);
   // the sentence never says less than the doors and the cards beside it
   const needN = Math.max((needs ? needs.rows.length + needs.privates.reduce((k, p) => k + p.count, 0) : 0) + alsoNeeds, doors.reduce((k, d) => k + (d.needs ?? 0), 0));
   if (all && view === "all") return <div className="fd fd-all" data-place="front-door" data-view="all">

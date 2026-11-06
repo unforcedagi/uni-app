@@ -23,7 +23,7 @@ import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { rolledNeeds, storedSidebarWidth } from "./sidebarState";
 import { useRailHidden, useShortTree, useTreeBesideNote, useUprightPhone, useWide } from "./homeLayout";
-import { isPrivatePath, isPrivateRoom, privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "./treeRooms";
+import { isPrivatePath, isPrivateRoom, privateRoot, privateRootIn, roomCluePrivate, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
 import { approvalsAt, rolledUnread, unreadByPath, unreadByRoom } from "./roomUnread";
 import { useNav, type NavControls } from "../navContext";
@@ -469,7 +469,7 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
     const all = allRooms.length ? { rooms: allRooms, onOpenAt: (room: string, ref?: string | null, threadRoot?: string | null) => { setDrawer(false); if (allPlace) allPlace.onFocus(room, ref ?? null, threadRoot ?? null); else (actions.openRoom as (id: string, focus?: string | null) => void)(room, ref ?? null); } } : null;
     if (allPlace && !all) return <div className="areas-home tree-home-wrap"><AllEmpty reading={roomsPending} onBack={allPlace.onBack} /></div>;
     const home = <>{status}<ApprovalRows approvals={allPlace ? approvalsAll.list.filter((x) => !privateChannel(x.channel)) : approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor needsKnown={tasks.error || tasks.truncated || tasks.treeTruncated || (allNeeds.pending ?? []).some((t) => t.askFailed || t.check?.kind === "unavailable") ? "failed" : !tasks.ready || tasks.savedAt || (allNeeds.pending?.length ?? 0) > 0 ? "reading" : "known"} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: fromPrivate(allPlace.from) ? "Back" : allPlace.backTo, onBack: allPlace.onBack, focusRoom: allPlace.focus && !allPlace.focus.leaving ? allPlace.focus.room : null }} onComposerFocus={actions.composerFocus} onOpenProject={setProjectOpen} />
-      {projectOpen && <ProjectSheet key={projectOpen} project={projectOpen} room={null} roomName={(id) => roomRefs.find((r) => r.id === id)?.name ?? null} talk={[]} onClose={closeProject} />}
+      {projectOpen && !allPlace && <ProjectSheet key={projectOpen} project={projectOpen} room={null} roomName={(id) => roomRefs.find((r) => r.id === id)?.name ?? null} talk={[]} onClose={closeProject} />}
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>;
     if (!allPlace) return <div className="areas-home tree-home-wrap">{home}</div>;
     // T-335 one fluid surface: All, and over it the room in focus. A room that turns out to be private leaves focus (its effect, above), and shows nothing here meanwhile.
@@ -520,7 +520,8 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
   const drafted = new Set(tasks.drafts.map((d) => d.task?.toUpperCase()).filter(Boolean));
   const feed0 = needsFeed(levelTasks.map((t) => ({ ...t, stewardRoom: roomOfNode(t.node)?.name ?? null, hasDraft: drafted.has(taskTitle(t.title).id?.toUpperCase()) })), privateOf, selfPrivate, undefined, confirm.of);
   const taskTree = tasks.tree;
-  const runs = taskTree ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node)) : [];
+  // a run from a private room may sit on the root or a public node: its room keeps it private too, unless this level is that private place
+  const runs = taskTree ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node) && (!!selfPrivate || !(r.rooms ?? []).some((c) => roomCluePrivate(tree ?? null, c, roomRefs, uniRef)))) : [];
   // r28 (Codex P2-6): a run waiting on the user's answer is in the same feed, counted once with the asks
   // T-161: Uni's level holds every room's approval prompts; a level with a room of its own, that room's
   const feed = withApprovals(withWaiting(feed0, runs), approvalsAll.list.filter((a) => isRoot || a.channel === target?.id));

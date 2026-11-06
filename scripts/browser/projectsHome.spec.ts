@@ -80,6 +80,23 @@ test('a session with no area at all has a home too: Unfiled sessions, on the hom
   await expect(page.locator('[data-place="front-door"]')).toBeVisible();
 });
 
+test("a run from a private room stays out of a public area's work view; a public one there shows", async ({ page }) => {
+  await bootProjects(page, { moreRuns: (now) => [
+    run(now, 'run-area-private', 'A private errand', { node: 'area-guild', room: 'sanctum', summary: 'Quiet letter to someone' }),
+    run(now, 'run-area-public', 'A public errand', { node: 'area-guild', room: 'guild', summary: 'Public minutes for the charter' }),
+  ] });
+  await page.goto('/');
+  await door(page, 'Guild').click();
+  await expect(page.locator('.sr-title')).toHaveText('Guild');
+  // on a phone the way there is under the room's one line
+  const all = page.getByRole('button', { name: /All of Guild.s work/ }).first();
+  if (!(await all.isVisible())) await page.locator('.cp-line[aria-expanded="false"]').click();
+  await all.click();
+  const view = page.locator('.wv');
+  await expect(view.getByText('Public minutes for the charter')).toBeVisible();
+  await expect(view).not.toContainText('Quiet letter');
+});
+
 test('nothing unfiled: the home says nothing about it, and a room with only projects has no extra tab', async ({ page }) => {
   await bootProjects(page);
   await page.goto('/');

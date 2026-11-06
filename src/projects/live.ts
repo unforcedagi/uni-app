@@ -7,10 +7,13 @@
 // - Sessions are the `run` notes mts writes. A run belongs to the project its `project`, its `node`, its task's node or (last) its
 //   repo `folder` names. What it is doing now is `doing_now` (mts writes it while it runs); words, never ids.
 // - No run is dropped. One that names no project sits in its area's home: the area its node, its task's node, a shared folder, its room's
-//   id or its room's name says. One that says no area is in the Unfiled home, unless it names a private place: then it goes to the private
-//   area, or (with none) keeps its words to itself.
+//   id or its room's name says. One that says no area is in the Unfiled home.
+// - A run touching a private place by any clue (node, task's node, folder, room id or name) is the private place's, whatever public clue it
+//   also carries: it goes to the private area, or (with none) to Unfiled with none of its words. The app's own private-place rules decide.
 import type { RawNote } from "../areas/taskCore.ts";
-import { isPrivateName } from "../areas/treeRooms.ts";
+import { parseArea, parseProject, type Area as TreeNode } from "../areas/areasCore.ts";
+import { buildTree } from "../areas/treeCore.ts";
+import { isPrivateName, isPrivatePath, roomCluePrivate } from "../areas/treeRooms.ts";
 import { redactRaw, safeStep } from "./sessionWords.ts";
 import { END_WHYS, isFolder, makeProject, ModelError, UNFILED, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type Work } from "./model.ts";
 
@@ -150,8 +153,12 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const name = lastName(str(n.path)!);
     if (!room || seenRooms.has(room)) continue;
     seenRooms.add(room);
-    areas.push({ id: keyOf(n), name, path: str(n.path)!, room, private: isPrivateName(name) });
+    areas.push({ id: keyOf(n), name, path: str(n.path)!, room, private: false });
   }
+  // the app's own rules for what is private (treeRooms), over the same notes
+  const tree = buildTree(src.nodes.flatMap((n): TreeNode[] => { const a = parseArea(n as never) ?? parseProject(n as never); return a ? [a] : []; }));
+  const privatePath = (path: string) => isPrivateName(lastName(path)) || isPrivatePath(tree, path);
+  for (const a of areas) a.private = privatePath(a.path);
   const areaIds = new Set(areas.map((a) => a.id));
   /** Every area note by key, with or without a room (review finding 7: one without is still where its projects sit). */
   const areaPathOf = new Map(areaNotes.map((n) => [keyOf(n), str(n.path)!]));
@@ -218,25 +225,42 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
   /** The areas by the names their rooms go by: each area's room first (so a shared older name can't take it), then its other and old ones. */
   const roomKey = (v: unknown) => (str(v) ?? "").replace(/^#/, "").replace(/\s*\(.*$/, "").trim().toLowerCase();
   const byRoom = new Map<string, string>();
-  const nameRooms = (area: LiveArea, names: unknown[]) => { for (const v of names) for (const part of String(v ?? "").split(",")) { const k = roomKey(part); if (k && !byRoom.has(k)) byRoom.set(k, area.id); } };
+  const nameRooms = (area: string, names: unknown[]) => { for (const v of names) for (const part of String(v ?? "").split(",")) { const k = roomKey(part); if (k && !byRoom.has(k)) byRoom.set(k, area); } };
+  /** An area a person can reach: an archived one has no door on the home, so a home under it would be seen by no one. */
+  const reachable = (id: string | null | undefined) => { const n = id ? byKey.get(id) : undefined; return !!n && areaIds.has(id!) && statusOf(meta(n).status) !== "archived"; };
   const areaNote = (a: LiveArea) => meta(areaNotes.find((n) => keyOf(n) === a.id)!);
-  for (const a of areas) nameRooms(a, [a.room, areaNote(a).room]);
-  for (const a of areas) nameRooms(a, [areaNote(a).rooms, a.name, areaNote(a).room_was, areaNote(a).room_renamed_from]);
+  for (const a of areas) nameRooms(a.id, [a.room, areaNote(a).room]);
+  for (const a of areas) nameRooms(a.id, [areaNote(a).rooms, a.name, areaNote(a).room_was, areaNote(a).room_renamed_from]);
+  // a project's own room (older ones have one) says its area too
+  for (const n of src.nodes) { const up = areaUp(n); if (up && areaIds.has(up)) nameRooms(up, [meta(n).channel, meta(n).room, meta(n).rooms]); }
   const areaOfNode = (ref: string | null): string | null => {
     const n = ref ? byKey.get(unlink(ref)) : undefined;
     const up = n ? areaUp(n) : null;
-    return up && areaIds.has(up) ? up : null;
+    return reachable(up) ? up : null;
   };
-  const areaOfRoom = (v: unknown): string | null => (roomKey(v) ? byRoom.get(roomKey(v)) ?? null : null);
+  const areaOfRoom = (v: unknown): string | null => { const hit = roomKey(v) ? byRoom.get(roomKey(v)) ?? null : null; return reachable(hit) ? hit : null; };
   const projectArea = new Map(projects.map((p) => [p.id, p.area]));
   /** The area a run with no project belongs to, from the surest clue on it down; null when nothing says. */
   const areaOfRun = (m: Record<string, unknown>, task: string | null, viaFolder: string[] | undefined): string | null => {
     const shared = viaFolder?.length && viaFolder.every((p) => projectArea.get(p) === projectArea.get(viaFolder[0])) ? projectArea.get(viaFolder[0]) ?? null : null;
-    return areaOfNode(str(m.project)) ?? areaOfNode(str(m.node)) ?? (task ? areaOfNode(taskNode.get(task) ?? null) : null) ?? shared
+    return areaOfNode(str(m.project)) ?? areaOfNode(str(m.node)) ?? (task ? areaOfNode(taskNode.get(task) ?? null) : null) ?? (reachable(shared) ? shared : null)
       ?? areaOfRoom(m.channel) ?? areaOfRoom(m.starter_channel) ?? areaOfRoom(m.room) ?? areaOfRoom(m.starter_room);
   };
-  const namesPrivate = (m: Record<string, unknown>) => [m.room, m.starter_room].some((v) => isPrivateName(roomKey(v)))
-    || isPrivateName(lastName(str(byKey.get(unlink(str(m.node) ?? ""))?.path) ?? ""));
+  const roomRefs = src.nodes.flatMap((n) => { const c = str(meta(n).channel); return c ? c.split(",").map((id) => ({ id: id.trim(), name: (str(meta(n).room) ?? lastName(str(n.path) ?? "")).split(",")[0].trim() })) : []; });
+  const seenClue = new Map<string, boolean>();
+  const cluePrivate = (v: unknown) => { const k = JSON.stringify(v ?? null); if (!seenClue.has(k)) seenClue.set(k, roomCluePrivate(tree, v, roomRefs, null)); return seenClue.get(k)!; };
+  const nodePrivate = (ref: string | null) => { const path = ref ? str(byKey.get(unlink(ref))?.path) : null; return !!path && privatePath(path); };
+  const projectPath = new Map(src.nodes.map((n) => [keyOf(n), str(n.path) ?? ""]));
+  /** Whether any clue on a run touches a private place. */
+  const touchesPrivate = (m: Record<string, unknown>, task: string | null, viaFolder: string[] | undefined) =>
+    [m.room, m.starter_room, m.channel, m.starter_channel].some(cluePrivate)
+    || [str(m.project), str(m.node), task ? taskNode.get(task) ?? null : null].some(nodePrivate)
+    || !!viaFolder?.some((p) => privatePath(projectPath.get(p) ?? ""));
+  /** The private area a private run belongs to: the one its clues name, else the first that can be reached. */
+  const privateHome = (m: Record<string, unknown>, task: string | null): LiveArea | null => {
+    const named = [areaOfNode(str(m.project)), areaOfNode(str(m.node)), task ? areaOfNode(taskNode.get(task) ?? null) : null, ...[m.channel, m.starter_channel, m.room, m.starter_room].flatMap((v) => (Array.isArray(v) ? v : [v])).flatMap((v) => String(v ?? "").split(",")).map(areaOfRoom)];
+    return areas.find((a) => a.private && named.includes(a.id)) ?? areas.find((a) => a.private && reachable(a.id)) ?? null;
+  };
   const homes = new Map<string, Project>();
   const homeOf = (area: LiveArea | null): string => {
     const id = area ? `home:${area.id}` : UNFILED;
@@ -253,19 +277,22 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     // through redactRaw first, raw, as the note is read: nothing later (plainWords, plainTitle, a cut) sees it unredacted
     const r = { ...r0, path: typeof r0.path === "string" ? redactRaw(r0.path) : r0.path };
     const m = saidSafe(meta(r0)), id = keyOf(r);
-    const startedAt = time(m.started_at);
+    // a note with no start of its own still has a place: when the note was made
+    const startedAt = time(m.started_at) ?? time(r.createdAt) ?? time(r.updatedAt);
     if (!id || startedAt === null) continue;
     const task = str(m.task)?.toUpperCase() ?? null;
     const folder = str(m.folder);
     const viaFolder = folder ? byFolder.get(folderKey(folder)) : undefined;
     const filed = projectOfNode(str(m.project)) ?? projectOfNode(str(m.node)) ?? (task ? projectOfNode(taskNode.get(task) ?? null) : null)
       ?? (viaFolder?.length === 1 ? viaFolder[0] : null);
-    const areaId = filed ? null : areaOfRun(m, task, viaFolder);
-    const secret = !filed && !areaId && namesPrivate(m);
-    const hiddenArea = secret ? areas.find((a) => a.private) ?? null : null;
+    // a private clue beats any public one; a project of the private place itself keeps its run
+    const secret = touchesPrivate(m, task, viaFolder);
+    const filedPrivately = !!filed && areas.some((a) => a.private && a.id === projectArea.get(filed));
+    const hiddenArea = secret && !filedPrivately ? privateHome(m, task) : null;
     // a private place's run with no private area to go to: counted in Unfiled, with none of its words
-    const sealed = secret && !hiddenArea;
-    const project = filed ?? homeOf(hiddenArea ?? areas.find((a) => a.id === areaId) ?? null);
+    const sealed = secret && !filedPrivately && !hiddenArea;
+    const areaId = filed || secret ? null : areaOfRun(m, task, viaFolder);
+    const project = (filedPrivately || !secret ? filed : null) ?? homeOf(hiddenArea ?? areas.find((a) => a.id === areaId) ?? null);
     // a run stopped by hand closes as failed with the launcher's "stopped" line: it was stopped, not a failure
     // a note marked running stays "running" here with its heartbeat (nowAt); freshen() below decides, from the clock, whether it is
     // still heard from (the same rule re-applied to a saved copy, so a cached session can't stay "working" forever)

@@ -78,7 +78,10 @@ function readCache(owner: string): Saved | null {
 }
 function writeCache(owner: string, s: Saved) {
   const floor = Date.now() - KEEP_MS;
-  const work = { ...s.work, sessions: s.work.sessions.filter((x) => x.state === "running" || (x.endedAt ?? 0) >= floor) };
+  const sessions = s.work.sessions.filter((x) => x.state === "running" || (x.endedAt ?? 0) >= floor);
+  // a home with none of its sessions kept is left out too: no "Unfiled sessions · 0" from a saved copy
+  const kept = new Set(sessions.map((x) => x.project));
+  const work = { ...s.work, sessions, projects: s.work.projects.filter((p) => !isHome(p) || kept.has(p.id)) };
   try { localStorage.setItem(cacheKey(owner), JSON.stringify({ ...s, work })); } catch { /* storage full or off: this session only */ }
 }
 /** Every device copy of the work, of every owner and every version (the vault-only keys before round 3 too). */

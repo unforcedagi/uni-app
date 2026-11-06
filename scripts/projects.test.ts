@@ -205,20 +205,78 @@ check("no run is ever invisible: its project, else its area (node, task's node, 
   assert.deepEqual(liveSessions(w, UNFILED).map((s) => s.id).sort(), ["bare", "nowhere"]);
   assert.deepEqual(w.projects.filter((p) => p.kind !== "home").map((p) => p.id), workFrom({ nodes: vault.nodes, runs: [], tasks: [] }, NOW).projects.map((p) => p.id), "a home is made only for sessions, and makes no project");
 });
-check("a run that names a private place never lands in Unfiled, where its words would show outside it", () => {
+{
+  // every shape a private run can take, each from the independent review of this change: the private clue wins over any public one
   const at = new Date(NOW - 30 * MIN).toISOString();
-  const nodes = [...vault.nodes, { id: "area-sanctum", path: "Areas/Sanctum", tags: ["node", "area"], metadata: { channel: "demo-sanctum", room: "sanctum" }, createdAt: at, updatedAt: at }];
-  const run = { id: "r-private", path: "Runs/2026-10-20 A private errand", tags: ["run"], createdAt: at, updatedAt: at, metadata: { state: "running", started_at: at, doing_at: at, node: "gone", room: "relationships" } };
-  const w = workFrom({ nodes, runs: [run], tasks: [] }, NOW);
-  const s = w.sessions.find((x) => x.id === "r-private")!;
-  assert.equal(w.projects.find((p) => p.id === s.project)!.area, "area-sanctum", "into the private area");
-  // and with no private area to go to, it is counted but keeps its words to itself
-  const alone = workFrom({ nodes: vault.nodes, runs: [run], tasks: [] }, NOW).sessions.find((x) => x.id === "r-private")!;
-  assert.equal(alone.project, UNFILED);
-  assert.equal(alone.ask, "A session in a private place");
-  assert.equal(alone.now, null);
-  assert.equal(alone.feed, null);
-});
+  const note = (id: string, path: string, tags: string[], metadata: Record<string, unknown>) => ({ id, path, tags, metadata, createdAt: at, updatedAt: at });
+  const privateNodes = [
+    note("area-sanctum", "Areas/Sanctum", ["node", "area"], { channel: "demo-sanctum", room: "sanctum", parent: "node-uni" }),
+    note("p-vow", "Projects/Quiet vow", ["node", "project"], { parent: "area-sanctum", folder: "~/quiet/vow", channel: "demo-vow", room: "quiet-vow" }),
+    note("p-linked", "Projects/Linked letter", ["node", "project"], { links: ["area-sanctum"], folder: "~/quiet/letter" }),
+    note("n-child", "Areas/Sanctum/A note beneath", ["node"], { parent: "area-sanctum" }),
+    note("p-shared-a", "Projects/Shared public", ["node", "project"], { parent: "area-guild", folder: "~/both/here" }),
+    note("p-shared-b", "Projects/Shared private", ["node", "project"], { parent: "area-sanctum", folder: "~/both/here" }),
+  ];
+  const nodes = [...vault.nodes, ...privateNodes];
+  const tasks = [...vault.tasks, note("t-private", "Tasks/T-960 A private ask", ["task"], { node: "n-child" }), note("t-public", "Tasks/T-961 A public ask", ["task"], { node: "area-guild" })];
+  const run = (id: string, md: Record<string, unknown>) => note(id, "Runs/2026-10-20 Words of a session", ["run"], { state: "running", started_at: at, doing_at: at, doing_now: "Reading the secret letter", feed: "feed-secret", ...md });
+  const SHAPES: [string, Record<string, unknown>][] = [
+    ["public channel, private room", { node: "node-uni", room: "sanctum", channel: "demo-guild" }],
+    ["public area node, private room", { node: "area-guild", room: "sanctum" }],
+    ["public area node, private channel", { node: "area-guild", channel: "demo-sanctum" }],
+    ["public task, private starter room", { node: "gone", task: "T-961", starter_room: "sanctum" }],
+    ["public area node, private starter channel", { node: "area-guild", starter_channel: "demo-sanctum" }],
+    ["slash room", { node: "gone", room: "sanctum/build" }],
+    ["comma room, private first", { node: "gone", room: "sanctum, guild" }],
+    ["comma room, private last", { node: "gone", room: "other, sanctum" }],
+    ["list room", { node: "gone", room: ["sanctum"] }],
+    ["list channel", { node: "gone", channel: ["demo-sanctum"] }],
+    ["hash room", { node: "gone", room: "#Sanctum" }],
+    ["child node of the private area", { node: "n-child" }],
+    ["task on a child of the private area", { node: "gone", task: "T-960" }],
+    ["a room a private project owns", { node: "gone", channel: "demo-vow" }],
+    ["a room a private project owns, by name", { node: "gone", room: "quiet-vow" }],
+    ["project linked to the private area", { node: "p-linked" }],
+    ["a folder shared with a private project", { node: "gone", folder: "~/both/here" }],
+  ];
+  for (const [what, md] of SHAPES) check(`a private run stays in its place: ${what}`, () => {
+    const r = run("r-private", md);
+    const s = workFrom({ nodes, runs: [r], tasks }, NOW).sessions.find((x) => x.id === "r-private")!;
+    assert.equal(s.project, "home:area-sanctum", "in the private area's home, never a public place");
+    assert.equal(s.ask, "Words of a session", "and its words are shown there, inside the place");
+  });
+  // with no private area to go to (only the clues that name it can be read): counted in Unfiled, none of its words
+  for (const [what, md] of SHAPES.filter(([, m]) => /sanctum/i.test(String(m.room)))) check(`a private run with no private area keeps its words to itself: ${what}`, () => {
+    const summary = { summary: "mts abcd1234: completed, evidence: file ~/quiet/letter-to-someone.md", video: "https://example.com/secret" };
+    const s = workFrom({ nodes: vault.nodes, runs: [run("r-private", { ...md, ...summary })], tasks }, NOW).sessions.find((x) => x.id === "r-private")!;
+    assert.equal(s.project, UNFILED);
+    assert.equal(s.ask, "A session in a private place");
+    assert.deepEqual([s.now, s.result, s.feed, s.video, s.end], [null, null, null, null, null]);
+  });
+  check("a private project keeps its own run, and a public run with no private clue is untouched", () => {
+    const w = workFrom({ nodes, runs: [run("r-vow", { node: "p-vow", room: "sanctum" }), run("r-pub", { node: "p-mail", room: "guild", channel: "demo-guild" })], tasks }, NOW);
+    assert.equal(w.sessions.find((s) => s.id === "r-vow")!.project, "p-vow");
+    assert.equal(w.sessions.find((s) => s.id === "r-pub")!.project, "p-mail");
+  });
+  check("a public project's run launched from a private room goes with the room, not the project", () => {
+    const s = workFrom({ nodes, runs: [run("r-from", { node: "p-mail", room: "sanctum" })], tasks }, NOW).sessions[0];
+    assert.equal(s.project, "home:area-sanctum");
+  });
+  check("an archived area has no door, so no home goes under it: its sessions show in Unfiled", () => {
+    const shut = nodes.map((n) => (n.id === "area-guild" ? { ...n, metadata: { ...n.metadata, status: "archived" } } : n));
+    const s = workFrom({ nodes: shut, runs: [run("r-shut", { node: "area-guild" })], tasks }, NOW).sessions[0];
+    assert.equal(s.project, UNFILED);
+  });
+  check("a project's own older room still says its area", () => {
+    const owned = nodes.map((n) => (n.id === "p-mail" ? { ...n, metadata: { ...n.metadata, channel: "demo-mail", room: "mail-room" } } : n));
+    assert.equal(workFrom({ nodes: owned, runs: [run("r-old-room", { node: "gone", room: "mail-room" })], tasks }, NOW).sessions[0].project, "home:area-engine");
+  });
+  check("a note with no start time still shows: when the note was made", () => {
+    const { started_at: _, ...md } = run("r-nostart", { node: "area-guild" }).metadata;
+    const s = workFrom({ nodes, runs: [{ ...run("r-nostart", {}), metadata: md }], tasks }, NOW).sessions[0];
+    assert.equal(s.startedAt, Date.parse(at));
+  });
+}
 check("a note that still says running but hasn't been heard from for hours is silent, not working (and has an end: when it was last heard)", () => {
   const at = (ms: number) => new Date(NOW - ms).toISOString();
   const base = vault.runs.find((r) => r.id === "run-events")!;
