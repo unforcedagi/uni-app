@@ -201,7 +201,7 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
           ? <HoldButton label="Hold to approve" disabled={busy} onDone={() => void answer("approve", [r.rid])} onCancel={() => setNote("Cancelled: nothing was sent. Hold for a second to approve.")} />
           : <button type="button" className="sealed-approve" disabled={busy} onClick={() => void answer("approve", [r.rid])}>Approve</button>}
       </div>}
-      below={<>{reach && what !== r.scope && <p className="sealed-says">Uni says: {what}</p>}{warn}{releases && <p className="sealed-releases">{releases}</p>}{note && <p className="secret-status" role="status">{note}</p>}{failure}</>}
+      below={<>{r.read_key && <p className="sealed-read-key">{r.read_key}</p>}{reach && what !== r.scope && <p className="sealed-says">Uni says: {what}</p>}{warn}{releases && <p className="sealed-releases">{releases}</p>}{note && <p className="secret-status" role="status">{note}</p>}{failure}</>}
       details={facts} />;
   }
 

@@ -17,7 +17,7 @@ const msg = (ref: string, body: string, ts: number, author = UNI, name = 'Uni') 
 const fence = (lang: string, prose: string) => `${prose}\nOpen this in the Uni app to see exactly what it unlocks.\n\n\`\`\`${lang}\n{"v": 1}\n\`\`\``;
 const single = (prose = '🔑 **Uni asks to use dns-zone** (powerful)') => fence('uni-sealed-approval', prose);
 
-type Row = { rid: string; action: string; credential: string; class: 'routine' | 'powerful'; scope: string; ttl_s: number; uses: number; payload: unknown; request_digest: string; expires: number; answer: null; always_unlock?: boolean };
+type Row = { read_key?: string; rid: string; action: string; credential: string; class: 'routine' | 'powerful'; scope: string; ttl_s: number; uses: number; payload: unknown; request_digest: string; expires: number; answer: null; always_unlock?: boolean };
 const row = (o: Partial<Row> = {}): Row => ({ rid: 'r1'.padEnd(32, '0'), action: 'dns.edit', credential: 'dns-zone', class: 'powerful', scope: 'Add an A record for demo.example.org',
   ttl_s: 600, uses: 1, payload: { type: 'A', name: 'demo', content: '192.0.2.7', zone: 'example.org', note: 'https://example.org/' + 'x'.repeat(90) },
   request_digest: '9b13b2ae' + 'f'.repeat(56), expires: now() + 900, answer: null, ...o });
@@ -401,8 +401,8 @@ test('T-335 the hold fill grows by transform (no layout per frame); calm shows n
 test('a card opens with the key\'s true reach and the job\'s age, and a small key is a tap', async ({ page }) => {
   // Rust's view for a job on a powerful credential: it worked out `always_unlock` and `reach` from the signed fields.
   const big = row({ rid: 'b1'.padEnd(32, '0'), credential: 'cf-parent', action: 'job.cloudflare', always_unlock: true,
-    scope: '🔴 All of Example Co, production included · 10 min\nCan: deploy any Worker (account-wide).\nUni says: Deploy to STAGING only',
-    reach: '🔴 All of Example Co, production included · 10 min', asked: now() - 6 * 3600, expires: now() + 18 * 3600,
+    scope: '🔴 All of Example Co, production included · 10 min, then read-only 3 h\nCan: deploy any Worker (account-wide).\nRead key: Workers.\nUni says: Deploy to STAGING only',
+    reach: '🔴 All of Example Co, production included · 10 min, then read-only 3 h', read_key: 'Read key: Workers.', asked: now() - 6 * 3600, expires: now() + 18 * 3600,
     payload: { job: 'site', purpose: 'Deploy to STAGING only', templates: ['workers-scripts-write'] } } as Partial<Row>);
   const small = row({ rid: 's1'.padEnd(32, '0'), credential: 'cf-parent', action: 'job.cloudflare', always_unlock: false,
     scope: '🟢 Names and settings of every zone on Example Co · 5 min\nCan: read the settings of every zone.\nUni says: find a zone id',
@@ -413,7 +413,8 @@ test('a card opens with the key\'s true reach and the job\'s age, and a small ke
   const cardBig = page.getByRole('region', { name: 'Approve use of cf-parent' }).first();
   const cardSmall = page.getByRole('region', { name: 'Approve use of cf-parent' }).last();
   // the first thing on the card is the reach, not the agent's sentence, which is below it and labelled
-  await expect(cardBig.locator('.cc-what')).toHaveText('🔴 All of Example Co, production included · 10 min');
+  await expect(cardBig.locator('.cc-what')).toHaveText('🔴 All of Example Co, production included · 10 min, then read-only 3 h');
+  await expect(cardBig.locator('.sealed-read-key')).toHaveText('Read key: Workers.');
   await expect(cardBig.locator('.sealed-says')).toHaveText('Uni says: Deploy to STAGING only');
   await expect(cardBig.getByText('asked 6 h ago')).toBeVisible();
   await expect(cardBig.getByRole('button', { name: /press and hold/ })).toBeVisible();

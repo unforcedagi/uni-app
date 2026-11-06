@@ -13,6 +13,8 @@ export type SealedRow = {
   asked?: number;
   /** The key's true reach (Rust's `reach_line`): what the card says first. */
   reach?: string | null;
+  /** What a read key riding on the card can see (Rust's `read_key_line`): it stays on the card's face. */
+  read_key?: string | null;
 };
 
 /** T-335: approving these rows would need only the tap while the unlock grace lasts (Rust decides, at the tap). */

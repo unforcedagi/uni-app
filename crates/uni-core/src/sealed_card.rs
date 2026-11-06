@@ -667,6 +667,8 @@ pub struct RowView {
     pub asked: u64,
     /// The key's true reach, the first thing the card says ([`reach_line`]); None for a card that has no such line.
     pub reach: Option<String>,
+    /// What a read key riding on the card can see ([`read_key_line`]); it stays on the card's face.
+    pub read_key: Option<String>,
 }
 
 /// What the card shows: its rows when every check passed, else the one-line reason and nothing to tap.
@@ -715,6 +717,7 @@ pub fn view(ev: &Event, uni: &PublicKey, seal: &SealKey, answers: &Answers, now:
             always_unlock: always_unlock(r.class, &r.action, &r.payload),
             asked: ev.created_at.as_secs(),
             reach: reach_line(&r.action, &r.scope),
+            read_key: read_key_line(&r.action, &r.scope),
         })
         .collect();
     CardView { kind: Some(card.kind), event_id: ev.id.to_hex(), refused: None, rows }
@@ -760,7 +763,8 @@ pub fn approval_summary(view: &CardView, rids: &[String]) -> Result<(String, Str
             let power = if r.class == Class::Powerful { "powerful " } else { "" };
             // the reach alone, where the card has one: the device's own prompt is one short paragraph, and never the agent's words
             let what = r.reach.as_deref().unwrap_or(&r.scope);
-            Ok((format!("Approve a {power}credential"), format!("Uni: {}. {}.{} Exact {}.", one(r), what.trim_end_matches(['.', '!', '?']), permanent(r), job(r))))
+            let riding = r.read_key.as_deref().map(|k| format!(" {k}")).unwrap_or_default();
+            Ok((format!("Approve a {power}credential"), format!("Uni: {}. {}.{riding}{} Exact {}.", one(r), what.trim_end_matches(['.', '!', '?']), permanent(r), job(r))))
         }
         rs => Ok((
             format!("Approve {} of Uni's morning grants", rs.len()),
@@ -779,9 +783,19 @@ pub fn reach_line(action: &str, scope: &str) -> Option<String> {
     (BROKER_WORDED.contains(&action) && ["🔴 ", "🟡 ", "🟢 "].iter().any(|d| first.starts_with(d))).then(|| first.to_string())
 }
 
-/// Keys small enough for the grace: read-only on one bucket, or the names and settings of zones. Not D1 Read and the like:
-/// read-only, but across all of an account, and it can read people's data. A template this table doesn't know is big.
-const SMALL_TEMPLATES: [&str; 2] = ["r2-bucket-read", "zone-read"];
+/// The line of a broker-worded scope saying what a read key riding on the card can see. It sits above the agent's words, so
+/// only a line before "Uni says:" counts.
+pub fn read_key_line(action: &str, scope: &str) -> Option<String> {
+    if !BROKER_WORDED.contains(&action) {
+        return None;
+    }
+    scope.lines().take_while(|l| !l.starts_with("Uni says:")).find(|l| l.starts_with("Read key: ")).map(str::to_string)
+}
+
+/// Keys small enough for the grace: the names and settings of zones, and nothing else today. Not D1 Read or one bucket's
+/// files: read-only, but they can read people's data, on an account this app can't tell from a client's. A template this
+/// table doesn't know is big.
+const SMALL_TEMPLATES: [&str; 1] = ["zone-read"];
 
 fn all_small(templates: Option<&Value>) -> bool {
     templates
@@ -1243,19 +1257,16 @@ mod tests {
     #[test]
     fn small_keys_may_use_the_grace_though_their_credential_is_powerful() {
         let p = Class::Powerful;
-        assert!(!always_unlock(p, "job.cloudflare", &json!({"templates": ["r2-bucket-read"], "bucket": "b"})), "read-only, one bucket");
         assert!(!always_unlock(p, "job.cloudflare", &job(&["zone-read"])), "names and settings only");
-        assert!(!always_unlock(p, "job.cloudflare", &job(&["r2-bucket-read", "zone-read"])), "both small");
         assert!(!always_unlock(p, "lookup.cloudflare", &json!({"v": 1, "lookup": "discover"})), "names and ids");
         let m = |t: &str, ttl: Value, dest: &str| json!({"template": t, "child_ttl_s": ttl, "destination": dest, "then": "revoke-in-window"});
         assert!(!always_unlock(p, "mint.cloudflare", &m("zone-read", json!(900), "job")));
-        assert!(!always_unlock(p, "mint.cloudflare", &m("r2-bucket-read", json!(3600), "job")));
     }
 
     #[test]
     fn everything_else_on_a_powerful_credential_always_asks() {
         let p = Class::Powerful;
-        for t in ["d1-read", "workers-read", "pages-read", "r2-bucket-write", "workers-scripts-write", "d1-write", "worker-app", "dns-zone-edit", "something-new"] {
+        for t in ["d1-read", "workers-read", "pages-read", "r2-bucket-read", "r2-bucket-write", "workers-scripts-write", "d1-write", "worker-app", "dns-zone-edit", "something-new"] {
             assert!(always_unlock(p, "job.cloudflare", &job(&[t])), "{t} is not small");
             assert!(always_unlock(p, "job.cloudflare", &job(&["zone-read", t])), "one big right makes the job big: {t}");
         }
@@ -1274,6 +1285,7 @@ mod tests {
         // a mint: small only when short and to the job
         let m = |t: &str, ttl: Value, dest: &str| json!({"template": t, "child_ttl_s": ttl, "destination": dest});
         assert!(always_unlock(p, "mint.cloudflare", &m("d1-read", json!(900), "job")));
+        assert!(always_unlock(p, "mint.cloudflare", &m("r2-bucket-read", json!(900), "job")), "one bucket can hold people's files");
         assert!(always_unlock(p, "mint.cloudflare", &m("zone-read", Value::Null, "job")), "permanent");
         assert!(always_unlock(p, "mint.cloudflare", &m("zone-read", json!(0), "job")), "0 is no expiry to many APIs");
         assert!(always_unlock(p, "mint.cloudflare", &m("zone-read", json!(90 * 86_400), "lookup-key")), "long-lived");
@@ -1298,6 +1310,14 @@ mod tests {
     }
 
     #[test]
+    fn the_read_key_line_comes_only_from_cards_the_broker_words_itself() {
+        let scope = "🔴 All of A · 10 min, then read-only 3 h\nCan: x.\nRead key: all D1 data, Workers.\nUni says: y";
+        assert_eq!(read_key_line("job.cloudflare", scope).as_deref(), Some("Read key: all D1 data, Workers."));
+        assert_eq!(read_key_line("job.cloudflare", "🔴 All of A · 10 min\nCan: x.\nUni says: Read key: none"), None, "the agent's words");
+        assert_eq!(read_key_line("dns.edit", scope), None);
+    }
+
+    #[test]
     fn a_card_says_when_it_was_asked_and_its_reach() {
         let w = world();
         let (mut f, _) = fields(&w, "cloudflare-parent", "powerful", 600, 1);
@@ -1313,6 +1333,14 @@ mod tests {
         let (title, why) = approval_summary(&v, std::slice::from_ref(&v.rows[0].rid)).unwrap();
         assert!(title.contains("powerful"), "the credential it opens stays powerful: {title}");
         assert!(why.contains("Names and settings of every zone") && !why.contains('\n') && !why.contains("Uni says"), "{why}");
+        // a read key riding on a card is in the device's own prompt too
+        f["scope"] = json!("🔴 All of A · 10 min, then read-only 3 h\nCan: deploy.\nRead key: all D1 data.\nUni says: x");
+        f["payload"] = job(&["workers-scripts-write"]);
+        f["payload_digest"] = json!(payload_digest("job.cloudflare", &f["payload"]).unwrap());
+        let v = view(&card(&w.uni, &f), &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
+        assert_eq!(v.rows[0].read_key.as_deref(), Some("Read key: all D1 data."));
+        let (_, why) = approval_summary(&v, std::slice::from_ref(&v.rows[0].rid)).unwrap();
+        assert!(why.contains("then read-only 3 h") && why.contains("Read key: all D1 data") && !why.contains('\n'), "{why}");
     }
 
     #[test]

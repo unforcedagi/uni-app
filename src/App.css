@@ -253,7 +253,7 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .sealed-none { color: var(--muted); }
 .sealed-warn { margin: 6px 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--warn); background: var(--g-needs-soft); color: var(--text); font-size: 13px; line-height: 1.45; }
 .sealed-releases { margin: 6px 0; font-size: 13px; line-height: 1.45; color: var(--text-soft); }
-.sealed-says { margin: 6px 0 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.sealed-says, .sealed-read-key { margin: 6px 0 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .cc-age { font-weight: 600; }
 .sealed-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 10px; }
 .sealed-actions .pairing-secondary { min-height: 44px; }
