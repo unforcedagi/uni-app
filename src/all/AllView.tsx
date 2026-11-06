@@ -435,6 +435,27 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
   recededRef.current = receded;
   const heldSpot = useRef<{ stick: boolean; spot: FeedSpot | null } | null>(null);
   const readHold = useRef(0);
+  // T-335 one fluid surface: a room can run on for many messages, or one long message past the screen, with its label scrolled away. The room you are reading is
+  // named at the top of the feed then, and is one tap into focus at the message you are on.
+  const [reading, setReading] = useState<string | null>(null);
+  const readingRef = useRef<string | null>(null);
+  const lookFrame = useRef(0);
+  const lookAtTop = useCallback(() => {
+    lookFrame.current = 0;
+    const el = list.current;
+    if (!el) return;
+    const rows = el.querySelectorAll<HTMLElement>("article.all-msg[data-ref]");
+    let lo = 0, hi = rows.length;
+    // the first row still showing at the top
+    while (lo < hi) { const mid = (lo + hi) >> 1, r = rows[mid]; if (r.offsetTop + r.offsetHeight > el.scrollTop + 4) hi = mid; else lo = mid + 1; }
+    const row = rows[lo];
+    // that row's own label, on screen: it says it itself
+    const own = row?.querySelector<HTMLElement>(".all-place");
+    const next = !row || (own && row.offsetTop + own.offsetTop + own.offsetHeight > el.scrollTop) ? null : row.dataset.room ?? null;
+    readingRow.current = row?.dataset.ref ?? null;
+    if (next !== readingRef.current) { readingRef.current = next; setReading(next); }
+  }, []);
+  const readingRow = useRef<string | null>(null);
   // the message being replied to (the tapped one): when the keyboard takes the room, it stays in sight
   const [tapped, setTapped] = useState<string | null>(null);
   const tappedRef = useRef<string | null>(null);
@@ -472,7 +493,8 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
       return;
     }
     if (stick.current && !tappedRef.current) el.scrollTop = el.scrollHeight;
-  }, [feed, loaded]);
+    lookAtTop();
+  }, [feed, loaded, lookAtTop, opened]);
   useLayoutEffect(() => { if (!recededRef.current && !restoring.current) keepTapped(); }, [tapped, target, keepTapped]);
   // T-335 one fluid surface: a room goes into focus: the place is noted; it ends: the same message is where it was, whatever arrived behind it
   useLayoutEffect(() => {
@@ -543,8 +565,11 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     rows.push(<FeedRow key={`${m.channel}:${m.ref}`} m={m} place={nameOf.get(m.channel) ?? "Room"} address={addressOf.get(m.channel) ?? "this room"} mine={!!me && m.author === me} me={me} run={run} named={named} targeted={targeted} open={opened.has(m.ref)} onOpen={onOpen} onTap={tap} onRead={onRead} />);
     prev = m;
   }
-  return <div className="all-feed" ref={list} role="log" aria-label="All rooms, by time" aria-live="polite"
-    onScroll={(e) => { const el = e.currentTarget; if (performance.now() >= readHold.current) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}
+  return <div className="all-feed-box">
+    {reading && nameOf.has(reading) && <button type="button" className="all-place all-reading" style={{ ["--room-tint" as string]: tint(reading) }} aria-label={`Focus ${nameOf.get(reading)}, at this message`} title={`Focus ${nameOf.get(reading)}`}
+      onClick={(e) => { label.el = null; label.rect = e.currentTarget.getBoundingClientRect(); onOpen(reading, readingRow.current); }}>{nameOf.get(reading)}</button>}
+    <div className="all-feed" ref={list} role="log" aria-label="All rooms, by time" aria-live="polite"
+    onScroll={(e) => { const el = e.currentTarget; if (performance.now() >= readHold.current) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; if (!lookFrame.current) lookFrame.current = requestAnimationFrame(lookAtTop); }}
     onPointerDown={(e) => {
       if (e.pointerType !== "touch" || e.clientX < EDGE_PX || e.clientX > innerWidth - EDGE_PX || !(e.target instanceof Element)) return;
       if (e.target.closest("pre, table, .md-table-wrap, a, button, video, audio, input, textarea, summary, .attachments")) return;
@@ -574,6 +599,7 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
       {loaded && !feed.length && <p className="all-quiet">Nothing said in your rooms yet.</p>}
       {rows}
       {failed.length > 0 && <p className="all-quiet" role="status">Couldn't read {andList(failed.map((id) => nameOf.get(id) ?? id))} just now.</p>}
+    </div>
     </div>
   </div>;
 });

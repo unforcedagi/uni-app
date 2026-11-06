@@ -206,6 +206,26 @@ test.describe('a room in focus', () => {
     });
   }
 
+  test('deep in a run from one room, its label scrolled away: the room is named at the top, and that is the way into focus, at the message you are on', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => { const w = window as any, now = Math.floor(Date.now() / 1000); for (let i = 0; i < 30; i++) w.__msgs['ch-north'].push({ ref: `run${i}`, channel: 'ch-north', author: 'b'.repeat(64), author_name: 'Uni', ts: now - 60 + i, body: `The north field, line ${i}. It goes on for a while, as a room does when it has a lot to say about the hedge.`, mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [], media: [] }); });
+    await allIn(page);
+    const reading = page.locator('.all-reading');
+    // at a run's own label there is nothing to add
+    await row(page, 'run0').evaluate((el) => { const f = el.closest('.all-feed')!; f.scrollTop = (el as HTMLElement).offsetTop; });
+    await expect(reading).toHaveCount(0);
+    // deep inside it
+    await row(page, 'run6').evaluate((el) => { const f = el.closest('.all-feed')!; f.scrollTop = (el as HTMLElement).offsetTop; });
+    await expect(reading).toHaveText('North Field');
+    await reading.click();
+    await expect(sheet(page).getByRole('heading', { name: 'North Field' })).toBeVisible();
+    await expect(sheet(page).locator('[data-ref="run6"].search-focus')).toBeVisible();
+    await backToAll(page).click();
+    await expect(sheet(page)).toHaveCount(0);
+    await expect(reading).toHaveText('North Field');
+    await expect(row(page, 'run6')).toBeInViewport();
+  });
+
   test('the way in moves quickly; on a calm screen it does not move at all, and still reads', async ({ page }) => {
     await boot(page);
     await allIn(page);

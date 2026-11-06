@@ -32,6 +32,7 @@
 .fd.fd-all { display: flex; flex-direction: column; overflow: hidden; width: 100%; box-sizing: border-box; padding-top: 22px; padding-bottom: 0; }
 .fd-allhead { flex: none; width: 100%; max-width: 720px; margin: 0 auto 4px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
 .fd-allhead .fd-mark { margin: 0; }
+.all-feed-box { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .all-feed { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(-1 * clamp(20px, 5vw, 64px)); padding: 0 clamp(20px, 5vw, 64px); }
 .all-stack { max-width: 720px; margin: 0 auto; padding: 8px 0 20px; }
 .all-file { margin: 2px 0 4px; font: italic 400 15px/1.5 var(--g-font-uni); color: var(--g-ink-2); }
@@ -126,4 +127,9 @@
   .all-back, .all-chip { min-height: 44px; }
   .all-chip-x { width: 44px; height: 44px; margin: -2px -4px -2px 0; }
 }
+/* the room you are reading, when its own label has scrolled away: at the top of the column, in the label's own shape */
+.all-reading { position: absolute; top: 6px; left: max(0px, calc((100% - 720px) / 2)); z-index: 1; max-width: 70%; box-shadow: var(--g-shadow-1); animation: all-reading-in var(--g-t-quick) var(--g-ease); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes all-reading-in { from { opacity: 0; } }
+:root[data-screen="ink"] .all-reading { box-shadow: 0 0 0 2px #fff; }
+@media (pointer: coarse) { .all-reading { min-height: 36px; } }
 .all-empty .all-quiet { width: 100%; max-width: 720px; margin: 24px auto; }
