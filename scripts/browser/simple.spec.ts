@@ -309,7 +309,7 @@ test.describe('simple', () => {
     await openCompanion(page);
     await expect(page.locator('.cp-body')).not.toContainText(/Decision \(/);
     await page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' }).locator('.cp-need').click();
-    await expect(taskDialog(page).or(page.locator('.sheet, .task-sheet')).first()).toContainText('Decision (default yes)');
+    await expect(taskDialog(page).or(page.locator('.sheet, .task-sheet')).first()).toContainText('Decision · default yes');
   });
 
   test('teaching lists what is the user\'s own and (r17) what waits on them, whoever holds it; not what waits on someone else', async ({ page }) => {
@@ -1033,7 +1033,7 @@ test.describe('simple', () => {
     const item = page.locator('.cp-item').filter({ hasText: 'after-event' });
     // r18: in the companion a long "Your call" is cut on a whole word; its sheet has the whole question from the note
     await expect(item.locator('.cp-title')).toContainText('Should Uni add the after-event "were you there?"');
-    await expect(item.locator('.cp-title')).not.toContainText('Decision (default yes)');
+    await expect(item.locator('.cp-title')).not.toContainText('Decision · default yes');
     await expect(item.locator('.cp-title')).not.toContainText('Converted from');
     await item.locator('.cp-need').click();
     await expect(page.locator('.task-sheet h2')).toHaveText('Should Uni add the after-event "were you there?" prompt to the companion on Wed? Say no to skip it.');

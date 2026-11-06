@@ -1094,7 +1094,7 @@ test('07-all-view-composer-focus', async ({ page }) => {
 
 test('23-find-scoped-to-a-folder', async ({ page }) => {
   await vaultBrowser(page);
-  await page.getByRole('button', { name: 'Search in this folder' }).first().click();
+  await page.getByRole('button', { name: /^Search in / }).first().click();
   await expect(page.getByRole('searchbox', { name: 'Search conversations and notes' })).toBeVisible();
   await snap(page, '23-find-scoped-to-a-folder');
 });

@@ -360,7 +360,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** The rail is hidden on short windows up to 950px (one rule, r14): the room then shows its Places drawer. */
   const railHidden = useRailHidden();
   const [railMore, setRailMore] = useState(false);
-  useEffect(() => { if (!railMore) return; const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRailMore(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [railMore]);
+  useEffect(() => { if (!railMore) return; const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRailMore(false); }; const onSize = () => setRailMore(false); window.addEventListener("keydown", onKey); window.addEventListener("resize", onSize); return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("resize", onSize); }; }, [railMore]);
   const forYouBack = useRef("Uni");
   const forYouReturn = useRef<string | null>(null);
   const [journalFocus, setJournalFocus] = useState(false);
@@ -2398,7 +2398,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // At Uni's room tree (nothing open over it) the system's own Back runs: the app goes to the background.
   const [modalOpen, setModalOpenState] = useState(false);
   useEffect(() => { const on = (e: Event) => setModalOpenState(((e as CustomEvent<number>).detail ?? 0) > 0); window.addEventListener("uni-modal", on); return () => window.removeEventListener("uni-modal", on); }, []);
-  const canGoBack = modalOpen || !!sheetFor || !!panel || journalFocus || notes.length > 0 || asideShown || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
+  const canGoBack = railMore || modalOpen || !!sheetFor || !!panel || journalFocus || notes.length > 0 || asideShown || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
   // Ctrl+W (Linux, Windows) closes what is open over the place. r22 (Codex 6): on macOS the native menu's "Close Window" owns Cmd+W.
   const closeActiveRef = useRef(() => {});
   const goHistoryRef = useRef<(by: -1 | 1) => void>(() => {});
@@ -2454,6 +2454,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return () => { dead = true; off?.(); };
   }, [canGoBack]);
   const active = activeTab(tabs);
+  useEffect(() => { setRailMore(false); }, [active?.id]);
   useEffect(() => { if (active && (active.kind === "areas" || active.kind === "area")) { const { id: _id, ...t } = active; originRef.current = t; } }, [active]);
   const originTitle = uniPlace.current?.title || "Uni";
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
@@ -2522,7 +2523,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     else areaActions.openRoom(a.channel, a.ref);
   };
   const approvalsView = { list: approvals, open: openApproval, roomName: (id: string) => rooms.find((r) => r.id === id)?.name ?? null };
-  const primaryVault = vaults.includes(lifeVault) ? lifeVault : vaults.includes("uni") ? "uni" : null;
+  const primaryVault = vaults.includes(lifeVault) ? lifeVault : vaults.includes("uni") ? "uni" : vaults.length === 1 ? vaults[0] : null;
   const otherVaults = vaults.filter((vault) => vault !== primaryVault);
   const activeOtherVault = active?.kind === "vault" && active.vault && active.vault !== primaryVault && otherVaults.includes(active.vault) ? active.vault : null;
   function toggleOtherVaults() {
@@ -2546,7 +2547,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       ...(calOn ? [{ label: "Calendar", go: () => openTarget({ kind: "calendar", title: "Calendar" }) }] : []),
       ...(msgsOn ? [{ label: "Messages", go: () => openTarget({ kind: "messages", title: "Messages" }) }] : []),
       ...(showUniGlue(lifeVault) ? [{ label: "All", go: () => openTarget({ kind: "all", title: "All" }) }, { label: "For you", go: openForYou }, { label: "To post", go: () => openTarget({ kind: "posts", title: "To post" }) }] : []),
-      { label: "Vault", go: () => { setSearchOpen(false); setPanel("vault"); } },
+      { label: "Vault", go: () => { setSearchOpen(false); if (vaults.length === 1) { setPanel(null); setVaultRefresh((n) => n + 1); openTarget({ kind: "vault", vault: vaults[0], title: vaults[0] }, "new"); } else setPanel("vault"); } },
       { label: "Search", go: openFind },
       { label: "Settings", go: () => { setSearchOpen(false); setPanel("settings"); setForgetArmed(false); } },
     ],
@@ -2588,7 +2589,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {(panel || searchOpen) && <header className="panel-head"><h1>{panelTitle}</h1><button className="panel-close icon-button" aria-label="Close panel" title="Close" onClick={() => { setPanel(null); setSearchOpen(false); }}>×</button></header>}
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
       {panel === "settings" && <div className="settings">
-        <p className="connection" role="status" data-fine={status === "Up to date" && (!live || live === "Live") ? "true" : undefined}>{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
+        <p className="connection" role="status" data-fine={/^(Up to date$|Message sent|Asked Uni)/.test(status) && (!live || live === "Live") ? "true" : undefined}>{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
       {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
         <UpdateSettings /><ClaudeUsage /><MotionSetting /><LifeOsVaultSetting vaults={vaults} /><SealedApprovals />
         <section className="settings-device" aria-label="This device"><h2>This device</h2><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary settings-forget" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget. You'll need to pair again." : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep it</button>}</section>

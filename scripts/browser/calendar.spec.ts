@@ -215,7 +215,7 @@ test.describe('T-229 Calendar', () => {
     await form.getByRole('button', { name: 'Add event' }).click();
     const box = detail(page).getByRole('region', { name: 'Invites' });
     await expect(box).toContainText('Invites not sent.');
-    await expect(detail(page).locator('.cal-detail-marks')).toContainText('TENTATIVE');
+    await expect(detail(page).locator('.cal-detail-marks')).toContainText('Maybe');
     await detail(page).getByRole('button', { name: 'Send invites…' }).click();
     const confirm = page.getByRole('dialog', { name: 'Send invites?' });
     await expect(confirm.getByRole('listitem')).toHaveText(['juno@example.com', 'mara@example.com']);

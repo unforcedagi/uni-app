@@ -66,6 +66,7 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
   await page.getByRole('button', { name: 'Focus' }).click();
   await page.getByRole('button', { name: 'Focus' }).click();
   const fy = rail.getByRole('button', { name: 'For you', exact: true });
+  if (phone) await expect(rail.getByRole('button', { name: 'More', exact: true }).locator('.rail-dot')).toBeVisible(); // what's behind More shows on it
   await openRailMore(page);
   await expect(fy.locator('.rail-count')).toHaveCount(0); await expect(fy.locator('.rail-dot')).toBeVisible();
   await fy.click();

@@ -8,7 +8,7 @@ import { backToThreads, boot, boxesHidden, KEY, mail, mailCmds, pickBox, rows, s
 test('the full flow: switch accounts and the combined view, open a thread, search, attachments, Send disabled', async ({ page }) => {
   await boot(page);
   const m = mail(page);
-  await expect(m.getByText('robin@example.com · read-only')).toBeVisible();
+  await expect(m.getByText('robin@example.com · reading only')).toBeVisible();
 
   // 1. the combined view: both inboxes, newest first, every row tagged
   await expect(rows(page)).toHaveCount(6);
@@ -55,11 +55,11 @@ test('the full flow: switch accounts and the combined view, open a thread, searc
   await expect(thread.locator('.mail-thread-where')).toContainText('In your mail · 3 messages');
   await expect(thread.locator('.mail-card')).toHaveCount(4);
   await expect(thread.locator('.mail-card').nth(0)).toContainText('marmalade jars');
-  await expect(thread.locator('.mail-card').nth(3)).toContainText('DRAFT · BY UNI · NOT SENT');
+  await expect(thread.locator('.mail-card').nth(3)).toContainText('Draft by Uni · not sent');
   await expect(thread.locator('.mail-card').nth(3)).toContainText("Uni can't send as you");
   await expect(thread.getByRole('note').filter({ hasText: "Uni's triage note" })).toContainText('Needs you: Mara asks which day to start.');
-  await expect(thread.getByRole('button', { name: /^Reply/ })).toBeDisabled();
-  await expect(thread.getByText('Sending comes later', { exact: true })).toBeVisible();
+  await expect(thread.getByRole('button', { name: /^Reply/ })).toHaveCount(0); // T-335 as Aaron: no grey button; the header says reading only
+  await expect(thread.getByText('Sending comes later', { exact: true })).toHaveCount(0);
   await shot(page, '3-thread');
   await thread.locator('.mail-card').nth(3).scrollIntoViewIfNeeded();
   await shot(page, '3b-uni-draft');
@@ -110,11 +110,7 @@ test('the full flow: switch accounts and the combined view, open a thread, searc
   await backToThreads(page);
 
   // 5. Send is disabled: New (in the bottom bar on a phone) and Reply, both saying sending comes later
-  const news = page.getByRole('button', { name: /^New/ }).filter({ visible: true });
-  await expect(news).toHaveCount(1);
-  await expect(news).toBeDisabled();
-  await expect(news).toHaveAccessibleName('New: sending comes later');
-  if (stacked(page)) await expect(page.getByRole('navigation', { name: 'Mail actions' }).getByText('Sending comes later')).toBeVisible();
+  await expect(page.getByRole('button', { name: /^New/ })).toHaveCount(0); // T-335 as Aaron: not offered, not greyed
 
   // only reads were asked of Rust
   expect(new Set(await mailCmds(page))).toEqual(new Set(['mail_overview', 'mail_threads', 'mail_thread', 'mail_triage', 'mail_attachment_open']));
@@ -248,7 +244,7 @@ test('a message of a thread that sits in Junk says so', async ({ page }) => {
   const thread = page.getByRole('region', { name: 'Thread: Your hold is ready' });
   await expect(thread.locator('.mail-card')).toHaveCount(2);
   await expect(thread.locator('.mail-card').nth(0).locator('.mail-place')).toHaveCount(0);
-  await expect(thread.locator('.mail-card').nth(1)).toContainText('IN JUNK');
+  await expect(thread.locator('.mail-card').nth(1)).toContainText('In Junk');
   await expect(thread.locator('.mail-card').nth(1)).toContainText('filed this message as junk');
 });
 

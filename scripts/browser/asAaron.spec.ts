@@ -1,4 +1,4 @@
-// T-335 as Aaron: the papercuts found walking the whole app as its owner, one flow each. Each fails on the build before the fix (fbb7e9b7).
+// T-335 as Aaron: the papercuts found walking the whole app as its owner, one flow each. Nearly all fail on the build before the fix (8c7241ae); the ones marked guard hold a line that was already right, and were proven by a bug of this pass.
 // Made-up data only: the fixtures are the tour's.
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
@@ -8,6 +8,7 @@ import * as mailMock from './mailMock';
 import * as calMock from './calMock';
 import { railGo, railNav, openRailMore } from './railGo';
 
+const USAGE = JSON.parse(readFileSync(new URL('../fixtures/usage-note.json', import.meta.url), 'utf8'));
 const PROMPTS = JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8'));
 const phone = () => test.info().project.name === 'phone';
 const onlyPhone = () => test.skip(!phone(), 'a phone-size papercut');
@@ -25,15 +26,14 @@ async function kiln(page: Page, o: BootOpts = {}) {
 }
 const TASKS: BootOpts = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true, uniMember: true };
 /** The tour's way into a room of the tasks world: the front door, a first room, then the tree (beside it, or the Places drawer). */
-async function openRoom(page: Page, name: string) {
+async function openRoomWithNeeds(page: Page) {
   await leaveFrontDoor(page);
   const beside = (page.viewportSize()?.width ?? 0) >= 900;
   if (!beside) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
   const scope = beside ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
   await scope.locator('.th-row.d1').first().waitFor();
   for (let i = 0; i < 12; i++) { const f = scope.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
-  await scope.locator(`.th-go[aria-label^="${name},"]`).click();
-  await expect(page.locator('.sr')).toHaveAttribute('data-node', name);
+  await scope.locator('.th-go').filter({ has: page.locator('.th-dot:not(.inside)') }).nth(2).click();
 }
 
 // ---------------------------------------------------------------- the rail
@@ -84,6 +84,23 @@ test('the bar stays in reach over a panel, and any way out closes the sheet (rev
   await expect(page.getByRole('button', { name: 'Close More' })).toHaveCount(0);
 });
 
+test('the sheet doesn\'t outlive a rotation', async ({ page }) => {
+  onlyPhone();
+  await glow(page);
+  await railNav(page).getByRole('button', { name: 'More', exact: true }).click();
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(railNav(page).getByRole('button', { name: 'Settings', exact: true })).toBeHidden();
+});
+
+test('ink: the knots and the sheet are black on white, by shape', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('uni.motion', 'calm'));
+  await glow(page);
+  const knot = page.locator('.fd-knot').first();
+  expect(await knot.evaluate((e) => getComputedStyle(e).opacity)).toBe('1');
+  expect(await knot.evaluate((e) => getComputedStyle(e).animationName)).toBe('none');
+});
+
 test('closing a panel opened from the sheet gives focus back to More', async ({ page }) => {
   onlyPhone();
   await glow(page);
@@ -92,7 +109,7 @@ test('closing a panel opened from the sheet gives focus back to More', async ({ 
   await expect(railNav(page).getByRole('button', { name: 'More', exact: true })).toBeFocused();
 });
 
-test('a wider screen keeps every place on the rail and has no More', async ({ page }) => {
+test('guard: a wider screen keeps every place on the rail and has no More', async ({ page }) => {
   test.skip(phone(), 'desktop');
   await glow(page);
   const rail = railNav(page);
@@ -128,9 +145,10 @@ test('a room says what it is once: no "Last written by", no "no folder yet", no 
 
 test('a long room name ends in an ellipsis', async ({ page }) => {
   await kiln(page);
-  const t = await page.locator('.sr-title').evaluate((el) => { const s = getComputedStyle(el); return { display: s.display, overflow: s.textOverflow }; });
+  const t = await page.locator('.sr-title').evaluate((el) => { el.textContent = 'A very long room name that goes on and on and on and on past any window, however wide, whatever the screen, and on again'; const s = getComputedStyle(el); return { display: s.display, overflow: s.textOverflow, cut: el.scrollWidth > el.clientWidth }; });
   expect(t.display).toBe('block');
   expect(t.overflow).toBe('ellipsis');
+  expect(t.cut).toBe(true);
 });
 
 test('a project that isn\'t set up is said once, under all of the room\'s work', async ({ page }) => {
@@ -149,6 +167,8 @@ test('the composer ring sits in line with the mic and Send, in the room\'s colou
   const ring = await page.locator('.compose-uni').evaluate((el) => { const s = getComputedStyle(el), b = getComputedStyle(el, '::before'); return { display: s.display, shadow: b.boxShadow, tint: getComputedStyle(el.closest('.sr')!).getPropertyValue('--room-tint') }; });
   expect(ring.display).toBe('flex');
   expect(ring.tint).toContain('hsl');
+  const tintRgb = await page.locator('.compose-uni').evaluate((el) => { const p = document.createElement('i'); p.style.color = 'var(--room-tint)'; el.append(p); const c = getComputedStyle(p).color; p.remove(); return c; });
+  expect(ring.shadow).toContain(tintRgb);
 });
 
 test('every room wears one colour: the home, All and the room agree', async ({ page }) => {
@@ -226,16 +246,16 @@ test('a note on a phone keeps its tools on one row, and Quote only shows when th
 // ---------------------------------------------------------------- tasks, decisions, approvals
 test('a task sheet speaks plainly: no "due due", no task number', async ({ page }) => {
   await bootAreas(page, 'seed', TASKS);
-  await openRoom(page, 'ATLAS');
+  await openRoomWithNeeds(page);
   await page.getByRole('textbox', { name: /^Message / }).first().waitFor();
   if (phone()) await page.locator('.cp.strip .cp-line').click();
-  await page.getByRole('region', { name: 'Needs you' }).locator('.cp-need[data-id="T-07"]').click();
+  await page.getByRole('region', { name: 'Needs you' }).locator('.cp-need[data-id]').first().click();
   const sheet = page.locator('.task-sheet').first();
   await expect(sheet).toBeVisible();
   await expect(sheet).not.toContainText(/due due/i);
   for (const dd of await sheet.locator('.task-facts dd').allTextContents()) expect(dd).not.toMatch(/\bdue\b/);
   await sheet.locator('summary', { hasText: 'Details' }).click();
-  await expect(sheet).not.toContainText('T-07');
+  await expect(sheet).not.toContainText(/\bT-\d+\b/);
 });
 
 test('a waiting approval is from Uni, not from a program\'s name', async ({ page }) => {
@@ -249,7 +269,9 @@ test('a waiting approval is from Uni, not from a program\'s name', async ({ page
 
 // ---------------------------------------------------------------- Settings
 test('Settings: the update first, nothing that can\'t be used, the dangerous one small and last', async ({ page }) => {
-  await glow(page, {}, (cmd) => (cmd === 'plugin:app|version' ? '0.1.98' : undefined));
+  await page.clock.setFixedTime(new Date('2026-10-26T18:00:00Z')); // the usage fixture's own Monday, so its reading is fresh
+  await page.addInitScript((usage) => { (window as any).__extraInvoke = async (cmd: string, a: any) => cmd === 'plugin:app|version' ? '0.1.98' : cmd === 'vault_note' && a.noteRef === 'System/Claude accounts' ? { hub: 'https://hub.example.ts.net', vault: 'uni', note: usage } : undefined; }, USAGE);
+  await glow(page);
   await railGo(page, 'Settings');
   const settings = page.locator('.settings');
   await expect(settings).toBeVisible();
@@ -262,6 +284,8 @@ test('Settings: the update first, nothing that can\'t be used, the dangerous one
   // order: updates above Claude accounts, Forget in This device, below approvals
   const y = async (l: ReturnType<Page['locator']>) => (await l.boundingBox())!.y + await settings.evaluate((e) => e.scrollTop ?? 0);
   const update = settings.locator('.update-settings');
+  await expect(settings.locator('.usage-card')).toBeVisible();
+  expect(await y(update)).toBeLessThan(await y(settings.locator('.usage-card')));
   const forget = settings.getByRole('button', { name: /Forget this device/ });
   expect(await y(update)).toBeLessThan(await y(forget));
   await expect(settings.getByRole('region', { name: 'This device' }).getByRole('button', { name: /Forget this device/ })).toBeVisible();
@@ -341,6 +365,12 @@ test('the home: a quiet day has its own line, the places sit on one thread, and 
 });
 
 // ---------------------------------------------------------------- Mail, Calendar, Messages
+test('Mail\'s account tags speak in words, not capitals', async ({ page }) => {
+  await mailMock.boot(page, 'ok');
+  await mailMock.rows(page).first().waitFor();
+  for (const t of await mailMock.rows(page).locator('.mail-who').allTextContents()) expect(t, t).not.toMatch(/^(YOU|UNI)\b/);
+});
+
 test('Mail that can only read has no grey New or Reply; a phone\'s list has one search field', async ({ page }) => {
   await mailMock.boot(page, 'ok');
   await expect(mailMock.mail(page)).toBeVisible();
@@ -371,7 +401,10 @@ test('Mail\'s and Calendar\'s tags don\'t shout', async ({ page }) => {
   const tags = await calMock.cal(page).locator('.cal-tag').allTextContents();
   expect(tags.length).toBeGreaterThan(0);
   for (const t of tags) expect(t === t.toUpperCase() && t.length > 1, `"${t}" shouts`).toBe(false);
-  expect(tags).not.toContain('Free');
+  // free is said, quietly: a free event shouldn't read as busy
+  expect(tags).toContain('Free');
+  const free = calMock.cal(page).locator('.cal-tag.tag-free').first();
+  expect(await free.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
 });
 
 test('the rail\'s Uni is the home\'s Uni: one mark', async ({ page }) => {

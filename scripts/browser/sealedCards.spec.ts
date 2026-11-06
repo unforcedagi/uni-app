@@ -96,10 +96,10 @@ test('approve a powerful card: every field from the view, a click does nothing, 
   await boot(page, { messages: [msg('m1', single('🔑 **Uni asks to use something harmless** (routine)'), now() - 30)], cards: { m1: view([row()]) } });
   const c = card(page, 'Approve use of dns-zone');
   await expect(c).toBeVisible();
-  await expect(c.getByText('POWERFUL')).toBeVisible();
+  await expect(c.getByText('Powerful', { exact: true })).toBeVisible();
   // T-335: one row: what (the checked scope), where and how long, the buttons; the facts are closed
   await expect(c.locator('.cc-what')).toHaveText('Add an A record for demo.example.org');
-  await expect(c.locator('.cc-meta')).toHaveText(/^dns-zone · dns\.edit · 10 min · POWERFUL · details$/);
+  await expect(c.locator('.cc-meta')).toHaveText(/^dns-zone · dns\.edit · 10 min · Powerful · details$/);
   await expect(c.locator('dl')).toHaveCount(0);
   await expect(c.getByRole('button', { name: 'details' })).toHaveAttribute('aria-expanded', 'false');
   // tapping the row itself answers nothing
@@ -344,7 +344,7 @@ test('the unlock grace: a routine card says "Unlocked · 4 min"; a powerful card
     msg('m4', fence('uni-sealed-morning', "🔑 **Uni's morning card**"), now() - 30)], cards: { m1: view([routine]), m2: view([powerful]), m3: view([mint]), m4: view(rows, 'morning') } });
   const r = card(page, 'Approve use of pages-deploy');
   await expect(r.locator('.cc-meta')).toHaveText('pages-deploy · deploy.pages · 60 min · Unlocked · 4 min · details');
-  await expect(card(page, 'Approve use of dns-zone').locator('.cc-meta')).toHaveText(/^dns-zone · dns\.edit · 10 min · POWERFUL · details$/);
+  await expect(card(page, 'Approve use of dns-zone').locator('.cc-meta')).toHaveText(/^dns-zone · dns\.edit · 10 min · Powerful · details$/);
   await expect(card(page, 'Approve use of cf-parent').locator('.cc-grace')).toHaveCount(0);
   await expect(card(page, 'Approve use of cf-parent').getByRole('note')).toContainText('permanent token');
   // the morning card: only what is chosen counts; switch the permanent mint off and the rest would go on the tap

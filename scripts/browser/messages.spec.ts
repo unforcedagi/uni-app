@@ -86,7 +86,7 @@ test.describe('T-278 Messages on a live homeserver', () => {
       await expect(arrived).toBeVisible({ timeout: 20_000 });
       await expect(arrived).toHaveAttribute('data-encrypted', 'true');
       await expect(arrived.locator('.msgs-from strong')).toHaveText(users!.a.display);
-      await expect(conversation(b, room).getByText('ENCRYPTED', { exact: true })).toBeVisible();
+      await expect(conversation(b, room).getByText('Encrypted', { exact: true })).toBeVisible();
       await expect(conversation(b, room).getByText("Uni can't read this conversation.")).toBeVisible();
     } finally {
       // leave no devices behind: signing out removes each test device on the homeserver

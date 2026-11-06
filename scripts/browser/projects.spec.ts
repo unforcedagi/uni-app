@@ -68,10 +68,10 @@ test('round 2: what needs you is one quiet line above the rooms, which opens in 
 test('a room keeps its chat at the heart, with one strip of its projects: archived behind one tab, a missing folder named', async ({ page }) => {
   await openRoom(page);
   await expect(page.getByText('Keep their own words on the cards, please. No rewriting.')).toBeVisible();
-  await expect(strip(page).locator('.ps-tab:not(.ps-more)')).toHaveText(['Riverbend co-op site×2', 'Seed library catalogue', 'Co-op kiosk']);
+  await expect(strip(page).locator('.ps-tab:not(.ps-more)')).toHaveText(['Riverbend co-op site2', 'Seed library catalogue', 'Co-op kiosk']);
   await expect(strip(page).locator('.ps-tab[data-project="p-coop"] .ps-dot')).toBeVisible();
   await expect(strip(page).locator('.ps-tab[data-project="p-seeds"] .ps-dot')).toHaveCount(0);
-  await expect(strip(page).getByText('Shop signs: no folder yet')).toBeVisible();
+  await expect(strip(page)).not.toContainText('Shop signs'); // T-335 as Aaron: said once, under all of the room's work
   // the archived project is behind its tab, and opens the same way
   await strip(page).getByRole('button', { name: 'Archived · 1' }).click();
   await expect(strip(page).getByRole('button', { name: /Old zine archive, archived/ })).toBeVisible();

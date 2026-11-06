@@ -202,12 +202,12 @@ test('an unsaved edit in the note asks before the note closes', async ({ page })
   await pane.getByRole('textbox', { name: 'Note content' }).fill('# Spring planting plan\n\nA changed line.');
   await tap(pane.getByRole('button', { name: 'Close note' }));
   const ask = page.getByRole('alertdialog', { name: 'Confirm tab close' });
-  await expect(ask).toContainText('unsaved changes');
+  await expect(ask).toContainText("changes you haven't saved");
   await tap(ask.getByRole('button', { name: 'Cancel' }));
   await expect(pane.getByRole('textbox', { name: 'Note content' })).toHaveValue('# Spring planting plan\n\nA changed line.');
   await back(page);
   await expect(ask).toBeVisible();
-  await tap(ask.getByRole('button', { name: 'Continue' }));
+  await tap(ask.getByRole('button', { name: 'Close note' }));
   await expect(pane).toHaveCount(0);
 });
 

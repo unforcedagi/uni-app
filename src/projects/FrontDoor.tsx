@@ -58,7 +58,8 @@ const count = (n: number) => WORDS[n] ?? String(n);
 /** T-335 as Aaron: nothing happening is good news, and it needn't read the same every day. One line a day, the same all day. */
 export const QUIET_LINES = ["All quiet.", "The rooms are resting.", "The mycelium has it.", "Go look at a tree.", "Nothing's on fire.", "Breathe out.", "The garden keeps itself today."];
 export const quietLine = (day: number) => QUIET_LINES[((day % QUIET_LINES.length) + QUIET_LINES.length) % QUIET_LINES.length];
-export function statement(needs: number, moving: number, day = 0): string[] {
+export function statement(needs: number, moving: number, day = 0, known = true): string[] {
+  if (!known && !needs) return ["Looking in on your places.", moving ? `${count(moving)} place${moving === 1 ? " is" : "s are"} moving.` : ""].filter(Boolean);
   const first = needs ? `${count(needs)} thing${needs === 1 ? " needs" : "s need"} you.` : "Nothing needs you.";
   const second = moving ? `${count(moving)} place${moving === 1 ? " is" : "s are"} moving.` : needs ? "The rest is quiet." : quietLine(day);
   return [first, second];
@@ -102,7 +103,7 @@ export function AllEmpty({ reading, error = null, onBack }: { reading: boolean; 
   </div>;
 }
 
-export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = true }: { /** T-335 as Aaron: the tasks have been read: only then may the home say nothing needs you */ needsKnown?: boolean; doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
   /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */
   all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string) => void } | null;
   /** T-335: this is the All place (a place of its own on the rail), and the way back from it; null: the home, with the places. */
@@ -151,7 +152,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   return <div className="fd" data-place="front-door" data-view="places">
     <header className="fd-head" data-moving={moving > 0 ? "true" : undefined}>
       <div className="fd-mark"><h1 className="fd-title"><Enso />Uni</h1><span className="fd-date">{today()}</span></div>
-      <p className="fd-statement">{statement(needN, moving, Math.floor((now - new Date(now).getTimezoneOffset() * 60_000) / 86_400_000)).map((line) => <span key={line}>{line}</span>)}</p>
+      <p className="fd-statement">{statement(needN, moving, Math.floor((now - new Date(now).getTimezoneOffset() * 60_000) / 86_400_000), needsKnown).map((line) => <span key={line}>{line}</span>)}</p>
     </header>
     {composer}
     {needs && <NeedsLine needs={needs} onOpen={onOpen} />}

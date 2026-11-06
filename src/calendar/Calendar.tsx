@@ -34,7 +34,8 @@ function Marks({ i, short }: { i: Pick<Shown, "status" | "show_as" | "visibility
   return <>
     {i.status === "tentative" && <span className="cal-tag tag-tentative">{short ? "?" : "Maybe"}</span>}
     {i.status === "cancelled" && <span className="cal-tag tag-cancelled">{short ? "✕" : "Cancelled"}</span>}
-        {i.visibility === "public" && !short && <span className="cal-tag tag-public">Public</span>}
+        {i.show_as === "free" && !short && <span className="cal-tag tag-free">Free</span>}
+    {i.visibility === "public" && !short && <span className="cal-tag tag-public">Public</span>}
     {i.visibility === "shared" && !short && <span className="cal-tag tag-shared">Shared</span>}
   </>;
 }
@@ -202,7 +203,7 @@ function Detail({ inst, note, sess, offline, tz, error, onClose, onEdit, onMove,
   return <aside className="cal-detail" role="dialog" aria-label={`Event: ${inst.title}`}>
     <header><h2>{inst.title}</h2><button className="icon-button" aria-label="Close event" onClick={onClose}>×</button></header>
     <p className="cal-detail-when">{rangeLabel(asInst(inst), tz)}</p>
-    <p className="cal-detail-marks"><Marks i={inst} />{inst.show_as === "free" && <span className="cal-tag tag-free">Free</span>}{inst.status === "confirmed" && <span className="cal-tag">Confirmed</span>}</p>
+    <p className="cal-detail-marks"><Marks i={inst} />{inst.status === "confirmed" && <span className="cal-tag">Confirmed</span>}</p>
     {error && <p className="cal-error" role="alert">{error}</p>}
     {waiting ? <section className="cal-invites" aria-label="Invites">
       <p>{inviteWords(note!) ?? <><strong>Invites not sent.</strong> {invitees(note!).length === 1 ? "One person is" : `${invitees(note!).length} people are`} on this event; nothing goes to them until you send it.</>}</p>

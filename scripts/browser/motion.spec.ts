@@ -128,7 +128,7 @@ test('the system asking for reduced motion is calm without the switch, and Setti
   expect(await calmOnRoot(page)).toBe('calm');
   await openSettings(page);
   await expect(page.getByRole('checkbox', { name: /Calm screen/ })).not.toBeChecked();
-  await expect(page.locator('.settings-check')).toContainText('Already calm');
+  await expect(page.locator('.settings-check')).toContainText('already asks for less motion');
   // the system changes its mind while the app is open: the app follows
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect.poll(() => calmOnRoot(page)).toBeNull();

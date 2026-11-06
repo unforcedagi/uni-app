@@ -230,11 +230,11 @@ test('mail that says it is from you but failed DMARC says "not verified"; mail t
   await boot(page, 'ok', { writes: true });
   await row(page, 'Please send the deposit').click();
   const t = page.getByRole('region', { name: 'Thread: Please send the deposit to my new account' });
-  await expect(t.getByRole('note').filter({ hasText: 'NOT VERIFIED' })).toContainText("This says it is from you, but the server that received it couldn't confirm that (DMARC: fail).");
+  await expect(t.getByRole('note').filter({ hasText: 'Not verified' })).toContainText("This says it is from you, but the server that received it couldn't confirm that (DMARC: fail).");
   await shot(page, 'w7-not-verified');
   await backToThreads(page);
   await rows(page).nth(0).click();
-  await expect(page.getByRole('region', { name: 'Thread: Planning the garden week' }).getByText('NOT VERIFIED')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Thread: Planning the garden week' }).getByText('Not verified')).toHaveCount(0);
 });
 
 test('on the Daylight the thread tools and the composer move nothing, and every target is at least 44 px', async ({ page }, info) => {

@@ -61,7 +61,7 @@ test.describe('T-282 Link an account, on the live bridges', () => {
       for (const n of ['Signal', 'Telegram', 'WhatsApp', 'Google Messages', 'Messenger', 'Instagram']) await expect(card(page, n)).toBeVisible();
 
       // every running bridge answers what is linked: nothing, for a throwaway account
-      for (const n of ['Signal', 'WhatsApp', 'Google Messages', 'Messenger', 'Instagram']) await expect(tag(card(page, n))).toHaveText('NOT LINKED', { timeout: 60_000 });
+      for (const n of ['Signal', 'WhatsApp', 'Google Messages', 'Messenger', 'Instagram']) await expect(tag(card(page, n))).toHaveText('Not linked', { timeout: 60_000 });
 
       // Signal: one way in, a QR to scan in Signal's Linked devices
       const signal = card(page, 'Signal');
@@ -102,7 +102,7 @@ test.describe('T-282 Link an account, on the live bridges', () => {
       // Telegram: its phone-number prompt once the bridge has Aaron's keys; until then the card says why it can't
       const tg = card(page, 'Telegram');
       if (telegramRunning) {
-        await expect(tag(tg)).toHaveText('NOT LINKED', { timeout: 60_000 });
+        await expect(tag(tg)).toHaveText('Not linked', { timeout: 60_000 });
         await tg.getByRole('button', { name: 'Link', exact: true }).click();
         await tg.getByRole('button', { name: /phone/i }).first().click({ timeout: 30_000 });
         await expect(tg.getByLabel(/Phone number/)).toBeVisible({ timeout: 30_000 });

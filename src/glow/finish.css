@@ -11,6 +11,7 @@
   .rail { overflow: visible !important; z-index: 42; }
   .rail > button, .rail-more { flex: 1 1 0; }
   .rail .rail-more { display: flex; }
+  .rail:has(.rail-extras.open) { z-index: 120; }
   .rail-extras { display: none; }
   .rail-extras.open {
     display: grid; position: absolute; left: 8px; right: 8px; bottom: calc(100% + 8px); z-index: 1;
@@ -44,6 +45,7 @@
 .note-pane .note-back:has(.note-back-arrow) .note-back-label { display: none; }
 .note-pane .note-back { width: 44px; min-width: 44px; padding: 0; justify-content: center; }
 .note-pane-quote:disabled { display: none; }
+@media (max-width: 599px) { .note-pane-quote:not(:disabled) ~ .note-action { display: none; } }
 .note-bar .note-action { white-space: nowrap; }
 
 /* ── The composer: one send, a quiet well until there's something to send; the ring in its right place, in the room's colour ── */
@@ -134,4 +136,5 @@
 .mail-bar, .msgs-bar, .cal-bar, .vault-browser .note-bar { padding-inline: 14px; }
 @media (min-width: 600px) { .shell.panel-settings .rooms { width: 420px; max-width: calc(100% - 64px); flex-basis: 420px; } }
 
-.wv-gaps { margin: 20px 0 0; font: 400 13px/1.45 var(--g-font-ui); color: var(--g-ink-3); }
+.wv-gaps { width: min(100%, 720px); margin: 0 auto; padding: 0 16px 32px; box-sizing: border-box; font: 400 13px/1.45 var(--g-font-ui); color: var(--g-ink-3); }
+.cal-tag.tag-free { border-color: transparent; background: none; color: var(--g-ink-3); font-weight: 500; padding: 0; }

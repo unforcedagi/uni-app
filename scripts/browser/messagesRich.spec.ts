@@ -255,7 +255,7 @@ test('signing in: a "live" that arrives before the sign-in answer is not undone 
   await expect(page.getByRole('navigation', { name: 'Conversations' }).getByRole('button', { name: /Robin Vale/ })).toBeVisible();
   // nothing more will come: the core sends a status only when it changes
   await page.waitForTimeout(500);
-  await expect(page.locator('.msgs-live')).toHaveText('LIVE');
+  await expect(page.locator('.msgs-live')).toHaveText(''); // T-335 as Aaron: live is the normal case; only a problem is said
 });
 
 /** Scroll Robin's conversation from its start to its end, a screen at a time, each screen's pictures loaded before the next. */

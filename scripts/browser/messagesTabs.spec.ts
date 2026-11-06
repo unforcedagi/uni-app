@@ -140,7 +140,7 @@ test('a link that needs doing again shows on its tab and in it; a network linked
   await boot(page);
   await page.getByRole('button', { name: 'Link another network' }).click();
   const screen = page.getByRole('region', { name: 'Link an account' });
-  await expect(screen.getByRole('listitem', { name: 'Telegram', exact: true })).toContainText('NEEDS ATTENTION');
+  await expect(screen.getByRole('listitem', { name: 'Telegram', exact: true })).toContainText('Needs attention');
   await screen.getByRole('button', { name: '← Conversations' }).click();
   await expect(tab(page, 'Telegram')).toHaveAccessibleName('Telegram, needs linking again');
   await expect(tab(page, 'Telegram')).toContainText('!');
