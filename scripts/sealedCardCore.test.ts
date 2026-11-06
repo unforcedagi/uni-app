@@ -68,5 +68,6 @@ assert.equal(ageText(T + 900), null, "an older view has no time");
 const noon = new Date(2030, 5, 10, 12, 0).getTime() / 1000;
 assert.ok(!whenText(noon + 3600, noon).includes("tomorrow"));
 assert.ok(whenText(noon + 20 * 3600, noon).startsWith("tomorrow "));
+assert.ok(whenText(noon - 20 * 3600, noon).startsWith("yesterday "), "a past end isn't tomorrow");
 
 console.log("sealedCardCore ok");

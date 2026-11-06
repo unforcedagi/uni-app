@@ -36,11 +36,12 @@ export function ageText(now: number, asked?: number): string | null {
 }
 
 const whenFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
-/** "14:05", or "tomorrow 14:05": a card can be open past midnight. */
+/** "14:05", or "tomorrow 14:05" or "yesterday 14:05": a card can be open past midnight. */
 export function whenText(ts: number, now: number): string {
   const at = new Date(ts * 1000), today = new Date(now * 1000);
   const t = whenFormat.format(at);
-  return at.toDateString() === today.toDateString() ? t : `tomorrow ${t}`;
+  if (at.toDateString() === today.toDateString()) return t;
+  return at > today ? `tomorrow ${t}` : `yesterday ${t}`;
 }
 export type SealedCardView = { kind: "single" | "morning" | null; event_id: string; refused: string | null; rows: SealedRow[] };
 /** A card waiting for a tap in some room (`sealed_waiting`), for Needs you. */

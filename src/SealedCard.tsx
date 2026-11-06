@@ -177,7 +177,7 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
         <dt>Window</dt><dd>{windowText(r.ttl_s, r.uses)}</dd>
         <dt>Payload</dt><dd><Payload payload={r.payload} /></dd>
         <dt>Exact job</dt><dd><code>{jobFingerprint(r.request_digest)}</code> (fingerprint)</dd>
-        {r.asked !== undefined && <><dt>Asked</dt><dd>{whenText(r.asked, minute).replace("tomorrow ", "")}{age && ` (${age})`}</dd></>}
+        {r.asked !== undefined && <><dt>Asked</dt><dd>{whenText(r.asked, minute)}{age && ` (${age})`}</dd></>}
         <dt>Answer by</dt><dd>{whenText(r.expires, minute)}</dd>
         {r.answer?.decision === "approve" && r.answer.sent && <><dt>Open until</dt><dd>{clock(r.answer.until ?? r.answer.at)}</dd></>}
       </dl>
