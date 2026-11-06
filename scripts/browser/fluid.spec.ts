@@ -325,7 +325,8 @@ test.describe('a room in focus', () => {
     await page.locator('.composer').getByRole('button', { name: /^Show/ }).click();
     await expect(page.locator('.search-focus')).toBeVisible();
     await page.waitForTimeout(300);
-    await page.evaluate((b) => (window as any).__arrive('ch-kiln', 'Uni', `FOLLOW-ME\n\n${b}`), LONG);
+    // tall enough to pass the fold, short enough not to be "a message longer than the screen" (that one is shown from its top)
+    await page.evaluate(() => (window as any).__arrive('ch-kiln', 'Uni', 'FOLLOW-ME\n\nA second paragraph of it.\n\nA third.\n\nA fourth.'));
     await expect(page.locator('.message-list article.message').filter({ hasText: 'FOLLOW-ME' })).toBeVisible();
     await expect.poll(() => page.locator('.message-list').evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(30);
     await expect(page.getByRole('button', { name: /Jump to latest/ })).toHaveCount(0);
