@@ -28,7 +28,7 @@ export function privateRoot(tree: Tree, path: string): { path: string; name: str
   return hit ? { path: hit.path, name: hit.name } : null;
 }
 
-const closures = new WeakMap<Tree, Set<string>>();
+const closures = new WeakMap<Tree, { all: Set<string>; under: Set<string> }>();
 /** A way of writing a reference, reduced: no brackets, alias, anchor, extension, outer slashes or case. Used only to err towards private. */
 const looseRef = (ref: unknown): string | null => {
   if (typeof ref !== "string") return null;
@@ -42,7 +42,7 @@ const looseRef = (ref: unknown): string | null => {
  * pointing at one, or private by the tree's own walk, and spreads through projects over two-way links, and into an area only by that area's own `parent`: an
  * area is never made private by what it links to. It errs towards private: a project linked to a private one counts.
  */
-function privateClosure(tree: Tree): Set<string> {
+function privateClosure(tree: Tree): { all: Set<string>; under: Set<string> } {
   const hit = closures.get(tree);
   if (hit) return hit;
   const known = [...tree.nodes.values(), ...tree.archived];
@@ -70,24 +70,41 @@ function privateClosure(tree: Tree): Set<string> {
       out.add(next); stack.push(next);
     }
   }
-  closures.set(tree, out);
-  return out;
+  // really under a private place, not only linked to something that is: by the seeds, a `parent` chain, or a two-way link with a privately named area
+  const under = new Set(known.filter((n) => isPrivateName(n.name) || n.path.split("/").some(isPrivateName) || refsOf(n).some(namesPrivate) || (tree.nodes.has(n.path) && isPrivateNode(tree, n.path))).map((n) => n.path));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const n of known) {
+      if (under.has(n.path)) continue;
+      const byParent = [...(parents.get(n.path) ?? [])].some((p) => under.has(p));
+      const byArea = [...(near.get(n.path) ?? [])].some((p) => { const a = byPath.get(p); return !!a && a.kind === "area" && isPrivateName(a.name); });
+      if (byParent || (n.kind !== "area" && byArea)) { under.add(n.path); grew = true; }
+    }
+  }
+  const both = { all: out, under };
+  closures.set(tree, both);
+  return both;
 }
 /** T-335: is this node inside a private place, however it got there? */
-export const isPrivatePath = (tree: Tree, path: string): boolean => privateClosure(tree).has(path) || isPrivateNode(tree, path);
+export const isPrivatePath = (tree: Tree, path: string): boolean => privateClosure(tree).all.has(path) || isPrivateNode(tree, path);
 /**
- * T-335: does this room belong to a private place? Named by a private node (a done or archived one too: a session can still wait in its room), or that
- * node's own. Never a room the node only borrows: a private area with no room of its own talks in Uni's, and that doesn't make Uni's private.
+ * T-335: does this room belong to a private place? A room named privately does, whoever claims it. So does one a private node names (a done or archived one
+ * too: a session can still wait in its room), or owns. Never a room it only borrows: a private area with no room of its own talks in Uni's, and that doesn't
+ * make Uni's private. Nor a public area's own room, because a project sharing it is linked to something private; a project really under the private place does count.
  */
 export function isPrivateRoom(tree: Tree, channel: string, rooms: readonly RoomRef[], uni: RoomRef | null): boolean {
   const room = rooms.find((r) => r.id === channel);
+  if (room && roomSlug(room.name).split("/").some(isPrivateName)) return true;
   const names = (n: Area) => [...n.rooms, ...n.channels, ...(typeof n.metadata.room === "string" ? [n.metadata.room] : [])].some((c) => c === channel || (!!room && roomSlug(c).toLowerCase() === roomSlug(room.name).toLowerCase()));
+  const { under } = privateClosure(tree);
+  const publicAreaHas = [...tree.nodes.values()].some((n) => n.kind === "area" && !isPrivatePath(tree, n.path) && names(n));
+  const counts = (n: Area) => !publicAreaHas || under.has(n.path);
   for (const n of tree.nodes.values()) {
-    if (!isPrivatePath(tree, n.path)) continue;
+    if (!isPrivatePath(tree, n.path) || !counts(n)) continue;
     const v = roomView(tree, n.path, rooms, uni);
     if ((v.own && v.target?.id === channel) || names(n)) return true;
   }
-  return tree.archived.some((a) => isPrivatePath(tree, a.path) && names(a));
+  return tree.archived.some((a) => isPrivatePath(tree, a.path) && counts(a) && names(a));
 }
 
 /** r21: the same, read from the task tree (its nodes and parents), for while the areas aren't read yet: privacy never waits on them. */

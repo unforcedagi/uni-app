@@ -218,6 +218,39 @@ check("T-335: a private place's rooms, done or archived ones too, and never a ro
   }
   const filed = buildTree([parseProject({ id: "p-f", path: "Projects/Sanctum/Part", tags: ["project"], content: "# Part", metadata: { status: "foreground", parent: "Nowhere/At all", room: "q-room" } })!, area("a-bou", "Boulder", { room: "boulder" })]);
   assert.equal(isPrivatePath(filed, "Projects/Sanctum/Part"), true, "filed under a private name, with a reference to nothing");
+  // a room named privately is private, whoever claims it; a name that only contains the word isn't
+  const named = [UNI, { id: "r-s", name: "Sanctum" }, { id: "r-sp", name: "sanctum/practice" }, { id: "r-sg", name: "sanctum-garden" }, { id: "r-bou", name: "boulder" }];
+  const noClaim = buildTree([area("a-sad", "Sanctum"), area("a-bou", "Boulder", { room: "boulder" })]);
+  assert.equal(isPrivateRoom(noClaim, "r-s", named, UNI), true, "the room of a private area with no room field");
+  assert.equal(isPrivateRoom(noClaim, "r-sp", named, UNI), true, "a part of a private name");
+  assert.equal(isPrivateRoom(noClaim, "r-sg", named, UNI), false, "only contains the word");
+  const noNode = buildTree([area("a-bou", "Boulder", { room: "boulder" })]);
+  assert.equal(isPrivateRoom(noNode, "r-s", named, UNI), true, "no such node at all: its note has moved");
+  assert.equal(isPrivateRoom(noNode, "r-bou", named, UNI), false);
+  // a public area keeps its room when a project sharing it is private only by a link to a private project
+  const shared = [UNI, { id: "r-bou", name: "boulder" }, { id: "r-sec", name: "secret" }];
+  const share = (pub: Record<string, unknown>) => buildTree([
+    area("a-sad", "Sanctum", { room: "sanctum" }),
+    area("a-bou", "Boulder", { room: "boulder" }),
+    proj("p-sec", "Secret", "Areas/Sanctum", { room: "secret" }),
+    parseProject({ id: "p-pub", path: "Projects/Pub", tags: ["project"], content: "# Pub", metadata: { status: "foreground", room: "boulder", links: ["Areas/Boulder", "Projects/Secret"], ...pub } })!,
+  ]);
+  for (const pub of [{}, { status: "done" }, { room: undefined, channel: "r-bou" }]) {
+    const tree5 = share(pub);
+    assert.equal(isPrivatePath(tree5, "Areas/Boulder"), false);
+    assert.equal(isPrivateRoom(tree5, "r-bou", shared, UNI), false, `the public area's room, with ${JSON.stringify(pub)}`);
+    assert.equal(isPrivateRoom(tree5, "r-sec", shared, UNI), true, "the private project's own");
+  }
+  // two hops through a plain project: the same
+  const hop = buildTree([
+    area("a-sad", "Sanctum", { room: "sanctum" }), area("a-bou", "Boulder", { room: "boulder" }), proj("p-sec", "Secret", "Areas/Sanctum", { room: "secret" }),
+    parseProject({ id: "p-mid", path: "Projects/Mid", tags: ["project"], content: "# Mid", metadata: { status: "foreground", links: ["Projects/Secret"] } })!,
+    parseProject({ id: "p-pub", path: "Projects/Pub", tags: ["project"], content: "# Pub", metadata: { status: "foreground", room: "boulder", links: ["Projects/Mid"] } })!,
+  ]);
+  assert.equal(isPrivateRoom(hop, "r-bou", shared, UNI), false, "two hops");
+  // a project really under the private area, in that room: private words are in it, so it stays out
+  const under = buildTree([area("a-sad", "Sanctum", { room: "sanctum" }), area("a-bou", "Boulder", { room: "boulder" }), proj("p-in", "In", "Areas/Sanctum", { room: "boulder" })]);
+  assert.equal(isPrivateRoom(under, "r-bou", shared, UNI), true, "under the private area itself");
   // no private name anywhere, a cycle: nothing is hidden, and it ends
   const plain = buildTree([area("a-bou", "Boulder", { room: "boulder", links: ["Projects/A"] }), proj("p-a", "A", "Projects/B", { room: "a" }), proj("p-b", "B", "Projects/A", { room: "b" })]);
   for (const n of plain.nodes.keys()) assert.equal(isPrivatePath(plain, n), false, n);
