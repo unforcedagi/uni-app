@@ -6,8 +6,9 @@ import type { Card, Reaction } from "../src/arcade/kit/engine/src/types.ts";
 const ID = "01M6QAF6FYXD39R6BP1TW2TEST";
 // a voice answer that reached the vault is named by its note id (the sweep renames its path later)
 assert.equal(journalRef({ sent: [ID], error: null }, "Journal/2026/11-05/10-00"), ID);
-// several sent at once (older queued entries first): the new one is last
-assert.equal(journalRef({ sent: ["01M6QAF6FYXD39R6BP1TW2AAAA", ID], error: null }, "p"), ID);
+// several sent at once, or more still waiting: which one is ours can't be told, so the path
+assert.equal(journalRef({ sent: ["01M6QAF6FYXD39R6BP1TW2AAAA", ID], error: null }, "p"), "p");
+assert.equal(journalRef({ sent: [ID], remaining: 1, error: null }, "p"), "p");
 // still queued on the device, or a failure: the path it was filed under
 assert.equal(journalRef({ sent: [], error: null }, "Journal/2026/11-05/10-00"), "Journal/2026/11-05/10-00");
 assert.equal(journalRef({ sent: [ID], error: "offline" }, "Journal/x"), "Journal/x");
@@ -32,7 +33,7 @@ assert.equal(journalRef({ sent: [ID], error: null, duplicate: { kind: "saved", i
 const typed: Reaction = { id: "r1", at: "2026-11-05T10:00:00Z", game: "ripple", kind: "words", card: "q1", words: " made-up answer " };
 const refs = new Map([["q1\nmade-up answer", ID]]);
 assert.deepEqual(typedAnswer(typed, refs), { id: "r1", at: "2026-11-05T10:00:00Z", game: "ripple", kind: "voice", card: "q1", voice: { ref: ID } });
-assert.equal(typedAnswer(typed, new Map()), typed, "no known entry: unchanged");
+assert.equal(typedAnswer(typed, new Map()), null, "no known entry: not sent, so the words never reach the door");
 const pick: Reaction = { id: "r2", at: "2026-11-05T10:00:00Z", game: "gallery", kind: "pin", card: "c", words: "kept" };
 assert.equal(typedAnswer(pick, refs), pick);
 console.log("arcade: ok");

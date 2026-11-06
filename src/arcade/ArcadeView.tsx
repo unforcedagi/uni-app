@@ -21,12 +21,15 @@ export function journalVoice(save: (blob: Blob, mime: string) => Promise<string>
   let session: RecorderSession<null> | null = null;
   let done: ((v: { blob: Blob; mime: string } | null) => void) | null = null;
   let stopping: Promise<{ ref: string; seconds: number } | null> | null = null;
+  // a recording that ended on its own (the mic went away) before stop was asked for
+  let early: { blob: Blob; mime: string } | null = null;
   let t0 = 0;
   const end = () => { session?.dispose(); session = null; };
   return {
     async start() {
       if (session) throw new Error("already recording");
-      const s = new RecorderSession<null>((blob, mime) => { const d = done; done = null; d?.({ blob, mime }); });
+      early = null;
+      const s = new RecorderSession<null>((blob, mime) => { const d = done; done = null; if (d) d({ blob, mime }); else early = { blob, mime }; });
       session = s;
       try {
         if (!(await s.start(null, "in the Arcade"))) throw new Error("the microphone is busy with another recording");
@@ -39,7 +42,8 @@ export function journalVoice(save: (blob: Blob, mime: string) => Promise<string>
       const s = session;
       stopping = (async () => {
         try {
-          const got = await new Promise<{ blob: Blob; mime: string } | null>((resolve) => { done = resolve; s.stop(); });
+          const got = early ?? (s.phase === "idle" ? null : await new Promise<{ blob: Blob; mime: string } | null>((resolve) => { done = resolve; s.stop(); }));
+          early = null;
           if (session === s) end();
           if (!got || got.blob.size < 200) return null;
           return { ref: await save(got.blob, got.mime), seconds: (Date.now() - t0) / 1000 };
@@ -86,7 +90,11 @@ export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: strin
       owner: { name: ownerName ?? "you", you: false },
       games: GAMES,
       rounds: async (game, n) => (await call<{ rounds: Round[] }>("arcade_rounds", { game, n })).rounds,
-      react: async (reactions: Reaction[]) => { await call("arcade_react", { reactions: reactions.map((r) => typedAnswer(r, typedRef.current)) }); home = null; },
+      react: async (reactions: Reaction[]) => {
+        const out = reactions.map((r) => typedAnswer(r, typedRef.current)).filter((r): r is Reaction => r !== null);
+        if (out.length) await call("arcade_react", { reactions: out });
+        home = null;
+      },
       profile: async () => (await call<{ profile: Profile }>("arcade_profile")).profile,
       stats: async () => (await fetchHome()).stats,
       fresh: async () => (await fetchHome()).fresh ?? {},
