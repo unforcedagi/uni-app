@@ -261,7 +261,7 @@ function parsed(b: Uint8Array) {
 {
   const ok = file(1, [cluster(0, [block(0, 1), block(20, 2)])]);
   const head = file(2, [cluster(0, [block(0, 3), block(20, 4)], true)], { knownSegment: true });
-  const badElement = [...idBytes(0x1254C367), 0x08, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]; // a Tags element claiming far more than the file holds
+  const badElement = [...idBytes(0x1254C367), 0x01, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]; // a Tags element claiming far more than the file holds
   const body = [...info(), ...tracks(2), ...cluster(0, [block(0, 3), block(20, 4)], true), ...badElement, ...new Array(8192).fill(0)];
   const damaged = new Uint8Array([...header(), ...el(SEGMENT, body, UNKNOWN)]);
   assert.throws(() => joinWebm([ok, damaged]), NotJoinable, "mid-file damage after readable clusters");
@@ -271,5 +271,11 @@ function parsed(b: Uint8Array) {
 {
   const m4a = () => new Blob([new Uint8Array(64)], { type: "audio/mp4" });
   await assert.rejects(joinSections([m4a(), m4a()], { decode: async () => new Float32Array(7_000_000), wav: true, limit: 50 * 1024 * 1024 }), /too large/i);
+}
+// 20. A known-size cluster cut at the very end (a killed recorder) keeps its whole blocks
+{
+  const whole = file(1, [cluster(0, [block(0, 1), block(20, 2)], true)]);
+  const out = parsed(joinWebm([whole.slice(0, whole.length - 2), file(2, [cluster(0, [block(0, 3), block(20, 4)])])]).bytes);
+  assert.deepEqual(out.blocks.map((x) => x.payload), [1, 3, 4]);
 }
 console.log("recording join tests passed");

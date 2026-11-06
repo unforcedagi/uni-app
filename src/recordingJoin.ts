@@ -111,7 +111,7 @@ function readSection(bytes: Uint8Array): Section {
   for (let at = segment.body; at < limit;) {
     const e = readElement(bytes, at, limit);
     // A cut at the very end stands; with more than that unread, the clusters after it would quietly go
-    if (!e || e.end > limit) {
+    if (!e || (e.end > limit && e.id !== CLUSTER)) { // a cluster cut short is readCluster's to judge: its whole blocks stand
       if (limit - at > SECTION_SLACK) throw new NotJoinable("a damaged segment");
       break;
     }
