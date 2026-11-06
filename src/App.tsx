@@ -592,6 +592,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Search result to scroll to and flash once its room/thread has loaded.
   const [focusRef, setFocusRef] = useState<string | null>(null);
   const focusPlaced = useRef<string | null>(null);
+  const focusDecided = useRef<string | null>(null);
   // T-335 one fluid surface: the room in focus inside All (AllFocus.tsx). The All tab stays what it is, with its feed in place behind; this room's view (messages, composer, drafts) is
   // the one the room's page uses, so one send path, one draft per room and one signer serve both.
   const [allFocus, setAllFocusState] = useState<AllFocusState | null>(null);
@@ -731,6 +732,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     try { localStorage.setItem(UNI_PLACE_KEY, serializeUniPlace(target, spot)); } catch { /* private storage: this session still has it */ }
   }
   function switchToTab(tab: Tab | null) {
+    pageFromAll.current = false;
     // T-294: leaving Uni's side (for Messages, Mail, the Journal…) keeps where the reader was in its conversation, for the way back. Any other
     // place on Uni's side opens at its newest (T-124 r2), and drops a spot kept for another.
     const from = activeTab(tabsRef.current);
@@ -775,7 +777,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // already in All, with a room in focus: All is what is behind it
     if (target.kind === "all" && allFocusRef.current && activeTab(tabsRef.current)?.kind === "all") {
       // a panel over it goes first; the room stays in focus under it
-      if (panel || searchOpen) { setPanel(null); setSearchOpen(false); setSidebarVisible(false); } else endAllFocus();
+      setSidebarVisible(false);
+      if (panel || searchOpen) { setPanel(null); setSearchOpen(false); } else endAllFocus();
       return;
     }
     // a place opened from the room's page: Back from there is that place's own
@@ -1436,23 +1439,29 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Jump to a search hit: once its room/thread is rendered, center and flash
   // it. If it is older than the loaded window, widen the window once.
   useEffect(() => {
-    if (!focusRef) { focusPlaced.current = null; return; }
+    if (!focusRef) { focusPlaced.current = null; focusDecided.current = null; return; }
     // Wait until the list shows the target room (and thread), not the last one.
-    if (!messages.length || messages[0].channel !== channel) return;
+    if (loadedView !== currentView || !messages.length || messages[0].channel !== channel) return;
     if (root && !messages.some((m) => m.ref === root || m.root === root)) return;
     const el = listRef.current?.querySelector<HTMLElement>(`[data-ref="${CSS.escape(focusRef)}"]`);
     if (el) {
-      // placed once: what arrives while the mark is on doesn't send the list back to it
-      const box = focusPlaced.current === focusRef ? null : listRef.current;
+      const box = listRef.current;
+      // placed once: what arrives while the mark is on doesn't send the list back to it. A message taller than the list opens at its top, where its reader starts.
+      if (box && focusPlaced.current !== focusRef) {
+        el.scrollIntoView({ block: el.offsetHeight > box.clientHeight - 32 ? "start" : "center" });
+        // the list may be the device's kept copy: nothing follows the newest yet, and it stays there as the rest comes in
+        stickToEnd.current = false;
+        settleUntil.current = 0;
+        pinned.current = { ref: focusRef, offset: el.getBoundingClientRect().top - box.getBoundingClientRect().top, until: Date.now() + 2000 };
+      }
       focusPlaced.current = focusRef;
-      // a message taller than the list opens at its top, where its reader starts
-      if (box) el.scrollIntoView({ block: box && el.offsetHeight > box.clientHeight - 32 ? "start" : "center" });
-      // it stays there as the rest of the list settles, and the view follows the newest again when the reader scrolls down to it. Already at the end, it simply goes on following.
-      if (box) {
+      // the room's read has answered: at its end, the view simply goes on following; else it follows again when the reader scrolls down to it
+      if (box && focusDecided.current !== focusRef && (fetchedView === currentView || failedView === currentView)) {
+        focusDecided.current = focusRef;
         const atEnd = markFor(box.scrollTop, box.scrollHeight, box.clientHeight).atEnd;
         stickToEnd.current = atEnd;
-        if (!atEnd) settleUntil.current = 0;
-        pinned.current = atEnd ? null : { ref: focusRef, offset: el.getBoundingClientRect().top - box.getBoundingClientRect().top, until: Date.now() + 1000 };
+        if (atEnd) pinned.current = null;
+        setAwayView(atEnd ? null : currentView);
       }
       const t = setTimeout(() => setFocusRef(null), 2500);
       return () => clearTimeout(t);
@@ -1462,7 +1471,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (focusTries.current++ === 0 && !root) { setLimit((l) => Math.max(l, 3000)); return; }
     setFocusRef(null);
     setStatus("That message isn't in the loaded history of this room");
-  }, [focusRef, messages, channel, root, fetchedView, failedView, currentView]);
+  }, [focusRef, messages, channel, root, fetchedView, failedView, currentView, loadedView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function openHit(t: { channel: string; root: string | null; focus: string }) {
     setSearchOpen(false);
@@ -1740,7 +1749,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       }
     });
   }
-  type RecordingOrigin = { key: string; tabId: string; title: string; channel: string; replyTo: string | null; notifyUni: boolean };
+  type RecordingOrigin = { key: string; tabId: string; title: string; channel: string; replyTo: string | null; notifyUni: boolean; root?: string | null };
   const recordingOrigin = useRef<RecordingOrigin | null>(null);
   const recorder = useRecorder((blob, mime, origin: RecordingOrigin) => {
     if (recordingOrigin.current === origin) recordingOrigin.current = null;
@@ -1768,7 +1777,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const target = root ? (messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null) : null;
     if (root && !target) { setError("Thread not in local cache. Refresh before replying."); return; }
     // from a room in focus, the pill names the room, not All
-    const origin = { key, tabId: tab.id, title: allFocusRef.current ? roomsRef.current.find((r) => r.id === channel)?.name ?? tab.title : tab.title, channel, replyTo: target, notifyUni };
+    const origin = { key, tabId: tab.id, title: allFocusRef.current ? roomsRef.current.find((r) => r.id === channel)?.name ?? tab.title : tab.title, channel, replyTo: target, notifyUni, root };
     recordingOrigin.current = origin;
     try { if (!await recorder.start(origin) && recordingOrigin.current === origin) recordingOrigin.current = null; }
     catch (e) { if (recordingOrigin.current === origin) recordingOrigin.current = null; setError(`Microphone unavailable: ${String(e)}`); }
@@ -2556,7 +2565,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const allOpen = active?.kind === "all";
   const shellOpen = areasOpen || allOpen || active?.kind === "room" || active?.kind === "thread";
   // another place opened: the focus ended with All (whoever opened it has already moved the room's view on)
-  useLayoutEffect(() => { if (!allOpen && allFocusRef.current) { stopLeaving(); setAllFocus(null); } }); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => { if (!allOpen && allFocusRef.current) { stopLeaving(); setAllFocus(null); } }, [allOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   // Escape: what is in front goes first, as Back; a field's own use of it (the mention list, an edit) comes before that
   const inFocus = !!allFocus;
   useEffect(() => {
@@ -2754,7 +2763,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         openTarget({ kind: "note", note, title }, "new");
       }}
       onDirty={(ref, dirty) => { const k = noteKey(ref); if (dirty) asideDirty.current.add(k); else asideDirty.current.delete(k); }} />}
-    {pill && <RecordingPill title={pill.title} controls={pill.controls} finish={pill.finish} overSidebar={sidebarVisible} onJump={() => { const o = recordingOrigin.current, tab = tabsRef.current.tabs.find((t) => t.id === pill.tabId); focusTabById(pill.tabId); if (tab?.kind === "all" && o?.channel && pill.finish === "send") focusInAll(o.channel, null, o.key === keyFor(o.channel, null) ? null : o.replyTo); }} />}
+    {pill && <RecordingPill title={pill.title} controls={pill.controls} finish={pill.finish} overSidebar={sidebarVisible} onJump={() => { const o = recordingOrigin.current, tab = tabsRef.current.tabs.find((t) => t.id === pill.tabId); focusTabById(pill.tabId); if (tab?.kind === "all" && o?.channel && pill.finish === "send") focusInAll(o.channel, null, o.root ?? null); }} />}
     {/* A note opens over the place you were in; Back pops the note's own stack (or closes it at the first note). */}
     {topNote && !searchOpen && <section className="note-sheet" role="region" aria-label="Note">
       <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}:${topNote.ref === FOR_YOU_ID ? forYouReload : 0}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={() => { if (topNote.ref === FOR_YOU_ID && forYouReturn.current && tabsRef.current.tabs.some((t) => t.id === forYouReturn.current)) focusTabById(forYouReturn.current); else closeNote(); }}

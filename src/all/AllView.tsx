@@ -15,7 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Body } from "../MessageBody";
 import { Attachments, attachmentBody, useRelayOrigin } from "../Attachments";
-import { collectAttachments, type MediaRef } from "../media";
+import { attachmentKind, collectAttachments, relayMediaSha, type MediaRef } from "../media";
 import { calmMotion, scrollMotion } from "../motion";
 import type { Member } from "../mentions";
 import { findUniMember } from "../uniActions";
@@ -351,7 +351,8 @@ const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named,
   const media = m.media ?? undefined;
   // what the attachments show isn't said again in the words, as in a room
   const body = useMemo(() => attachmentBody(m.body, media, relay), [m.body, media, relay]);
-  const files = useMemo(() => collectAttachments(m.body, media ?? [], relay).length, [m.body, media, relay]);
+  // what <Attachments> will really draw here: on the relay, or an https picture
+  const files = useMemo(() => collectAttachments(m.body, media ?? [], relay).filter((a) => relayMediaSha(a.url, relay) || (attachmentKind(a) === "image" && a.url.startsWith("https://"))).length, [m.body, media, relay]);
   const long = !mine && isLong(body);
   // over the length but it fits the cut on this screen: nothing to open, and a tap replies, as on any message
   const box = useRef<HTMLDivElement>(null);
@@ -385,7 +386,7 @@ const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named,
     <div className="message-content" ref={box}>
       {named && !run && !mine && <div className="all-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}
       {body.trim() ? <Body body={body} mentions={m.mentions ?? []} me={me} edited={m.edited} />
-        : !files && <p className="all-file">(nothing to show here)</p>}
+        : !files && <p className="all-file">{media?.length ? `${media.length === 1 ? "A file" : `${media.length} files`}: its room shows ${media.length === 1 ? "it" : "them"}` : "(nothing to show here)"}</p>}
       {(cut || (long && open)) && <button type="button" className="all-rest" aria-expanded={open} onClick={(e) => read(e.currentTarget.closest("article")!)}>{open ? "Show less" : "Read the rest"}</button>}
       <Attachments body={m.body} media={media} />
       {replies > 0 && <button type="button" className="all-thread" onClick={() => onOpen(m.channel, m.ref, m.ref)}>{replies} {replies === 1 ? "reply" : "replies"}<span aria-hidden="true"> ›</span></button>}
@@ -584,7 +585,8 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
       onClick={(e) => { label.el = null; label.rect = e.currentTarget.getBoundingClientRect(); onOpen(reading, readingRow.current); }}>{nameOf.get(reading)}</button></div>}
     <div className="all-feed" ref={list} role="log" aria-label="All rooms, by time" aria-live="polite"
     onScroll={(e) => { const el = e.currentTarget; if (tappedRef.current) { const r = el.querySelector<HTMLElement>(`article[data-ref="${CSS.escape(tappedRef.current)}"]`); tapInSight.current = !!r && r.offsetTop + r.offsetHeight > el.scrollTop && r.offsetTop < el.scrollTop + el.clientHeight; }
-      const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80, up = el.scrollTop < lastTop.current - 1; lastTop.current = el.scrollTop; if (performance.now() >= readHold.current) { if (near) stick.current = true; else if (up) stick.current = false; } if (!lookFrame.current) lookFrame.current = requestAnimationFrame(lookAtTop); }}
+      if (restoring.current) return;
+      const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80, up = el.scrollTop < lastTop.current - 1; if (near || el.scrollTop > lastTop.current) lastTop.current = el.scrollTop; if (performance.now() >= readHold.current) { if (near) stick.current = true; else if (up) stick.current = false; } if (!lookFrame.current) lookFrame.current = requestAnimationFrame(lookAtTop); }}
     onPointerDown={(e) => {
       if (e.pointerType !== "touch" || e.clientX < EDGE_PX || e.clientX > innerWidth - EDGE_PX || !(e.target instanceof Element)) return;
       if (e.target.closest("pre, table, .md-table-wrap, a, button, video, audio, input, textarea, summary, .attachments")) return;

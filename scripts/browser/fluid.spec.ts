@@ -204,6 +204,29 @@ test.describe('a long message, in place', () => {
     await expect(m.locator('.md strong').first()).toBeInViewport();
   });
 
+  test('a slow scroll up lets go of the newest: what arrives after it does not throw you back down', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await feed(page).evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await page.waitForTimeout(200);
+    // less than a pixel an event, as a slow finger on a dense screen
+    await feed(page).evaluate(async (el) => { for (let i = 0; i < 400; i++) { el.scrollTop -= 0.75; await new Promise((r) => requestAnimationFrame(r)); } });
+    await page.waitForTimeout(150);
+    const at = await feed(page).evaluate((el) => el.scrollTop);
+    expect(await feed(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeGreaterThan(100);
+    await page.evaluate(() => (window as any).__arrive('ch-bees', 'Uni', 'A new line from the bees.'));
+    await expect(feed(page)).toContainText('A new line from the bees.');
+    await page.waitForTimeout(200);
+    expect(Math.abs(await feed(page).evaluate((el) => el.scrollTop) - at)).toBeLessThan(2);
+  });
+
+  test('a message that only carries a file All can\'t show says so; it is never a blank row', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => { const w = window as any, now = Math.floor(Date.now() / 1000); w.__msgs['ch-bees'].push({ ref: 'blankfile', channel: 'ch-bees', author: 'b'.repeat(64), author_name: 'Uni', ts: now - 3, body: '', mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [], media: [{ url: 'http://files.example.com/made-up.zip', mime: 'application/zip', sha256: null, size: 70, dim: null, blurhash: null, alt: null, filename: 'made-up.zip' }] }); });
+    await allIn(page);
+    await expect(row(page, 'blankfile')).toContainText('A file');
+  });
+
   test('a message over the length that fits anyway shows no "Read the rest"', async ({ page }) => {
     test.skip(project() !== 'desktop', 'needs the wide column');
     await boot(page);
@@ -661,6 +684,48 @@ test.describe('a room in focus', () => {
     if (touch()) await page.touchscreen.tap(box.x + 30, box.y + box.height / 2);
     else await page.mouse.click(box.x + 30, box.y + box.height / 2);
     await expect(page.locator('section.sr[data-node="Kiln Studio"]')).toBeVisible();
+  });
+
+  test('Escape with a panel over the focus closes the panel only; the room stays', async ({ page }) => {
+    test.skip(project() !== 'desktop', 'a keyboard key');
+    await boot(page);
+    await allIn(page);
+    await row(page, 'k3').locator('.all-place').click();
+    await expect(sheet(page)).toBeVisible();
+    await rail(page).getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
+    await page.waitForTimeout(300);
+    await expect(sheet(page)).toBeVisible();
+    // and the same with Find open, its own field holding the keys
+    await rail(page).getByRole('button', { name: 'Search' }).click();
+    await expect(page.locator('.search-view')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.search-view')).toHaveCount(0);
+    await page.waitForTimeout(300);
+    await expect(sheet(page)).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(sheet(page)).toHaveCount(0);
+  });
+
+  test('a label on the last message the device has seen, with newer ones since: it lands on that message, not at the newest', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await page.evaluate(() => (window as any).__arrive('ch-kiln', 'Uni', 'LAST-SEEN on this device.'));
+    await feed(page).locator('article.all-msg').filter({ hasText: 'LAST-SEEN' }).locator('.all-place').click();
+    await expect(sheet(page).locator('.message-list')).toContainText('LAST-SEEN');
+    await page.waitForTimeout(300);
+    await backToAll(page).click();
+    await expect(sheet(page)).toHaveCount(0);
+    // newer ones, while away; the room's read is slow, so the kept copy shows first, with LAST-SEEN at its end
+    await page.evaluate((b) => { const w = window as any; w.__arrive('ch-bees', 'Uni', 'Meanwhile, the bees.'); w.__arrive('ch-kiln', 'Uni', `${b}\n\n${b}`); const next = w.__extraInvoke; w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'get_messages' && a.channel === 'ch-kiln') await new Promise((r) => setTimeout(r, 500)); return next(cmd, a); }; }, LONG);
+    await expect(feed(page)).toContainText('Meanwhile, the bees.');
+    await feed(page).locator('article.all-msg').filter({ hasText: 'LAST-SEEN' }).locator('.all-place').click();
+    const mark = sheet(page).locator('.search-focus');
+    await expect(mark).toContainText('LAST-SEEN');
+    await page.waitForTimeout(900);
+    await expect(mark).toBeInViewport();
   });
 
   test('a panel opened over the focus goes first; the rail\'s All then ends the focus', async ({ page }) => {
