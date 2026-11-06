@@ -1,0 +1,73 @@
+/* T-335 one fluid surface: a room in focus over All. All recedes (smaller, paler, on a darker ground, out of reach) and keeps its place; the room is
+   the real pane on its own sheet. A wide screen sets them side by side; a narrow one leaves a strip of All over the sheet. Only transform and opacity move. */
+.all-surface { position: relative; overflow: hidden !important; display: flex; flex-direction: column; }
+.all-behind { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; transform-origin: 50% 0;
+  transition: transform 240ms var(--g-ease), opacity 240ms var(--g-ease); }
+.all-behind > .fd-all { flex: 1; min-height: 0; height: auto; }
+.all-feed { position: relative; }
+.all-surface[data-focus] { background: var(--g-sunk); }
+.all-surface[data-focus] .fd-all { background: transparent; }
+.all-surface[data-focus="open"] .all-behind { opacity: .3; transform: translateY(-12px) scale(.94); will-change: transform, opacity; pointer-events: none; user-select: none; }
+.all-surface[data-focus="leaving"] .all-behind { transition-duration: 170ms; }
+
+.all-focus-scrim { all: unset; position: absolute; inset: 0; z-index: 1; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.all-surface[data-focus="leaving"] .all-focus-scrim { display: none; }
+
+.all-focus { position: absolute; inset: 46px 0 0; z-index: 2; display: flex; flex-direction: column; min-height: 0; overflow: hidden; outline: none; background: var(--g-ground);
+  border-top: var(--g-hair) solid var(--g-line-strong); border-radius: 18px 18px 0 0; box-shadow: var(--g-shadow-2);
+  animation: all-focus-in 240ms var(--g-ease); }
+.all-focus[data-leaving] { pointer-events: none; animation: all-focus-out 170ms var(--g-ease) forwards; }
+@keyframes all-focus-in { from { opacity: 0; transform: translateY(20px); } }
+@keyframes all-focus-out { from { transform: translateY(var(--pull, 0px)); } to { opacity: 0; transform: translateY(calc(var(--pull, 0px) + 20px)); } }
+.shell.composer-focused .all-focus { inset-block-start: 8px; }
+
+.all-focus-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 8px max(14px, calc((100% - 720px) / 2)) 8px; touch-action: none; }
+.all-focus-back { flex: none; min-height: 40px; padding: 0 14px 0 11px; font: 500 14px/1 var(--g-font-ui); white-space: nowrap; max-width: 44vw; overflow: hidden; text-overflow: ellipsis; }
+.all-focus-titles { position: relative; flex: 1; min-width: 0; padding-right: 26px; }
+.all-focus-title { margin: 0; display: flex; align-items: center; gap: 8px; font: 520 19px/1.2 var(--g-font-display); font-variation-settings: "SOFT" 60, "opsz" 72; color: var(--g-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transform-origin: 0 50%; }
+.all-focus-title::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--room-tint, var(--g-accent)); }
+.all-focus-stands { margin: 1px 0 0; font: 400 13px/1.35 var(--g-font-uni); color: var(--g-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.all-focus-page { all: unset; box-sizing: border-box; position: absolute; top: 50%; right: 0; transform: translateY(-50%); width: 24px; height: 24px; display: grid; place-items: center; cursor: pointer; font: 400 18px/1 var(--g-font-ui); color: var(--g-ink-3); }
+/* the whole of the room's name and line is the way to its page */
+.all-focus-page::after { content: ""; position: absolute; inset: -22px 0 -22px -2000px; }
+.all-focus-titles { overflow: hidden; }
+.all-focus-page:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; border-radius: 6px; }
+@media (hover: hover) { .all-focus-titles:hover .all-focus-page { color: var(--g-ink); } }
+.all-focus .sr-chat .message-list { padding-inline: max(20px, calc((100% - 720px) / 2)); }
+
+@media (min-width: 600px) and (max-width: 899px) {
+  .all-focus { inset: 46px 20px 0; border-inline: var(--g-hair) solid var(--g-line-strong); }
+  .shell.composer-focused .all-focus { inset-block-start: 46px; }
+}
+/* room for both: All to one side at reading size for a glance, the room in its full column beside it */
+@media (min-width: 900px) {
+  .all-focus { inset: 12px 16px 12px auto; width: min(760px, calc(100vw - 64px - 232px)); border: var(--g-hair) solid var(--g-line-strong); border-radius: 18px; }
+  .shell.composer-focused .all-focus { inset-block-start: 12px; }
+  .all-surface[data-focus="open"] .all-behind { transform-origin: 0 50%; transform: translateX(calc(16px - .78 * (100vw - 64px - 720px) / 2)) scale(.78); }
+  .all-behind { transform-origin: 0 50%; }
+  .all-focus-head { padding-inline: 24px; }
+  .all-focus .sr-chat .message-list { padding-inline: 24px; }
+  .all-focus .composer { padding-inline: 16px; }
+}
+
+/* no colour and no shadow to lean on: a black edge, and All gone pale on white */
+:root[data-screen="ink"] .all-surface[data-focus="open"] .all-behind { opacity: .28; will-change: auto; }
+:root[data-screen="ink"] .all-focus { border-color: #000; border-width: 1.5px; box-shadow: none; }
+:root[data-screen="ink"] .all-focus-head { border-bottom: 1.5px solid #000; }
+:root[data-screen="ink"] .all-focus-title::before { background: #000; }
+:root[data-screen="ink"] .all-focus-stands { color: #262626; }
+
+:root[data-screen="ink"] .message.search-focus .message-content { background: none; box-shadow: none; outline: 1.5px solid #000; outline-offset: 7px; border-radius: 6px; }
+
+.message .message-content { transition: background-color 500ms var(--g-ease), box-shadow 500ms var(--g-ease); }
+
+/* A room's own page: the same conversation as the focus, in the same column as All, under one quiet line instead of three ruled bands. */
+.sr .sr-chat .message-list { padding-inline: max(20px, calc((100% - 720px) / 2)); }
+.sr .sr-chat .composer { padding-inline: max(14px, calc((100% - 720px) / 2)); }
+.th-simple.phone .sr .sr-chat .message-list { padding-inline: 20px; }
+.th-simple.phone .sr .sr-head { padding: 6px 14px 2px 4px; }
+.th-simple.phone .sr .cp.strip { border-top: 0; border-bottom: 0; box-shadow: none; }
+.th-simple.phone .sr .cp.strip .cp-line { border: 0; min-height: 34px; padding-top: 0; padding-bottom: 6px; font: 400 13.5px/1.35 var(--g-font-uni); color: var(--g-ink-2); }
+.sr .sr-chat { border-top: var(--g-hair) solid var(--g-line); }
+.all-focus .sr-chat { border-top: var(--g-hair) solid var(--g-line); }
+:root[data-screen="ink"] .all-focus .sr-chat { border-top: 0; }

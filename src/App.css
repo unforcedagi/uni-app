@@ -478,7 +478,8 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .search-snippet mark, .message.search-focus mark { background: var(--highlight); color: inherit; border-radius: 3px; padding: 0 2px; }
 .search-notes { background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 6px 14px 14px; margin: 0 4px; }
 .search-error { padding: 0 24px; }
-.message.search-focus .message-content { box-shadow: 0 0 0 2px var(--turquoise); border-radius: 12px; }
+/* T-335 one fluid surface: "this one" is a soft ground around the words, clear of them; on a screen with no colour, a thin line (focus.css) */
+.message.search-focus .message-content { background: var(--g-accent-soft); box-shadow: 0 0 0 8px var(--g-accent-soft); border-radius: 4px; }
 
 /* ── Attachments (src/Attachments.tsx) ─────────────────────── */
 .attachments { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }

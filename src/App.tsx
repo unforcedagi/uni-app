@@ -6,6 +6,7 @@ import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { forgetComposer } from "./all/AllView";
+import { FOCUS_OUT_MS, type AllFocusState } from "./all/AllFocus";
 import { MoreIcon, SearchIcon, ToPostIcon, VaultIcon, SettingsIcon, UniIcon, JournalIcon, StarIcon, MailIcon, CalendarIcon, MessagesIcon, AllIcon } from "./Icons";
 import Mail from "./Mail";
 import Calendar from "./calendar/Calendar";
@@ -213,7 +214,7 @@ function ComposerMenu({ onMention, onAttach, onDiscard, canDiscard, sending }: {
 
 /** A room's chat is what is on screen (a room, a thread, Uni or an area with its room) with no full-page note over it. */
 function chatOnScreen(tab: { kind: string } | null, channel: string | null, fullPageNotes: number): boolean {
-  return !!channel && !!tab && ["room", "thread", "areas", "area"].includes(tab.kind) && !fullPageNotes;
+  return !!channel && !!tab && ["room", "thread", "areas", "area", "all"].includes(tab.kind) && !fullPageNotes;
 }
 
 /** T-200: scroll a list so the message `ref` sits `offset` px below its top. False when the message isn't in the list. */
@@ -589,6 +590,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [utilityOpen]);
   // Search result to scroll to and flash once its room/thread has loaded.
   const [focusRef, setFocusRef] = useState<string | null>(null);
+  // T-335 one fluid surface: the room in focus inside All (AllFocus.tsx). The All tab stays what it is, with its feed in place behind; this room's view (messages, composer, drafts) is
+  // the one the room's page uses, so one send path, one draft per room and one signer serve both.
+  const [allFocus, setAllFocusState] = useState<AllFocusState | null>(null);
+  const allFocusRef = useRef<AllFocusState | null>(null);
+  const setAllFocus = (f: AllFocusState | null) => { allFocusRef.current = f; setAllFocusState(f); };
+  const focusLeaving = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finishRef = useRef<() => void>(() => {});
+  const pageFromAll = useRef(false);
+  const stopLeaving = () => { if (focusLeaving.current) { clearTimeout(focusLeaving.current); focusLeaving.current = null; } };
   /** r25: "Check in" opens a room at a message and keeps the sheet's question over the composer ("Checking: <step>") until it is dismissed or the room is left. */
   const [checking, setChecking] = useState<{ channel: string; text: string } | null>(null);
   const checkingSeen = useRef(false);
@@ -690,6 +700,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const room = chatRoom();
     if (room && by < 0 && asidesRef.current[room]) { backAside(room); return; }
     if (room && by > 0 && forwardAside(room)) return;
+    if (by < 0 && allFocusRef.current) { stepBackInFocus(); return; }
     const hop = histStep(histRef.current, by);
     if (!hop) return;
     histRef.current = hop.history; setHist(hop.history);
@@ -759,6 +770,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   /** `fromHistory`: Back and Forward move through the places visited; they do not add to them. */
   function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false, fromHistory = false) {
+    // already in All, with a room in focus: All is what is behind it
+    if (target.kind === "all" && allFocusRef.current && activeTab(tabsRef.current)?.kind === "all") { endAllFocus(); return; }
+    // a place opened from the room's page: Back from there is that place's own
+    pageFromAll.current = false;
     target = resolveTarget(target);
     if (!tabsReady.current && target.kind === "area") openedEarly.current = true;
     if (target.note) target = { ...target, note: resolveNote(target.note, aliases.current) };
@@ -1415,7 +1430,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (root && !messages.some((m) => m.ref === root || m.root === root)) return;
     const el = listRef.current?.querySelector<HTMLElement>(`[data-ref="${CSS.escape(focusRef)}"]`);
     if (el) {
-      el.scrollIntoView({ block: "center" });
+      // a message taller than the list opens at its top, where its reader starts
+      const box = listRef.current;
+      el.scrollIntoView({ block: box && el.offsetHeight > box.clientHeight - 32 ? "start" : "center" });
+      // it stays there as the rest of the list settles (the view follows the newest again when the reader scrolls down to it)
+      if (box) { stickToEnd.current = false; settleUntil.current = 0; pinned.current = { ref: focusRef, offset: el.getBoundingClientRect().top - box.getBoundingClientRect().top, until: Date.now() + 1000 }; }
       const t = setTimeout(() => setFocusRef(null), 2500);
       return () => clearTimeout(t);
     }
@@ -1853,6 +1872,35 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
   }
 
+  /** Puts a room (or a thread of it) in focus inside All, at a message if one is named. Works from All, from another focus, and while one is on its way out. */
+  function focusInAll(room: string, ref: string | null = null, threadRoot: string | null = null) {
+    stopLeaving();
+    setAllFocus({ room, root: threadRoot, leaving: false });
+    // a pointer that doesn't bring up a keyboard goes on typing; a touch keeps the thread on screen
+    if (threadRoot || !matchMedia("(pointer: coarse)").matches) focusComposer.current = true;
+    setChecking(null);
+    if (channelRef.current !== room || root !== threadRoot) navigate(room, threadRoot);
+    if (ref) { focusTries.current = 0; setFocusRef(ref); }
+  }
+  /** Ends the focus: All is in reach at once; the room's pane goes when it has finished leaving. */
+  function endAllFocus() {
+    const f = allFocusRef.current;
+    if (!f || f.leaving) return;
+    setComposerFocused(false);
+    const finish = () => { focusLeaving.current = null; setAllFocus(null); if (activeTab(tabsRef.current)?.kind === "all") navigate(null, null); };
+    if (calmMotion()) { finish(); return; }
+    setAllFocus({ ...f, leaving: true });
+    focusLeaving.current = setTimeout(() => finishRef.current(), FOCUS_OUT_MS);
+    finishRef.current = finish;
+  }
+  /** Back in focus: a thread steps to its room, the room to All. */
+  function stepBackInFocus() {
+    const f = allFocusRef.current;
+    if (!f) return;
+    if (f.root && !f.leaving) focusInAll(f.room);
+    else endAllFocus();
+  }
+
   function navigate(nextChannel: string | null, nextRoot: string | null) {
     const key = scope();
     const draft = box.get();
@@ -1879,6 +1927,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   function openThread(m: Message) {
     focusComposer.current = true;
     const threadRoot = m.root && messages.some((x) => x.ref === m.root) ? m.root : m.ref;
+    if (allFocusRef.current) { focusInAll(m.channel, null, threadRoot); return; }
     openTarget({ kind: "thread", channel: m.channel, root: threadRoot, title: `Thread · ${roomsRef.current.find((r) => r.id === m.channel)?.name ?? "Room"}` }, "new");
   }
 
@@ -2398,7 +2447,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (overlayRef.current && !notes.length) { overlayRef.current.close(); return; }
     if (notes.length) { closeNote(); return; }
     if (asideRoom) { backAside(asideRoom); return; }
+    if (allFocusRef.current) { stepBackInFocus(); return; }
     if (root && channel) { openTarget(roomTarget(channel), "focus"); return; }
+    // the room's page, opened from its focus in All: Back is All again
+    if (pageFromAll.current) { pageFromAll.current = false; openTarget({ kind: "all", title: "All" }); return; }
     // A level goes up, a room on a phone goes back to the room tree (Uni's own level, opened from the tree, too); anything else goes to Uni.
     if (areaBack.current) { areaBack.current(); return; }
     const cur = activeTab(tabsRef.current);
@@ -2471,6 +2523,20 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** Every room opens in the room shell (tree, conversation, companion): a node's room, a room no node owns ("Other rooms"), a thread. */
   const allOpen = active?.kind === "all";
   const shellOpen = areasOpen || allOpen || active?.kind === "room" || active?.kind === "thread";
+  // another place opened: the focus ended with All (whoever opened it has already moved the room's view on)
+  useLayoutEffect(() => { if (!allOpen && allFocusRef.current) { stopLeaving(); setAllFocus(null); } }); // eslint-disable-line react-hooks/exhaustive-deps
+  // Escape: what is in front goes first, as Back; a field's own use of it (the mention list, an edit) comes before that
+  const inFocus = !!allFocus;
+  useEffect(() => {
+    if (!inFocus) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || !e.isTrusted || modalCount() > 0) return;
+      if (e.target instanceof Element && e.target.closest(".inline-editor, [role=dialog], [role=alertdialog]")) return;
+      goBack.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [inFocus]);
   const uniShown = !panel && !searchOpen && !topNote && shellOpen && !allOpen;
   const threadNode = active?.kind === "thread" && active.channel ? roomNodes.get(active.channel) ?? null : null;
   const shellPath = active?.kind === "area" ? active.path ?? null : threadNode && threadNode.path !== "" ? threadNode.path : null;
@@ -2481,6 +2547,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const key = keyFor(id, null);
     editDraft(key, appendDraft(scopeDraft(key), text));
     focusComposer.current = true;
+    if (activeTab(tabsRef.current)?.kind === "all") { focusInAll(id); return; }
     openTargetRef.current(roomTarget(id), "new");
   };
   const composeInRoomRef = useRef(composeInRoom);
@@ -2510,9 +2577,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if ((tab.channel ?? null) !== id || tab.borrowed !== borrowed) commitTabs(updateTab(tabsRef.current, tab.id, { channel: id ?? undefined, borrowed }));
     if ((channel ?? null) !== id || root) navigate(id, null);
   };
+  const focusInAllRef = useRef(focusInAll);
+  focusInAllRef.current = focusInAll;
   const areaActions = useMemo(() => ({
     /** `focus`: a message of that room to scroll to and mark (the request sheet's "Check in #room first" goes to the first message about it) */
-    openRoom: (id: string, focus?: string | null, checking?: string | null) => { openTargetRef.current(roomTarget(id), "new"); if (focus) { focusTries.current = 0; setFocusRef(focus); } setChecking(checking ? { channel: id, text: checking } : null); },
+    openRoom: (id: string, focus?: string | null, checking?: string | null) => { if (activeTab(tabsRef.current)?.kind === "all") { focusInAllRef.current(id, focus ?? null); if (checking) setChecking({ channel: id, text: checking }); return; } openTargetRef.current(roomTarget(id), "new"); if (focus) { focusTries.current = 0; setFocusRef(focus); } setChecking(checking ? { channel: id, text: checking } : null); },
     // r15: a note opens in the vault its reference names (the task's, the area's), the same vault its title was read from
     openNote: (r: NoteRef) => openNote({ hub: null, vault: r.vault, ref: r.id }, null),
     compose: (id: string, text: string) => composeInRoomRef.current(id, text),
@@ -2527,6 +2596,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const typed = a.kind !== "sealed";
     if (channelRef.current === a.channel && root === a.root) { focusTries.current = 0; setFocusRef(a.ref); if (typed) input.current?.focus(); return; }
     focusComposer.current = typed;
+    if (allOpen && a.root) { focusInAll(a.channel, a.ref, a.root); return; }
     // a prompt posted as a reply is in its thread, never the room's timeline: it opens there, as a search hit does
     if (a.root) { focusTries.current = 0; openTarget({ kind: "thread", channel: a.channel, root: a.root, title: `Thread · ${roomsRef.current.find((r) => r.id === a.channel)?.name ?? "Room"}` }, "focus"); setFocusRef(a.ref); }
     else areaActions.openRoom(a.channel, a.ref);
@@ -2635,7 +2705,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       : active?.kind === "posts" ? <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} backTo={originTitle} onBack={() => openTarget(origin())} />
       : active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} backTo={originTitle} onBack={() => openTarget(origin())} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : shellOpen && active ? <AreasSurface allPlace={allOpen ? { backTo: originTitle, from: uniPlace.current, onBack: () => openTarget(origin()) } : null} noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} loose={shellLoose} thread={shellThread} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
+      : shellOpen && active ? <AreasSurface allPlace={allOpen ? { backTo: originTitle, from: uniPlace.current, onBack: () => openTarget(origin()), focus: allFocus, onFocus: focusInAll, onUnfocus: endAllFocus, onPage: (id) => { openTarget(roomTarget(id), "focus"); pageFromAll.current = true; } } : null} noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} loose={shellLoose} thread={shellThread} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>
@@ -2652,7 +2722,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         openTarget({ kind: "note", note, title }, "new");
       }}
       onDirty={(ref, dirty) => { const k = noteKey(ref); if (dirty) asideDirty.current.add(k); else asideDirty.current.delete(k); }} />}
-    {pill && <RecordingPill title={pill.title} controls={pill.controls} finish={pill.finish} overSidebar={sidebarVisible} onJump={() => focusTabById(pill.tabId)} />}
+    {pill && <RecordingPill title={pill.title} controls={pill.controls} finish={pill.finish} overSidebar={sidebarVisible} onJump={() => { const o = recordingOrigin.current, tab = tabsRef.current.tabs.find((t) => t.id === pill.tabId); focusTabById(pill.tabId); if (tab?.kind === "all" && o?.channel && pill.finish === "send") focusInAll(o.channel, null, o.key === keyFor(o.channel, null) ? null : o.replyTo); }} />}
     {/* A note opens over the place you were in; Back pops the note's own stack (or closes it at the first note). */}
     {topNote && !searchOpen && <section className="note-sheet" role="region" aria-label="Note">
       <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}:${topNote.ref === FOR_YOU_ID ? forYouReload : 0}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={() => { if (topNote.ref === FOR_YOU_ID && forYouReturn.current && tabsRef.current.tabs.some((t) => t.id === forYouReturn.current)) focusTabById(forYouReturn.current); else closeNote(); }}

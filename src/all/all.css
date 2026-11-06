@@ -66,7 +66,7 @@
 .all-place { font: 600 13px/1 var(--g-font-ui); }
 .all-place::before { background: var(--room-tint, var(--g-accent)); }
 .all-msg.clamped .md { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-.all-rest { all: unset; box-sizing: border-box; cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; margin-top: 2px; font: 500 13.5px/1 var(--g-font-ui); color: var(--g-ink-2); }
+.all-rest { all: unset; box-sizing: border-box; cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; margin-top: 2px; font: 500 13.5px/1 var(--g-font-ui); color: var(--g-ink-2); text-decoration: underline; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .all-rest:hover { color: var(--g-ink); text-decoration: underline; text-underline-offset: 3px; }
 .all-rest:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .all-chip.chosen { background: var(--g-ink); color: var(--g-ground); border-color: var(--g-ink); }
@@ -106,7 +106,11 @@
 .all-reply-go:focus-visible { opacity: 1; outline: 2px solid var(--g-focus); outline-offset: 2px; }
 @media (hover: hover) { .all-msg:hover .all-reply-go { opacity: 1; } }
 @media (hover: none) { .all-reply-go { display: none; } }
-.all-thread { margin: 2px 0 2px; font: 500 12.5px/1.4 var(--g-font-ui) !important; color: var(--g-ink-2) !important; }
+.all-thread { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; min-height: 28px; font: 500 12.5px/1.4 var(--g-font-ui); color: var(--g-ink-2); }
+.all-thread:hover { color: var(--g-ink); }
+.all-thread:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+@media (pointer: coarse) { .all-thread { min-height: 44px; } }
+.all-msg .attachments { margin-top: 6px; cursor: auto; }
 .all-echo-state { margin: 2px 2px 0 0; font: 400 12px/1.3 var(--g-font-ui); color: var(--g-ink-3); text-align: right; width: 100%; }
 .all-echo .all-place { cursor: default; }
 .all-reply-chip { padding-left: 14px; }

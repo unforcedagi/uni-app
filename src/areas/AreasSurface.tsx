@@ -45,6 +45,7 @@ import { ApprovalsContext, useApprovalList } from "../approvalsLive";
 import type { Approval } from "../approvals";
 import "./areas.css";
 import type { AllRoom } from "../all/AllView";
+import { AllFocusSheet, type AllFocusState } from "../all/AllFocus";
 import { AllEmpty, FrontDoor, type Door, type Needs, type NewRoom } from "../projects/FrontDoor";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
@@ -102,7 +103,9 @@ const viaMemory: { path: string | null; via: string | null } = { path: null, via
 
 export default function AreasSurface({ allPlace = null, identity, path, loose = null, thread = null, rooms: hostRooms, roomsPending = false, actions, roomFor, onRoom, onOpenArea, onBackChange, onOverlayChange, noteBeside = false }: {
   /** T-335: this surface is the All place: every area's room at once, with the way back to where you came from. */
-  allPlace?: { backTo: string; from?: { path?: string; channel?: string } | null; onBack: () => void } | null;
+  allPlace?: { backTo: string; from?: { path?: string; channel?: string } | null; onBack: () => void;
+    /** T-335 one fluid surface: the room in focus over All, how to put one there and how it ends; `onPage`: from focus to that room's own page. */
+    focus: AllFocusState | null; onFocus: (room: string, ref?: string | null, root?: string | null) => void; onUnfocus: () => void; onPage: (room: string) => void } | null;
   identity: string | null;
   /** T-200: a note is open beside the conversation. The chat keeps the room: the companion folds to its tab, and the tree to its icons
    *  on a window under 1400px. Either unfolds again for as long as the note is open; the choices kept on this device stay as they were. */
@@ -230,6 +233,9 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
     return () => { window.removeEventListener("keydown", esc); };
   }, [overlayKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onOverlayChange?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // T-335 one fluid surface: a room in focus that turns out to be private (or has just become so) doesn't stay over All
+  const focusGoesPrivate = useRef(false);
+  useEffect(() => { if (focusGoesPrivate.current) { focusGoesPrivate.current = false; allPlace?.onUnfocus(); } });
   const workShown = work || !chat;
   // the drawer is a dialog (r14): focus moves in, stays in (Tab wraps), what is under it is inert, and closing gives focus back to Places
   const drawerBox = useRef<HTMLElement>(null);
@@ -459,10 +465,27 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
     const allRooms: AllRoom[] = doors.filter((d) => d.room && !isPrivatePath(data!.tree, d.path) && !privateChannel(d.room)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, about: d.about ?? null, lastTs: d.lastTs }));
     /** All's way back names where you came from, unless that is inside a private place (the place itself, a room or a thread of it). */
     const fromPrivate = (from: { path?: string; channel?: string } | null | undefined) => !!from && (!!(from.path && isPrivatePath(data!.tree, from.path)) || (!!from.channel && privateChannel(from.channel)));
-    const all = allRooms.length ? { rooms: allRooms, onOpenAt: (room: string, ref?: string) => { setDrawer(false); (actions.openRoom as (id: string, focus?: string | null) => void)(room, ref ?? null); } } : null;
+    const all = allRooms.length ? { rooms: allRooms, onOpenAt: (room: string, ref?: string | null, threadRoot?: string | null) => { setDrawer(false); if (allPlace) allPlace.onFocus(room, ref ?? null, threadRoot ?? null); else (actions.openRoom as (id: string, focus?: string | null) => void)(room, ref ?? null); } } : null;
     if (allPlace && !all) return <div className="areas-home tree-home-wrap"><AllEmpty reading={roomsPending} onBack={allPlace.onBack} /></div>;
-    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={allPlace ? approvalsAll.list.filter((x) => !privateChannel(x.channel)) : approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor needsKnown={tasks.error || tasks.truncated || tasks.treeTruncated || (allNeeds.pending ?? []).some((t) => t.askFailed || t.check?.kind === "unavailable") ? "failed" : !tasks.ready || tasks.savedAt || (allNeeds.pending?.length ?? 0) > 0 ? "reading" : "known"} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} all={all} allPlace={allPlace && { ...allPlace, backTo: fromPrivate(allPlace.from) ? "Back" : allPlace.backTo }} onComposerFocus={actions.composerFocus} />
-      {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
+    const home = <>{status}<ApprovalRows approvals={allPlace ? approvalsAll.list.filter((x) => !privateChannel(x.channel)) : approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor needsKnown={tasks.error || tasks.truncated || tasks.treeTruncated || (allNeeds.pending ?? []).some((t) => t.askFailed || t.check?.kind === "unavailable") ? "failed" : !tasks.ready || tasks.savedAt || (allNeeds.pending?.length ?? 0) > 0 ? "reading" : "known"} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: fromPrivate(allPlace.from) ? "Back" : allPlace.backTo, onBack: allPlace.onBack, receded: !!allPlace.focus && !allPlace.focus.leaving }} onComposerFocus={actions.composerFocus} />
+      {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>;
+    if (!allPlace) return <div className="areas-home tree-home-wrap">{home}</div>;
+    // T-335 one fluid surface: All, and over it the room in focus. A room that turns out to be private leaves focus (its effect, above), and shows nothing here meanwhile.
+    if (allPlace.focus && !allPlace.focus.leaving && privateChannel(allPlace.focus.room)) focusGoesPrivate.current = true;
+    const focus = allPlace.focus && !privateChannel(allPlace.focus.room) ? allPlace.focus : null;
+    const focusChat = focus ? roomFor(focus.room, focus.root) : null;
+    const focusName = focus ? allRooms.find((r) => r.id === focus.room)?.name ?? roomRefs.find((r) => r.id === focus.room)?.name ?? "Room" : "";
+    const focusDoor = focus ? allRooms.find((r) => r.id === focus.room) : undefined;
+    const focusSlug = focus ? focusDoor?.slug ?? roomRefs.find((r) => r.id === focus.room)?.name.replace(/^#/, "") ?? null : null;
+    const focusReplies = focus?.root && focusChat?.loaded ? focusChat.messages.filter((m) => m.ref !== focus.root).length : null;
+    return <div className="areas-home tree-home-wrap all-surface" data-focus={focus ? (focus.leaving ? "leaving" : "open") : undefined}>
+      <div className="all-behind" inert={!!focus && !focus.leaving}>{home}</div>
+      {focus && <><button type="button" className="all-focus-scrim" aria-label="Back to All" tabIndex={-1} onClick={allPlace.onUnfocus} />
+        <AllFocusSheet key={focus.room} id={focus.room} name={focusName} stands={focusDoor?.stands ?? null} root={focus.root} replies={focusReplies} leaving={focus.leaving} onBack={allPlace.onUnfocus} onPage={() => allPlace.onPage(focus.room)}>
+          <ApprovalElsewhere approvals={approvalsAll.list.filter((x) => !privateChannel(x.channel))} here={focus.room} />
+          <div className="sr-chat" data-chat={focusChat ? "open" : "waiting"}>{focusChat ? focusChat.render(null, focusSlug ? `Message #${focusSlug}` : undefined, focusName) : <ChatWait placeholder={focusSlug ? `Message #${focusSlug}` : "Message"} retry={null} />}</div>
+        </AllFocusSheet></>}
+    </div>;
   }
   if (treeHome && path === null && !rootOpen) {
     return <div className="areas-home tree-home-wrap"><TreeScreen {...treeProps} status={<><ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" />{status}{railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>} />

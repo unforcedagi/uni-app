@@ -6,12 +6,17 @@
 // T-335 All v2: All is a place on the rail, reachable from every room and back, never where the app opens. A tap or a swipe on a message
 // replies in that room (or its thread) with no routing at all; the room's label is the way into the room. An unaddressed message gets the word
 // match at once and the small model's route if it answers in time (modelRoute.ts).
+// T-335 one fluid surface: a long message opens where it is, whole, with its markdown, media and links; a room's label puts that room in focus over
+// this feed (AllFocus.tsx), and the feed keeps its place behind it. Nothing here makes you leave All to read.
 import { roomTint as tint } from "../glow/roomTint";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Body } from "../MessageBody";
+import { Attachments, attachmentBody, useRelayOrigin } from "../Attachments";
+import { collectAttachments, type MediaRef } from "../media";
+import { calmMotion, scrollMotion } from "../motion";
 import type { Member } from "../mentions";
 import { findUniMember } from "../uniActions";
 import { andList, interleave, replyTargetOf, roomAddress, sameTarget, sendEach, type FeedMessage, type ReplyTarget } from "./allCore";
@@ -27,7 +32,7 @@ import "./all.css";
 export type AllRoom = { id: string; name: string; slug: string | null; stands: string | null; lastTs: number | null;
   /** The area note's own one line on what it is (the route's description of the room). */ about?: string | null };
 
-type Message = FeedMessage & { mentions: Member[]; edited: boolean; media?: unknown[] | null; reply_count?: number };
+type Message = FeedMessage & { mentions: Member[]; edited: boolean; media?: MediaRef[] | null; reply_count?: number };
 type Live = { kind: string; channel: string | null };
 
 const PER_ROOM = 40;
@@ -77,6 +82,16 @@ export function useRoomsFeed(rooms: readonly AllRoom[], on: boolean) {
   return { byRoom, loaded, failed, reread };
 }
 
+/** Where the feed was and which messages were opened, for coming back to All from anywhere (never saved: a restart opens at the newest). */
+const feedMemory = { spot: null as FeedSpot | null, at: 0, open: new Set<string>() };
+/** A spot this old is another visit: All opens at its newest. */
+const SPOT_KEEP_MS = 15 * 60_000;
+type FeedSpot = { ref: string; offset: number };
+/** The label that was tapped: the focus head grows out of it, and it has the keys back when the focus ends. */
+const label = { el: null as HTMLElement | null, rect: null as DOMRect | null };
+export const takeLabelRect = () => { const r = label.rect; label.rect = null; return r; };
+export const labelBack = () => { const el = label.el; label.el = null; if (el?.isConnected) el.focus({ preventScroll: true }); };
+
 /**
  * What the composer holds, across the home and All, across visits, and while a send is out: written the moment it changes, not when a component draws,
  * because a send can finish after you have left. A message delivered isn't left as a draft to send again; one that failed is back here, with why.
@@ -102,6 +117,7 @@ function useHeld() {
 /** Forget this device's key: nothing typed under it stays in memory, or could be read to a model under the next key. */
 export function forgetComposer() {
   setHeld({ text: "", chosen: null, target: null, attempt: null, sending: false, outcome: null, lost: [], era: held.era + 1 });
+  feedMemory.spot = null; feedMemory.open = new Set(); label.el = null; label.rect = null;
   forgetModelRoute();
 }
 if (import.meta.env.VITE_AREAS_TESTHOOKS === "1" && typeof window !== "undefined") (window as unknown as { __allHeld: typeof held }).__allHeld = held;
@@ -315,31 +331,60 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   </section>;
 }
 
-/** T-335 chat feel: a reply this long shows its start in All, and a way into its room for the rest. */
+/** T-335 chat feel: a reply this long shows its start in All; T-335 one fluid surface: a tap opens the rest right there. */
 const isLong = (body: string) => body.length > 320 || body.split("\n").filter((l) => l.trim()).length > 4;
+const OPEN_MS = 200;
+/** Opening a long message may scroll it into sight: that isn't you going back to the newest. */
+const READ_HOLD_MS = OPEN_MS + 700;
 
-const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named, targeted, onOpen, onTap }: { m: Message; place: string; address: string; mine: boolean; me: string | null;
+const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named, targeted, open, onOpen, onTap, onRead }: { m: Message; place: string; address: string; mine: boolean; me: string | null;
   /** The first message of a run from one room: it carries the room's label. */ run: boolean; /** Says who and when (a new author, or a pause). */ named: boolean;
   /** The composer is replying here. */ targeted: boolean;
-  onOpen: (room: string, ref: string) => void; onTap: (m: Message) => void }) {
-  const clamp = !mine && isLong(m.body);
+  /** A long message opened: it reads whole, here. */ open: boolean;
+  /** Puts the room in focus, at this message or in its thread. */ onOpen: (room: string, ref: string | null, root?: string | null) => void; onTap: (m: Message) => void;
+  onRead: (row: HTMLElement, ref: string, open: boolean) => void }) {
+  const relay = useRelayOrigin();
+  const media = m.media ?? undefined;
+  // what the attachments show isn't said again in the words, as in a room
+  const body = useMemo(() => attachmentBody(m.body, media, relay), [m.body, media, relay]);
+  const files = useMemo(() => collectAttachments(m.body, media ?? [], relay).length, [m.body, media, relay]);
+  const long = !mine && isLong(body);
+  // over the length but it fits the cut on this screen: nothing to open, and a tap replies, as on any message
+  const box = useRef<HTMLDivElement>(null);
+  const [fits, setFits] = useState(false);
+  useLayoutEffect(() => {
+    const md = long && !open ? box.current?.querySelector<HTMLElement>(".md") : null;
+    if (!md) return;
+    const look = () => setFits(md.scrollHeight <= md.clientHeight + 2);
+    look();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(look);
+    ro.observe(md);
+    return () => ro.disconnect();
+  }, [long, open, body]);
+  const cut = long && !open && !fits;
   const replies = m.reply_count ?? 0;
-  return <article className={`message all-msg${mine ? " mine" : ""}${run ? " run" : " grouped"}${clamp ? " clamped" : ""}${targeted ? " targeted" : ""}`} data-ref={m.ref} data-room={m.channel}
+  const read = (el: HTMLElement) => onRead(el, m.ref, !open);
+  return <article className={`message all-msg${mine ? " mine" : ""}${run ? " run" : " grouped"}${long && !open ? " clamped" : ""}${targeted ? " targeted" : ""}`} data-ref={m.ref} data-room={m.channel}
     onClick={(e) => {
-      // T-335 All v2: a tap replies here; the room's label opens the room. Links and buttons stay themselves, and selecting text isn't a tap.
-      if (e.target instanceof Element && e.target.closest("a, button, summary, input, textarea")) return;
+      // T-335 All v2: a tap replies here; the room's label opens the room. Links, buttons and what a message carries stay themselves, and selecting text isn't a tap.
+      if (e.target instanceof Element && e.target.closest("a, button, summary, input, textarea, .attachments")) return;
       const picked = getSelection();
       if (picked && !picked.isCollapsed && picked.anchorNode && e.currentTarget.contains(picked.anchorNode)) return;
+      // a message you can't yet see the end of: the tap opens it (you reply to what you have read)
+      if (cut) { read(e.currentTarget); return; }
       onTap(m);
     }}>
-    {run && <div className="all-run"><button type="button" className="all-place" style={{ ["--room-tint" as string]: tint(m.channel) }} aria-label={`Open ${place}, at this message`} onClick={() => onOpen(m.channel, m.ref)}>{place}</button>
+    {run && <div className="all-run"><button type="button" className="all-place" style={{ ["--room-tint" as string]: tint(m.channel) }} aria-label={`Focus ${place}, at this message`} title={`Focus ${place}`}
+      onClick={(e) => { label.el = e.currentTarget; label.rect = e.currentTarget.getBoundingClientRect(); onOpen(m.channel, m.ref); }}>{place}</button>
       {!mine && <strong>{m.author_name}</strong>}<time>{clock(m.ts)}</time></div>}
-    <div className="message-content">
+    <div className="message-content" ref={box}>
       {named && !run && !mine && <div className="all-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}
-      {m.body.trim() ? <Body body={m.body} mentions={m.mentions ?? []} me={me} edited={m.edited} />
-        : <p className="all-file">{m.media?.length ? `${m.media.length === 1 ? "A file" : `${m.media.length} files`}: open the room to see ${m.media.length === 1 ? "it" : "them"}` : "(nothing to show here)"}</p>}
-      {clamp && <button type="button" className="all-rest" onClick={() => onOpen(m.channel, m.ref)}>Read the rest in {place} ›</button>}
-      {replies > 0 && <p className="all-thread">{replies} {replies === 1 ? "reply" : "replies"}</p>}
+      {body.trim() ? <Body body={body} mentions={m.mentions ?? []} me={me} edited={m.edited} />
+        : !files && <p className="all-file">(nothing to show here)</p>}
+      {(cut || (long && open)) && <button type="button" className="all-rest" aria-expanded={open} onClick={(e) => read(e.currentTarget.closest("article")!)}>{open ? "Show less" : "Read the rest"}</button>}
+      <Attachments body={m.body} media={media} />
+      {replies > 0 && <button type="button" className="all-thread" onClick={() => onOpen(m.channel, m.ref, m.ref)}>{replies} {replies === 1 ? "reply" : "replies"}<span aria-hidden="true"> ›</span></button>}
     </div>
     <button type="button" className="all-reply-go" aria-label={`Reply in ${address}${m.root || replies ? ", in the thread" : ""}`} aria-pressed={targeted} onClick={() => onTap(m)}>Reply</button>
   </article>;
@@ -359,15 +404,37 @@ const notTalk = (m: FeedMessage) => isWorkerStatus(m.body) || isMaintenance(m.bo
 const SWIPE_PX = 64, EDGE_PX = 24;
 const stillScreen = () => document.documentElement.dataset.screen === "ink" || matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = null, onTarget, echoes = [] }: { rooms: readonly AllRoom[]; byRoom: ReadonlyMap<string, Message[]>; loaded: boolean; failed: readonly string[];
-  me: string | null; onOpen: (room: string, ref: string) => void;
+const NO_ECHOES: readonly Echo[] = [];
+/** T-335 one fluid surface: the first message at or under the top of the list and how far down from it the top is. Read from layout, not the screen: the feed may be scaled while it recedes. */
+function spotIn(el: HTMLElement): FeedSpot | null {
+  for (const row of el.querySelectorAll<HTMLElement>("article.all-msg[data-ref]")) {
+    if (row.offsetTop + row.offsetHeight > el.scrollTop) return { ref: row.dataset.ref!, offset: el.scrollTop - row.offsetTop };
+  }
+  return null;
+}
+function pinSpot(el: HTMLElement, s: FeedSpot): boolean {
+  const row = el.querySelector<HTMLElement>(`article.all-msg[data-ref="${CSS.escape(s.ref)}"]`);
+  if (row) el.scrollTop = row.offsetTop + s.offset;
+  return !!row;
+}
+
+export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = null, onTarget, echoes = NO_ECHOES, receded = false }: { rooms: readonly AllRoom[]; byRoom: ReadonlyMap<string, Message[]>; loaded: boolean; failed: readonly string[];
+  me: string | null; onOpen: (room: string, ref: string | null, root?: string | null) => void;
+  /** A room is in focus over the feed: it stays exactly where it is until that ends. */ receded?: boolean;
   /** Where the composer is replying, and how a tap or a swipe sets it. */ target?: ReplyTarget | null; onTarget?: (t: ReplyTarget | null) => void;
   /** Your replies not yet in their room's list. */ echoes?: readonly Echo[] }) {
   const nameOf = useMemo(() => new Map(rooms.map((r) => [r.id, r.name])), [rooms]);
   const addressOf = useMemo(() => new Map(rooms.map((r) => [r.id, roomAddress(r)])), [rooms]);
   const feed = useMemo(() => interleave(new Map([...byRoom].filter(([id]) => nameOf.has(id)).map(([id, list]) => [id, list.filter((m) => !notTalk(m))]))), [byRoom, nameOf]);
   const list = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
+  // back in All within a while: where it was, once the rows it was at are read
+  const restoring = useRef(feedMemory.spot && Date.now() - feedMemory.at < SPOT_KEEP_MS ? feedMemory.spot : null);
+  const stick = useRef(!restoring.current);
+  const [opened, setOpened] = useState(feedMemory.open);
+  const recededRef = useRef(receded);
+  recededRef.current = receded;
+  const heldSpot = useRef<{ stick: boolean; spot: FeedSpot | null } | null>(null);
+  const readHold = useRef(0);
   // the message being replied to (the tapped one): when the keyboard takes the room, it stays in sight
   const [tapped, setTapped] = useState<string | null>(null);
   const tappedRef = useRef<string | null>(null);
@@ -395,13 +462,65 @@ export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = nu
     const el = list.current;
     if (added && el) { stick.current = true; el.scrollTop = el.scrollHeight; }
   }, [echoCount]);
-  useLayoutEffect(() => { const el = list.current; if (el && stick.current && !tappedRef.current) el.scrollTop = el.scrollHeight; }, [feed]);
-  useLayoutEffect(() => { keepTapped(); }, [tapped, target, keepTapped]);
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    if (restoring.current) {
+      const hit = pinSpot(el, restoring.current);
+      // every room's rows are in: it is either there or gone (then All opens at its newest)
+      if (loaded) { restoring.current = null; if (!hit) { stick.current = true; el.scrollTop = el.scrollHeight; } }
+      return;
+    }
+    if (stick.current && !tappedRef.current) el.scrollTop = el.scrollHeight;
+  }, [feed, loaded]);
+  useLayoutEffect(() => { if (!recededRef.current && !restoring.current) keepTapped(); }, [tapped, target, keepTapped]);
+  // T-335 one fluid surface: a room goes into focus: the place is noted; it ends: the same message is where it was, whatever arrived behind it
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    if (receded) { heldSpot.current = { stick: stick.current, spot: spotIn(el) }; return; }
+    const was = heldSpot.current;
+    heldSpot.current = null;
+    if (!was) return;
+    stick.current = was.stick;
+    if (was.stick) el.scrollTop = el.scrollHeight;
+    else if (was.spot) pinSpot(el, was.spot);
+  }, [receded]);
+  // leaving All: where it was, for coming back
+  useLayoutEffect(() => {
+    const el = list.current;
+    return () => {
+      if (!el) return;
+      const was = heldSpot.current;
+      feedMemory.spot = was ? (was.stick ? null : was.spot) : restoring.current ?? (stick.current ? null : spotIn(el));
+      feedMemory.at = Date.now();
+    };
+  }, []);
+  /** A long message opens or folds where it is. Opening leaves the page where it is (no later arrival pulls it away) and brings the new words into sight, its top kept on screen. */
+  const onRead = useCallback((row: HTMLElement, ref: string, open: boolean) => {
+    const el = list.current;
+    const md = row.querySelector<HTMLElement>(".md");
+    const before = md?.getBoundingClientRect().height ?? 0;
+    // the opened words are being read: the view follows the newest again only when you scroll back down yourself
+    if (open) { stick.current = false; readHold.current = performance.now() + READ_HOLD_MS; }
+    flushSync(() => setOpened((s) => { const next = new Set(s); if (open) next.add(ref); else next.delete(ref); feedMemory.open = next; return next; }));
+    if (!el) return;
+    if (!open) { row.scrollIntoView({ block: "nearest" }); return; }
+    const reveal = () => {
+      const r = row.getBoundingClientRect(), box = el.getBoundingClientRect();
+      const by = Math.min(r.bottom - box.bottom, r.top - box.top - 8);
+      if (by > 0) el.scrollBy({ top: by, behavior: scrollMotion() });
+    };
+    if (!md || calmMotion()) { reveal(); return; }
+    const after = md.getBoundingClientRect().height;
+    const grow = md.animate([{ height: `${before}px`, overflow: "hidden" }, { height: `${after}px`, overflow: "hidden" }], { duration: OPEN_MS, easing: "cubic-bezier(.22, .8, .2, 1)" });
+    grow.onfinish = reveal;
+  }, []);
   // the feed gets shorter (the route row appearing over the composer, the keyboard): still at its newest if it was, or still at the tapped message
   useEffect(() => {
     const el = list.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => { if (!keepTapped() && stick.current) el.scrollTop = el.scrollHeight; });
+    const ro = new ResizeObserver(() => { if (restoring.current) return; if ((recededRef.current || !keepTapped()) && stick.current) el.scrollTop = el.scrollHeight; });
     ro.observe(el);
     return () => ro.disconnect();
   }, [keepTapped]);
@@ -420,14 +539,14 @@ export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = nu
     const run = !sameDay || prev!.channel !== m.channel;
     const named = run || prev!.author !== m.author || m.ts - prev!.ts >= 300;
     const targeted = !!target && tapped === m.ref && target.room === m.channel;
-    rows.push(<FeedRow key={`${m.channel}:${m.ref}`} m={m} place={nameOf.get(m.channel) ?? "Room"} address={addressOf.get(m.channel) ?? "this room"} mine={!!me && m.author === me} me={me} run={run} named={named} targeted={targeted} onOpen={onOpen} onTap={tap} />);
+    rows.push(<FeedRow key={`${m.channel}:${m.ref}`} m={m} place={nameOf.get(m.channel) ?? "Room"} address={addressOf.get(m.channel) ?? "this room"} mine={!!me && m.author === me} me={me} run={run} named={named} targeted={targeted} open={opened.has(m.ref)} onOpen={onOpen} onTap={tap} onRead={onRead} />);
     prev = m;
   }
   return <div className="all-feed" ref={list} role="log" aria-label="All rooms, by time" aria-live="polite"
-    onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}
+    onScroll={(e) => { const el = e.currentTarget; if (performance.now() >= readHold.current) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}
     onPointerDown={(e) => {
       if (e.pointerType !== "touch" || e.clientX < EDGE_PX || e.clientX > innerWidth - EDGE_PX || !(e.target instanceof Element)) return;
-      if (e.target.closest("pre, table, .md-table-wrap, a, button, video, audio, input, textarea, summary")) return;
+      if (e.target.closest("pre, table, .md-table-wrap, a, button, video, audio, input, textarea, summary, .attachments")) return;
       const el = e.target.closest<HTMLElement>("article.all-msg:not(.all-echo)");
       if (el?.dataset.ref) swipe.current = { id: e.pointerId, x: e.clientX, y: e.clientY, el, ref: el.dataset.ref, on: false };
     }}
@@ -456,7 +575,7 @@ export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = nu
       {failed.length > 0 && <p className="all-quiet" role="status">Couldn't read {andList(failed.map((id) => nameOf.get(id) ?? id))} just now.</p>}
     </div>
   </div>;
-}
+});
 
 export type RoomWords = { text: string; lastMine: number | null };
 /** Each room's recent words (its last messages' text) and when you last wrote there, for the route. */
