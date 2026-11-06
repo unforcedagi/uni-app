@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { railGo } from './railGo';
 
 async function boot(page: Page, fixture = 'five', query = '') {
   await page.addInitScript(() => {
@@ -36,7 +37,7 @@ async function boot(page: Page, fixture = 'five', query = '') {
   });
   await page.goto(`/?vaultFixture=${fixture}${query}`);
   // r12: the rail's Vault opens the vaults at every width (the phone's rail has Vault and Search now that Rooms is gone).
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Vault', exact: true }).click();
+  await railGo(page, 'Vault');
   await expect(page.getByRole('region', { name: 'Vaults' })).toBeVisible();
 }
 
@@ -85,13 +86,13 @@ test('Other vault expansion survives reload and remains keyboard operable', asyn
   await page.keyboard.press('Enter');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await page.reload();
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Vault', exact: true }).click();
+  await railGo(page, 'Vault');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await toggle.focus();
   await page.keyboard.press('Space');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await page.reload();
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Vault', exact: true }).click();
+  await railGo(page, 'Vault');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
 });
 
@@ -130,7 +131,7 @@ test('Unavailable storage leaves vaults collapsed but operable', async ({ page }
 
 test('Search still reaches every vault', async ({ page }) => {
   await boot(page);
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Search', exact: true }).click();
+  await railGo(page, 'Search');
   const options = await page.locator('select option').allTextContents();
   for (const name of ['parachute', 'scope-test', 'unforced', 'uni', 'uni-1']) expect(options).toContain(name);
 });

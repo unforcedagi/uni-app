@@ -2,6 +2,7 @@
 // through the levels. (Today, the Brief page, the map and the room switcher were deleted with the Map, Octopus and Classic layouts.)
 import { test, expect, type Page } from '@playwright/test';
 import { areaCard, bootAreas, openAreaPage, openAreasHome, showTree } from './areasFixture';
+import { railGo } from './railGo';
 
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c), cmd);
 const isDesktop = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
@@ -85,7 +86,7 @@ test.describe('device cache', () => {
       };
       localStorage.setItem('uni.areas.cache.v1', 'legacy private data');
     });
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
+    await railGo(page, 'Settings');
     await page.getByRole('button', { name: 'Forget this device key', exact: true }).click();
     await page.getByRole('button', { name: /Tap again to forget/ }).click();
     await expect(page.locator('.pairing-card')).toBeVisible();

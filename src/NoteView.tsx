@@ -149,8 +149,8 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
       </button>
       {note && !tools && <button className="note-action quiet" onClick={() => setAsNote(true)}>Open as a note</button>}
       {note && tools && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
-      {note && tools && !compact && <button className="note-action" onClick={() => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "")}>New note</button>}
-      {note && tools && !editing && !compact && <button className="note-action" onClick={() => void copyText(note.content ?? "", "Copied markdown")}>Copy markdown</button>}
+      {note && tools && !compact && <button className="note-action" aria-label="New note" onClick={() => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "")}><span className="only-wide">New note</span><span className="only-narrow">New</span></button>}
+      {note && tools && !editing && !compact && <button className="note-action" aria-label="Copy markdown" onClick={() => void copyText(note.content ?? "", "Copied markdown")}><span className="only-wide">Copy markdown</span><span className="only-narrow">Copy</span></button>}
       {note && tools && !editing && isMarkdownNote(note.extension) && <NoteDownload note={note} title={heading} compact={compact} />}
       {actions}
     </header>

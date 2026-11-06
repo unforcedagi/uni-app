@@ -5,6 +5,7 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas, leaveFrontDoor, showTree, toOldHome } from './areasFixture';
+import { railGo } from './railGo';
 
 const SHOTS = 'scripts/browser/__shots__/simple';
 /** r27: `__arrive(…, -426600)` puts a message at 2026-10-14 08:30Z (the fixture's clock is pinned at Oct 9 10:00Z): after a record written at 08:00 that day */
@@ -1723,7 +1724,7 @@ test.describe('simple', () => {
     await expect(drawer.getByRole('navigation', { name: 'Rooms and areas' })).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(drawer).toHaveCount(0);
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings' }).click();
+    await railGo(page, 'Settings');
     await expect(page.locator('.settings')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeHidden();
     await expect(page.locator('.settings-dev > summary')).toHaveText('Developer');
@@ -2070,7 +2071,7 @@ test.describe('r15', () => {
     await page.setViewportSize({ width: 800, height: 600 });
     await boot(page);
     await openRoom(page, 'Techne');
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Search' }).click();
+    await railGo(page, 'Search');
     const panel = page.getByRole('dialog', { name: 'Search' }); // r19: the utility panels keep the one dialog contract
     const field = panel.getByRole('searchbox', { name: 'Search conversations and notes' });
     await expect(field).toBeVisible();
@@ -2979,7 +2980,7 @@ test.describe('r19', () => {
     await expect(row13(page)).toHaveAttribute('data-mode', 'lead');
     await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('uni.checks.v1:')))).toBe(true);
     await page.evaluate(() => localStorage.setItem('uni.support.v1:old|uni', '[]'));
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
+    await railGo(page, 'Settings');
     await page.getByRole('button', { name: 'Forget this device key', exact: true }).click();
     await page.getByRole('button', { name: /Tap again to forget/ }).click();
     await expect(page.locator('.pairing-card')).toBeVisible();

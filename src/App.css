@@ -394,7 +394,7 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .pairing-secondary { background: transparent; border: var(--g-hair) solid var(--g-line-strong); color: var(--g-ink); border-radius: 999px; min-height: 44px; padding: 0 18px; font-weight: 500; }
 .pairing-secondary:hover { border-color: var(--accent); color: var(--accent); }
 .pairing-actions { display: flex; flex-direction: column; gap: 10px; }
-.sas { font-family: var(--serif); font-size: 64px; font-weight: 500; letter-spacing: .1em; text-align: center; margin: 8px 0; font-variant-numeric: tabular-nums; color: var(--accent); }
+.sas { white-space: nowrap; font-family: var(--serif); font-size: clamp(36px, 11vw, 64px); font-weight: 500; letter-spacing: .1em; text-align: center; margin: 8px 0; font-variant-numeric: tabular-nums; color: var(--accent); }
 .pairing-note { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0; }
 
 /* ── Markdown bodies ───────────────────────────────────────── */

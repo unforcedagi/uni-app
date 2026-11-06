@@ -6,7 +6,7 @@ import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { forgetComposer } from "./all/AllView";
-import { SettingsIcon, UniIcon, JournalIcon, StarIcon, MailIcon, CalendarIcon, MessagesIcon, AllIcon } from "./Icons";
+import { MoreIcon, SearchIcon, ToPostIcon, VaultIcon, SettingsIcon, UniIcon, JournalIcon, StarIcon, MailIcon, CalendarIcon, MessagesIcon, AllIcon } from "./Icons";
 import Mail from "./Mail";
 import Calendar from "./calendar/Calendar";
 import { calShown, forgetCalendar, onCalShown, probeCalendar } from "./calendar/calDoor";
@@ -310,7 +310,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const dirtyNotes = useRef(new Map<string, Set<string>>());
   const [, setDirtyTabs] = useState(new Set<string>());
   const editOnOpen = useRef(new Set<string>());
-  const [confirmation, setConfirmation] = useState<{ text: string; run: () => void; notice?: string } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ text: string; run: () => void; notice?: string; /** the words on the button that goes ahead */ go?: string } | null>(null);
   const [creating, setCreating] = useState<{ vault: string; path: string } | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
@@ -359,6 +359,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [composerFocused, setComposerFocused] = useState(false);
   /** The rail is hidden on short windows up to 950px (one rule, r14): the room then shows its Places drawer. */
   const railHidden = useRailHidden();
+  const [railMore, setRailMore] = useState(false);
+  useEffect(() => { if (!railMore) return; const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRailMore(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [railMore]);
   const forYouBack = useRef("Uni");
   const forYouReturn = useRef<string | null>(null);
   const [journalFocus, setJournalFocus] = useState(false);
@@ -625,7 +627,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const top = cur?.[cur.length - 1];
     if (top && top.vault === target.vault && resolveNote(top, aliases.current).ref === target.ref) return;
     if (!confirmed && cur && paneDraft(cur)) {
-      setConfirmation({ text: "Close this note with unsaved changes? Its draft will be kept on this device.", run: () => openAside(room, target, true) }); return;
+      setConfirmation({ text: "This note has changes you haven't saved. Your draft stays on this device.", go: "Close note", run: () => openAside(room, target, true) }); return;
     }
     asideAhead.current.delete(room);
     putAside(room, [target]);
@@ -635,7 +637,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const cur = asidesRef.current[room];
     if (!cur) return;
     if (!confirmed && paneDraft(all ? cur : cur.slice(-1))) {
-      setConfirmation({ text: "Close this note with unsaved changes? Its draft will be kept on this device.", run: () => backAside(room, all, true) }); return;
+      setConfirmation({ text: "This note has changes you haven't saved. Your draft stays on this device.", go: "Close note", run: () => backAside(room, all, true) }); return;
     }
     if (all) asideAhead.current.delete(room);
     else asideAhead.current.set(room, [...(asideAhead.current.get(room) ?? []), cur].slice(-20));
@@ -770,7 +772,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setError("Stop the recording before replacing its tab."); return;
     }
     if (!confirmed && removed.some(isTabDirty)) {
-      setConfirmation({ text: "Leave this note with unsaved changes? Its draft will be kept on this device.", run: () => openTarget(target, mode, true, fromHistory) }); return;
+      setConfirmation({ text: "This note has changes you haven't saved. Your draft stays on this device.", go: "Leave note", run: () => openTarget(target, mode, true, fromHistory) }); return;
     }
     removed.forEach((t) => dirtyNotes.current.delete(t.id));
     const tab = activeTab(next);
@@ -784,7 +786,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   function closeTabById(id: string, confirmed = false) {
     const closing = tabsRef.current.tabs.find((t) => t.id === id);
     if (!confirmed && closing && isTabDirty(closing)) {
-      setConfirmation({ text: "Close this tab with unsaved changes? Its draft will be kept on this device.", run: () => closeTabById(id, true) }); return;
+      setConfirmation({ text: "This note has changes you haven't saved. Your draft stays on this device.", go: "Close note", run: () => closeTabById(id, true) }); return;
     }
     if (!recordingTabCanClose(id, recordingOrigin.current?.tabId ?? null)) {
       setError("Stop the voice recording before closing its tab."); return;
@@ -2563,29 +2565,38 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {showUniGlue(lifeVault) && <button aria-label="All" aria-current={!panel && !searchOpen && !topNote && allOpen ? "page" : undefined} onClick={() => openTarget({ kind: "all", title: "All" })}><i><AllIcon /></i><span>All</span></button>}
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
       <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })} aria-describedby={[held > 0 && "rail-mail-held", unreadMail > 0 && "rail-mail-unread"].filter(Boolean).join(" ") || undefined}><i><MailIcon />{held > 0 && <span className="rail-count" aria-hidden="true">{held}</span>}{unreadMail > 0 && <span className="rail-dot" aria-hidden="true" />}</i><span>Mail</span>{held > 0 && <span id="rail-mail-held" hidden>{held} waiting for you</span>}{unreadMail > 0 && <span id="rail-mail-unread" hidden>{unreadMail} unread in your Inbox</span>}</button>
+      {/* T-335 as Aaron: on a phone the bar is four places and More; the rest open from a sheet above it. On a wider screen More is hidden and the rest sit on the rail (display: contents) */}
+      <button className="rail-more" aria-label="More" aria-expanded={railMore} aria-controls="rail-extras" aria-current={!railMore && (panel || searchOpen || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "vault" || topNote) ? "page" : undefined} onClick={() => setRailMore((o) => !o)}><i><MoreIcon />{(forYou.fresh && showUniGlue(lifeVault)) && <span className="rail-dot" aria-hidden="true" />}</i><span>More</span></button>
+      <div id="rail-extras" className={`rail-extras${railMore ? " open" : ""}`} onClickCapture={() => setRailMore(false)}>
       {calOn && <button aria-label="Calendar" aria-current={!panel && !searchOpen && (active?.kind === "calendar" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "calendar", title: "Calendar" })}><i><CalendarIcon /></i><span>Calendar</span></button>}
       {msgsOn && <button aria-label="Messages" aria-current={!panel && !searchOpen && (active?.kind === "messages" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "messages", title: "Messages" })}><i><MessagesIcon /></i><span>Messages</span></button>}
       {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>}
-      {showUniGlue(lifeVault) && <button aria-label="To post" aria-current={!panel && !searchOpen && (active?.kind === "posts" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "posts", title: "To post" })}><i aria-hidden="true">↗</i><span>To post</span></button>}
-      <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
-      <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} aria-keyshortcuts="Control+K Meta+K" onClick={openFind}><i>⌕</i><span>Search</span></button>
+      {showUniGlue(lifeVault) && <button aria-label="To post" aria-current={!panel && !searchOpen && (active?.kind === "posts" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "posts", title: "To post" })}><i aria-hidden="true"><ToPostIcon /></i><span>To post</span></button>}
+      <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false);
+        // one vault: nothing to choose, straight in
+        if (primaryVault && otherVaults.length === 0) { setPanel(null); openTarget({ kind: "vault", vault: primaryVault, title: primaryVault }, "new"); return; }
+        setPanel(panel === "vault" ? null : "vault"); }}><i><VaultIcon /></i><span>Vault</span></button>
+      <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} aria-keyshortcuts="Control+K Meta+K" onClick={openFind}><i><SearchIcon /></i><span>Search</span></button>
       <button className="rail-settings" aria-label="Settings" aria-expanded={panel === "settings"} onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setForgetArmed(false); }}><i><SettingsIcon /></i><span>Settings</span></button>
+      </div>
     </nav>
+    {railMore && <button className="rail-more-scrim" aria-label="Close More" tabIndex={-1} onClick={() => setRailMore(false)} />}
     {(panel || searchOpen) && <button className="panel-scrim" aria-label="Close navigation panel" onClick={() => { setPanel(null); setSearchOpen(false); }} />}
     {/* r14: one utility-panel frame for Settings, Search and Vault: the destination's title and Close, nothing else */}
     <aside ref={panelBox} className="rooms" aria-label={panelTitle} {...(panel || searchOpen ? { role: "dialog", "aria-modal": true, tabIndex: -1 } : {})}>
       {(panel || searchOpen) && <header className="panel-head"><h1>{panelTitle}</h1><button className="panel-close icon-button" aria-label="Close panel" title="Close" onClick={() => { setPanel(null); setSearchOpen(false); }}>×</button></header>}
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
       {panel === "settings" && <div className="settings">
-        <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
+        <p className="connection" role="status" data-fine={status === "Up to date" ? "true" : undefined}>{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
       {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
-        <ClaudeUsage /><UpdateSettings /><MotionSetting /><LifeOsVaultSetting vaults={vaults} /><SealedApprovals /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}
+        <UpdateSettings /><ClaudeUsage /><MotionSetting /><LifeOsVaultSetting vaults={vaults} /><SealedApprovals />
+        <section className="settings-device" aria-label="This device"><h2>This device</h2><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary settings-forget" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget. You'll need to pair again." : "Forget this device's key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep it</button>}</section>
         {/* r13: the machinery (the app sandbox's self-test, where the app connects) is for whoever builds Uni, not part of ordinary Settings */}
         <details className="settings-dev"><summary>Developer</summary>{hub && <p className="settings-dev-line">Notes hub: <code>{hub}</code></p>}{syncDetail && <p className="settings-dev-line">Last sync: {syncDetail}</p>}<AreaSelfTest /></details></div>}
       {searchOpen && <Search initialQuery={searchQuery} onQuery={(q) => { lastSearch.current = q; }} recent={navControls.recent} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
-      <section className="vault-sidebar" aria-label="Vaults"><div className="vault-heading"><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Refresh the list</button></div>
+      <section className="vault-sidebar" aria-label="Vaults"><div className="vault-heading"><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Look for new vaults</button></div>
         {vaultError && <p className="error" role="alert">{vaultError}</p>}
         {primaryVault && vaultRow(primaryVault)}
         {otherVaults.length > 0 && <>
@@ -2658,8 +2669,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
         backLabel={topNote.ref === FOR_YOU_ID ? forYouBack.current : notes.length > 1 ? noteTitles[noteKey(notes[notes.length - 2])] ?? notes[notes.length - 2].ref.split("/").pop() ?? "note" : backTo}
         onTitle={(t) => rememberTitle(noteKey(topNote), t)} />
     </section>}
-    {creating && <SurfaceModal onCancel={() => { if (!createBusy) setCreating(null); }}><form role="dialog" aria-modal="true" aria-label="New note" onSubmit={(e) => { e.preventDefault(); void createNote(); }}><h2>New note in {creating.vault}</h2><label>Path<input autoFocus value={creating.path} disabled={createBusy} onChange={(e) => setCreating({ ...creating, path: e.target.value })} /></label>{createError && <p className="error" role="alert">{createError}</p>}<button disabled={createBusy} type="submit">{createBusy ? "Creating…" : "Create note"}</button><button disabled={createBusy} type="button" onClick={() => setCreating(null)}>Cancel</button></form></SurfaceModal>}
-    {confirmation && <SurfaceModal onCancel={() => setConfirmation(null)}><div role="alertdialog" aria-modal="true" aria-label="Confirm tab close">{confirmation.notice && <p role="status">{confirmation.notice}</p>}<p>{confirmation.text}</p><button autoFocus onClick={() => { const run = confirmation.run; setConfirmation(null); run(); }}>Continue</button><button onClick={() => setConfirmation(null)}>Cancel</button></div></SurfaceModal>}
+    {creating && <SurfaceModal onCancel={() => { if (!createBusy) setCreating(null); }}><form role="dialog" aria-modal="true" aria-label="New note" onSubmit={(e) => { e.preventDefault(); void createNote(); }}><h2>New note in {creating.vault}</h2><label>Name, with any folders before it<input autoFocus placeholder="Projects/Glaze Tests/Firing notes" value={creating.path} disabled={createBusy} onChange={(e) => setCreating({ ...creating, path: e.target.value })} /></label>{createError && <p className="error" role="alert">{createError}</p>}<button disabled={createBusy} type="submit">{createBusy ? "Creating…" : "Create note"}</button><button disabled={createBusy} type="button" onClick={() => setCreating(null)}>Cancel</button></form></SurfaceModal>}
+    {confirmation && <SurfaceModal onCancel={() => setConfirmation(null)}><div role="alertdialog" aria-modal="true" aria-label="Confirm tab close">{confirmation.notice && <p role="status">{confirmation.notice}</p>}<p>{confirmation.text}</p><button autoFocus onClick={() => setConfirmation(null)}>Keep editing</button><button onClick={() => { const run = confirmation.run; setConfirmation(null); run(); }}>{confirmation.go ?? "Leave it"}</button></div></SurfaceModal>}
     {toast && <div className="toast" role="status">{toast}</div>}
   </main></NoteOpener.Provider></NavContext.Provider></ApprovalsContext.Provider>;
 }

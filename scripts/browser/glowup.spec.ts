@@ -4,6 +4,7 @@
 // never into the repo. Run: GLOWUP_TEST_PORT=1461 npx playwright test --config playwright.glowup.config.ts
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
+import { railGo } from './railGo';
 
 const SHOTS = process.env.GLOWUP_SHOTS ?? 'test-results/glowup-shots';
 const shot = (page: Page, name: string) => page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` });
@@ -58,7 +59,7 @@ test('look: home, a room and find wear the glow-up, at every size', async ({ pag
   await shot(page, '02-room');
   // find: Ctrl+K on a wide window, the rail's Search on a phone; recent places before typing; the query is kept when it opens again
   if (wide) await page.keyboard.press('Control+k');
-  else await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Search' }).click();
+  else await railGo(page, 'Search');
   const search = page.getByRole('searchbox', { name: 'Search conversations and notes' });
   await expect(search).toBeFocused();
   await expect(page.locator('.search-recent button').first()).toBeVisible();
@@ -72,7 +73,7 @@ test('look: home, a room and find wear the glow-up, at every size', async ({ pag
   await page.keyboard.press('Escape');
   await expect(search).toBeHidden();
   if (wide) await page.keyboard.press('Control+k');
-  else await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Search' }).click();
+  else await railGo(page, 'Search');
   await expect(search).toHaveValue('glaze');
 });
 
@@ -113,7 +114,7 @@ test('All: the route is a suggestion with its reason; chips edit it; Send posts 
   // naming places picks them, in the order named
   await field(page).fill('Tell Choir and North Field the hall is booked for Tuesday');
   await expect(chips(page)).toHaveText(['Choir', 'North Field']);
-  await expect(page.locator('.all-why')).toHaveText('suggested: names Choir, names North Field');
+  await expect(page.locator('.all-why')).toHaveCount(0); // the chips are the rooms you named: nothing to explain
   await expect(page.getByRole('button', { name: 'Send to Choir and North Field', exact: true })).toHaveText('Send to 2 rooms');
   // the person edits the route: take Choir off, add Long Table
   await page.getByRole('button', { name: "Don't send to Choir" }).click();

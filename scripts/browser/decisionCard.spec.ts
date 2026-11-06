@@ -4,6 +4,7 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas, leaveFrontDoor } from './areasFixture';
+import { railGo } from './railGo';
 
 const BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb';
 const D1 = '01M5D0000000000000000000A1';
@@ -221,7 +222,7 @@ test.describe('decision cards in the chat', () => {
     await page.evaluate(() => { (window as any).__membersDelay = 2500; });
     await card.getByRole('button', { name: 'A', exact: true }).click();
     await expect(card.getByText('Telling the room…')).toBeVisible();
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings' }).click();
+    await railGo(page, 'Settings');
     await page.getByRole('button', { name: 'Forget this device key' }).click();
     await page.getByRole('button', { name: /^Tap again to forget/ }).click();
     await expect.poll(() => page.evaluate(() => (window as any).__calls.some((c: any) => c.cmd === 'identity_forget'))).toBe(true);

@@ -2,6 +2,7 @@
 // (made-up vault, nothing leaves the page). Each test fails with its fix taken out.
 import { expect, test, type Page } from '@playwright/test';
 import { bootProjects } from './projectsFixture.ts';
+import { railGo } from './railGo';
 
 const A = 'a'.repeat(64), B = 'b'.repeat(64);
 const MIN = 60_000;
@@ -42,7 +43,7 @@ test('P1: Forget drops the kept work, and a read still out when it happened can\
   await page.evaluate(() => { (window as any).__holdRuns = true; });
   await page.clock.fastForward(31_000);
   await expect.poll(() => page.evaluate(() => (window as any).__held.length)).toBeGreaterThan(0);
-  await rail(page).getByRole('button', { name: 'Settings', exact: true }).click();
+  await railGo(page, 'Settings');
   await page.getByRole('button', { name: 'Forget this device key', exact: true }).click();
   await page.getByRole('button', { name: /Tap again to forget/ }).click();
   await expect.poll(() => workKeys(page)).toEqual([]);

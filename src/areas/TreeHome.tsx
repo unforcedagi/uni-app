@@ -1,5 +1,6 @@
 // T-111, r12, r13: the room tree (beside the room on wide screens, the home on a phone, a drawer from the room's header below 900px) and the crumbs.
 // Styling is in tree.css (the Field Book tokens).
+import { sameWords } from "./sameWords";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { agoLabel, roomSlug, type TreeRow } from "./treeRooms";
 import { VIEWS, type Card, type Chip, type RoomStamp, type SidebarView } from "./viewsCore";
@@ -77,7 +78,7 @@ export function RoomTree({ chat = true, rows, needs, onOpen, selected, others = 
         : <span className="th-fold-gap" aria-hidden="true" />)}
       <button type="button" className="th-go" data-path={r.path} data-via={r.via ?? undefined} aria-current={selected === r.path ? "page" : undefined} onClick={() => onOpen(r.path, r.via)} title={heldBy || undefined}
         aria-label={`${r.name}${chat ? `, ${sub ? `room ${sub}` : "no channel of its own"}` : ""}${dot ? `, ${n ? `${n} need${n === 1 ? "s" : ""} you` : "something inside needs you"}` : ""}${askWords(shownAsks, asksInside)}${newWords(shownNew, newInside)}`}>
-        <span className="th-name"><b>{r.name}</b>{sub && <small className="th-sub">{sub}</small>}</span>
+        <span className="th-name"><b>{r.name}</b>{sub && !sameWords(r.name, sub) && <small className="th-sub">{sub}</small>}</span>
         {shownAsks > 0 && <AskBadge n={shownAsks} inside={asksInside} />}
         {shownNew && <NewCount u={shownNew} inside={newInside} />}
         {dot && <i className={`th-dot ${n > 0 ? "" : "inside"}`} title={dotTitle} aria-hidden="true" />}

@@ -1,5 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import { railGo } from './railGo';
 
 async function press(page: Page, target: Locator) {
   if (test.info().project.name === 'mobile') await target.tap();
@@ -694,7 +695,7 @@ for (const boundary of ['account', 'relay']) test(`Outbox ignores another ${boun
 
 test('Forget device key clears the whole outbox', async ({ page }) => {
   await seedForeign(page);
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
+  await railGo(page, 'Settings');
   await page.getByRole('button', { name: 'Forget this device key', exact: true }).click();
   await page.getByRole('button', { name: /Tap again to forget/ }).click();
   await expect(page.locator('.pairing-card')).toBeVisible();

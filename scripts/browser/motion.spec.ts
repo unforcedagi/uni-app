@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { railGo } from './railGo';
 
 // T-335 motion pass. What moves, where: the Mac and the Pixel keep the app's short motion; Settings → Calm screen (the Daylight, where
 // every frame is a slow redraw) or the system's reduced motion stills all of it, script-driven scrolls included. Calm is the device's
@@ -49,7 +50,7 @@ async function boot(page: Page, opts: { history?: number; calm?: boolean } = {})
 }
 
 const openSettings = async (page: Page) => {
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
+  await railGo(page, 'Settings');
   await expect(page.getByRole('checkbox', { name: /Calm screen/ })).toBeVisible();
 };
 const calmOnRoot = (page: Page) => page.evaluate(() => document.documentElement.dataset.motion ?? null);

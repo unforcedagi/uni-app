@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import { areaCard, bootAreas, openAreaPage, openAreasHome, FOCUS_STEAL, navApp, SUGGEST } from './areasFixture';
 import { startListener } from './areasListener';
+import { railGo } from './railGo';
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 const openAreas = openAreasHome;
@@ -144,7 +145,7 @@ test.describe('rail badge', () => {
 });
 
 // r13: the self-test sits under Settings → Developer
-const openSettings = async (page: Page) => { await rail(page).getByRole('button', { name: 'Settings' }).click(); await page.locator('.settings-dev > summary').click(); await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeVisible(); };
+const openSettings = async (page: Page) => { await railGo(page, 'Settings'); await page.locator('.settings-dev > summary').click(); await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeVisible(); };
 const stored = (page: Page) => page.evaluate(() => localStorage.getItem('uni.areaApps.selftest.v1'));
 
 test.describe('sandbox self-test', () => {

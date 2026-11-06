@@ -2,6 +2,8 @@
 // the room last talked, and a small mark when sessions are working there. No ids. Above the rooms, one quiet line on what needs you
 // (round 2: #Uni is archived, so this is where it lives); under them, one quiet line on the Claude accounts, which opens the full card.
 // T-304: the working mark counts the room's Uni at work on your message too, not only Claude Code sessions.
+import { roomTint } from "../glow/roomTint";
+import { sameWords } from "../areas/sameWords";
 import { useRef, useCallback, useMemo, useState, type ReactNode } from "react";
 import { AllComposer, AllFeed, roomWords, useEchoes, useReplyTarget, useRoomsFeed, type AllRoom } from "../all/AllView";
 import { liveInArea, span } from "./model";
@@ -53,14 +55,32 @@ const NONE: readonly AllRoom[] = [];
 const WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
 const count = (n: number) => WORDS[n] ?? String(n);
 /** T-335 glow-up: the day in one or two short sentences: what needs you, then what is moving. */
-export function statement(needs: number, moving: number): string[] {
+/** T-335 as Aaron: nothing happening is good news, and it needn't read the same every day. One line a day, the same all day. */
+export const QUIET_LINES = ["All quiet.", "The rooms are resting.", "The mycelium has it.", "Go look at a tree.", "Nothing's on fire.", "Breathe out.", "The garden keeps itself today."];
+export const quietLine = (day: number) => QUIET_LINES[((day % QUIET_LINES.length) + QUIET_LINES.length) % QUIET_LINES.length];
+export function statement(needs: number, moving: number, day = 0): string[] {
   const first = needs ? `${count(needs)} thing${needs === 1 ? " needs" : "s need"} you.` : "Nothing needs you.";
-  const second = moving ? `${count(moving)} place${moving === 1 ? " is" : "s are"} moving.` : needs ? "The rest is quiet." : "All quiet.";
+  const second = moving ? `${count(moving)} place${moving === 1 ? " is" : "s are"} moving.` : needs ? "The rest is quiet." : quietLine(day);
   return [first, second];
 }
 
 /** Uni's mark: a one-breath brush circle. */
 const Enso = () => <svg className="enso" viewBox="0 0 40 40" width="22" height="22" aria-hidden="true"><path pathLength="100" d="M29.5 8.8C24.6 5.2 14.8 5 9.3 11.6 4.6 17.3 5.6 27.4 12.6 32.2c7.2 4.9 17.4 2.9 21.2-4.3 3.3-6.3 1.6-13.4-3.1-17.4" /></svg>;
+
+/** T-335 as Aaron: the places on one thread: each a knot in its room's colour, a place at work breathing, one that needs you ochre. Says nothing the list doesn't; it's the shape of the day at a glance. */
+function Weave({ doors, liveOf }: { doors: readonly Door[]; liveOf: (d: Door) => number }) {
+  const n = doors.length;
+  if (n < 2) return null;
+  const W = 400, H = 24, mid = H / 2;
+  const at = (i: number) => (i + 0.5) * (W / n);
+  const y = (i: number) => mid + (i % 2 ? 4.5 : -4.5);
+  let line = `M0 ${mid}`;
+  doors.forEach((_, i) => { const x = at(i), c = W / n / 2; line += ` C${(x - c).toFixed(1)} ${(i % 2 ? y(i - 1) : y(i + 1)).toFixed(1)} ${(x - c / 2).toFixed(1)} ${y(i).toFixed(1)} ${x.toFixed(1)} ${y(i)}`; });
+  line += ` S${W - 8} ${mid} ${W} ${mid}`;
+  return <span className="fd-weave" aria-hidden="true"><svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"><path d={line} vectorEffect="non-scaling-stroke" /></svg>
+    {doors.map((d, i) => <i key={d.path} className={`fd-knot${liveOf(d) > 0 ? " live" : ""}${(d.needs ?? 0) > 0 ? " needs" : ""}${d.unread ? " fresh" : ""}`} style={{ left: `${(at(i) / W) * 100}%`, top: y(i), ...(d.room ? { ["--room-tint" as string]: roomTint(d.room) } : {}) }} />)}
+  </span>;
+}
 
 /** When the room last talked, in words ("talked 3 h ago"). */
 const talked = (now: number, ts: number) => { const s = span(now - ts * 1000); return s === "just now" ? "talking now" : `talked ${s} ago`; };
@@ -129,15 +149,15 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
     {composer}
   </div>;
   return <div className="fd" data-place="front-door" data-view="places">
-    <header className="fd-head">
+    <header className="fd-head" data-moving={moving > 0 ? "true" : undefined}>
       <div className="fd-mark"><h1 className="fd-title"><Enso />Uni</h1><span className="fd-date">{today()}</span></div>
-      <p className="fd-statement">{statement(needN, moving).map((line) => <span key={line}>{line}</span>)}</p>
+      <p className="fd-statement">{statement(needN, moving, Math.floor((now - new Date(now).getTimezoneOffset() * 60_000) / 86_400_000)).map((line) => <span key={line}>{line}</span>)}</p>
     </header>
     {composer}
     {needs && <NeedsLine needs={needs} onOpen={onOpen} />}
     {toPost && <div className="fd-topost">{toPost}</div>}
     {onOpenRoom && <NewLine rooms={newRooms} onOpen={onOpenRoom} />}
-    <h2 className="fd-places-h">Places</h2>
+    <h2 className="fd-places-h"><span>Places</span><Weave doors={doors} liveOf={liveOf} /></h2>
     <nav aria-label="Rooms"><ul className="fd-doors">{doors.map((d) => {
       const a = areaAt.get(d.path);
       const sessions = a ? liveInArea(work, a.id).length : 0;
@@ -148,7 +168,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
       const u = d.unread ?? null; const k = d.needs ?? 0;
       const marks = [u && unreadWords(u), k > 0 && `${k} need${k === 1 ? "s" : ""} you`].filter(Boolean).join(", ");
       return <li key={d.path}>
-        <button type="button" className="fd-door" data-path={d.path} data-sign={k > 0 ? "needs" : live > 0 ? "running" : u ? "new" : "quiet"} onClick={() => onOpen(d.path)}
+        <button type="button" className="fd-door" style={d.room ? { ["--room-tint" as string]: roomTint(d.room) } : undefined} data-path={d.path} data-sign={k > 0 ? "needs" : live > 0 ? "running" : u ? "new" : "quiet"} onClick={() => onOpen(d.path)}
           aria-label={`${d.name}${marks ? `, ${marks}` : ""}${live ? `, ${workingWords(sessions, turn)}${when}` : ""}${d.stands ? `. ${d.stands}` : ""}`}>
           <span className="fd-sign" aria-hidden="true"><i /></span>
           <span className="fd-name">{d.name}</span>
@@ -158,7 +178,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
             {k > 0 && <span className="fd-need-n" title={`${k} need${k === 1 ? "s" : ""} you`}><i />{k} for you</span>}
           </span>}
           {d.stands && <span className="fd-stands">{d.stands}</span>}
-          <span className="fd-foot">{d.slug && <span className="fd-slug">#{d.slug}</span>}{d.lastTs && <span className="fd-when">{talked(now, d.lastTs)}</span>}</span>
+          <span className="fd-foot">{d.slug && !sameWords(d.name, d.slug) && <span className="fd-slug">#{d.slug}</span>}{d.lastTs && <span className="fd-when">{talked(now, d.lastTs)}</span>}</span>
         </button>
       </li>;
     })}</ul></nav>

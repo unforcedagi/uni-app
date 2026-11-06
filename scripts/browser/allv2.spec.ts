@@ -5,6 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
+import { railGo } from './railGo';
 
 const UNI = 'c'.repeat(64);
 const project = () => test.info().project.name;
@@ -486,7 +487,7 @@ test.describe('review', () => {
     await row(page, 'k3').locator('.message-content').click();
     await field(page).fill('A private draft');
     await page.evaluate(() => (document.activeElement as HTMLElement).blur());
-    await rail(page).getByRole('button', { name: 'Settings' }).click();
+    await railGo(page, 'Settings');
     await page.getByRole('button', { name: 'Forget this device key' }).click();
     await page.getByRole('button', { name: /Tap again to forget/ }).click();
     await expect.poll(() => page.evaluate(() => (window as any).__allHeld.text)).toBe('');
@@ -583,7 +584,7 @@ test.describe('review 3', () => {
     await field(page).fill('A private reply');
     await send(page).click();
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await rail(page).getByRole('button', { name: 'Settings' }).click();
+    await railGo(page, 'Settings');
     await page.getByRole('button', { name: 'Forget this device key' }).click();
     await page.getByRole('button', { name: /Tap again to forget/ }).click();
     await page.waitForTimeout(1800);

@@ -1,3 +1,4 @@
+import { roomTint } from "../glow/roomTint";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
@@ -358,7 +359,7 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
     return <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms th-simple ${wide && (!o.companion || o.main || stripCompanion) ? "solo" : wide && !companionOpen ? "folded" : ""}`} data-layout="rooms" data-view={view}
       style={sidebar && treeFold ? { "--th-nav-w": treeFold.folded ? "34px" : `${storedSidebarWidth()}px` } as React.CSSProperties : undefined}>
       {sidebar && <RoomSidebar {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={nav} fold={treeFold} />}
-      <section className="sr" aria-label={o.main ? `Work: ${o.title}` : `Conversation: ${o.title}`} data-node={o.node}>
+      <section className="sr" style={o.chatRoom?.id ? { ["--room-tint" as string]: roomTint(o.chatRoom.id) } : undefined} aria-label={o.main ? `Work: ${o.title}` : `Conversation: ${o.title}`} data-node={o.node}>
         <header className="sr-head">
           {placesDrawer && <button ref={drawerOpener} type="button" className="sr-drawer" aria-label="Places" title={newElsewhere ? "Rooms and places · new messages in other rooms" : "Rooms and places"} aria-describedby={newElsewhere ? "sr-drawer-new" : undefined} aria-expanded={drawer} aria-controls="th-drawer" onClick={() => setDrawer(true)}><span aria-hidden="true" />
             {newElsewhere && <><i className="sr-drawer-new" aria-hidden="true" /><span id="sr-drawer-new" hidden>New messages in other rooms</span></>}</button>}

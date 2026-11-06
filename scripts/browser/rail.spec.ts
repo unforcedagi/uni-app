@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect } from '@playwright/test';
 import { bootRail } from './railFixture';
+import { railGo } from './railGo';
 
 test.beforeEach(async ({ page }) => bootRail(page));
 
@@ -172,7 +173,7 @@ test('For you opened after an old tab set (a note was active) returns to the rea
   await page.reload();
   // 0.1.46: only places are restored, so the old set opens on its last place, not on the note
   await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'For you', exact: true }).click();
+  await railGo(page, 'For you');
   await expect(page.locator('.note-back-label')).toHaveText('Uni');
   await page.locator('.note-back').click();
   await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();

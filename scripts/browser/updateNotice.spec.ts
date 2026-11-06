@@ -5,6 +5,7 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
+import { railGo } from './railGo';
 
 const SHOTS = process.env.ELSEWHERE_SHOTS ?? '';
 const shot = async (page: Page, name: string) => { if (!SHOTS) return; await mkdir(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` }); };
@@ -66,6 +67,6 @@ test('the update line is at the top, in the flow, and never over the composer or
   await notice.getByRole('button', { name: 'Later' }).click();
   await expect(notice).toHaveCount(0);
   // Settings still has it
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings' }).click();
+  await railGo(page, 'Settings');
   await expect(page.locator('.update-settings')).toContainText(onAndroid ? 'Update 0.1.99 available — Download APK' : 'Update 0.1.99 ready — Restart');
 });

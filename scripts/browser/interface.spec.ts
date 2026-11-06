@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import { areaCard, bootAreas, openAreaPage, openAreasHome } from './areasFixture';
 import { startListener } from './areasListener';
+import { railGo } from './railGo';
 // On a narrow phone Stop / Revoke live in the bar's menu.
 const appControl = async (page: Page, name: string) => {
   const toggle = page.getByRole('button', { name: 'App controls' });
@@ -14,7 +15,7 @@ const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigati
 const openAreas = openAreasHome;
 const openArea = openAreaPage;
 // r13: the self-test sits under Settings → Developer
-const openSettings = async (page: Page) => { await rail(page).getByRole('button', { name: 'Settings' }).click(); await page.locator('.settings-dev > summary').click(); await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeVisible(); };
+const openSettings = async (page: Page) => { await railGo(page, 'Settings'); await page.locator('.settings-dev > summary').click(); await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeVisible(); };
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c), cmd);
 const grants = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('uni.interface.grants.v2') ?? '{}'));
 

@@ -6,6 +6,7 @@
 // Run: npx playwright test --config playwright.roomrestore.config.ts
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas, leaveFrontDoor } from './areasFixture';
+import { railGo } from './railGo';
 
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900 && (page.viewportSize()?.height ?? 0) >= 400;
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
@@ -99,7 +100,7 @@ test.describe('T-294 back to the room you were in', () => {
   test('a room, Messages, then the rail\'s Uni: the same room, at the same spot, with the draft', async ({ page }) => {
     await boot(page);
     const was = await inRoomWithDraft(page);
-    await rail(page).getByRole('button', { name: 'Messages' }).click();
+    await railGo(page, 'Messages');
     await expect(page.getByRole('navigation', { name: 'Conversations' })).toBeVisible();
     await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
     await expectSamePlace(page, was);
@@ -108,7 +109,7 @@ test.describe('T-294 back to the room you were in', () => {
   test('Messages\' own Back says where it goes, and goes there: the room, at its spot', async ({ page }) => {
     await boot(page);
     const was = await inRoomWithDraft(page);
-    await rail(page).getByRole('button', { name: 'Messages' }).click();
+    await railGo(page, 'Messages');
     await messagesView(page).getByRole('button', { name: '← ATLAS' }).click();
     await expectSamePlace(page, was);
   });
@@ -142,7 +143,7 @@ test.describe('T-294 back to the room you were in', () => {
   test('closed by the system in Messages (a reload): Messages reopens, and Uni goes back to the room, at the spot, with the draft', async ({ page }) => {
     await boot(page);
     const was = await inRoomWithDraft(page);
-    await rail(page).getByRole('button', { name: 'Messages' }).click();
+    await railGo(page, 'Messages');
     await expect(page.getByRole('navigation', { name: 'Conversations' })).toBeVisible();
     await flip(page, 'hidden');
     await page.reload();
@@ -155,7 +156,7 @@ test.describe('T-294 back to the room you were in', () => {
   test('Messages keeps its own place: the conversation open, its draft and how far back it was read, across a trip to Uni', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
-    await rail(page).getByRole('button', { name: 'Messages' }).click();
+    await railGo(page, 'Messages');
     await page.getByRole('navigation', { name: 'Conversations' }).getByRole('button', { name: /Kit Sample/ }).click();
     const box = page.getByRole('textbox', { name: 'Message Kit Sample' });
     await box.fill('Running ten minutes late');
@@ -173,7 +174,7 @@ test.describe('T-294 back to the room you were in', () => {
     const left = await reading();
     await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(page.locator('.sr')).toHaveAttribute('data-node', 'ATLAS');
-    await rail(page).getByRole('button', { name: 'Messages' }).click();
+    await railGo(page, 'Messages');
     await expect(page.getByRole('region', { name: 'Conversation: Kit Sample' })).toBeVisible();
     await expect(box).toHaveValue('Running ten minutes late');
     // back at the message it was read to, though two newer lines came in meanwhile

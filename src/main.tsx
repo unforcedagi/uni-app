@@ -9,6 +9,8 @@ import { startTide } from "./glow/tide";
 import "./glow/glow.css";
 // T-335 chat feel: the room's turn with Uni, on the glow-up tokens
 import "./chatFeel.css";
+// T-335 as Aaron: the finishing pass over every screen, last so it reads as the final word
+import "./glow/finish.css";
 
 /** A render error in remote content must not blank the whole app. */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {

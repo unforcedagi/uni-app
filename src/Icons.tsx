@@ -33,3 +33,19 @@ export function EyeIcon() {
 export function EyeOffIcon() {
   return <svg className="mono-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /><path d="m4 4 16 16" /></svg>;
 }
+/** T-335 as Aaron: the rail's glyphs drawn by one hand: same box, same weight. */
+export function MoreIcon() {
+  return <svg className="mono-icon" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="7" cy="7" r="1.9" /><circle cx="17" cy="7" r="1.9" /><circle cx="7" cy="17" r="1.9" /><circle cx="17" cy="17" r="1.9" /></svg>;
+}
+export function ToPostIcon() {
+  return <svg className="mono-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 18 18 6M9 6h9v9" /></svg>;
+}
+export function VaultIcon() {
+  return <svg className="mono-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>;
+}
+export function SearchIcon() {
+  return <svg className="mono-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4.5 4.5" /></svg>;
+}
+export function RefreshIcon() {
+  return <svg className="mono-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M19.5 12a7.5 7.5 0 1 1-2.3-5.4M19.5 3.5v4h-4" /></svg>;
+}

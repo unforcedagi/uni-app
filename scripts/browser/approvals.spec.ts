@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { railGo } from './railGo';
 
 // T-234: Settings → Approvals on the real built frontend, with the Tauri backend faked. The fake stands in for Rust
 // (`sealed_status`, `sealed_enroll`; the signing, the key and the relay are tested for real in uni-core: sealed.rs and
@@ -67,7 +68,7 @@ const calls = (page: Page) => page.evaluate(() => (window as any).calls as { cmd
 const release = (page: Page) => page.evaluate(() => (window as any).held.splice(0).forEach((r: () => void) => r()));
 const enrolls = async (page: Page) => (await calls(page)).filter((c) => c.cmd === 'sealed_enroll');
 const settings = async (page: Page) => {
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
+  await railGo(page, 'Settings');
   const s = page.getByRole('region', { name: 'Approvals' });
   await s.scrollIntoViewIfNeeded();
   return s;

@@ -10,6 +10,7 @@ import { audit, lookViolations } from './tourAudit';
 import { installNotePaneFixture } from './notePaneFixture';
 import * as mailMock from './mailMock';
 import * as calMock from './calMock';
+import { railGo } from './railGo';
 
 const USAGE_NOTE = JSON.parse(readFileSync(new URL('../fixtures/usage-note.json', import.meta.url), 'utf8'));
 const SHOTS = process.env.TOUR_SHOTS ?? 'test-results/tour';
@@ -143,7 +144,7 @@ test('05-all-route-chips', async ({ page }) => {
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'All', exact: true }).click();
   const field = page.getByRole('textbox', { name: 'Message for your rooms' });
   await field.fill('Tell Choir and North Field the hall is booked for Tuesday');
-  await expect(page.locator('.all-why')).toContainText('suggested');
+  await expect(page.locator('.all-chip.chosen').first()).toBeVisible();
   await snap(page, '05-all-route-chips');
 });
 
@@ -203,7 +204,7 @@ test('16-room-latest-actions-row', async ({ page }) => {
 
 test('20-find-recent', async ({ page }) => {
   await kiln(page);
-  if (wide(page)) await page.keyboard.press('Control+k'); else await rail(page).getByRole('button', { name: 'Search' }).click();
+  if (wide(page)) await page.keyboard.press('Control+k'); else await railGo(page, 'Search');
   await expect(page.getByRole('searchbox', { name: 'Search conversations and notes' })).toBeFocused();
   await expect(page.locator('.search-recent button').first()).toBeVisible();
   await snap(page, '20-find-recent');
@@ -211,7 +212,7 @@ test('20-find-recent', async ({ page }) => {
 
 test('21-find-results', async ({ page }) => {
   await kiln(page);
-  if (wide(page)) await page.keyboard.press('Control+k'); else await rail(page).getByRole('button', { name: 'Search' }).click();
+  if (wide(page)) await page.keyboard.press('Control+k'); else await railGo(page, 'Search');
   await page.getByRole('searchbox', { name: 'Search conversations and notes' }).fill('glaze');
   await expect(page.locator('.search-hit').first()).toBeVisible();
   await snap(page, '21-find-results');
@@ -221,7 +222,7 @@ test('21-find-results', async ({ page }) => {
 async function settings(page: Page, tour: Tour = { usage: true }) {
   await page.clock.setFixedTime(new Date('2026-10-26T18:00:00Z')); // the usage fixture's own Monday, so its reading is fresh
   await glow(page, {}, {}, { version: true, approvals: true, ...tour });
-  await rail(page).getByRole('button', { name: 'Settings', exact: true }).click();
+  await railGo(page, 'Settings');
   await expect(page.locator('.settings')).toBeVisible();
 }
 
@@ -284,15 +285,14 @@ test('37-update-banner', async ({ page }) => {
 // ---------------------------------------------------------------------------------------------------------- Vault, notes, journal
 test('40-vault-panel', async ({ page }) => {
   await glow(page);
-  await rail(page).getByRole('button', { name: 'Vault', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Vaults' })).toBeVisible();
+  await railGo(page, 'Vault');
+  await expect(page.locator('.vault-browser')).toBeVisible(); // one vault: straight in
   await snap(page, '40-vault-panel');
 });
 
 async function vaultBrowser(page: Page) {
   await glow(page);
-  await rail(page).getByRole('button', { name: 'Vault', exact: true }).click();
-  await page.getByRole('region', { name: 'Vaults' }).locator('button.room').first().click();
+  await railGo(page, 'Vault');
   await expect(page.locator('.vault-browser, [data-place="vault"], .vault-view').first()).toBeVisible();
 }
 
@@ -927,7 +927,7 @@ test('141-to-post-queue', async ({ page }) => {
 
 test('142-for-you', async ({ page }) => {
   await glow(page, {}, {}, { forYou: true });
-  await rail(page).getByRole('button', { name: 'For you' }).click();
+  await railGo(page, 'For you');
   await expect(page.getByText('Worth a look')).toBeVisible();
   await snap(page, '142-for-you');
 });
@@ -986,7 +986,7 @@ test('152-area-app-self-test', async ({ page }) => {
   test.setTimeout(120_000);
   await init(page, {}, { approvals: true });
   await bootAreas(page, 'seed', { selftest: false });
-  await rail(page).getByRole('button', { name: 'Settings' }).click();
+  await railGo(page, 'Settings');
   await page.locator('.settings-dev > summary').click();
   await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
   await expect(page.locator('.selftest-status.pass')).toContainText('Passed', { timeout: 60000 });
@@ -1047,7 +1047,7 @@ test('163-room-mention-picker', async ({ page }) => {
 
 test('22-find-no-results', async ({ page }) => {
   await kiln(page);
-  if (wide(page)) await page.keyboard.press('Control+k'); else await rail(page).getByRole('button', { name: 'Search' }).click();
+  if (wide(page)) await page.keyboard.press('Control+k'); else await railGo(page, 'Search');
   await page.getByRole('searchbox', { name: 'Search conversations and notes' }).fill('zzzqqq nothing like this');
   await page.waitForTimeout(800);
   await snap(page, '22-find-no-results');

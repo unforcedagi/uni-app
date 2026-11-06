@@ -174,7 +174,7 @@ export default function NotePane({ shape, stack, hub, list, onOpen, onBack, onCl
       actions={<>
         <button type="button" className={`note-action note-pane-quote${picked ? " ready" : ""}`} disabled={!picked || !ids[key]} onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={quote}
           title={picked ? "Put the selected passage in your reply" : "Select a passage in the note first"}>Quote in reply</button>
-        <button type="button" className="note-action quiet" onClick={() => onOpenPage(ids[key] ? { ...top, ref: ids[key] } : top, title)}>Open as page</button>
+        <button type="button" className="note-action quiet" aria-label="Open as page" onClick={() => onOpenPage(ids[key] ? { ...top, ref: ids[key] } : top, title)}><span className="only-wide">Open as page</span><span className="only-narrow">Page</span></button>
         {prev && <button type="button" className="note-action note-pane-close" aria-label="Close note" onClick={onClose}>×</button>}
         {shape === "sheet" && <button type="button" className="note-action note-pane-size" aria-pressed={full} onClick={() => keepShare(full ? 0.5 : 1)}>{full ? "Half" : "Full"}</button>}
       </>} />

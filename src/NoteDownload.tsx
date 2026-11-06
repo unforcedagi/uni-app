@@ -47,7 +47,7 @@ export default function NoteDownload({ note, title, compact = false }: { note: D
   }
 
   return <div className="note-download" ref={box}>
-    <button className="note-action note-download-go" disabled={busy} onClick={() => void download()} aria-label={compact ? "Download .md" : undefined} title={compact ? "Download .md" : undefined}>{compact ? "↓ .md" : "Download .md"}</button>
+    <button className="note-action note-download-go" disabled={busy} onClick={() => void download()} aria-label="Download .md" title="Download .md">{compact ? "↓ .md" : <><span className="only-wide">Download .md</span><span className="only-narrow">↓ .md</span></>}</button>
     <button className="note-action note-download-more" aria-label="Download options" aria-expanded={open} onClick={() => setOpen((o) => !o)}>▾</button>
     {open && <div className="note-download-menu" role="group" aria-label="Download settings">
       {android && <button onClick={() => void share()}>Share…</button>}
