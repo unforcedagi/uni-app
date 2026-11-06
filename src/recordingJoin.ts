@@ -8,11 +8,12 @@ export class NotJoinable extends Error {}
 const EBML = 0x1A45DFA3, DOC_TYPE = 0x4282, SEGMENT = 0x18538067, INFO = 0x1549A966, TRACKS = 0x1654AE6B, CLUSTER = 0x1F43B675;
 const SEEK_HEAD = 0x114D9B74, CUES = 0x1C53BB6B, TAGS = 0x1254C367, CHAPTERS = 0x1043A770, ATTACHMENTS = 0x1941A469;
 const SCALE = 0x2AD7B1, DURATION = 0x4489, TRACK_ENTRY = 0xAE, TRACK_UID = 0x73C5;
-const TIMECODE = 0xE7, PREV_SIZE = 0xAB, POSITION = 0xA7, SIMPLE_BLOCK = 0xA3, BLOCK_GROUP = 0xA0, BLOCK = 0xA1;
+const CRC32 = 0xBF, TIMECODE = 0xE7, PREV_SIZE = 0xAB, POSITION = 0xA7, SIMPLE_BLOCK = 0xA3, BLOCK_GROUP = 0xA0, BLOCK = 0xA1;
 /** What ends an unknown-size cluster. */
 const SEGMENT_LEVEL = new Set([INFO, TRACKS, CLUSTER, SEEK_HEAD, CUES, TAGS, CHAPTERS, ATTACHMENTS]);
 const DEFAULT_SCALE = 1_000_000; // WebM's default: a tick is a millisecond
 const DEFAULT_FRAME_MS = 20;
+const SECTION_SLACK = 4096;
 
 type Element = { id: number; start: number; body: number; end: number; unknown: boolean };
 
@@ -64,6 +65,7 @@ function blockRelative(b: Uint8Array, e: Element): number | null {
   return v > 32767 ? v - 65536 : v;
 }
 
+/** A cluster's audio. A cut at the very end of the file is a killed recorder: what came before stands. A break anywhere else is damage. */
 function readCluster(b: Uint8Array, cluster: Element, limit: number, times: number[]): { cluster: Cluster; end: number } {
   const end = cluster.unknown ? limit : Math.min(cluster.end, limit);
   let timecode: number | null = null;
@@ -72,12 +74,15 @@ function readCluster(b: Uint8Array, cluster: Element, limit: number, times: numb
   let length = 0, at = cluster.body;
   while (at < end) {
     const e = readElement(b, at, end);
-    if (!e || e.unknown) break; // cut short: keep what came before
-    if (cluster.unknown && SEGMENT_LEVEL.has(e.id)) break;
-    if (e.end > end) { at = end; break; } // a last element cut short (a killed recorder)
+    if (e && cluster.unknown && SEGMENT_LEVEL.has(e.id)) break;
+    if (!e || e.unknown || e.end > end) {
+      if (end < b.length) throw new NotJoinable("a damaged cluster");
+      at = end;
+      break;
+    }
     at = e.end;
     if (e.id === TIMECODE) { timecode = uintOf(b, e); continue; }
-    if (e.id === PREV_SIZE || e.id === POSITION) continue; // these point at bytes that move
+    if (e.id === PREV_SIZE || e.id === POSITION || e.id === CRC32) continue; // these describe bytes that move
     if (e.id === SIMPLE_BLOCK) { const r = blockRelative(b, e); if (r !== null) relative.push(r); }
     if (e.id === BLOCK_GROUP) for (const k of children(b, e)) if (k.id === BLOCK) { const r = blockRelative(b, k); if (r !== null) relative.push(r); }
     const part = b.subarray(e.start, e.end);
@@ -118,6 +123,8 @@ function readSection(bytes: Uint8Array): Section {
     at = e.end;
   }
   if (!info || !tracks) throw new NotJoinable("no Info or Tracks");
+  // A section's row was on screen: if it holds real bytes and no audio can be read, it isn't to vanish quietly.
+  if (!clusters.length && bytes.length - tracks.end > SECTION_SLACK) throw new NotJoinable("bytes that hold no audio");
   const scaleElement = children(bytes, info).find((e) => e.id === SCALE);
   const entries = children(bytes, tracks).filter((e) => e.id === TRACK_ENTRY);
   if (entries.length !== 1) throw new NotJoinable("not a single track");
@@ -177,13 +184,13 @@ export function joinWebm(parts: Uint8Array[]): { bytes: Uint8Array; durationMs: 
   for (const s of sections) {
     const sorted = [...s.times].sort((x, y) => x - y);
     const earliest = sorted[0], latest = sorted[sorted.length - 1];
-    const lowest = Math.min(...s.clusters.map((c) => c.timecode));
+    const lowest = s.clusters.reduce((low, c) => Math.min(low, c.timecode), Infinity);
     const shift = Math.max(cursor - earliest, -lowest); // a cluster's timecode can't go below zero
     for (const cluster of s.clusters) placed.push({ timecode: cluster.timecode + shift, cluster });
     cursor = latest + shift + frameTicks(sorted, first.scale);
   }
   // Info: what the first said, with the length it could not know
-  const keep = children(first.bytes, first.info).filter((e) => e.id !== DURATION);
+  const keep = children(first.bytes, first.info).filter((e) => e.id !== DURATION && e.id !== CRC32);
   const infoBody = keep.reduce((n, e) => n + e.end - e.start, 0) + 2 + 1 + 8;
   const clusterHead = 4 + 8 + 1 + 1 + 8; // id, size, timecode element
   const segmentBody = (4 + 8 + infoBody) + (first.tracks.end - first.tracks.start) + placed.reduce((n, p) => n + clusterHead + p.cluster.length, 0);
@@ -242,8 +249,8 @@ export function peaksOf(samples: Float32Array, buckets: number): number[] {
 export type Decode = (blob: Blob) => Promise<Float32Array>;
 
 const WAV_RATE = 16000; // what the transcriber listens at
-/** A voice message's limit. Past it a WAV can't be sent, so it isn't made. */
-const WAV_LIMIT = 25 * 1024 * 1024;
+/** A voice message's limit. Past it a joined file can't be sent, so it isn't made: the sections go on their own. */
+const JOIN_LIMIT = 25 * 1024 * 1024;
 
 /** A recording's audio as mono samples at `rate`, by the platform's own decoder. */
 export async function decodeMono(blob: Blob, rate = WAV_RATE): Promise<Float32Array> {
@@ -258,19 +265,23 @@ export async function decodeMono(blob: Blob, rate = WAV_RATE): Promise<Float32Ar
 }
 
 /** One file from a recording's sections. Throws when it can't make one; the sections are still whole. */
-export async function joinSections(blobs: Blob[], decode: Decode = decodeMono): Promise<Blob> {
+export async function joinSections(blobs: Blob[], decode: Decode = decodeMono, limit = JOIN_LIMIT): Promise<Blob> {
+  const tooLarge = () => new Error("Recording too large to join");
   if (blobs.every((b) => b.type.includes("webm"))) {
-    try {
-      const { bytes } = joinWebm(await Promise.all(blobs.map(async (b) => new Uint8Array(await b.arrayBuffer()))));
-      return new Blob([bytes as BlobPart], { type: blobs[0].type });
-    } catch (e) { if (!(e instanceof NotJoinable)) throw e; }
+    let joined: Uint8Array | null = null;
+    try { joined = joinWebm(await Promise.all(blobs.map(async (b) => new Uint8Array(await b.arrayBuffer())))).bytes; }
+    catch (e) { if (!(e instanceof NotJoinable)) throw e; }
+    if (joined) {
+      if (joined.length > limit) throw tooLarge();
+      return new Blob([joined as BlobPart], { type: blobs[0].type });
+    }
   }
   const samples: Float32Array[] = [];
   let total = 44;
   for (const b of blobs) {
     const s = await decode(b);
     total += s.length * 2;
-    if (total > WAV_LIMIT) throw new Error("Recording too large to join");
+    if (total > limit) throw tooLarge();
     samples.push(s);
   }
   return new Blob([encodeWav(samples, WAV_RATE) as BlobPart], { type: "audio/wav" });

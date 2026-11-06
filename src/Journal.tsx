@@ -215,7 +215,8 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   const reportRecording = useRef(onRecordingChange);
   reportRecording.current = onRecordingChange;
   useEffect(() => {
-    reportRecording.current?.(recorder.recording, recorder);
+    // finishing counts: the sections may still be joining, and the tab stays guarded and the pill up until they're out
+    reportRecording.current?.(recorder.recording || recorder.phase === "finishing", recorder);
   }, [recorder.recording, recorder.elapsed, recorder.phase, recorder.sections, recorder.canUndo]);
   useEffect(() => () => reportRecording.current?.(false), []);
 
@@ -267,7 +268,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
         <button className={`mic ${recorder.recording ? "on" : ""}`} onClick={() => void toggleMic()} disabled={saving && !recorder.recording} aria-label={recorder.recording ? "Stop recording and save" : "Record a journal entry"}>
           {recorder.recording ? <>■ <span>{mmss(recorder.elapsed)}</span></> : <MicIcon />}
         </button>
-        <span className="journal-status" role="status">{recorder.recording ? `${recorder.paused ? "Paused" : "Recording"} · ${mmss(recorder.elapsed)}${text.trim() ? " · your typed text is kept with it" : ""}` : status}</span>
+        <span className="journal-status" role="status">{recorder.recording ? `${recorder.paused ? "Paused" : "Recording"} · ${mmss(recorder.elapsed)}${text.trim() ? " · your typed text is kept with it" : ""}` : recorder.phase === "finishing" ? "Finishing…" : status}</span>
         <button className="send" onClick={() => void saveText()} disabled={!text.trim() || saving || recorder.recording}>{saving ? "Saving…" : "Save"}</button>
       </div>
       {same && <div className="journal-same" role="group" aria-label="Same words as another entry">

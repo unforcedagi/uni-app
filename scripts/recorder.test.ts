@@ -77,7 +77,7 @@ async function editing(run: (ctx: { session: RecorderSession<string>; clips: { o
     Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: previousRec });
   }
 }
-class FakeStream { stopped = 0; ended = false; getTracks() { const s = this; return [{ get readyState() { return s.ended ? "ended" : "live"; }, stop() { s.stopped++; } }]; } }
+class FakeStream { stopped = 0; ended = false; muted = false; getTracks() { const s = this; return [{ get readyState() { return s.ended ? "ended" : "live"; }, get muted() { return s.muted; }, stop() { s.stopped++; } }]; } }
 
 // No pause: the very same bytes, straight through, on one recorder (nothing a caller relied on moves)
 await editing(async ({ session, clips, rec, joined }) => {
@@ -276,4 +276,83 @@ await editing(async ({ session, rec }) => {
   session.stop();
   rec().finish("x");
 });
+// Review: a Stop that's joining when the owner goes away (the Journal tab closed) still delivers
+await editing(async ({ session, clips, rec }) => {
+  await session.start("A", "for A");
+  const p = session.pause(); rec().finish("one"); await p;
+  await session.resume();
+  session.stop();
+  rec().finish("two");
+  session.dispose();
+  await tick(); await tick(); await tick();
+  assert.deepEqual(clips.map((c) => c.text), ["joined"], "nothing recorded and stopped is dropped");
+});
+
+// Review: while a recording that stopped by itself joins, the phase says so and the controls can't act
+await editing(async ({ session, rec }) => {
+  await session.start("A", "for A");
+  const p = session.pause(); rec().finish("one"); await p;
+  await session.resume();
+  rec().finish("two");
+  assert.equal(session.phase, "finishing");
+  await tick(); await tick();
+});
+
+// Review: a muted mic is no mic; resume asks again and lets the old one go
+await editing(async ({ session, rec, stream, streams }) => {
+  await session.start("A", "for A");
+  const p = session.pause(); rec().finish("one"); await p;
+  stream.muted = true;
+  await session.resume();
+  assert.equal(streams(), 2);
+  assert.notEqual(rec().stream, stream);
+  assert.equal(stream.stopped, 1, "the old stream is released");
+  session.stop();
+});
+
+// Review: a join that never answers (a decoder that hangs) ends in each section going out, and frees the mic
+{
+  const stream = new FakeStream();
+  const previousNav = globalThis.navigator, previousRec = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: async () => stream } } });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: FakeRecorder });
+  FakeRecorder.instances = [];
+  const texts: string[] = [];
+  const session = new RecorderSession<string>((blob) => { void blob.text().then((t) => texts.push(t)); }, () => {}, { join: () => new Promise<Blob>(() => {}), joinTimeoutMs: 5 });
+  await session.start("A", "for A");
+  const p = session.pause(); FakeRecorder.instances[0].finish("one"); await p;
+  await session.resume();
+  session.stop();
+  FakeRecorder.instances[1].finish("two");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(texts, ["one", "two"]);
+  assert.equal(session.phase, "idle");
+  assert.equal(recordingHolder(), null);
+  session.dispose();
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNav });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: previousRec });
+}
+
+// Review: sections going out one by one go in turn, so the Journal's typed words land on the first entry only
+{
+  const stream = new FakeStream();
+  const previousNav = globalThis.navigator, previousRec = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: async () => stream } } });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: FakeRecorder });
+  FakeRecorder.instances = [];
+  let note = "typed words";
+  const saved: string[] = [];
+  const session = new RecorderSession<string>(async () => { saved.push(note); await tick(); note = ""; }, () => {}, { join: async () => { throw new Error("cannot join"); } });
+  await session.start("A", "for A");
+  const p = session.pause(); FakeRecorder.instances[0].finish("one"); await p;
+  await session.resume();
+  session.stop();
+  FakeRecorder.instances[1].finish("two");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(saved, ["typed words", ""]);
+  assert.equal(session.phase, "idle");
+  session.dispose();
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNav });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: previousRec });
+}
 console.log("recorder tests passed");

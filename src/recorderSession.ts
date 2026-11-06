@@ -12,9 +12,12 @@ export type RecorderOptions<Origin> = {
   onChange?: () => void;
   now?: () => number;
   join?: (blobs: Blob[]) => Promise<Blob>;
+  joinTimeoutMs?: number;
 };
 
 const MIC = { audio: { echoCancellation: true, noiseSuppression: true } };
+/** Longer than any decode that's working: a join that never answers must not hold the mic and the recording. */
+const JOIN_TIMEOUT_MS = 120_000;
 
 /**
  * Keeps the microphone and its starting destination owned until the recording finishes.
@@ -38,10 +41,10 @@ export class RecorderSession<Origin> {
   phase: RecorderPhase = "idle";
   sections: RecordedSection[] = [];
 
-  private onDone: (blob: Blob, mime: string, origin: Origin) => void;
+  private onDone: (blob: Blob, mime: string, origin: Origin) => void | Promise<void>;
   private onPhase: (phase: RecorderPhase) => void;
   private options: RecorderOptions<Origin>;
-  constructor(onDone: (blob: Blob, mime: string, origin: Origin) => void,
+  constructor(onDone: (blob: Blob, mime: string, origin: Origin) => void | Promise<void>,
               onPhase: (phase: RecorderPhase) => void = () => {},
               options: RecorderOptions<Origin> = {}) {
     this.onDone = onDone;
@@ -49,7 +52,7 @@ export class RecorderSession<Origin> {
     this.options = options;
   }
 
-  updateDone(onDone: (blob: Blob, mime: string, origin: Origin) => void) { this.onDone = onDone; }
+  updateDone(onDone: (blob: Blob, mime: string, origin: Origin) => void | Promise<void>) { this.onDone = onDone; }
 
   private setPhase(phase: RecorderPhase) {
     this.phase = phase;
@@ -111,24 +114,34 @@ export class RecorderSession<Origin> {
     this.setPhase("idle");
   }
 
-  /** Hand over what was kept. A join that fails hands over each section: nothing recorded is lost. */
+  /** Join with a time limit; null when that can't be done. */
+  private async joined(sections: RecordedSection[]): Promise<Blob | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timed out")), this.options.joinTimeoutMs ?? JOIN_TIMEOUT_MS); });
+    try { return await Promise.race([(this.options.join ?? joinSections)(sections.map((s) => s.blob)), timeout]); }
+    catch (e) { console.warn("Recording sections could not be joined; sending each", e); return null; }
+    finally { clearTimeout(timer); }
+  }
+
+  /**
+   * Hand over what was kept. A join that fails hands over each section, in turn: nothing recorded is lost.
+   * Once a join is under way it's delivered even if the owner goes away meanwhile (the Journal tab closed).
+   */
   private async finish() {
     this.stopStream();
+    if (this.phase !== "finishing") this.setPhase("finishing");
     const origin = this.origin as Origin, sections = this.sections, type = this.lastType;
     try {
       if (this.disposed) return;
       if (!sections.length) {
         if (this.removed.length) this.options.onDiscard?.(origin);
-        else this.onDone(new Blob([], { type }), type, origin);
+        else void this.onDone(new Blob([], { type }), type, origin);
       } else if (sections.length === 1) {
-        this.onDone(sections[0].blob, sections[0].blob.type, origin);
+        void this.onDone(sections[0].blob, sections[0].blob.type, origin); // nothing to wait for: finishes at once, as it always has
       } else {
-        let joined: Blob | null = null;
-        try { joined = await (this.options.join ?? joinSections)(sections.map((s) => s.blob)); }
-        catch (e) { console.warn("Recording sections could not be joined; sending each", e); }
-        if (this.disposed) return;
-        if (joined) this.onDone(joined, joined.type, origin);
-        else for (const s of sections) this.onDone(s.blob, s.blob.type, origin);
+        const joined = await this.joined(sections);
+        if (joined) await this.onDone(joined, joined.type, origin);
+        else for (const s of sections) await this.onDone(s.blob, s.blob.type, origin);
       }
     } finally { this.reset(); }
   }
@@ -164,7 +177,7 @@ export class RecorderSession<Origin> {
     const recorder = this.recorder;
     await new Promise<void>((resolve) => {
       this.pauseLanded = resolve;
-      recorder.stop();
+      if (recorder.state !== "inactive") recorder.stop();
     });
   }
 
@@ -174,9 +187,11 @@ export class RecorderSession<Origin> {
     this.setPhase("resuming");
     try {
       let stream = this.stream;
-      if (!stream || !stream.getTracks().some((t) => t.readyState !== "ended")) {
+      if (!stream || !stream.getTracks().some((t) => t.readyState !== "ended" && !t.muted)) {
+        const lost = stream;
         stream = await navigator.mediaDevices.getUserMedia(MIC);
         if (this.disposed || this.phaseNow() !== "resuming") { this.stopStream(stream); return; }
+        this.stopStream(lost);
         this.stream = stream;
       }
       this.beginSection(stream);

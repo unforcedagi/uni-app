@@ -178,4 +178,53 @@ function parsed(b: Uint8Array) {
   assert.deepEqual(peaksOf(new Float32Array(0), 3), [0, 0, 0]);
   assert.equal(peaksOf(new Float32Array(2), 8).length, 8);
 }
+// 11. BlockGroups (WebKit's and libwebm's last frames) count as audio, with their times
+{
+  const group = (rel: number, payload: number) => el(0xA0, [...el(0xA1, [0x81, ...uint(rel), 0x00, payload]), ...el(0x9B, [20])]);
+  const a = file(1, [cluster(0, [block(0, 1), group(20, 2)])]);
+  const b = file(2, [cluster(0, [group(0, 3), group(20, 4)])]);
+  const { bytes, durationMs } = joinWebm([a, b]);
+  assert.equal(durationMs, 80);
+  const kids = readNodes(bytes, readNodes(bytes, 0, bytes.length)[1].bodyStart, bytes.length);
+  assert.equal(kids.filter((n) => n.id === CLUSTER).length, 2);
+}
+// 12. A block's time may be negative within its cluster; nothing lands before zero
+{
+  const a = file(1, [cluster(100, [block(65516, 1), block(0, 2)])]); // -20, then 0
+  const b = file(2, [cluster(100, [block(65516, 3), block(0, 4)])]);
+  const out = parsed(joinWebm([a, b]).bytes);
+  assert.deepEqual(out.blocks.map((x) => x.at), [0, 20, 40, 60]);
+  assert.equal(out.duration, 80);
+}
+// 13. A stale checksum doesn't survive the edit (Info's and a cluster's); Void passes unharmed
+{
+  const CRC = 0xBF;
+  const infoCrc = el(INFO, [...el(CRC, [1, 2, 3, 4]), ...el(SCALE, uint(1_000_000, 3))]);
+  const withCrc = new Uint8Array([...header(), ...el(SEGMENT, [...infoCrc, ...tracks(1), ...cluster(0, [block(0, 1), block(20, 2)], true, el(CRC, [5, 6, 7, 8]))])]);
+  const { bytes } = joinWebm([withCrc, file(2, [cluster(0, [block(0, 3)])])]);
+  const top = readNodes(bytes, 0, bytes.length);
+  const kids = readNodes(bytes, top[1].bodyStart, top[1].end);
+  const infoKids = readNodes(bytes, kids[0].bodyStart, kids[0].end);
+  assert.ok(!infoKids.some((n) => n.id === CRC), "no checksum in Info");
+  for (const c of kids.filter((n) => n.id === CLUSTER)) assert.ok(!readNodes(bytes, c.bodyStart, c.end).some((n) => n.id === CRC), "no checksum in a cluster");
+}
+// 14. Damage in the middle is refused, not skipped: that section's row was shown, so its audio can't quietly vanish
+{
+  const ok = file(1, [cluster(0, [block(0, 1), block(20, 2)])]);
+  // a known-size cluster whose last block claims more than the cluster holds, with more of the file after it
+  const bad = [...el(TIMECODE, uint(0)), ...block(0, 1), ...idBytes(BLOCK), ...sizeBytes(40), 0x81, 0, 0];
+  const damaged = file(2, [el(CLUSTER, bad), cluster(1000, [block(0, 9)], true)]);
+  assert.throws(() => joinWebm([ok, damaged]), NotJoinable, "a broken cluster mid-file");
+  // real-sized audio that yields no cluster at all
+  const noise = new Uint8Array(8192).fill(0xEC);
+  const lost = new Uint8Array([...file(3, []), ...noise]);
+  assert.throws(() => joinWebm([ok, lost]), NotJoinable, "kilobytes that hold no audio");
+}
+// 15. A join past what a message can carry isn't made: the caller sends the sections instead
+{
+  const a = new Blob([file(1, [cluster(0, [block(0, 1), block(20, 2)])])], { type: "audio/webm" });
+  const b = new Blob([file(2, [cluster(0, [block(0, 3), block(20, 4)])])], { type: "audio/webm" });
+  await assert.rejects(joinSections([a, b], undefined, 40), /too large/i);
+  assert.ok((await joinSections([a, b], undefined, 100_000)).size > 40);
+}
 console.log("recording join tests passed");

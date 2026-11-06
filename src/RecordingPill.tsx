@@ -39,6 +39,7 @@ function Wave({ section }: { section: RecordedSection }) {
 function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: string; controls: RecorderControls; finish: "send" | "save"; overSidebar: boolean; onJump: () => void }) {
   const [playing, setPlaying] = useState<number | null>(null);
   const [problem, setProblem] = useState("");
+  const [said, setSaid] = useState("");
   const player = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
   const resumeButton = useRef<HTMLButtonElement>(null);
   const ready = controls.phase === "paused";
@@ -71,12 +72,24 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
   useEffect(() => () => {
     if (player.current) { player.current.audio.pause(); URL.revokeObjectURL(player.current.url); player.current = null; }
   }, []);
-  // The button that opened this is gone; keyboard focus lands on the way back.
-  useEffect(() => { resumeButton.current?.focus({ preventScroll: true }); }, []);
+  // The button that opened this is gone: once the section has landed, keyboard focus goes to the way back, and a screen reader hears it.
+  useEffect(() => {
+    if (!ready) return;
+    resumeButton.current?.focus({ preventScroll: true });
+    setSaid(`Paused. ${controls.sections.length} ${controls.sections.length === 1 ? "section" : "sections"} kept.`);
+  }, [ready]);
 
   function remove(section: RecordedSection) {
     if (playing === section.id) stopPlaying();
     controls.removeSection(section.id);
+    const left = controls.sections.length - 1;
+    setSaid(`Section deleted. ${left} kept.`);
+    resumeButton.current?.focus({ preventScroll: true }); // its own button is gone
+  }
+  function undo() {
+    controls.undoRemove();
+    setSaid(`Section back. ${controls.sections.length + 1} kept.`);
+    resumeButton.current?.focus({ preventScroll: true });
   }
   function resume() {
     stopPlaying();
@@ -86,9 +99,10 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
 
   return <div className={`recording-pill paused ${overSidebar ? "over-sidebar" : ""}`} role="group" aria-label="Paused recording">
     <div className="rec-head">
-      <span className="rec-state" role="status">Paused</span>
+      <span className="rec-state">Paused</span>
       <span className="rec-time">{mmss(controls.elapsed)}</span>
       <button className="recording-destination" onClick={onJump} aria-label={`Jump to recording in ${title}`}>{title}</button>
+      <span className="rec-said" role="status">{said}</span>
     </div>
     {none ? <p className="rec-empty">Nothing kept yet.</p> : <ol className="rec-sections">
       {controls.sections.map((section, i) => <li key={section.id} className={playing === section.id ? "playing" : undefined}>
@@ -100,13 +114,14 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
         <button className="rec-row-button rec-delete" onClick={() => remove(section)} disabled={!ready} aria-label={`Delete section ${i + 1}`}><DeleteIcon /></button>
       </li>)}
     </ol>}
-    {controls.canUndo && <button className="rec-undo" onClick={() => controls.undoRemove()} disabled={!ready} aria-label="Undo delete">Undo delete</button>}
+    {controls.canUndo && <button className="rec-undo" onClick={undo} disabled={!ready} aria-label="Undo delete">Undo delete</button>}
     {problem && <p className="rec-problem" role="alert">{problem}</p>}
+    {/* Resume sits under the finger that tapped Pause: a second, quick tap can never send */}
     <div className="rec-actions">
-      <button ref={resumeButton} className="rec-resume" onClick={resume} disabled={!ready} aria-label="Resume recording">Resume</button>
       {none
         ? <button className="rec-finish" onClick={() => controls.discard()} disabled={!ready} aria-label="Discard recording">Discard</button>
-        : <button className="rec-finish recording-stop" onClick={controls.stop} aria-label={`Stop recording for ${title}`}>Stop and {finish}</button>}
+        : <button className="rec-finish recording-stop" onClick={controls.stop} disabled={!ready} aria-label={`Stop and ${finish} recording for ${title}`}>Stop and {finish}</button>}
+      <button ref={resumeButton} className="rec-resume" onClick={resume} disabled={!ready} aria-label="Resume recording">Resume</button>
     </div>
   </div>;
 }

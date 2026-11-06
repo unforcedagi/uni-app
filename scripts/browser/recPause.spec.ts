@@ -37,6 +37,8 @@ test.beforeEach(async ({ page }) => {
         w.calls.push({ cmd });
         const keep = () => w.uploads.push({ cmd, bytes: Array.from(new Uint8Array(args)), headers: options?.headers });
         switch (cmd) {
+          case 'plugin:app|version': return '0.1.98';
+          case 'plugin:updater|check': return w.offerUpdate ? { rid: 7, currentVersion: '0.1.98', version: '0.1.99', date: null, body: null, rawJson: {} } : null;
           case 'identity_status': return { paired: true, pubkey: 'a'.repeat(64) };
           case 'get_identity': return 'a'.repeat(64);
           case 'relay_origin': return 'https://example.invalid';
@@ -87,7 +89,12 @@ const spans = async (page: Page) => {
   const all: { from: number; to: number }[] = await page.evaluate(() => (window as any).spans.map((x: any) => ({ from: x.from, to: x.to })));
   return { seconds: all.map((x) => (x.to - x.from) / 1000), wall: (all[all.length - 1].to - all[0].from) / 1000 };
 };
-const CLOSE = 0.5; // a recorder takes a moment to start and flush
+/** A recorder takes a moment to start, longer on a busy box, so a file can run a little short of its recorders; never long. */
+const matches = (duration: number, seconds: number[]) => {
+  const ran = seconds.reduce((a, b) => a + b, 0);
+  expect(duration, `the file against ${seconds.map((x) => x.toFixed(2))}`).toBeLessThan(ran + 0.25);
+  expect(duration, `the file against ${seconds.map((x) => x.toFixed(2))}`).toBeGreaterThan(ran - 0.5 * seconds.length);
+};
 
 /** The whole of what ffmpeg sees in a file: its length, its streams, every packet, and a full decode that must be clean. */
 function probe(bytes: number[], ext: string) {
@@ -143,7 +150,7 @@ test('Record, pause, resume, stop: one clean file as long as the time recorded',
   expect(out.codec).toBe('opus');
   const ran = await spans(page);
   expect(ran.seconds).toHaveLength(2);
-  expect(Math.abs(out.duration - (ran.seconds[0] + ran.seconds[1]))).toBeLessThan(CLOSE);
+  matches(out.duration, ran.seconds);
   expect(ran.wall - out.duration).toBeGreaterThan(1.3); // the 1.5 s pause is not in it
   expect(out.pts.every((t: number, i: number) => i === 0 || t > out.pts[i - 1])).toBe(true);
   expect(out.biggestGap).toBeLessThan(0.2); // the join is seamless: no hole where the pause was
@@ -177,7 +184,7 @@ test('Record, pause, resume, delete the last section, send: the deleted part is 
   const ran = await spans(page);
   expect(ran.seconds).toHaveLength(3);
   expect(ran.seconds[1]).toBeGreaterThan(2.4);
-  expect(Math.abs(out.duration - (ran.seconds[0] + ran.seconds[2]))).toBeLessThan(CLOSE); // the second, deleted section is gone
+  matches(out.duration, [ran.seconds[0], ran.seconds[2]]); // the second, deleted section is gone
   expect(out.biggestGap).toBeLessThan(0.2);
 });
 
@@ -194,13 +201,13 @@ test('Delete any section, undo it, and stop from the card', async ({ page }) => 
   await press(page, button(page, 'Undo delete'));
   await expect(card.getByRole('listitem')).toHaveCount(3);
   await press(page, button(page, 'Delete section 2'));
-  await press(page, button(page, 'Stop recording for Test room'));
+  await press(page, button(page, 'Stop and send recording for Test room'));
   await expect.poll(() => posts(page)).toBe(1);
   const out = probe((await uploads(page))[0].bytes, 'webm');
   const ran = await spans(page);
   expect(ran.seconds).toHaveLength(3);
   expect(ran.seconds[1]).toBeGreaterThan(1.7);
-  expect(Math.abs(out.duration - (ran.seconds[0] + ran.seconds[2]))).toBeLessThan(CLOSE);
+  matches(out.duration, [ran.seconds[0], ran.seconds[2]]);
 });
 
 test('Delete every section and stop: nothing is sent and the composer is free again', async ({ page }) => {
@@ -250,7 +257,7 @@ test('A recorder that can only write MP4 still gives one file: WAV', async ({ pa
   const out = probe(up.bytes, 'wav');
   expect(out.format).toBe('wav');
   const ran = await spans(page);
-  expect(Math.abs(out.duration - (ran.seconds[0] + ran.seconds[1]))).toBeLessThan(CLOSE);
+  matches(out.duration, ran.seconds);
 });
 
 test('Journal: pause and resume there too, saved as one recording', async ({ page }) => {
@@ -271,7 +278,65 @@ test('Journal: pause and resume there too, saved as one recording', async ({ pag
   expect(up.cmd).toBe('journal_save_voice');
   const out = probe(up.bytes, 'webm');
   const ran = await spans(page);
-  expect(Math.abs(out.duration - (ran.seconds[0] + ran.seconds[1]))).toBeLessThan(CLOSE);
+  matches(out.duration, ran.seconds);
+});
+
+test('Two quick taps on Pause never send', async ({ page }) => {
+  test.skip(test.info().project.name !== 'mobile', 'a thumb');
+  await boot(page);
+  await startInRoom(page);
+  for (const round of [1, 2]) { // from the second pause on, there are sections to send
+    await wait(page, 700);
+    const box = (await button(page, 'Pause recording').boundingBox())!;
+    const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+    await page.touchscreen.tap(x, y);
+    await page.touchscreen.tap(x, y);
+    await wait(page, 500);
+    await page.touchscreen.tap(x, y); // and a slow third, once the card is ready
+    await wait(page, 500);
+    expect(await posts(page), `round ${round}`).toBe(0);
+    // whatever the taps landed on, the recording is still open
+    await expect(button(page, 'Stop recording voice message')).toBeVisible();
+    if (await button(page, 'Resume recording').isVisible()) await resume(page);
+  }
+});
+
+test('An update waits for a recording: Restart says finish first, then restarts', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).offerUpdate = true; });
+  await boot(page);
+  const go = page.locator('.update-notice-go');
+  await expect(go).toHaveText('Restart', { timeout: 30000 });
+  await startInRoom(page);
+  await wait(page, 300);
+  await pause(page);
+  await press(page, go);
+  await expect(page.locator('.update-notice')).toContainText('Finish your recording first');
+  const restarted = () => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd.includes('restart')).length);
+  await wait(page, 300);
+  expect(await restarted()).toBe(0);
+  await expect(page.getByRole('group', { name: 'Paused recording' }).getByRole('listitem')).toHaveCount(1); // still there
+  await press(page, button(page, 'Stop recording voice message'));
+  await expect.poll(() => posts(page)).toBe(1);
+  await press(page, go);
+  await expect.poll(restarted).toBe(1);
+});
+
+test('The card fits a phone on its side, and many sections scroll', async ({ page }) => {
+  test.skip(test.info().project.name !== 'mobile', 'a phone');
+  await page.setViewportSize({ width: 740, height: 360 });
+  await boot(page);
+  await startInRoom(page);
+  for (let i = 0; i < 5; i++) { await wait(page, 250); await pause(page); await resume(page); }
+  await wait(page, 250);
+  await pause(page);
+  await press(page, button(page, 'Delete section 1'));
+  const stop = button(page, 'Stop and send recording for Test room');
+  await stop.scrollIntoViewIfNeeded();
+  const box = (await stop.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(360);
+  await expect(button(page, 'Resume recording')).toBeVisible();
+  await button(page, 'Delete section 1').scrollIntoViewIfNeeded();
+  await expect(button(page, 'Delete section 1')).toBeInViewport();
 });
 
 test('On a phone the controls are big enough to hit and the card fits', async ({ page }) => {
