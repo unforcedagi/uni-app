@@ -26,6 +26,10 @@ export const sameTarget = (a: ReplyTarget | null, b: ReplyTarget | null): boolea
 /** The room as the person knows its address: "#kiln-studio", or its name when it has no room name of its own. */
 export const roomAddress = (r: { name: string; slug?: string | null }): string => (r.slug ? `#${r.slug.replace(/^#/, "")}` : r.name);
 
+/** T-335 one fluid surface: you said something in this room, from its own composer. Your own message may bring no live event, so All reads the room again. */
+export const SAID_EVENT = "uni-said-in";
+export const saidIn = (room: string) => { if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(SAID_EVENT, { detail: room })); };
+
 export type SendResult = { sent: string[]; failed: { id: string; error: string }[] };
 
 /**

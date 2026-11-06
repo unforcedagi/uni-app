@@ -140,6 +140,32 @@ test.describe('a long message, in place', () => {
     expect(Math.abs(await feed(page).evaluate((el) => el.scrollTop) - at)).toBeLessThan(2);
   });
 
+  test('opened mid-run, its first line clears the band at the top', async ({ page }) => {
+    await boot(page);
+    await page.evaluate((b) => { const w = window as any, now = Math.floor(Date.now() / 1000); for (let i = 0; i < 12; i++) w.__msgs['ch-table'].push({ ref: `tab${i}`, channel: 'ch-table', author: 'b'.repeat(64), author_name: 'Uni', ts: now - 40 + i, body: i === 6 ? b : `Supper note ${i}, with enough words in it to take up a line or so of the column.`, mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [], media: [] }); }, LONG);
+    await allIn(page);
+    const m = row(page, 'tab6');
+    // the row is at the very bottom of the view, so opening it scrolls it up
+    await m.evaluate((el) => { const f = el.closest('.all-feed') as HTMLElement; f.scrollTop = (el as HTMLElement).offsetTop - f.clientHeight + 150; });
+    await page.waitForTimeout(120);
+    await m.getByRole('button', { name: 'Read the rest' }).click();
+    await page.waitForTimeout(1100);
+    const y = await m.evaluate((el) => { const band = document.querySelector('.all-reading-band')?.getBoundingClientRect().bottom ?? 0; return el.querySelector('.md')!.getBoundingClientRect().top - band; });
+    expect(y).toBeGreaterThanOrEqual(0);
+    await expect(m.locator('.md').getByText('The glaze report.')).toBeInViewport();
+  });
+
+  test('a picture that arrives with no known size: All still ends at its newest', async ({ page }) => {
+    await boot(page);
+    await page.evaluate((sha) => { const w = window as any, now = Math.floor(Date.now() / 1000); w.__msgs['ch-bees'].push({ ref: 'nodim', channel: 'ch-bees', author: 'b'.repeat(64), author_name: 'Uni', ts: now - 2, body: 'A frame, size unknown.', mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [], media: [{ url: `wss://relay.test/media/${sha}.png`, mime: 'image/png', sha256: sha, size: 70, dim: null, blurhash: null, alt: 'A frame', filename: 'frame.png' }] }); }, SHA);
+    // a real size, to grow by when it comes in
+    await page.evaluate(async () => { const w = window as any, next = w.__extraInvoke, c = new OffscreenCanvas(600, 400); c.getContext('2d')!.fillRect(0, 0, 600, 400); const buf = await (await c.convertToBlob({ type: 'image/png' })).arrayBuffer(); w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'media_bytes') { await new Promise((r) => setTimeout(r, 400)); return buf; } return next(cmd, a); }; });
+    await allIn(page);
+    await expect.poll(() => row(page, 'nodim').locator('img').evaluate((el: HTMLImageElement) => el.naturalWidth).catch(() => 0)).toBeGreaterThan(0);
+    await page.waitForTimeout(200);
+    await expect.poll(() => feed(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(4);
+  });
+
   test('a message over the length that fits anyway shows no "Read the rest"', async ({ page }) => {
     test.skip(project() !== 'desktop', 'needs the wide column');
     await boot(page);
@@ -301,6 +327,48 @@ test.describe('a room in focus', () => {
     await backToAll(page).click();
     await expect(sheet(page)).toHaveCount(0);
     await expect(feed(page)).toContainText('Words that should be in All.');
+  });
+
+  test('your reply still on its way when you go back: it is in All as soon as it lands', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').last().click();
+    await roomBox(page, 'kiln-studio').fill('Sent just before Back.');
+    await page.evaluate(() => { (window as any).__postDelay = 700; });
+    await sheet(page).getByRole('button', { name: 'Send message' }).click();
+    await backToAll(page).click();
+    await expect(sheet(page)).toHaveCount(0);
+    await expect(feed(page)).toContainText('Sent just before Back.');
+  });
+
+  test('tapping a message newer than the room\'s kept copy waits for the read in hand, and never asks for the room\'s whole history', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    // a first visit keeps a copy of the room on this device
+    await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').last().click();
+    await expect(sheet(page).locator('.message-list')).toContainText('Three glaze tiles');
+    await page.waitForTimeout(300);
+    await backToAll(page).click();
+    await expect(sheet(page)).toHaveCount(0);
+    await page.evaluate(() => (window as any).__arrive('ch-kiln', 'Uni', 'NEWER-THAN-THE-COPY'));
+    const last = feed(page).locator('article.all-msg').filter({ hasText: 'NEWER-THAN-THE-COPY' });
+    await expect(last).toBeVisible();
+    // the room's read is slow, so the kept copy is what shows first
+    await page.evaluate(() => { const w = window as any, next = w.__extraInvoke; w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'get_messages' && a.channel === 'ch-kiln') await new Promise((r) => setTimeout(r, 500)); return next(cmd, a); }; });
+    await last.locator('.all-place').click();
+    await expect(sheet(page).locator('.search-focus')).toContainText('NEWER-THAN-THE-COPY');
+    expect((await calls(page, 'get_messages')).filter((a: any) => a.limit >= 3000)).toEqual([]);
+  });
+
+  test('a label tapped in a room with unread messages lands on that message, not on the New line', async ({ page }) => {
+    await boot(page, { unread: { 'ch-kiln': 2 } });
+    await allIn(page);
+    await row(page, 'k1').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').first().click();
+    const mark = sheet(page).locator('.search-focus');
+    await expect(mark).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(mark).toBeInViewport();
   });
 
   test('opened at a message that is already the newest, the room still follows what arrives next', async ({ page }) => {

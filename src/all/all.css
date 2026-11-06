@@ -94,7 +94,7 @@
 .fd-allhead .fd-mark { min-width: 0; }
 .fd-allhead .fd-title { font: 520 24px/1.1 var(--g-font-display) !important; font-variation-settings: "SOFT" 60, "opsz" 72; }
 .fd-allhead .fd-date { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.all-msg { position: relative; touch-action: pan-y; }
+.all-msg { position: relative; touch-action: pan-y; scroll-margin-top: 52px; }
 .all-msg pre, .all-msg .md-table-wrap { touch-action: auto; }
 /* a run here is a run of one room's messages, not the tree's running row */
 .all-msg.run { border-bottom: 0; }

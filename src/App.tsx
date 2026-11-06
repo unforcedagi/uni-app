@@ -7,6 +7,7 @@ import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { forgetComposer } from "./all/AllView";
 import { FOCUS_OUT_MS, type AllFocusState } from "./all/AllFocus";
+import { saidIn } from "./all/allCore";
 import { MoreIcon, SearchIcon, ToPostIcon, VaultIcon, SettingsIcon, UniIcon, JournalIcon, StarIcon, MailIcon, CalendarIcon, MessagesIcon, AllIcon } from "./Icons";
 import Mail from "./Mail";
 import Calendar from "./calendar/Calendar";
@@ -1225,6 +1226,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // the remembered spot, or the newest message. Runs before paint, so the
   // list never flashes at the top.
   const currentView = channel ? `${channel}|${root}` : null;
+  // no room on screen (All, with nothing in focus): the last room's read isn't this visit's when it comes back
+  useEffect(() => { if (!currentView) { setFetchedView(null); setFailedView(null); } }, [currentView]);
   useLayoutEffect(() => {
     const el = listEl;
     if (!el || !currentView || loadedView !== currentView || restoredView.current === currentView) return;
@@ -1340,6 +1343,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const at = el.querySelector<HTMLElement>(".new-line");
     if (!at) return;
     newPlaced.current = true;
+    // opened at a message you asked for: the list stays on it (the New line still marks where the new ones start)
+    if (focusRef) return;
     stickToEnd.current = false;
     settleUntil.current = 0;
     stopGlide();
@@ -1452,10 +1457,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const t = setTimeout(() => setFocusRef(null), 2500);
       return () => clearTimeout(t);
     }
+    // the kept copy may just be older than the message: the read in hand answers first; only then is the room's long history asked for
+    if (fetchedView !== currentView && failedView !== currentView) return;
     if (focusTries.current++ === 0 && !root) { setLimit((l) => Math.max(l, 3000)); return; }
     setFocusRef(null);
     setStatus("That message isn't in the loaded history of this room");
-  }, [focusRef, messages, channel, root]);
+  }, [focusRef, messages, channel, root, fetchedView, failedView, currentView]);
 
   function openHit(t: { channel: string; root: string | null; focus: string }) {
     setSearchOpen(false);
@@ -1704,6 +1711,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         }
         try { if (!known) await invoke<Message>("post_message", { ...args, signedEvent }); }
         catch (e) { if (!relayAccepted(e)) throw e; }
+        saidIn(destination.channel);
         // A durable tombstone survives a failed delete; deletion is also retried below.
         await persistVoice(key, id, true).catch(() => {});
         await voiceOutbox.current.remove(id);
@@ -2036,6 +2044,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** T-335 chat feel: a message is posted: it is Uni's to pick up (the status line says so until its 👀), and it stays on screen until the
    *  room's list has it. */
   function landed(key: string, view: string | null, body: string, ref: string | null, toUni: boolean) {
+    if (view) saidIn(view.split("|")[0]);
     if (ref && toUni) asked.current.set(ref, Date.now() / 1000);
     // only the hold of the view it was sent from (another room's send landing late never takes this one's)
     if (ref && anchor.current && !anchor.current.ref && anchor.current.view === view) anchor.current.ref = ref;
@@ -2264,6 +2273,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const uni = findUniMember(roster);
     // a card tapped in a thread answers in that thread, where it was asked
     await invoke<Message>("post_message", { channel: room, body, replyTo: thread, recipients: uni ? [uni.pubkey] : [] });
+    saidIn(room);
     setTick((n) => n + 1);
   };
   const decisionCards = (m: Message, inThread: boolean) => {

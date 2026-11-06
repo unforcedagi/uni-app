@@ -19,7 +19,7 @@ import { collectAttachments, type MediaRef } from "../media";
 import { calmMotion, scrollMotion } from "../motion";
 import type { Member } from "../mentions";
 import { findUniMember } from "../uniActions";
-import { andList, interleave, replyTargetOf, roomAddress, sameTarget, sendEach, type FeedMessage, type ReplyTarget } from "./allCore";
+import { andList, interleave, replyTargetOf, roomAddress, SAID_EVENT, sameTarget, sendEach, type FeedMessage, type ReplyTarget } from "./allCore";
 import { makeRouter, mergeRoute, type RouteRoom } from "./route";
 import { forgetModelRoute, logOutcome, useModelRoute, type DoorRoom } from "./modelRoute";
 import { enterInsertsNewline } from "../composerCore";
@@ -75,7 +75,9 @@ export function useRoomsFeed(rooms: readonly AllRoom[], on: boolean) {
       clearTimeout(timers.get(c));
       timers.set(c, setTimeout(() => void read(c), 120));
     });
-    return () => { live = false; readRef.current = null; timers.forEach(clearTimeout); void un.then((f) => f()); };
+    const onSaid = (e: Event) => { const c = (e as CustomEvent<string>).detail; if (want.includes(c)) { clearTimeout(timers.get(c)); timers.set(c, setTimeout(() => void read(c), 60)); } };
+    window.addEventListener(SAID_EVENT, onSaid);
+    return () => { live = false; readRef.current = null; timers.forEach(clearTimeout); window.removeEventListener(SAID_EVENT, onSaid); void un.then((f) => f()); };
   }, [ids, on]);
   /** Reads these rooms again now (after a send: the relay's own echo may come later). */
   const reread = useCallback((list: readonly string[]) => { for (const id of list) readRef.current?.(id); }, []);
@@ -336,6 +338,8 @@ const isLong = (body: string) => body.length > 320 || body.split("\n").filter((l
 const OPEN_MS = 200;
 /** Opening a long message may scroll it into sight: that isn't you going back to the newest. */
 const READ_HOLD_MS = OPEN_MS + 700;
+/** What a message scrolled into sight keeps clear at the top: the band that names the room (all.css says the same in scroll-margin). */
+const BAND_CLEAR = 52;
 
 const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named, targeted, open, onOpen, onTap, onRead }: { m: Message; place: string; address: string; mine: boolean; me: string | null;
   /** The first message of a run from one room: it carries the room's label. */ run: boolean; /** Says who and when (a new author, or a pause). */ named: boolean;
@@ -435,6 +439,9 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
   recededRef.current = receded;
   const heldSpot = useRef<{ stick: boolean; spot: FeedSpot | null } | null>(null);
   const readHold = useRef(0);
+  /** Where the feed put itself at its newest: the scroll event that follows isn't the reader leaving, even if a picture has grown by the time it arrives. */
+  const ownTop = useRef(-1);
+  const toNewest = useCallback((el: HTMLElement) => { el.scrollTop = el.scrollHeight; ownTop.current = el.scrollTop; }, []);
   // T-335 one fluid surface: a room can run on for many messages, or one long message past the screen, with its label scrolled away. The room you are reading is
   // named at the top of the feed then, and is one tap into focus at the message you are on.
   const [reading, setReading] = useState<string | null>(null);
@@ -481,7 +488,7 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     const added = echoCount > echoesWere.current;
     echoesWere.current = echoCount;
     const el = list.current;
-    if (added && el) { stick.current = true; el.scrollTop = el.scrollHeight; }
+    if (added && el) { stick.current = true; toNewest(el); }
   }, [echoCount]);
   useLayoutEffect(() => {
     const el = list.current;
@@ -489,10 +496,10 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     if (restoring.current) {
       const hit = pinSpot(el, restoring.current);
       // every room's rows are in: it is either there or gone (then All opens at its newest)
-      if (loaded) { restoring.current = null; if (!hit) { stick.current = true; el.scrollTop = el.scrollHeight; } }
+      if (loaded) { restoring.current = null; if (!hit) { stick.current = true; toNewest(el); } }
       return;
     }
-    if (stick.current && !tappedRef.current) el.scrollTop = el.scrollHeight;
+    if (stick.current && !tappedRef.current) toNewest(el);
     lookAtTop();
   }, [feed, loaded, lookAtTop, opened]);
   useLayoutEffect(() => { if (!recededRef.current && !restoring.current) keepTapped(); }, [tapped, target, keepTapped]);
@@ -505,7 +512,7 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     heldSpot.current = null;
     if (!was) return;
     stick.current = was.stick;
-    if (was.stick) el.scrollTop = el.scrollHeight;
+    if (was.stick) toNewest(el);
     else if (was.spot) pinSpot(el, was.spot);
   }, [receded]);
   // leaving All: where it was, for coming back
@@ -531,7 +538,7 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     if (!open) { row.scrollIntoView({ block: "nearest" }); return; }
     const reveal = () => {
       const r = row.getBoundingClientRect(), box = el.getBoundingClientRect();
-      const by = Math.min(r.bottom - box.bottom, r.top - box.top - 8);
+      const by = Math.min(r.bottom - box.bottom, r.top - box.top - BAND_CLEAR);
       if (by > 0) el.scrollBy({ top: by, behavior: scrollMotion() });
     };
     if (!md || calmMotion()) { reveal(); return; }
@@ -543,8 +550,11 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
   useEffect(() => {
     const el = list.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => { if (restoring.current) return; if ((recededRef.current || !keepTapped()) && stick.current) el.scrollTop = el.scrollHeight; });
+    const ro = new ResizeObserver(() => { if (restoring.current) return; if ((recededRef.current || !keepTapped()) && stick.current) toNewest(el); });
     ro.observe(el);
+    // and when it gets longer from inside (a picture with no known size coming in)
+    const stack = el.firstElementChild;
+    if (stack) ro.observe(stack);
     return () => ro.disconnect();
   }, [keepTapped]);
   // a swipe sideways on a message is the same as a tap on it; up and down is the feed's own scroll (touch-action: pan-y)
@@ -569,7 +579,7 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     {reading && nameOf.has(reading) && <div className="all-reading-band"><button type="button" className="all-place all-reading" style={{ ["--room-tint" as string]: tint(reading) }} aria-label={`Focus ${nameOf.get(reading)}, at this message`} title={`Focus ${nameOf.get(reading)}`}
       onClick={(e) => { label.el = null; label.rect = e.currentTarget.getBoundingClientRect(); onOpen(reading, readingRow.current); }}>{nameOf.get(reading)}</button></div>}
     <div className="all-feed" ref={list} role="log" aria-label="All rooms, by time" aria-live="polite"
-    onScroll={(e) => { const el = e.currentTarget; if (performance.now() >= readHold.current) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; if (!lookFrame.current) lookFrame.current = requestAnimationFrame(lookAtTop); }}
+    onScroll={(e) => { const el = e.currentTarget; if (performance.now() >= readHold.current && Math.abs(el.scrollTop - ownTop.current) >= 1) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; if (!lookFrame.current) lookFrame.current = requestAnimationFrame(lookAtTop); }}
     onPointerDown={(e) => {
       if (e.pointerType !== "touch" || e.clientX < EDGE_PX || e.clientX > innerWidth - EDGE_PX || !(e.target instanceof Element)) return;
       if (e.target.closest("pre, table, .md-table-wrap, a, button, video, audio, input, textarea, summary, .attachments")) return;
