@@ -27,6 +27,41 @@ export function privateRoot(tree: Tree, path: string): { path: string; name: str
   return hit ? { path: hit.path, name: hit.name } : null;
 }
 
+/** T-335: is this node inside a private place, a done or archived one included? Those aren't in the tree's walk, so their own way up is followed. */
+export function isPrivatePath(tree: Tree, path: string): boolean {
+  if (tree.nodes.has(path)) return isPrivateNode(tree, path);
+  const byRef = new Map(tree.archived.flatMap((a) => [[a.path, a], [a.id, a]] as const));
+  const liveById = new Map([...tree.nodes.values()].map((n) => [n.id, n.path]));
+  const seen = new Set<string>();
+  const stack = [path];
+  while (stack.length) {
+    const at = stack.pop()!;
+    if (seen.has(at)) continue;
+    seen.add(at);
+    const live = tree.nodes.has(at) ? at : liveById.get(at);
+    if (live) { if (isPrivateNode(tree, live)) return true; continue; }
+    const a = byRef.get(at);
+    if (!a) continue;
+    if (isPrivateName(a.name)) return true;
+    stack.push(...[a.parent, ...(a.links ?? [])].filter((x): x is string => !!x));
+  }
+  return false;
+}
+/**
+ * T-335: does this room belong to a private place? Named by a private node (a done or archived one too: a session can still wait in its room), or that
+ * node's own. Never a room the node only borrows: a private area with no room of its own talks in Uni's, and that doesn't make Uni's private.
+ */
+export function isPrivateRoom(tree: Tree, channel: string, rooms: readonly RoomRef[], uni: RoomRef | null): boolean {
+  const room = rooms.find((r) => r.id === channel);
+  const names = (n: Area) => [...n.rooms, ...n.channels, ...(typeof n.metadata.room === "string" ? [n.metadata.room] : [])].some((c) => c === channel || (!!room && roomSlug(c).toLowerCase() === roomSlug(room.name).toLowerCase()));
+  for (const n of tree.nodes.values()) {
+    if (!isPrivateNode(tree, n.path)) continue;
+    const v = roomView(tree, n.path, rooms, uni);
+    if ((v.own && v.target?.id === channel) || names(n)) return true;
+  }
+  return tree.archived.some((a) => isPrivatePath(tree, a.path) && names(a));
+}
+
 /** r21: the same, read from the task tree (its nodes and parents), for while the areas aren't read yet: privacy never waits on them. */
 export function privateRootIn(tasks: { byPath: ReadonlyMap<string, { path: string; name: string }>; parent: ReadonlyMap<string, string> }, path: string): { path: string; name: string } | null {
   let hit: { path: string; name: string } | null = null;

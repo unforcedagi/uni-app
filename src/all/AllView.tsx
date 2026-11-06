@@ -105,8 +105,9 @@ export function forgetComposer() {
 }
 if (import.meta.env.VITE_AREAS_TESTHOOKS === "1" && typeof window !== "undefined") (window as unknown as { __allHeld: typeof held }).__allHeld = held;
 
-/** T-335 All v2: where the composer is replying, if anywhere. A room that left All drops it. */
-export function useReplyTarget(rooms: readonly AllRoom[]): [ReplyTarget | null, (t: ReplyTarget | null) => void] {
+/** T-335 All v2: where the composer is replying, if anywhere. A room that has left All stays the target, with Send held, until you clear it: its words
+ *  never quietly become an unaddressed message that the model reads and something else routes. */
+export function useReplyTarget(): [ReplyTarget | null, (t: ReplyTarget | null) => void] {
   // only the target: a key typed in the composer doesn't redraw the home or the feed
   const [target, setTarget] = useState(held.target);
   useLayoutEffect(() => {
@@ -116,9 +117,7 @@ export function useReplyTarget(rooms: readonly AllRoom[]): [ReplyTarget | null, 
     return () => { watchers.delete(look); };
   }, []);
   const choose = useCallback((t: ReplyTarget | null) => setHeld(t ? { target: t, taps: held.taps + 1 } : { target: null }), []);
-  const gone = !!target && rooms.length > 0 && !rooms.some((r) => r.id === target.room);
-  useEffect(() => { if (gone) choose(null); }, [gone, choose]);
-  return [gone ? null : target, choose];
+  return [target, choose];
 }
 
 /** A reply on its way or just sent, shown at once in the feed. */
@@ -159,7 +158,8 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   const model = useModelRoute(text, doorRooms, !target && !wordPicks.some((p) => p.named), chosen !== null);
   const picks = useMemo(() => mergeRoute(wordPicks, model.picks.length ? model : null), [wordPicks, model]);
   // T-335 chat feel: a sure route is chosen for you (and named on Send); a guess is only offered, dashed, until you tap it
-  const to = target ? [target.room] : (chosen ?? picks.filter((p) => p.sure).map((p) => p.id)).filter((id) => nameOf.has(id));
+  const targetRoom = target ? rooms.find((r) => r.id === target.room) ?? null : null;
+  const to = target ? (targetRoom ? [target.room] : []) : (chosen ?? picks.filter((p) => p.sure).map((p) => p.id)).filter((id) => nameOf.has(id));
   // what you dropped stays on offer, dashed, so it is one tap back
   const offered = target ? [] : picks.filter((p) => (chosen || !p.sure) && nameOf.has(p.id) && !to.includes(p.id));
   const done = attempt && attempt.body === text ? attempt.done : null;
@@ -228,7 +228,7 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
 
   async function send() {
     if (held.sending) return;
-    if (held.target) { await reply(held.target); return; }
+    if (held.target) { if (rooms.some((r) => r.id === held.target!.room)) await reply(held.target); return; }
     const sentText = held.text, body = sentText.trim();
     if (!body || !left.length) return;
     if (!held.chosen && performance.now() < settling.current) { setRouteMoved(true); return; }
@@ -241,7 +241,11 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
     try {
       const r = await sendEach(to, body, post, run.done);
       if (era !== held.era) return;
-      setHeld({ outcome: { sent: to.filter((id) => run.done.has(id)), failed: r.failed, noUni } });
+      const sent = to.filter((id) => run.done.has(id));
+      // you wrote more while it was out: the box isn't these words any more, so what failed is offered back on its own, never re-sent with the new ones
+      if (r.failed.length && held.text !== sentText) setHeld({ outcome: { sent, failed: [], noUni }, attempt: null, lost: [...held.lost, ...r.failed.map((f) => ({ body, target: { room: f.id, root: null }, error: f.error }))] });
+      // a message tapped while it was out doesn't catch these words: "send again" goes where the note says
+      else setHeld({ outcome: { sent, failed: r.failed, noUni }, ...(r.failed.length ? { target: null } : {}) });
       if (r.sent.length) {
         onSent?.(r.sent);
         logOutcome({ suggestion: model.suggestion, model: model.picks.map((p) => p.id), modelState: model.state, words: wordPicks.map((p) => p.id), sent: r.sent, edited });
@@ -257,15 +261,14 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   }
 
   const named = (ids: readonly string[]) => andList(ids.map((id) => nameOf.get(id) ?? id));
-  const targetRoom = target ? rooms.find((r) => r.id === target.room) ?? null : null;
-  const where = targetRoom ? roomAddress(targetRoom) : "";
+  const where = targetRoom ? roomAddress(targetRoom) : "that room";
   const hasText = !!text.trim();
   return <section className={`all-compose all-compose-${place}`} aria-label="Talk to Uni"
     onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) onKeyboard?.(true); }}
     onBlurCapture={(e) => { const box = e.currentTarget; requestAnimationFrame(() => onKeyboard?.(box.contains(document.activeElement))); }}>
-    {target && targetRoom && <div className="all-route" role="group" aria-label="Where this goes">
+    {target && <div className="all-route" role="group" aria-label="Where this goes">
       <span className="all-chip chosen all-reply-chip" data-room={target.room}>
-        <span className="all-chip-name">Replying in {where}{target.root ? " · thread" : ""}</span>
+        <span className="all-chip-name">{targetRoom ? <>Replying in {where}{target.root ? " · thread" : ""}</> : "That room isn't in All now"}</span>
         <button type="button" className="all-chip-x" aria-label={`Stop replying in ${where}`} onClick={() => { onTarget?.(null); field.current?.focus({ preventScroll: true }); }}>×</button>
       </span>
     </div>}
@@ -286,13 +289,16 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
     </div>}
     <div className="compose-row all-row">
       <textarea ref={field} rows={1} value={text} aria-label="Message for your rooms" onFocus={onFocus} placeholder={target ? `Reply in ${where}` : place === "all" ? "Say something, or tap a message" : "Talk to Uni"}
-        onChange={(e) => setHeld({ text: e.target.value, outcome: null, attempt: held.attempt?.body === e.target.value ? held.attempt : null })}
+        onChange={(e) => setHeld({ text: e.target.value, outcome: null, attempt: held.attempt?.body === e.target.value ? held.attempt : null,
+          // an empty box is the end of that message: its chosen rooms go with it
+          chosen: e.target.value.trim() ? held.chosen : null })}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !touchKeyboard()) { e.preventDefault(); void send(); } }} />
       <button type="button" className={`send all-send${hasText ? "" : " all-send-idle"}`} disabled={!hasText || !left.length || sending}
         aria-label={!hasText ? "Send" : left.length ? `Send to ${named(left)}` : "Choose a room to send to"} onClick={() => void send()}>
         {!hasText ? "↑" : sending ? "Sending…" : target ? "Send" : left.length > 1 ? `Send to ${left.length} rooms` : left.length ? `Send to ${nameOf.get(left[0])}` : "Choose a room"}
       </button>
     </div>
+    {target && !targetRoom && <p className="all-note" role="status">Nothing goes there from here. Clear this to choose another room; your words stay.</p>}
     {routeMoved && <p className="all-note" role="status">The route just changed. Check it, then send.</p>}
     {!target && hasText && !to.length && <p className="all-note" role="status">Pick a room, or keep typing. Nothing is sent until you do.</p>}
     {outcome && (outcome.sent.length > 0 || outcome.noUni.length > 0 || outcome.failed.length > 0) && <p className={`all-note${outcome.failed.length ? " all-failed" : ""}`} role="status">

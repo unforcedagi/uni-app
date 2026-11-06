@@ -35,12 +35,12 @@ export function useModelRoute(text: string, rooms: readonly DoorRoom[], enabled:
   const body = text.trim();
   const key = JSON.stringify(rooms);
   const [route, setRouteState] = useState<ModelRoute>(() => (enabled && last.key === key && related(body, last.body) ? last.route : IDLE));
-  const s = useRef({ answered: route.picks.length ? last.body : "", route, inFlight: false, queued: false, asks: route.picks.length ? last.asks : 0, latest: body, on: enabled && !hold, key, live: true });
+  const s = useRef({ thought: route.picks.length ? last.body : "", answered: route.picks.length ? last.body : "", route, inFlight: false, queued: false, asks: route.picks.length ? last.asks : 0, latest: body, on: enabled && !hold, key, live: true });
   s.current.latest = body; s.current.on = enabled && !hold; s.current.key = key;
   const setRoute = (r: ModelRoute) => { s.current.route = r; setRouteState(r); };
   const ask = (asked: string) => {
     const st = s.current, roomsNow = JSON.parse(st.key) as DoorRoom[], started = performance.now();
-    st.inFlight = true; st.asks += 1;
+    st.inFlight = true; st.asks += 1; st.thought = asked;
     if (!st.route.picks.length) setRoute({ ...IDLE, state: "waiting" });
     const next = () => {
       st.inFlight = false;
@@ -71,13 +71,15 @@ export function useModelRoute(text: string, rooms: readonly DoorRoom[], enabled:
     // the person's own choice: the answer stays for the log while it is about these words, and goes with them
     if (hold) { if (st.answered && !related(body, st.answered)) { st.answered = ""; st.asks = 0; setRoute(IDLE); } return; }
     if (!enabled || body.length < MIN_CHARS) {
-      st.answered = ""; st.asks = 0; st.queued = false;
+      st.answered = ""; st.thought = ""; st.asks = 0; st.queued = false;
       if (!body) last.body = "";
       if (st.route !== IDLE) setRoute(IDLE);
       return;
     }
     // still typing the same thought: the last answer stays until the next one, so the chips don't flicker; a new thought drops it
-    if (st.answered && !related(body, st.answered)) { st.answered = ""; st.asks = 0; setRoute(IDLE); }
+    if (st.answered && !related(body, st.answered)) { st.answered = ""; setRoute(IDLE); }
+    // a new thought gets its own asks, whether or not the last one was ever answered
+    if (st.thought && !related(body, st.thought)) { st.thought = ""; st.asks = 0; }
     if (body === st.answered || st.asks >= MAX_ASKS) return;
     const pause = setTimeout(() => { if (st.inFlight) st.queued = true; else if (st.asks < MAX_ASKS) ask(st.latest); }, PAUSE_MS);
     return () => clearTimeout(pause);

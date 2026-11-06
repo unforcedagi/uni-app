@@ -36,7 +36,7 @@ def out(o): print(json.dumps(o), flush=True)
 if mode == "hang": time.sleep(60)
 if mode == "die": sys.exit(1)
 out(dict(type="system", subtype="init", tools=["Bash"] if mode == "tools" else [], mcp_servers=[]))
-text = {{"garbage": "I would say the kiln", "none": json.dumps(dict(picks=[dict(id="not-a-room", why="x")]))}}.get(mode) or json.dumps(dict(picks=[
+text = {{"garbage": "I would say the kiln", "none": json.dumps(dict(picks=[dict(id="not-a-room", why="x")])), "badlist": json.dumps(dict(picks=5)), "badid": json.dumps(dict(picks=[dict(id=["ch-kiln"]), 7])), "notobject": "[1, 2]"}}.get(mode) or json.dumps(dict(picks=[
     dict(id="not-a-room", why="made up", sure=True),
     dict(id="ch-kiln", why="glaze {MARK} and\\nmany many many many many more words", sure=False),
     dict(id="ch-kiln", why="twice"),
@@ -59,6 +59,8 @@ LOG = tmp / "log.jsonl"
 (tmp / "runs").mkdir()
 env = {**os.environ, "TMPDIR": str(tmp / "runs"), "UNI_ROUTE_PORT": str(PORT), "UNI_ROUTE_URLS": ORIGIN, "UNI_ROUTE_ALLOW": str(tmp / "allow"), "UNI_ROUTE_LOG": str(LOG), "UNI_ROUTE_CLAUDE": str(FAKE),
        "UNI_ROUTE_DEADLINE": "1.5", "SECRET_THING": "must-not-reach-the-model", "HOME": str(tmp)}
+(tmp / "runs" / "uni-route-1-otherdoor").mkdir()                  # another door's run: not this one's to touch
+(tmp / "runs" / f"uni-route-{PORT}-lasttime").mkdir()              # this door's, from before a crash
 out = open(tmp / "server.out", "w")
 server = subprocess.Popen([sys.executable, "-I", str(HERE / "server.py")], env=env, stdout=out, stderr=subprocess.STDOUT)
 
@@ -118,6 +120,8 @@ def mode(m):
 
 try:
     check("starts and warms a process", wait_warm())
+    check("clears its own old run directory", not (tmp / "runs" / f"uni-route-{PORT}-lasttime").exists())
+    check("leaves another door's alone", (tmp / "runs" / "uni-route-1-otherdoor").exists())
     SUG, OUT = "/route/v1/suggest", "/route/v1/outcome"
     ask = {"text": f"The glaze {MARK} crawled again", "rooms": ROOMS}
 
@@ -177,7 +181,7 @@ try:
 
     # bad answers are errors, and name nothing
     wait_warm()
-    for m, code in (("garbage", 502), ("none", 502), ("tools", 502), ("error", 502), ("hang", 504), ("die", 502)):
+    for m, code in (("garbage", 502), ("none", 502), ("badlist", 502), ("badid", 502), ("notobject", 502), ("tools", 502), ("error", 502), ("hang", 504), ("die", 502)):
         mode(m)
         # a process already waiting was started in the old mode: the stand-in reads its mode only after the words arrive, so this applies
         started = time.time()
@@ -195,7 +199,7 @@ try:
     for _ in range(6):
         post(SUG, ask)
     time.sleep(0.5)
-    runs = list((tmp / "runs").glob("uni-route-*"))
+    runs = list((tmp / "runs").glob(f"uni-route-{PORT}-*"))
     check("dead processes don't pile up directories", len(runs) <= 2, [p.name for p in runs])
     mode("ok")
     # the next ask starts a process that doesn't die, and the door is whole again
@@ -231,7 +235,9 @@ try:
 
     logged = LOG.read_text()
     rows = [json.loads(x) for x in logged.splitlines()]
-    check("the log has the suggestions and the outcomes", {r["kind"] for r in rows} == {"suggest", "outcome"} and sum(r["kind"] == "outcome" for r in rows) == 2)
+    check("a malformed answer still logs its ask, as failed", sum(r["kind"] == "suggest" and r.get("ok") is False and r.get("why") == "no room in the answer" for r in rows) >= 3)
+    check("no answer reached the catch-all", not any(r["kind"] == "error" for r in rows))
+    check("the log has the suggestions and the outcomes", {"suggest", "outcome"} <= {r["kind"] for r in rows} and sum(r["kind"] == "outcome" for r in rows) == 2)
     check("the log never holds the words or a reason", MARK not in logged and "glaze" not in logged and "crawled" not in logged, logged[:300])
     check("the log is private", stat.S_IMODE(LOG.stat().st_mode) == 0o600)
     out.flush()
@@ -252,7 +258,7 @@ finally:
         server.kill()
     out.close()
     time.sleep(0.2)
-    check("a stopped door leaves no run directory", not list((tmp / "runs").glob("uni-route-*")), [p.name for p in (tmp / "runs").glob("*")])
+    check("a stopped door leaves no run directory", not list((tmp / "runs").glob(f"uni-route-{PORT}-*")), [p.name for p in (tmp / "runs").glob("*")])
     shutil.rmtree(tmp, ignore_errors=True)
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

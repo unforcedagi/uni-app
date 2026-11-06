@@ -148,7 +148,7 @@ class Run:
     live: set = set()
 
     def __init__(self):
-        self.base = tempfile.mkdtemp(prefix="uni-route-")
+        self.base = tempfile.mkdtemp(prefix=f"uni-route-{PORT}-")
         self.born = time.time()
         Run.live.add(self)
         try:
@@ -330,8 +330,9 @@ def parse_picks(answer: str, rooms: list[dict]) -> list[dict]:
         raise RuntimeError("the answer wasn't JSON") from e
     known = {r["id"] for r in rooms}
     picks, seen_ids = [], set()
-    for p in data.get("picks") or [] if isinstance(data, dict) else []:
-        if not isinstance(p, dict) or p.get("id") not in known or p["id"] in seen_ids:
+    listed = data.get("picks") if isinstance(data, dict) else None
+    for p in listed if isinstance(listed, list) else []:
+        if not isinstance(p, dict) or not isinstance(p.get("id"), str) or p["id"] not in known or p["id"] in seen_ids:
             continue
         seen_ids.add(p["id"])
         why = " ".join(re.sub(r"[\x00-\x1f\x7f]", " ", str(p.get("why") or "")).split()[:6])[:48]
@@ -493,7 +494,7 @@ def main() -> None:
     server = Server(("127.0.0.1", PORT), Handler)   # first: a second instance dies here, before it touches anything
     # none outlives its run: last time's are cleared at start, this time's at stop
     for old in Path(tempfile.gettempdir()).iterdir():
-        if re.fullmatch(r"uni-route-[a-z0-9_]{8}", old.name):
+        if re.fullmatch(rf"uni-route-{PORT}-[a-z0-9_]{{8}}", old.name):
             shutil.rmtree(old, ignore_errors=True)
     pool = Pool()
 

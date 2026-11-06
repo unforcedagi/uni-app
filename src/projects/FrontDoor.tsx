@@ -2,7 +2,7 @@
 // the room last talked, and a small mark when sessions are working there. No ids. Above the rooms, one quiet line on what needs you
 // (round 2: #Uni is archived, so this is where it lives); under them, one quiet line on the Claude accounts, which opens the full card.
 // T-304: the working mark counts the room's Uni at work on your message too, not only Claude Code sessions.
-import { useMemo, useState, type ReactNode } from "react";
+import { useRef, useCallback, useMemo, useState, type ReactNode } from "react";
 import { AllComposer, AllFeed, roomWords, useEchoes, useReplyTarget, useRoomsFeed, type AllRoom } from "../all/AllView";
 import { liveInArea, span } from "./model";
 import { asOf, useWork } from "./store";
@@ -71,6 +71,17 @@ function workingWords(sessions: number, turn: boolean): string {
   return turn ? `Uni is answering here${s ? ` and ${s}` : ""}` : s;
 }
 
+/** T-335: All before the rooms are read, or when no area has a room of its own: it says which, never another screen under All's name. */
+export function AllEmpty({ reading, error = null, onBack }: { reading: boolean; error?: (() => void) | null; onBack: () => void }) {
+  return <div className="fd fd-all all-empty" data-place="front-door" data-view="all">
+    <header className="fd-head fd-allhead">
+      <div className="fd-mark"><h1 className="fd-title"><Enso />All</h1></div>
+      <button type="button" className="note-action all-back" onClick={onBack}>← Back</button>
+    </header>
+    <p className="all-quiet" role="status">{error ? <>Couldn't read your places just now. <button type="button" className="all-link" onClick={error}>Try again</button></> : reading ? "Reading your rooms…" : "No room to show here yet. An area with a room of its own shows up here."}</p>
+  </div>;
+}
+
 export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
   /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */
   all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string) => void } | null;
@@ -97,8 +108,12 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   const feed = useRoomsFeed(allRooms, !!all && (view === "all" || wantWords));
   const words = useMemo(() => roomWords(feed.byRoom, me), [feed.byRoom, me]);
   const openAt = all?.onOpenAt;
-  const [target, setTarget] = useReplyTarget(allRooms);
+  const [target, setTarget] = useReplyTarget();
   const echoes = useEchoes(feed.byRoom);
+  // the same function across redraws, so the feed's rows stay as they are
+  const opener = useRef(openAt);
+  opener.current = openAt;
+  const openFromFeed = useCallback((room: string, ref: string) => opener.current?.(room, ref), []);
   const composer = all && <AllComposer rooms={allRooms} words={words} onOpen={(id) => openAt?.(id)} onFocus={() => setWantWords(true)} onSent={feed.reread} place={view}
     target={target} onTarget={setTarget} echo={echoes.send} onKeyboard={onComposerFocus} />;
   // T-335 glow-up: how many places are moving (a session or the room's Uni at work), for the home's one sentence
@@ -110,7 +125,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
       <div className="fd-mark"><h1 className="fd-title"><Enso />All</h1><span className="fd-date">Every room, newest at the bottom</span></div>
       <button type="button" className="note-action all-back" onClick={allPlace!.onBack}>← {allPlace!.backTo}</button>
     </header>
-    <AllFeed rooms={allRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={(room, ref) => openAt?.(room, ref)} target={target} onTarget={setTarget} echoes={echoes.shown} />
+    <AllFeed rooms={allRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={openFromFeed} target={target} onTarget={setTarget} echoes={echoes.shown} />
     {composer}
   </div>;
   return <div className="fd" data-place="front-door" data-view="places">

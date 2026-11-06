@@ -600,3 +600,103 @@ test.describe('review 3', () => {
     await expect(page.locator('.all-note')).toHaveCount(0);
   });
 });
+
+// The second look (/code-review), with its own fixes.
+test.describe('review 4', () => {
+  test('a reply\'s room leaves All: the words stay aimed there with Send held, nothing is asked or routed, until you clear it', async ({ page }) => {
+    await boot(page, { mode: 'ok', picks: [{ id: 'ch-table', why: 'supper plans', sure: true }] });
+    await allIn(page);
+    await row(page, 'k3').locator('.message-content').click();
+    await field(page).fill('Is the honey ready to jar?');
+    // the room goes (made private, or done): the target names a room All no longer has
+    await page.evaluate(() => { (window as any).__allHeld.target = { room: 'ch-gone', root: null }; (document.activeElement as HTMLElement | null)?.blur(); });
+    await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
+    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await expect(reply(page)).toContainText("isn't in All now");
+    await page.waitForTimeout(700);
+    expect(await calls(page, 'route_suggest')).toEqual([]);
+    await expect(send(page)).toBeDisabled();
+    if (!touch()) { await field(page).press('Enter'); await page.waitForTimeout(150); }
+    expect(await posts(page)).toEqual([]);
+    await expect(chosen(page)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Stop replying in that room' }).click();
+    await expect(field(page)).toHaveValue('Is the honey ready to jar?');
+    await expect(reply(page)).toHaveCount(0);
+    await expect(chosen(page)).not.toHaveCount(0);
+  });
+
+  test('a message tapped while a routed send is out doesn\'t catch its words when it fails: send again goes where the note says', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await page.evaluate(() => { const w = window as any; w.__postDelay = 700; const prev = w.__extraInvoke; w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'post_message' && !w.__failedOnce) { w.__failedOnce = true; await new Promise((r) => setTimeout(r, 700)); throw 'relay said no'; } return prev(cmd, a); }; });
+    await field(page).fill('Is the honey ready to jar?');
+    await send(page).click();
+    await row(page, 'k3').locator('.message-content').click();
+    await expect(page.locator('.all-note.all-failed')).toContainText('Bee Garden');
+    await expect(reply(page)).toHaveCount(0);
+    await expect(field(page)).toHaveValue('Is the honey ready to jar?');
+    await expect(send(page)).toHaveText('Send to Bee Garden');
+    await page.waitForTimeout(400); // the route just moved back: a Send in that moment is held (its own test)
+    await send(page).click();
+    // the try that failed, and this one; none to the tapped room
+    await expect.poll(async () => (await posts(page)).map((p: any) => p.channel)).toEqual(['ch-bees', 'ch-bees']);
+  });
+
+  test('you wrote more while a multi-room send was out and one room failed: that room is offered back; the next Send doesn\'t repeat anything', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await page.evaluate(() => { const w = window as any; w.__postDelay = 500; const prev = w.__extraInvoke; w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'post_message' && a.channel === 'ch-north' && !w.__failedOnce) { w.__failedOnce = true; await new Promise((r) => setTimeout(r, 900)); throw 'relay said no'; } return prev(cmd, a); }; });
+    await field(page).fill('Tell Choir and North Field the hall is booked');
+    await send(page).click();
+    await field(page).fill('Something else entirely');
+    await expect(page.locator('.all-note.all-failed')).toContainText('North Field', { timeout: 5000 });
+    await expect(page.locator('.all-note.all-failed')).toContainText('Tell Choir');
+    await expect(field(page)).toHaveValue('Something else entirely');
+    await expect(page.getByRole('button', { name: 'Put it back' })).toBeVisible();
+  });
+
+  test('after failed asks, a new thought gets its own', async ({ page }) => {
+    await boot(page, { mode: 'down' });
+    await allIn(page);
+    await field(page).click();
+    for (const w of ['Could we', ' borrow', ' the bowls', ' for Saturday', ' please', ' thanks']) { await page.keyboard.type(w); await page.waitForTimeout(520); }
+    const n = (await calls(page, 'route_suggest')).length;
+    expect(n).toBeLessThanOrEqual(4);
+    await page.evaluate(() => { const s = (window as any).__routeStub; s.mode = 'ok'; s.picks = [{ id: 'ch-kiln', why: 'the shelf', sure: true }]; });
+    await field(page).fill('A completely different message');
+    await expect(chosen(page)).toHaveText(['Kiln Studio']);
+    await expect(page.locator('[data-why]')).toContainText('the shelf');
+  });
+
+  test('an empty box ends that message: its chosen rooms go, and the next one is asked about', async ({ page }) => {
+    await boot(page, { mode: 'ok', picks: [{ id: 'ch-kiln', why: 'the shelf', sure: true }] });
+    await allIn(page);
+    await field(page).fill('Tell the choir');
+    await page.getByRole('button', { name: 'Add a room' }).click();
+    await page.getByRole('list', { name: 'Rooms to add' }).getByRole('button', { name: 'Long Table' }).click();
+    await expect(chosen(page)).toContainText(['Long Table']);
+    await field(page).fill('');
+    await field(page).fill('A completely different message');
+    await expect(page.locator('[data-why]')).not.toContainText('your choice');
+    await expect(chosen(page)).toHaveText(['Kiln Studio']);
+  });
+
+  test('All opened before the areas are read says so, with a way back; then it fills', async ({ page }) => {
+    await page.addInitScript(() => { if (window.innerWidth === 828 && window.innerHeight === 1104) localStorage.setItem('uni.motion', 'calm'); });
+    await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, queryDelay: 1800 } as any);
+    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await expect(page.locator('.all-empty')).toContainText('Reading your rooms');
+    await expect(page.locator('.all-empty .all-back')).toHaveText('← Back');
+    await expect(feed(page).locator('article.all-msg')).toHaveCount(13);
+    await expect(page.locator('.all-empty')).toHaveCount(0);
+  });
+
+  test('on touch, the chip\'s × is a full 44 px', async ({ page }) => {
+    test.skip(!touch(), 'touch only');
+    await boot(page);
+    await allIn(page);
+    await row(page, 'k3').locator('.message-content').click();
+    const b = (await page.getByRole('button', { name: 'Stop replying in #kiln-studio' }).boundingBox())!;
+    expect(Math.min(b.width, b.height)).toBeGreaterThanOrEqual(44);
+  });
+});

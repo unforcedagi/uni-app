@@ -21,7 +21,7 @@ import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { rolledNeeds, storedSidebarWidth } from "./sidebarState";
 import { useRailHidden, useShortTree, useTreeBesideNote, useUprightPhone, useWide } from "./homeLayout";
-import { privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "./treeRooms";
+import { isPrivatePath, isPrivateRoom, privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
 import { approvalsAt, rolledUnread, unreadByPath, unreadByRoom } from "./roomUnread";
 import { useNav, type NavControls } from "../navContext";
@@ -43,7 +43,7 @@ import { ApprovalsContext, useApprovalList } from "../approvalsLive";
 import type { Approval } from "../approvals";
 import "./areas.css";
 import type { AllRoom } from "../all/AllView";
-import { FrontDoor, type Door, type Needs, type NewRoom } from "../projects/FrontDoor";
+import { AllEmpty, FrontDoor, type Door, type Needs, type NewRoom } from "../projects/FrontDoor";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
 import { plainWords } from "../projects/live";
@@ -429,6 +429,8 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
   // inside it), a mark where sessions are working, and a quiet usage line. A vault with no areas yet, or a profile without chat (no rooms
   // to open), keeps the tree home below.
   const doorAreas = chat && data ? childrenOf(data.tree, ROOT) : [];
+  // T-335: All with nothing read yet, or no areas: it says so, and the way back is there (it names no place: privacy isn't known yet)
+  if (allPlace && !doorAreas.length) return <div className="areas-home tree-home-wrap"><AllEmpty reading={signingIn || loading || !data} error={error && !data ? retryAreas : null} onBack={allPlace.onBack} /></div>;
   if (path === null && doorAreas.length) {
     const doors: Door[] = doorAreas.map((a) => {
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
@@ -452,19 +454,11 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
     };
     // T-335 All view: every area's own room, interleaved, with a composer that routes; a private area stays out of it
     const allRooms: AllRoom[] = doors.filter((d) => d.room && !privateRoot(data!.tree, d.path)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, about: d.about ?? null, lastTs: d.lastTs }));
-    /** A room inside a private place: it stays out of All, and so does anything that would name it. */
-    const privateChannel = (channel: string) => {
-      const room = roomRefs.find((r) => r.id === channel);
-      // a done or archived project's room too: a session can still wait there
-      for (const n of [...data!.tree.nodes.values(), ...(data!.tree.archived ?? [])]) {
-        if (!privateRoot(data!.tree, n.path)) continue;
-        if (roomView(data!.tree, n.path, roomRefs, uniRef).target?.id === channel || n.rooms.includes(channel) || (room && n.rooms.includes(room.name))) return true;
-      }
-      return false;
-    };
     /** All's way back names where you came from, unless that is inside a private place (the place itself, a room or a thread of it). */
-    const fromPrivate = (from: { path?: string; channel?: string } | null | undefined) => !!from && (!!(from.path && privateRoot(data!.tree, from.path)) || (!!from.channel && privateChannel(from.channel)));
+    const privateChannel = (channel: string) => isPrivateRoom(data!.tree, channel, roomRefs, uniRef);
+    const fromPrivate = (from: { path?: string; channel?: string } | null | undefined) => !!from && (!!(from.path && isPrivatePath(data!.tree, from.path)) || (!!from.channel && privateChannel(from.channel)));
     const all = allRooms.length ? { rooms: allRooms, onOpenAt: (room: string, ref?: string) => { setDrawer(false); (actions.openRoom as (id: string, focus?: string | null) => void)(room, ref ?? null); } } : null;
+    if (allPlace && !all) return <div className="areas-home tree-home-wrap"><AllEmpty reading={roomsPending} onBack={allPlace.onBack} /></div>;
     return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={allPlace ? approvalsAll.list.filter((x) => !privateChannel(x.channel)) : approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} all={all} allPlace={allPlace && { ...allPlace, backTo: fromPrivate(allPlace.from) ? "Back" : allPlace.backTo }} onComposerFocus={actions.composerFocus} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
   }

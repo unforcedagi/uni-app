@@ -119,6 +119,7 @@
 :root[data-screen="ink"] .all-msg.targeted.mine .message-content { box-shadow: 0 0 0 2px #000; }
 :root[data-screen="ink"] .all-reply-go { transition: none; border-color: #000; }
 @media (pointer: coarse) {
-  .all-back, .all-reply-chip { min-height: 44px; }
-  .all-chip-x { width: 36px; height: 36px; }
+  .all-back, .all-chip { min-height: 44px; }
+  .all-chip-x { width: 44px; height: 44px; margin: -2px -4px -2px 0; }
 }
+.all-empty .all-quiet { width: 100%; max-width: 720px; margin: 24px auto; }

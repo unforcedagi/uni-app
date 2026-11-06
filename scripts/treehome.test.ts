@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree, ROOT } from "../src/areas/treeCore.ts";
 import { ownRoom } from "../src/areas/talkCore.ts";
-import { fnv1a, isPrivateName, isPrivateNode, privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "../src/areas/treeRooms.ts";
+import { fnv1a, isPrivateName, isPrivateNode, isPrivatePath, isPrivateRoom, privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "../src/areas/treeRooms.ts";
 import { parseBrief } from "../src/areas/briefCore.ts";
 import { HOME_LAYOUT_KEY, migrateHomeLayout } from "../src/areas/homeLayout.ts";
 
@@ -132,5 +132,27 @@ check("T-293: a private area that absorbed its parts: items repointed to it are 
   const byPath = new Map([...t.nodes.values()].map((n) => [n.path, { path: n.path, name: n.name }]));
   assert.deepEqual(privateRootIn({ byPath, parent: new Map() }, "Areas/Sanctum"), { path: "Areas/Sanctum", name: "Sanctum" });
   assert.equal(privateRoot(t, "Areas/Boulder"), null);
+});
+check("T-335: a private place's rooms, done or archived ones too, and never a room it only borrows", () => {
+  const rooms = [UNI, { id: "r-sad", name: "Sanctum" }, { id: "r-old", name: "old-sit" }, { id: "r-older", name: "older-sit" }, { id: "r-bou", name: "boulder" }, { id: "r-gone", name: "gone-work" }];
+  const t = buildTree([
+    area("a-sad", "Sanctum", { room: "Sanctum" }),
+    area("a-rel", "Relationships"),                                                            // private, no room of its own: talks in Uni's
+    area("a-bou", "Boulder", { room: "boulder" }),
+    proj("p-old", "Old Sit", "Areas/Sanctum", { room: "old-sit", status: "done" }),            // done, under a private area
+    proj("p-older", "Older Sit", "Projects/Old Sit", { room: "older-sit", status: "archived" }), // archived, under the done one
+    proj("p-gone", "Gone Work", "Areas/Boulder", { room: "gone-work", status: "done" }),       // done, under a public one
+  ]);
+  assert.equal(isPrivateRoom(t, "r-sad", rooms, UNI), true, "the private area's own room");
+  assert.equal(isPrivateRoom(t, "r-old", rooms, UNI), true, "a done project under it");
+  assert.equal(isPrivateRoom(t, "r-older", rooms, UNI), true, "archived, under the done one");
+  assert.equal(isPrivateRoom(t, "r-uni", rooms, UNI), false, "Uni's room is not private because a private area borrows it");
+  assert.equal(isPrivateRoom(t, "r-bou", rooms, UNI), false);
+  assert.equal(isPrivateRoom(t, "r-gone", rooms, UNI), false, "done, under a public area");
+  assert.equal(isPrivatePath(t, "Projects/Old Sit"), true);
+  assert.equal(isPrivatePath(t, "Projects/Older Sit"), true);
+  assert.equal(isPrivatePath(t, "Projects/Gone Work"), false);
+  assert.equal(isPrivatePath(t, "Areas/Relationships"), true);
+  assert.equal(isPrivatePath(t, "Areas/Boulder"), false);
 });
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
