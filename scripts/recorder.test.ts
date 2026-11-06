@@ -247,16 +247,28 @@ await editing(async ({ session, rec, stream }) => {
   assert.equal(session.sections.length, 1);
 });
 
-// The recorder stopping by itself (the mic unplugged mid-section) still delivers everything, as it always has
+// The recorder stopping by itself (the mic unplugged): never paused, it delivers at once as it always has
+await editing(async ({ session, clips, rec }) => {
+  await session.start("A", "for A");
+  rec().finish("whole");
+  assert.equal(session.phase, "idle");
+  await tick();
+  assert.deepEqual(clips.map((c) => c.text), ["whole"]);
+});
+// ...but a recording that's been paused or edited lands paused: it isn't sent without the look it was paused for
 await editing(async ({ session, clips, rec, joined }) => {
   await session.start("A", "for A");
   const p = session.pause(); rec().finish("one"); await p;
   await session.resume();
   rec().finish("two");
+  assert.equal(session.phase, "paused");
   await tick(); await tick();
-  assert.deepEqual(joined, [["one", "two"]]);
-  assert.deepEqual(clips.map((c) => c.text), ["joined"]);
-  assert.equal(session.phase, "idle");
+  assert.deepEqual(clips, []);
+  assert.deepEqual(joined, []);
+  assert.deepEqual(session.sections.length, 2);
+  await session.resume();
+  assert.equal(session.phase, "recording", "and it can go on");
+  session.stop();
 });
 
 // Calls out of turn do nothing
@@ -288,14 +300,18 @@ await editing(async ({ session, clips, rec }) => {
   assert.deepEqual(clips.map((c) => c.text), ["joined"], "nothing recorded and stopped is dropped");
 });
 
-// Review: while a recording that stopped by itself joins, the phase says so and the controls can't act
-await editing(async ({ session, rec }) => {
+// Review: while Stop's join runs, pause, resume and delete do nothing
+await editing(async ({ session, rec, joined }) => {
   await session.start("A", "for A");
   const p = session.pause(); rec().finish("one"); await p;
   await session.resume();
+  session.stop();
   rec().finish("two");
   assert.equal(session.phase, "finishing");
+  await session.pause(); await session.resume();
+  session.removeSection(session.sections[0]?.id ?? 1); session.undoRemove(); session.discard();
   await tick(); await tick();
+  assert.deepEqual(joined, [["one", "two"]], "both sections, once");
 });
 
 // Review: a muted mic is no mic; resume asks again and lets the old one go
@@ -429,4 +445,44 @@ await (async () => {
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNav });
   Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: previousRec });
 }
+// Review 3: discard works while resume waits on a mic that may never answer: the card is never a dead end
+{
+  const stream = new FakeStream(), late = new FakeStream();
+  let answer!: (s: FakeStream) => void;
+  let asked = 0;
+  const previousNav = globalThis.navigator, previousRec = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: () => asked++ === 0 ? Promise.resolve(stream) : new Promise((r) => { answer = r; }) } } });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: FakeRecorder });
+  FakeRecorder.instances = [];
+  const discarded: string[] = [];
+  const session = new RecorderSession<string>(() => { throw new Error("nothing is delivered"); }, () => {}, { onDiscard: (o) => discarded.push(o) });
+  await session.start("A", "for A");
+  const p = session.pause(); FakeRecorder.instances[0].finish("one"); await p;
+  stream.ended = true;
+  const resuming = session.resume();
+  session.discard();
+  assert.equal(session.phase, "idle");
+  assert.deepEqual(discarded, ["A"]);
+  assert.equal(recordingHolder(), null);
+  answer(late);
+  await resuming;
+  assert.equal(late.stopped, 1);
+  assert.equal(session.phase, "idle");
+  session.dispose();
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNav });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: previousRec });
+}
+
+// Review 3: the owner going away during the one-by-one fallback still delivers every section
+await editing(async ({ session, clips, rec }) => {
+  await session.start("A", "for A");
+  const p = session.pause(); rec().finish("one"); await p;
+  await session.resume();
+  session.stop();
+  rec().finish("two");
+  session.dispose();
+  await tick(); await tick(); await tick(); await tick();
+  assert.deepEqual(clips.map((c) => c.text), ["one", "two"]);
+}, async () => { throw new Error("cannot join"); });
+
 console.log("recorder tests passed");

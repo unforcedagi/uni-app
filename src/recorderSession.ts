@@ -97,7 +97,9 @@ export class RecorderSession<Origin> {
     }
     const landed = this.pauseLanded;
     this.pauseLanded = null;
-    if (this.afterSection === "pause") {
+    // The recorder stopped by itself (the mic went): a recording that's been paused or edited isn't sent without its look.
+    const edited = this.sections.length > 1 || this.removed.length > 0;
+    if (this.afterSection === "pause" || (this.afterSection === null && edited)) {
       this.afterSection = null;
       this.setPhase("paused");
     } else {
@@ -235,7 +237,7 @@ export class RecorderSession<Origin> {
 
   /** Drop the whole paused recording: nothing goes out. */
   discard() {
-    if (this.phase !== "paused") return;
+    if (this.phase !== "paused" && this.phase !== "resuming") return;
     const origin = this.origin as Origin;
     this.stopStream();
     try { if (!this.disposed) this.options.onDiscard?.(origin); }

@@ -68,6 +68,7 @@ async function boot(page: Page, opts: { noWebm?: boolean } = {}) {
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: 'Message Test room' })).toBeVisible();
 }
+const BETWEEN_TAPS = 400; // what a person takes; a quicker second tap is a slip, and is ignored
 const startInRoom = async (page: Page) => {
   await press(page, button(page, 'Record a voice message'));
   await expect(button(page, 'Pause recording')).toBeVisible();
@@ -76,10 +77,12 @@ const pause = async (page: Page) => {
   await press(page, button(page, 'Pause recording'));
   await expect(page.getByRole('group', { name: 'Paused recording' })).toBeVisible();
   await expect(button(page, 'Resume recording')).toBeEnabled();
+  await wait(page, BETWEEN_TAPS);
 };
 const resume = async (page: Page) => {
   await press(page, button(page, 'Resume recording'));
   await expect(button(page, 'Pause recording')).toBeVisible();
+  await wait(page, BETWEEN_TAPS);
 };
 const uploads = (page: Page): Promise<{ cmd: string; bytes: number[]; headers: Record<string, string> }[]> => page.evaluate(() => (window as any).uploads);
 const posts = (page: Page) => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message').length);
@@ -315,6 +318,27 @@ test('Two quick taps on Pause never send', async ({ page }) => {
     await expect(button(page, 'Stop recording voice message')).toBeVisible();
     if (await button(page, 'Resume recording').isVisible()) await resume(page);
   }
+});
+
+for (const view of ['upright', 'on its side'] as const) test(`Two quick taps on Resume never send (phone ${view})`, async ({ page }) => {
+  test.skip(test.info().project.name !== 'mobile', 'a thumb');
+  if (view === 'on its side') await page.setViewportSize({ width: 740, height: 360 });
+  await boot(page);
+  await startInRoom(page);
+  await wait(page, 600);
+  await pause(page);
+  // at the point of Resume where, once it's the running pill again, Stop will be
+  await resume(page);
+  const stop = (await button(page, 'Stop recording for Test room').boundingBox())!;
+  await pause(page);
+  const resumeBox = (await button(page, 'Resume recording').boundingBox())!;
+  const x = Math.min(stop.x + stop.width / 2, resumeBox.x + resumeBox.width - 4);
+  const y = view === 'upright' ? Math.max(Math.min(stop.y + stop.height / 2, resumeBox.y + resumeBox.height - 4), resumeBox.y + 4) : resumeBox.y + resumeBox.height / 2;
+  await page.touchscreen.tap(x, y);
+  await page.touchscreen.tap(x, y);
+  await wait(page, 600);
+  expect(await posts(page)).toBe(0);
+  await expect(button(page, 'Pause recording')).toBeVisible(); // still going
 });
 
 test('Two quick taps on delete take one section', async ({ page }) => {

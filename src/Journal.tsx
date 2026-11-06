@@ -162,6 +162,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   useEffect(() => { entries.filter((e) => e.pending).forEach((e) => watch(e.id)); }, [entries, watch]);
 
   async function saveText(saveAnother = false) {
+    if (recorder.isBusy()) return; // the words go with the recording; the shortcut waits like the button does
     const body = text.trim();
     if (!body || saving) return;
     if (send.current?.body !== body) send.current = { body, draft: newDraft(body, "text") };
@@ -195,11 +196,14 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
     setStatus(same.kind === "saved" ? "Kept one · it's in your vault" : "Kept one · waiting to send");
   }
 
+  const noteTaken = useRef(false);
   const recorder = useRecorder(async (blob, mime) => {
     if (blob.size < 200) { setStatus("Recording was empty"); return; }
     setSaving(true);
     setStatus("Saving journal entry…");
-    const note = live.current.text.trim();
+    // One recording's typed words go with its first entry only, however many entries it becomes
+    const note = noteTaken.current ? "" : live.current.text.trim();
+    noteTaken.current = true;
     const rev = live.current.rev;
     const submitted = live.current.text;
     try {
@@ -226,6 +230,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   async function toggleMic() {
     setError(null);
     if (recorder.recording) { recorder.stop(); return; }
+    noteTaken.current = false;
     try { if (await recorder.start(undefined)) setStatus("Listening… tap ■ when you're done"); }
     catch (e) { setError(`Microphone unavailable: ${e}`); }
   }

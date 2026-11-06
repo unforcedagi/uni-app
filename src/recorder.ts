@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { RecorderSession, type RecordedSection, type RecorderPhase } from "./recorderSession";
 import { joinSections, type JoinOptions } from "./recordingJoin";
 
+/** A second tap this soon after Pause or Resume is a slip: the control under the finger has changed, and it may be Stop. */
+const DOUBLE_TAP_MS = 350;
+
 /** What a recording's controls need, whoever owns the recorder. */
 export type RecorderControls = {
   phase: RecorderPhase;
@@ -56,16 +59,28 @@ export function useRecorder<Origin = void>(onDone: (blob: Blob, mime: string, or
     timer.current = window.setInterval(() => setElapsed(session.current!.elapsed()), 250);
     return true;
   }
+  const lastEdit = useRef(0);
+  const tooSoon = () => Date.now() - lastEdit.current < DOUBLE_TAP_MS;
   function stop() {
+    if (tooSoon()) return; // never set unless this recording was paused, so a recording never paused stops as it always has
     if (timer.current !== null) { clearInterval(timer.current); timer.current = null; }
     session.current?.stop();
+  }
+  async function pause() {
+    if (tooSoon()) return;
+    lastEdit.current = Date.now();
+    await session.current!.pause();
+  }
+  async function resume() {
+    if (tooSoon()) return;
+    lastEdit.current = Date.now();
+    await session.current!.resume();
   }
   return {
     recording: phase === "recording" || phase === "pausing" || phase === "paused" || phase === "resuming",
     paused: phase === "paused",
     busy: phase !== "idle", phase, elapsed, sections, canUndo, start, stop,
-    pause: () => session.current!.pause(),
-    resume: () => session.current!.resume(),
+    pause, resume,
     removeSection: (id: number) => session.current!.removeSection(id),
     undoRemove: () => session.current!.undoRemove(),
     discard: () => session.current!.discard(),

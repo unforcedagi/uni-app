@@ -125,7 +125,7 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
     {/* Resume sits under the finger that tapped Pause: a second, quick tap can never send */}
     <div className="rec-actions">
       {none
-        ? <button className="rec-finish" onClick={() => controls.discard()} disabled={!ready} aria-label="Discard recording">Discard</button>
+        ? <button className="rec-finish" onClick={() => controls.discard()} disabled={controls.phase === "pausing"} aria-label="Discard recording">Discard</button>
         : <button className="rec-finish recording-stop" onClick={controls.stop} disabled={controls.phase === "pausing"} aria-label={`Stop and ${finish} recording for ${title}`}>Stop and {finish}</button>}
       <button ref={resumeButton} className="rec-resume" onClick={resume} disabled={!ready} aria-label="Resume recording">Resume</button>
     </div>
