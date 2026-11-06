@@ -54,7 +54,7 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await expect(row.locator('.cp-approval-how')).toHaveText(/^Reply \/approve, \/approve session or \/deny · ends \d{1,2}:\d{2}\s?[AP]M$/);
     // one notification, on the desktop (Android has no notification path from the app yet)
     if (await android(page)) expect(await page.evaluate(() => (window as any).__notes.length)).toBe(0);
-    else await expect.poll(() => page.evaluate(() => (window as any).__notes)).toEqual([{ title: 'Hermes in #garden-club', body: 'Needs your OK to run: git branch -D feature/example-cleanup' }]);
+    else await expect.poll(() => page.evaluate(() => (window as any).__notes)).toEqual([{ title: 'Uni in #garden-club', body: 'Needs your OK to run: git branch -D feature/example-cleanup' }]);
     // read again (a message elsewhere): still one row, and no second notification
     const n = await reads(page);
     await arrive(page, 'Unrelated chatter in another room.', ME, 'ch-unf');
