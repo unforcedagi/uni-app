@@ -77,7 +77,7 @@ test('look: home, a room and find wear the glow-up, at every size', async ({ pag
   await expect(search).toHaveValue('glaze');
 });
 
-test('All: every area room interleaved by time, each marked with its place; its label opens that room', async ({ page }) => {
+test('All: every area room interleaved by time, each marked with its place; its label puts that room in focus', async ({ page }) => {
   await boot(page);
   await toAll(page);
   const feed = page.getByRole('log', { name: 'All rooms, by time' });
@@ -96,9 +96,9 @@ test('All: every area room interleaved by time, each marked with its place; its 
   await page.evaluate(() => (window as any).__arrive('ch-bees', 'Uni', 'Jars found: the neighbours have thirty.'));
   await expect(feed.locator('article.all-msg').last()).toContainText('Jars found');
   await expect(feed.locator('article.all-msg').last().locator('.all-place')).toHaveText('Bee Garden');
-  // its room's label steps into the room (a tap on the message itself replies there: allv2.spec.ts)
+  // its room's label puts the room in focus (a tap on the message itself replies there: allv2.spec.ts; the focus itself: fluid.spec.ts)
   await feed.locator('article[data-ref="k3"] .all-place').click();
-  await expect(page.locator('.sr').first()).toBeVisible();
+  await expect(page.locator('.all-focus')).toBeVisible();
   await expect(page.locator('.message-list')).toContainText('Three glaze tiles came out glossy');
   await expect(page.getByRole('textbox', { name: /^Message kiln-studio/ })).toBeVisible();
 });

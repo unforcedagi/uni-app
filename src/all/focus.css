@@ -65,7 +65,7 @@
 
 /* A room's own page: the same conversation as the focus, in the same column as All, under one quiet line instead of three ruled bands. */
 .sr .sr-chat .message-list { padding-inline: max(20px, calc((100% - 720px) / 2)); }
-.sr .sr-chat .composer { padding-inline: max(10px, calc((100% - 720px) / 2)); }
+@media (min-width: 600px) { .sr .sr-chat .composer { padding-inline: max(10px, calc((100% - 720px) / 2)); } }
 .th-simple.phone .sr .sr-chat .message-list { padding-inline: 20px; }
 .th-simple.phone .sr .sr-head { padding: 6px 14px 2px 4px; }
 .th-simple.phone .sr .cp.strip { border-top: 0; border-bottom: 0; box-shadow: none; }
