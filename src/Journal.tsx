@@ -254,7 +254,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   return <>
     <header className="conversation-header">
       <button className="back icon-button" onClick={onBack} aria-label={`Back to ${backTo}`} title={`Back to ${backTo}`}>‹</button>
-      <div><strong>Journal</strong><small>Private to you</small></div>
+      <div><strong>Journal</strong><small>{cfg ? `Private · in your vault, ${cfg.vault}` : "Private · your vault"}</small></div>
       <button className="icon-button" onClick={() => setSettings(!settings)} aria-label="Journal settings" aria-expanded={settings}><SettingsIcon /></button>
       <button className="icon-button" onClick={() => { void load(false); void invoke<FlushReport>("journal_flush").then((r) => afterFlush(r, "Synced")).catch((e) => setError(String(e))); }} disabled={loading} aria-label="Refresh journal">↻</button>
     </header>

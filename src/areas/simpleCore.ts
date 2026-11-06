@@ -493,6 +493,12 @@ export const checkingBanner = (step: string): string => `Checking: ${cutWords(wi
  */
 /** A stamp as the date a summary is dated by: "Oct 14" (local calendar day). Null when unknown. */
 export const asOfDate = (at: string | null | undefined): string | null => { const ms = stampMs(at ?? ""); return Number.isFinite(ms) ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null; };
+/** T-335 as Aaron, the folded room line's short form of the same account: "Today: ", "Yesterday: ", "Oct 14: ", and with no date the room that wrote it: "#cohere: ". */
+export function foldedLead(asOf: string | null | undefined, age: number | null | undefined, by: string | null | undefined): string {
+  if (asOf) return `${age === 0 ? "Today" : age === 1 ? "Yesterday" : asOf}: `;
+  const room = by ? `#${by.replace(/^#/, "")}` : "";
+  return room ? `${room}: ` : "";
+}
 /** The label in front of a written summary: "Last written Oct 14 by #cohere:" (a part that isn't known is left out). */
 export function lastWritten(asOf: string | null | undefined, by: string | null | undefined): string {
   const room = by ? `#${by.replace(/^#/, "")}` : "";

@@ -39,3 +39,12 @@ await check("P1-3: a summary is labelled with its date and room; no verdict", ()
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 console.log("simpleR29: all ok");
+
+// T-335 as Aaron: the folded room line keeps the dated account in fewer words
+import { foldedLead } from "../src/areas/simpleCore.ts";
+import assertLead from "node:assert/strict";
+assertLead.equal(foldedLead("Nov 5", 0, "#kiln"), "Today: ");
+assertLead.equal(foldedLead("Nov 4", 1, "#kiln"), "Yesterday: ");
+assertLead.equal(foldedLead("Oct 7", 29, "#kiln"), "Oct 7: ");
+assertLead.equal(foldedLead(null, null, "kiln"), "#kiln: ");
+assertLead.equal(foldedLead(null, null, null), "");

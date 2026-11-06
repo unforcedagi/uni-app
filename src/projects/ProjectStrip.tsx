@@ -10,6 +10,13 @@ import "./projects.css";
 const FOLD_KEY = "uni.t301.strip.folded";
 const readFold = () => { try { return localStorage.getItem(FOLD_KEY) === "1"; } catch { return false; } };
 
+/** T-335 as Aaron: under "All of X's work": a project the vault hasn't given a folder yet. Not news on every visit to the room, not silently missing. */
+export function ProjectGaps({ areaPath }: { areaPath: string }) {
+  const { work } = useWork();
+  const gaps = work.gaps.filter((g) => g.areaPath === areaPath);
+  return gaps.length ? <p className="wv-gaps">{gaps.map((g) => g.name).join(", ")}: not set up yet, so sessions there won't show here.</p> : null;
+}
+
 export function ProjectStrip({ areaPath, onOpen }: { areaPath: string; onOpen: (project: string) => void }) {
   const { work } = useWork();
   const [folded, setFoldedState] = useState(readFold);

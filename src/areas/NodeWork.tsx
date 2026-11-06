@@ -307,7 +307,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
         {(() => { const line = missing ? "Can't be checked: a note is missing" : decision && (checking || unavailable) ? "Not read yet" : tidy ? "Needs rewording by its room: not a request yet" : stateLine(task, (w) => isMe(w), OWNER);
           return line === "Open" || line === "Needs your decision" ? null : <><dt>Status</dt><dd>{line}</dd></>; })()}
         {!isMe(task.owner) && <><dt>{isMe(task.waitingOn) ? "Task of" : "With"}</dt><dd>{OWNER(task.owner)}</dd></>}
-        {task.due && <><dt>Due</dt><dd>{dueLine(task.due)?.replace(/^due /, "")}</dd></>}
+        {task.due && <><dt>{overdue ? "Was due" : "Due"}</dt><dd>{dueLine(task.due)?.replace(/^(was )?due /, "")}</dd></>}
       </dl>
       {/* r17: housekeeping sits below the real action, smaller and quieter. r20: inside the scrolling body, above the sticky footer, so a short
           window never hides it behind the footer */}
@@ -315,7 +315,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
         {!decision && <button type="button" className="task-house-b" aria-busy={busy === "archive" || undefined} disabled={!!busy} onClick={() => void go("archive")}>{busy === "archive" ? "Archiving…" : "Archive"}</button>}
         <button type="button" className="task-house-b" aria-busy={busy === "snooze" || undefined} disabled={!!busy} onClick={() => void go("snooze")}>{busy === "snooze" ? "Snoozing…" : "Snooze until tomorrow"}</button>
       </div>}
-      {!checking && (tid || at || about || check || act || (!gone && !decision && onPriority)) && <details className="task-details" onToggle={(e) => { const d = e.currentTarget; if (d.open) requestAnimationFrame(() => d.scrollIntoView({ block: "nearest" })); }}><summary>Details</summary>
+      {!checking && (at || about || check || act || (!gone && !decision && onPriority)) && <details className="task-details" onToggle={(e) => { const d = e.currentTarget; if (d.open) requestAnimationFrame(() => d.scrollIntoView({ block: "nearest" })); }}><summary>Details</summary>
         {!gone && !decision && !tidy && onPriority && <div className="task-prio" role="group" aria-label="Priority">
           {PRIORITIES.map((p) => <button key={p} type="button" className="task-prio-b" aria-pressed={p === prio} onClick={() => { if (p !== prio) { ownWrite.current = true; onPriority(task, p); } }}>{PRIORITY_LABEL[p]}</button>)}
         </div>}

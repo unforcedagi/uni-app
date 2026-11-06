@@ -2,7 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import { areaCard, bootAreas, openAreaPage, openAreasHome, FOCUS_STEAL, navApp, SUGGEST } from './areasFixture';
 import { startListener } from './areasListener';
-import { railGo } from './railGo';
+import { openRailMore, railGo } from './railGo';
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 const openAreas = openAreasHome;
@@ -139,6 +139,7 @@ test.describe('dark theme', () => {
 test.describe('rail badge', () => {
   test('a zero For you count renders no badge', async ({ page }) => {
     await bootAreas(page, 'seed');
+    await openRailMore(page);
     await expect(rail(page).getByRole('button', { name: 'For you' })).toBeVisible();
     await expect(page.locator('.rail-count')).toHaveCount(0);
   });

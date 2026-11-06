@@ -52,7 +52,7 @@ export function isolate(box: HTMLElement, keep: readonly (Element | null)[] = []
   }
   return () => { for (const m of marked) m.removeAttribute("inert"); };
 }
-export function openDialog(box: HTMLElement, close: () => void, opts: { /** what stays live beside it */ keep?: readonly (Element | null)[]; initial?: HTMLElement | null; opener?: HTMLElement | null;
+export function openDialog(box: HTMLElement, close: () => void, opts: { /** what stays live beside it */ keep?: readonly (Element | null)[]; initial?: HTMLElement | null; opener?: HTMLElement | null; /** where focus goes when the opener can no longer take it (it sat in a sheet that has closed) */ fallback?: () => HTMLElement | null;
   /** the dialog's whole layer (its scrim included), isolated from everything else; default the box */ root?: HTMLElement | null } = {}): () => void {
   const me = Symbol("dialog"); stack.push(me);
   const opener = opts.opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
@@ -69,6 +69,6 @@ export function openDialog(box: HTMLElement, close: () => void, opts: { /** what
     const i = stack.indexOf(me); if (i >= 0) stack.splice(i, 1);
     undo();
     const at = document.activeElement;
-    if (opener?.isConnected && (!at || at === document.body || box.contains(at) || !at.isConnected)) opener.focus();
+    if (opener?.isConnected && (!at || at === document.body || box.contains(at) || !at.isConnected)) { opener.focus(); if (document.activeElement !== opener) opts.fallback?.()?.focus(); }
   };
 }

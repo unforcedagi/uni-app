@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect } from '@playwright/test';
 import { bootRail } from './railFixture';
-import { railGo } from './railGo';
+import { openRailMore, railGo } from './railGo';
 
 test.beforeEach(async ({ page }) => bootRail(page));
 
@@ -43,8 +43,8 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
     await expect(rail).toBeHidden();
     await input.blur();
     await expect(rail).toBeVisible();
-    // Uni, Journal, Mail (T-45), For you, Vault, Search and Settings: everything the drawer used to hold is on the rail or in the tree
-    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(7);
+    // T-335 as Aaron: Uni, All, Journal, Mail and More on the bar; For you, Vault, Search and Settings one tap more
+    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(5);
   }
   await rail.getByRole('button', { name: 'Journal', exact: true }).click();
   const writing = page.getByRole('textbox', { name: 'Journal entry', exact: true });
@@ -66,6 +66,7 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
   await page.getByRole('button', { name: 'Focus' }).click();
   await page.getByRole('button', { name: 'Focus' }).click();
   const fy = rail.getByRole('button', { name: 'For you', exact: true });
+  await openRailMore(page);
   await expect(fy.locator('.rail-count')).toHaveCount(0); await expect(fy.locator('.rail-dot')).toBeVisible();
   await fy.click();
   await expect(page.locator('.note-title')).toHaveText('For you');
@@ -88,8 +89,8 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
     await expect(page.getByRole('textbox', { name: 'Message Garden' })).toBeVisible();
     await expect(page.locator('.sr-title')).toHaveText('#Garden'); // r13: the channel's own name
     await shot('other-room');
-    await rail.getByRole('button', { name: 'Vault', exact: true }).click();
-    await expect(rail.locator('[aria-current="page"], [aria-expanded="true"]')).toHaveCount(1);
+    await railGo(page, 'Vault');
+    await expect(rail.locator('[aria-current="page"]:visible, [aria-expanded="true"]:visible')).toHaveCount(1);
     await page.getByRole('button', { name: 'Close panel', exact: true }).click();
     await rail.getByRole('button', { name: 'Journal', exact: true }).click();
     await page.reload();
@@ -102,6 +103,7 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await page.evaluate(() => { (window as any).updated = '2026-10-02T12:00:00Z'; (window as any).content += '\n- A new suggestion'; document.dispatchEvent(new Event('visibilitychange')); });
+    await openRailMore(page);
     await expect(fy.locator('.rail-count')).toHaveCount(0);
     await expect(fy.locator('.rail-dot')).toBeVisible();
   }
@@ -109,6 +111,7 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
 
 test('Active For you renders the newer version before clearing its dot', async ({ page }, info) => {
   const fy = page.getByRole('navigation').getByRole('button', { name: 'For you', exact: true });
+  await openRailMore(page);
   await fy.click();
   await expect(page.locator('.note-sheet li').filter({ hasText: 'Read something slowly' })).toBeVisible();
   await page.evaluate(() => {
@@ -117,6 +120,7 @@ test('Active For you renders the newer version before clearing its dot', async (
     w.content += '\n- A new suggestion';
     document.dispatchEvent(new Event('visibilitychange'));
   });
+  await openRailMore(page);
   await expect(fy.locator('.rail-count')).toHaveCount(0);
   await expect(fy.locator('.rail-dot')).toBeVisible();
   await page.evaluate(() => {
@@ -129,6 +133,7 @@ test('Active For you renders the newer version before clearing its dot', async (
     };
   });
   await fy.click();
+  await openRailMore(page);
   await expect(fy.locator('.rail-dot')).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('uni.forYou.opened.v1'))).toBe('2026-10-01T12:00:00Z');
   await page.waitForFunction(() => !!(window as any).releaseNote);

@@ -8,12 +8,12 @@
 .rail .rail-more, .rail-more-scrim { display: none; }
 .rail-extras { display: contents; }
 @media (max-width: 599px) {
-  .rail { overflow: visible !important; z-index: 40; }
+  .rail { overflow: visible !important; z-index: 42; }
   .rail > button, .rail-more { flex: 1 1 0; }
   .rail .rail-more { display: flex; }
   .rail-extras { display: none; }
   .rail-extras.open {
-    display: grid; position: absolute; left: 8px; right: 8px; bottom: calc(100% + 8px); z-index: 41;
+    display: grid; position: absolute; left: 8px; right: 8px; bottom: calc(100% + 8px); z-index: 1;
     grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 10px;
     background: var(--g-paper); border: var(--g-hair) solid var(--g-line); border-radius: 22px; box-shadow: var(--g-shadow-2);
     animation: rail-sheet var(--g-t-state) var(--g-ease);
@@ -23,7 +23,7 @@
   .rail-extras.open button i { width: 44px; height: 36px; }
   .rail-extras.open button span { font-size: 13px; display: inline; }
   .rail-extras.open button .rail-count, .rail-extras.open button .rail-dot { font-size: 11px; }
-  .rail-more-scrim { display: block; position: absolute; inset: 0; z-index: 39; border: 0; padding: 0; background: var(--g-scrim); animation: rail-scrim var(--g-t-state) linear; }
+  .rail-more-scrim { display: block; position: absolute; inset: 0; z-index: 41; border: 0; padding: 0; background: var(--g-scrim); animation: rail-scrim var(--g-t-state) linear; }
 }
 @keyframes rail-sheet { from { opacity: 0; transform: translateY(8px) scale(.97); } }
 @keyframes rail-scrim { from { opacity: 0; } }
@@ -38,6 +38,8 @@
 .note-refresh svg { width: 18px; height: 18px; }
 @media (pointer: coarse) { .note-refresh, .note-back { min-height: 44px; } .note-refresh { width: 44px; min-width: 44px; } }
 .note-bar { flex-wrap: nowrap; gap: 6px; }
+.note-bar > .note-action:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 340px) { .note-bar { flex-wrap: wrap; } }
 .note-bar .note-back { flex: 0 1 auto; min-width: 0; margin-right: auto; }
 .note-pane .note-back:has(.note-back-arrow) .note-back-label { display: none; }
 .note-pane .note-back { width: 44px; min-width: 44px; padding: 0; justify-content: center; }
@@ -54,8 +56,7 @@
 @media (max-width: 599px) { .toast { bottom: calc(132px + env(safe-area-inset-bottom)); } }
 
 /* ── A room's header is its name: on a phone the channel is on the composer, and "Uni" alone isn't a path ── */
-.sr-title { display: flex; align-items: center; gap: 10px; }
-.sr[style*="--room-tint"] .sr-title::before { content: ""; flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--room-tint); }
+.sr[style*="--room-tint"] .sr-title::before { content: ""; display: inline-block; vertical-align: .08em; margin-right: 10px; width: 10px; height: 10px; border-radius: 50%; background: var(--room-tint); }
 :root[data-screen="ink"] .sr-title::before { background: #000 !important; }
 .th-simple.phone .sr-door { display: none; }
 .th-simple.phone .sr-meta:not(:has(.th-crumb-wrap:nth-child(2))) { display: none; }
@@ -132,3 +133,5 @@
 /* ── A many-pane place's header runs the width of its panes; only a page you read keeps to the reading column ── */
 .mail-bar, .msgs-bar, .cal-bar, .vault-browser .note-bar { padding-inline: 14px; }
 @media (min-width: 600px) { .shell.panel-settings .rooms { width: 420px; max-width: calc(100% - 64px); flex-basis: 420px; } }
+
+.wv-gaps { margin: 20px 0 0; font: 400 13px/1.45 var(--g-font-ui); color: var(--g-ink-3); }

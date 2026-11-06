@@ -172,7 +172,7 @@ test('signing out forgets the tab: the next sign-in starts on All', async ({ pag
   await boot(page);
   await tab(page, 'WhatsApp').click();
   await page.getByRole('button', { name: 'Sign out' }).click();
-  await page.getByRole('button', { name: 'Tap again to sign out' }).click();
+  await page.getByRole('button', { name: 'Sign out?' }).click();
   await page.getByRole('button', { name: 'Sign in with this device' }).click();
   await expect(tab(page, 'All')).toHaveAttribute('aria-selected', 'true');
   await page.reload();

@@ -63,6 +63,35 @@ test('the phone bar is four places and More; the rest open from a sheet that clo
   await expect(more).toHaveAttribute('aria-current', 'page');
 });
 
+test('the bar stays in reach over a panel, and any way out closes the sheet (review round 1)', async ({ page }) => {
+  onlyPhone();
+  await glow(page);
+  const rail = railNav(page);
+  await railGo(page, 'Settings');
+  await expect(page.locator('.settings')).toBeVisible();
+  // More over an open panel: the panel goes, the sheet is on top and its places can be tapped
+  await rail.getByRole('button', { name: 'More', exact: true }).click();
+  await expect(page.locator('.settings')).toBeHidden();
+  await rail.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page.getByRole('searchbox', { name: 'Search conversations and notes' })).toBeVisible();
+  // a place on the bar over an open panel goes there, not just closes the panel
+  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Journal entry', exact: true })).toBeVisible();
+  // with the sheet open, a place on the bar goes there and the sheet closes
+  await rail.getByRole('button', { name: 'More', exact: true }).click();
+  await rail.getByRole('button', { name: 'Uni', exact: true }).click();
+  await expect(rail.getByRole('button', { name: 'Settings', exact: true })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Close More' })).toHaveCount(0);
+});
+
+test('closing a panel opened from the sheet gives focus back to More', async ({ page }) => {
+  onlyPhone();
+  await glow(page);
+  await railGo(page, 'Settings');
+  await page.getByRole('button', { name: 'Close panel', exact: true }).click();
+  await expect(railNav(page).getByRole('button', { name: 'More', exact: true })).toBeFocused();
+});
+
 test('a wider screen keeps every place on the rail and has no More', async ({ page }) => {
   test.skip(phone(), 'desktop');
   await glow(page);
@@ -87,13 +116,29 @@ test('a room says what it is once: no "Last written by", no "no folder yet", no 
   const body = page.locator('.sr').first();
   await expect(body).not.toContainText('no folder yet');
   if (phone()) {
-    await expect(page.locator('.cp.strip .cp-line')).toContainText('Glaze tests are out');
+    // r29: still a dated account: the date first, or with no date the room that wrote it
+    await expect(page.locator('.cp.strip .cp-line')).toContainText(/^(Today|Yesterday|[A-Z][a-z]{2} \d+|#kiln-studio): Glaze tests are out/);
     await expect(page.locator('.cp.strip .cp-line')).not.toContainText('Last written');
     await expect(page.locator('.sr-door')).toBeHidden();
     // the chat gets the room: the header and strip take at most 130 px
     const list = (await page.locator('.message-list').boundingBox())!;
     expect(list.y).toBeLessThanOrEqual(130);
   }
+});
+
+test('a long room name ends in an ellipsis', async ({ page }) => {
+  await kiln(page);
+  const t = await page.locator('.sr-title').evaluate((el) => { const s = getComputedStyle(el); return { display: s.display, overflow: s.textOverflow }; });
+  expect(t.display).toBe('block');
+  expect(t.overflow).toBe('ellipsis');
+});
+
+test('a project that isn\'t set up is said once, under all of the room\'s work', async ({ page }) => {
+  await kiln(page);
+  await expect(page.locator('[data-place="project-strip"]')).toHaveCount(0);
+  if (phone()) await page.locator('.cp.strip .cp-line').click();
+  await page.getByRole('button', { name: /^All of Kiln Studio/ }).click();
+  await expect(page.locator('.wv-gaps')).toContainText('Glaze Tests: not set up yet');
 });
 
 test('the composer ring sits in line with the mic and Send, in the room\'s colour', async ({ page }) => {
@@ -188,6 +233,7 @@ test('a task sheet speaks plainly: no "due due", no task number', async ({ page 
   const sheet = page.locator('.task-sheet').first();
   await expect(sheet).toBeVisible();
   await expect(sheet).not.toContainText(/due due/i);
+  for (const dd of await sheet.locator('.task-facts dd').allTextContents()) expect(dd).not.toMatch(/\bdue\b/);
   await sheet.locator('summary', { hasText: 'Details' }).click();
   await expect(sheet).not.toContainText('T-07');
 });
@@ -225,6 +271,17 @@ test('Settings: the update first, nothing that can\'t be used, the dangerous one
   expect(f.bg).toBe('rgba(0, 0, 0, 0)');
 });
 
+test('Settings says so when the live line has a problem, even with the sync up to date (review round 1)', async ({ page }) => {
+  await glow(page);
+  await railGo(page, 'Settings');
+  const line = page.locator('.settings .connection');
+  await expect(line).toHaveAttribute('data-fine', 'true');
+  await page.evaluate(() => { const w = window as any; for (const h of w.__listeners?.['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'status', status: 'Reconnecting in 5s' } }); });
+  await expect(line).toContainText('Reconnecting in 5s');
+  await expect(line).not.toHaveAttribute('data-fine', 'true');
+  expect((await line.boundingBox())!.height).toBeGreaterThan(8);
+});
+
 // ---------------------------------------------------------------- the vault
 test('one vault: Vault goes straight in; each open folder has two small marks, not two more buttons of words', async ({ page }) => {
   await glow(page);
@@ -240,6 +297,13 @@ test('one vault: Vault goes straight in; each open folder has two small marks, n
   const dialog = page.getByRole('dialog', { name: 'New note' });
   await expect(dialog).toContainText('Name');
   await expect(dialog).not.toContainText('Path');
+});
+
+test('one vault, whatever it is called, goes straight in', async ({ page }) => {
+  await glow(page, {}, (cmd) => (cmd === 'vault_list' ? ['garden'] : undefined));
+  await railGo(page, 'Vault');
+  await expect(page.locator('.vault-browser')).toBeVisible();
+  await expect(page.locator('.vault-browser .note-bar strong')).toHaveText('garden');
 });
 
 // ---------------------------------------------------------------- Search

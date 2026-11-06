@@ -579,7 +579,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useEffect(() => {
     const box = panelBox.current;
     if (!utilityOpen || !box) return;
-    return openDialog(box, () => { setPanel(null); setSearchOpen(false); }, { keep: [railRef.current, box.parentElement?.querySelector(".panel-scrim") ?? null], initial: box });
+    return openDialog(box, () => { setPanel(null); setSearchOpen(false); }, { keep: [railRef.current, box.parentElement?.querySelector(".panel-scrim") ?? null], initial: box, fallback: () => railRef.current?.querySelector<HTMLElement>(".rail-more") ?? null });
   }, [utilityOpen]);
   // Search result to scroll to and flash once its room/thread has loaded.
   const [focusRef, setFocusRef] = useState<string | null>(null);
@@ -2379,6 +2379,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const asideShown = !!asideRoom;
   const goBack = useRef<() => void>(() => {});
   goBack.current = () => {
+    if (railMore) { setRailMore(false); return; }
     // T-258: a full-window layer (video full screen, image viewer) closes first, as Escape closes it.
     if (modalCount() > 0) { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); return; }
     if (journalFocus) { setJournalFocus(false); return; }
@@ -2558,7 +2559,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
   return <ApprovalsContext.Provider value={approvalsView}><NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault" || active?.kind === "mail" || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
-    <nav ref={railRef} className="rail" aria-label="Main navigation">
+    <nav ref={railRef} className="rail" aria-label="Main navigation" onClickCapture={(e) => { if (!(e.target as HTMLElement).closest(".rail-more")) setRailMore(false); }}>
       {/* T-294: from another side (Messages, Mail…) Uni goes back to where you were on its side; at Uni already, home to Uni */}
       <button aria-label="Uni" aria-current={uniShown ? "page" : undefined} onClick={() => openTarget(uniShown ? uniHome() : origin())}><i><UniIcon /></i><span>Uni</span></button>
       {/* T-335: All is a place of its own, one tap from any room; rooms stay the main way in, and the app never opens on it */}
@@ -2566,15 +2567,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
       <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })} aria-describedby={[held > 0 && "rail-mail-held", unreadMail > 0 && "rail-mail-unread"].filter(Boolean).join(" ") || undefined}><i><MailIcon />{held > 0 && <span className="rail-count" aria-hidden="true">{held}</span>}{unreadMail > 0 && <span className="rail-dot" aria-hidden="true" />}</i><span>Mail</span>{held > 0 && <span id="rail-mail-held" hidden>{held} waiting for you</span>}{unreadMail > 0 && <span id="rail-mail-unread" hidden>{unreadMail} unread in your Inbox</span>}</button>
       {/* T-335 as Aaron: on a phone the bar is four places and More; the rest open from a sheet above it. On a wider screen More is hidden and the rest sit on the rail (display: contents) */}
-      <button className="rail-more" aria-label="More" aria-expanded={railMore} aria-controls="rail-extras" aria-current={!railMore && (panel || searchOpen || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "vault" || topNote) ? "page" : undefined} onClick={() => setRailMore((o) => !o)}><i><MoreIcon />{(forYou.fresh && showUniGlue(lifeVault)) && <span className="rail-dot" aria-hidden="true" />}</i><span>More</span></button>
-      <div id="rail-extras" className={`rail-extras${railMore ? " open" : ""}`} onClickCapture={() => setRailMore(false)}>
+      <button className="rail-more" aria-label="More" aria-expanded={railMore} aria-controls="rail-extras" aria-current={!railMore && (panel || searchOpen || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "vault" || topNote) ? "page" : undefined} onClick={() => { setPanel(null); setSearchOpen(false); setRailMore((o) => !o); }}><i><MoreIcon />{(forYou.fresh && showUniGlue(lifeVault)) && <span className="rail-dot" aria-hidden="true" />}</i><span>More</span></button>
+      <div id="rail-extras" className={`rail-extras${railMore ? " open" : ""}`}>
       {calOn && <button aria-label="Calendar" aria-current={!panel && !searchOpen && (active?.kind === "calendar" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "calendar", title: "Calendar" })}><i><CalendarIcon /></i><span>Calendar</span></button>}
       {msgsOn && <button aria-label="Messages" aria-current={!panel && !searchOpen && (active?.kind === "messages" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "messages", title: "Messages" })}><i><MessagesIcon /></i><span>Messages</span></button>}
       {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>}
       {showUniGlue(lifeVault) && <button aria-label="To post" aria-current={!panel && !searchOpen && (active?.kind === "posts" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "posts", title: "To post" })}><i aria-hidden="true"><ToPostIcon /></i><span>To post</span></button>}
-      <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false);
+      <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={vaults.length === 1 ? undefined : panel === "vault"} onClick={() => { setSearchOpen(false);
         // one vault: nothing to choose, straight in
-        if (primaryVault && otherVaults.length === 0) { setPanel(null); openTarget({ kind: "vault", vault: primaryVault, title: primaryVault }, "new"); return; }
+        if (vaults.length === 1) { setPanel(null); setVaultRefresh((n) => n + 1); openTarget({ kind: "vault", vault: vaults[0], title: vaults[0] }, "new"); return; }
         setPanel(panel === "vault" ? null : "vault"); }}><i><VaultIcon /></i><span>Vault</span></button>
       <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} aria-keyshortcuts="Control+K Meta+K" onClick={openFind}><i><SearchIcon /></i><span>Search</span></button>
       <button className="rail-settings" aria-label="Settings" aria-expanded={panel === "settings"} onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setForgetArmed(false); }}><i><SettingsIcon /></i><span>Settings</span></button>
@@ -2587,7 +2588,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {(panel || searchOpen) && <header className="panel-head"><h1>{panelTitle}</h1><button className="panel-close icon-button" aria-label="Close panel" title="Close" onClick={() => { setPanel(null); setSearchOpen(false); }}>×</button></header>}
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
       {panel === "settings" && <div className="settings">
-        <p className="connection" role="status" data-fine={status === "Up to date" ? "true" : undefined}>{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
+        <p className="connection" role="status" data-fine={status === "Up to date" && (!live || live === "Live") ? "true" : undefined}>{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
       {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
         <UpdateSettings /><ClaudeUsage /><MotionSetting /><LifeOsVaultSetting vaults={vaults} /><SealedApprovals />
         <section className="settings-device" aria-label="This device"><h2>This device</h2><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary settings-forget" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget. You'll need to pair again." : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep it</button>}</section>

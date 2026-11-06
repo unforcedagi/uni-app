@@ -1073,7 +1073,7 @@ test('88-mail-search-results', async ({ page }) => {
 test('104-messages-sign-in', async ({ page }) => {
   await messages(page);
   await page.getByRole('button', { name: 'Sign out' }).click();
-  await page.getByRole('button', { name: 'Tap again to sign out' }).click();
+  await page.getByRole('button', { name: 'Sign out?' }).click();
   await expect(page.getByRole('form', { name: 'Sign in to Messages' })).toBeVisible();
   await snap(page, '104-messages-sign-in');
 });
