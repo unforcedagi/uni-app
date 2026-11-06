@@ -1,7 +1,7 @@
 import { SettingsIcon, MicIcon } from "./Icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useRecorder } from "./recorder";
+import { useRecorder, type RecorderControls } from "./recorder";
 import { areaRooms, entryText, greeting, mmss, newDraft, sameWordsLine, type FlushReport, type JournalDraft, type JournalNote, type QueuedEntry, type SameWords } from "./journalCore";
 import { forgetPublishOrigins } from "./PublishedPlayer";
 
@@ -19,7 +19,10 @@ function when(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "Uni", onRecordingChange, focus, onFocus }: { focus: boolean; onFocus: () => void; rooms: Room[]; uniRoomId: string | null; onShare: ShareFn; onBack: () => void; /** r22: the place Back returns to */ backTo?: string; onRecordingChange?: (recording: boolean, elapsed: number, stop: () => void) => void }) {
+/** The vault's limit on a journal entry's audio (MAX_AUDIO_BYTES in uni-core). */
+const JOURNAL_AUDIO_LIMIT = 50 * 1024 * 1024;
+
+export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "Uni", onRecordingChange, focus, onFocus }: { focus: boolean; onFocus: () => void; rooms: Room[]; uniRoomId: string | null; onShare: ShareFn; onBack: () => void; /** r22: the place Back returns to */ backTo?: string; onRecordingChange?: (recording: boolean, controls?: RecorderControls) => void }) {
   const [cfg, setCfg] = useState<VaultConfig | null>(null);
   const [entries, setEntries] = useState<JournalNote[]>([]);
   const [queued, setQueued] = useState<QueuedEntry[]>([]);
@@ -159,6 +162,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   useEffect(() => { entries.filter((e) => e.pending).forEach((e) => watch(e.id)); }, [entries, watch]);
 
   async function saveText(saveAnother = false) {
+    if (recorder.isBusy()) return; // the words go with the recording; the shortcut waits like the button does
     const body = text.trim();
     if (!body || saving) return;
     if (send.current?.body !== body) send.current = { body, draft: newDraft(body, "text") };
@@ -192,11 +196,15 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
     setStatus(same.kind === "saved" ? "Kept one · it's in your vault" : "Kept one · waiting to send");
   }
 
+  const noteTaken = useRef(false);
   const recorder = useRecorder(async (blob, mime) => {
     if (blob.size < 200) { setStatus("Recording was empty"); return; }
     setSaving(true);
     setStatus("Saving journal entry…");
-    const note = live.current.text.trim();
+    // One recording's typed words go with its first entry only, however many entries it becomes
+    const carriesNote = !noteTaken.current;
+    const note = carriesNote ? live.current.text.trim() : "";
+    noteTaken.current = true;
     const rev = live.current.rev;
     const submitted = live.current.text;
     try {
@@ -206,22 +214,24 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
       // offered once its transcript lands (the menu waits for it too), and only when it reached the vault
       if (!r.error) setOffer(draft.entry_id);
       // the typed words went with the recording: clear them only if they are still what was sent
-      if (clearIf(rev, submitted)) { setSame(null); send.current = null; }
+      if (carriesNote && clearIf(rev, submitted)) { setSame(null); send.current = null; }
       await afterFlush(r, "Journal entry");
       if (!r.error) setStatus("Journal entry saved · transcribing…");
     } catch (e) { setError(String(e)); setStatus("Journal entry not saved"); }
     finally { setSaving(false); }
-  }, "in the Journal");
+  }, "in the Journal", { onDiscard: () => setStatus("Recording deleted"), join: { wav: true, limit: JOURNAL_AUDIO_LIMIT } });
   const reportRecording = useRef(onRecordingChange);
   reportRecording.current = onRecordingChange;
   useEffect(() => {
-    reportRecording.current?.(recorder.recording, recorder.elapsed, recorder.stop);
-  }, [recorder.recording, recorder.elapsed]);
-  useEffect(() => () => reportRecording.current?.(false, 0, () => {}), []);
+    // finishing counts: the sections may still be joining, and the tab stays guarded and the pill up until they're out
+    reportRecording.current?.(recorder.recording || recorder.phase === "finishing", recorder);
+  }, [recorder.recording, recorder.elapsed, recorder.phase, recorder.sections, recorder.canUndo]);
+  useEffect(() => () => reportRecording.current?.(false), []);
 
   async function toggleMic() {
     setError(null);
     if (recorder.recording) { recorder.stop(); return; }
+    noteTaken.current = false;
     try { if (await recorder.start(undefined)) setStatus("Listening… tap ■ when you're done"); }
     catch (e) { setError(`Microphone unavailable: ${e}`); }
   }
@@ -264,11 +274,11 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
       <textarea value={text} onChange={(e) => { edit(e.target.value); if (same) { setSame(null); setStatus(""); } }} placeholder="What's here right now…" rows={4} maxLength={65536} aria-label="Journal entry"
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveText(); } }} />
       <div className="journal-actions">
-        <button className={`mic ${recorder.recording ? "on" : ""}`} onClick={() => void toggleMic()} disabled={saving && !recorder.recording} aria-label={recorder.recording ? "Stop recording and save" : "Record a journal entry"}>
+        <button className={`mic ${recorder.recording ? "on" : ""}`} onClick={() => void toggleMic()} disabled={(saving && !recorder.recording) || recorder.phase === "finishing"} aria-label={recorder.recording ? "Stop recording and save" : "Record a journal entry"}>
           {recorder.recording ? <>■ <span>{mmss(recorder.elapsed)}</span></> : <MicIcon />}
         </button>
-        <span className="journal-status" role="status">{recorder.recording ? `Recording · ${mmss(recorder.elapsed)}${text.trim() ? " · your typed text is kept with it" : ""}` : status}</span>
-        <button className="send" onClick={() => void saveText()} disabled={!text.trim() || saving || recorder.recording}>{saving ? "Saving…" : "Save"}</button>
+        <span className="journal-status" role="status">{recorder.recording ? `${recorder.paused ? "Paused" : "Recording"} · ${mmss(recorder.elapsed)}${text.trim() ? " · your typed text is kept with it" : ""}` : recorder.phase === "finishing" ? "Finishing…" : status}</span>
+        <button className="send" onClick={() => void saveText()} disabled={!text.trim() || saving || recorder.busy}>{saving ? "Saving…" : "Save"}</button>
       </div>
       {same && <div className="journal-same" role="group" aria-label="Same words as another entry">
         <button type="button" className="note-action" onClick={() => void saveText(true)} disabled={saving}>Save another</button>

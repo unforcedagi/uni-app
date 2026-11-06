@@ -1,0 +1,51 @@
+/* The recorder's controls. Running: the dark pill (App.css), with Pause. Paused: a card on the glow-up paper, sitting where the pill was. */
+.recording-pill .rec-pause { font-weight: 650; }
+
+.recording-pill.paused { flex-direction: column; align-items: stretch; gap: 8px; width: min(360px, calc(100vw - 16px)); max-width: none;
+  max-height: calc(100dvh - 200px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); padding: 12px; border-radius: 14px; overflow-y: auto;
+  background: var(--g-paper); color: var(--g-ink); border: var(--g-hair) solid var(--g-line-strong); box-shadow: var(--g-shadow-2); font-family: var(--g-font-ui); }
+.recording-pill.paused button:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 1px; }
+.recording-pill.paused button:disabled { opacity: .5; cursor: default; }
+
+.rec-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; }
+.rec-state { font-weight: 650; }
+.rec-time { color: var(--g-ink-2); font-variant-numeric: tabular-nums; }
+.recording-pill.paused .recording-destination { margin-left: auto; min-height: 44px; min-width: 44px; color: var(--g-ink-2); text-decoration-color: var(--g-line-strong); }
+
+.rec-sections { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; flex: 0 1 auto; min-height: 44px; overflow-y: auto; border-top: var(--g-hair) solid var(--g-line); }
+.rec-sections li { display: flex; align-items: center; gap: 8px; min-height: 44px; flex: none; border-bottom: var(--g-hair) solid var(--g-line); }
+.rec-sections li.playing .rec-wave { color: var(--g-accent); }
+.recording-pill .rec-row-button { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 10px; color: var(--g-ink); }
+.recording-pill .rec-row-button:hover:not(:disabled) { background: var(--g-sunk); }
+.recording-pill .rec-delete { color: var(--g-ink-2); }
+.recording-pill .rec-delete:hover:not(:disabled) { color: var(--g-danger); background: var(--g-danger-soft); }
+.rec-icon { width: 20px; height: 20px; }
+.rec-wave { flex: 1; min-width: 0; height: 22px; color: var(--g-ink-3); fill: currentColor; }
+.rec-seconds { flex: none; font-size: 13px; color: var(--g-ink-2); font-variant-numeric: tabular-nums; }
+
+/* for a screen reader; "Paused" is on screen already */
+.rec-said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.rec-empty { margin: 0; padding: 6px 0; font-size: 14px; color: var(--g-ink-2); }
+.rec-problem { margin: 0; font-size: 13px; color: var(--g-danger); }
+.recording-pill .rec-undo { align-self: flex-start; min-width: 44px; min-height: 44px; padding: 0 8px; margin-left: -8px; font-size: 14px; color: var(--g-ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); }
+
+.rec-actions { position: sticky; bottom: 0; display: flex; gap: 8px; flex: none; background: var(--g-paper); }
+.recording-pill .rec-resume, .recording-pill .rec-finish { flex: 1; min-height: 44px; padding: 0 14px; border-radius: 999px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.recording-pill .rec-resume { background: var(--g-ink); color: var(--g-ground); }
+.recording-pill .rec-finish { border: var(--g-hair) solid var(--g-line-strong); color: var(--g-ink); }
+.recording-pill .rec-finish:hover:not(:disabled) { background: var(--g-sunk); }
+
+/* A fixed sidebar means a wide screen with the composer beside it: pill and card both clear it, on the same line,
+   so what a second click on Pause lands on is Resume, never the composer's mic */
+@media (min-width: 600px) { .recording-pill.over-sidebar { bottom: calc(96px + env(safe-area-inset-bottom)); } }
+
+/* A phone on its side: the card takes the height there is, over the composer, and scrolls */
+@media (max-height: 500px) {
+  .shell .recording-pill.paused { bottom: calc(8px + env(safe-area-inset-bottom)); max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+}
+
+/* Thumbs: every control in the running pill is a full target */
+@media (pointer: coarse), (max-width: 599px) {
+  .recording-pill:not(.paused) { padding: 2px 14px; }
+  .recording-pill:not(.paused) button { min-height: 44px; min-width: 44px; }
+}
