@@ -65,7 +65,8 @@ export function sealedFence(body: string): "single" | "morning" | null {
 /** The words Uni wrote above the fenced block: the room shows the first line as an ordinary message, never inside the card. */
 export function sealedProse(body: string): string {
   const at = body.search(FENCE);
-  return (at < 0 ? body : body.slice(0, at)).trim().split("\n")[0] ?? "";
+  const first = (at < 0 ? body : body.slice(0, at)).trim().split("\n")[0] ?? "";
+  return /^🔑 \*\*(🔴|🟡|🟢) /u.test(first) ? "" : first; // the card itself opens with the reach: the room needn't say it too
 }
 
 /** "45 s", "10 min", "14 h" (CARD.md §4: seconds under 2 minutes, minutes under 2 hours, hours above). */

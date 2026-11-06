@@ -255,6 +255,8 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .sealed-releases { margin: 6px 0; font-size: 13px; line-height: 1.45; color: var(--text-soft); }
 .sealed-says, .sealed-read-key { margin: 6px 0 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .cc-age { font-weight: 600; }
+/* the reach is the card: it wraps, and is never cut */
+.cc-what:has(> .sealed-reach) { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .sealed-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 10px; }
 .sealed-actions .pairing-secondary { min-height: 44px; }
 .sealed-approve { position: relative; overflow: hidden; min-height: 44px; padding: 0 20px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 14px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }

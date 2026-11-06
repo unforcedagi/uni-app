@@ -193,7 +193,7 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
         status={status} what={what} when={expired ? clock(r.expires) : a ? clock(a.at) : null} details={facts}
         after={<>{failure}{retry}</>} />;
     }
-    return <PendingCard className={cls} label={label} icon="🔑" what={reach ?? what}
+    return <PendingCard className={cls} label={label} icon="🔑" what={reach ? <span className="sealed-reach">{reach}</span> : what}
       meta={<>{!reach && <><span className="cc-where">{r.credential}</span> · <code className="cc-action">{r.action}</code> · {span(r.ttl_s)} · </>}{age && <><span className="cc-age">{age}</span> · </>}{hold && <><Badge cls="powerful" /> · </>}<GraceHint on={tapOnly([r])} sep /></>}
       actions={<div className="sealed-actions">
         <button type="button" className="pairing-secondary sealed-deny" disabled={busy} onClick={() => void answer("deny", [r.rid])}>Deny</button>

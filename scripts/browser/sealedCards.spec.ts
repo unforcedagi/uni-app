@@ -415,6 +415,11 @@ test('a card opens with the key\'s true reach and the job\'s age, and a small ke
   // the first thing on the card is the reach, not the agent's sentence, which is below it and labelled
   await expect(cardBig.locator('.cc-what')).toHaveText('🔴 All of Example Co, production included · 10 min, then read-only 3 h');
   await expect(cardBig.locator('.sealed-read-key')).toHaveText('Read key: Workers.');
+  // the line that matters is never cut: its end says how long, and what comes after
+  const cut = await cardBig.locator('.sealed-reach').evaluate((e) => { const c = e.closest('.cc-what') as HTMLElement; return c.scrollWidth > c.clientWidth + 1; });
+  expect(cut).toBe(false);
+  // and the room doesn't say it twice
+  await expect(page.locator('.message-content').filter({ hasText: 'All of Example Co' }).locator('p', { hasText: 'All of Example Co' })).toHaveCount(0);
   await expect(cardBig.locator('.sealed-says')).toHaveText('Uni says: Deploy to STAGING only');
   await expect(cardBig.getByText('asked 6 h ago')).toBeVisible();
   await expect(cardBig.getByRole('button', { name: /press and hold/ })).toBeVisible();

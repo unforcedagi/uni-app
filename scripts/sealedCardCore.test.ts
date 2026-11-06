@@ -70,4 +70,15 @@ assert.ok(!whenText(noon + 3600, noon).includes("tomorrow"));
 assert.ok(whenText(noon + 20 * 3600, noon).startsWith("tomorrow "));
 assert.ok(whenText(noon - 20 * 3600, noon).startsWith("yesterday "), "a past end isn't tomorrow");
 
+// The room doesn't say the reach twice: the card opens with it. An older card's line stays.
+const reachCard = "🔑 **🔴 All of A · 10 min**\nFor: job.cloudflare. Can: x.\n\n```uni-sealed-approval\n{}\n```";
+assert.equal(sealedProse(reachCard), "");
+assert.equal(sealedProse(reachCard.replace("🔴", "🟢")), "");
+assert.equal(sealedProse(reachCard.replace("🔴", "🟡")), "");
+assert.equal(sealedProse("🔑 **Uni asks to use x** (powerful)\n\n```uni-sealed-approval\n{}\n```"), "🔑 **Uni asks to use x** (powerful)");
+
+// Needs you says the reach too, when the card has one.
+assert.equal(waitingTitle({ kind: "single", credential: "c", action: "a", rows: 1, reach: "🔴 All of A · 10 min" }), "🔴 All of A · 10 min");
+assert.equal(waitingTitle({ kind: "single", credential: "c", action: "a", rows: 1, reach: null }), "c · a");
+
 console.log("sealedCardCore ok");
