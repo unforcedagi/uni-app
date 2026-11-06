@@ -47,7 +47,7 @@ async function boot(page: Page, opts: Record<string, unknown> = {}, before?: () 
     };
   }, { calm: test.info().project.name === 'daylight', tasks: [task('t-jars', 'T-41 Find jars for the honey', 'Areas/Bee Garden', { priority: 'now', next: 'Ask the neighbours for twenty jars.' })] });
   if (before) await page.addInitScript(before);
-  await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, tasks: true, ...opts } as any);
+  await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, tasks: true, noWait: true, ...opts } as any);
   await page.locator('[data-place="front-door"]').first().waitFor();
 }
 
@@ -55,7 +55,7 @@ test.describe('every way into a room lands in focus over All', () => {
   test('a place on the Uni home', async ({ page }) => {
     await boot(page);
     await home(page).locator('.fd-door[data-path="Areas/Choir"]').click();
-    await inFocus(page, 'Choir', /^Message #choir/);
+    await inFocus(page, 'Choir', /^Message choir/);
     await expect(sheet(page)).toContainText('Sheet music for the winter set is printed');
     // Back: All, where the room was in front of it
     if (touch()) await androidBack(page); else await page.keyboard.press('Escape');
@@ -67,21 +67,21 @@ test.describe('every way into a room lands in focus over All', () => {
   test('a place with no room of its own talks in the room it borrows, named for the place', async ({ page }) => {
     await boot(page);
     await home(page).locator('.fd-door[data-path="Areas/Still Water"]').click();
-    await inFocus(page, 'Still Water', /^Message #uni/);
-    await expect(sheet(page).locator('.all-focus-line')).toContainText('Talks in #uni');
+    await inFocus(page, 'Still Water', /^Message uni/i);
+    await expect(sheet(page).locator('.all-focus-line')).toHaveText(/^Talks in #uni · no room of its own yet$/i);
   });
 
   test('a room no area holds, from "New in other rooms"', async ({ page }) => {
     await boot(page, { unread: { 'ch-allot': 2 } });
     await home(page).getByRole('button', { name: /^#allotment/ }).click();
-    await inFocus(page, '#allotment', /^Message #allotment/);
+    await inFocus(page, '#allotment', /^Message allotment/);
     await expect(sheet(page)).toContainText('The water butt is full again.');
   });
 
   test('a private place, opened from the home, shows inside its focus only', async ({ page }) => {
     await boot(page);
     await home(page).locator('.fd-door[data-path="Areas/Sanctum"]').click();
-    await inFocus(page, 'Sanctum', /^Message #sanctum/);
+    await inFocus(page, 'Sanctum', /^Message sanctum/);
     await expect(sheet(page)).toContainText('Sat twenty minutes');
     // All behind it never shows the private room
     await expect(page.locator('.all-behind')).not.toContainText('Sat twenty minutes');
@@ -98,14 +98,14 @@ test.describe('every way into a room lands in focus over All', () => {
     if (touch() && (page.viewportSize()?.width ?? 0) < 600) await page.getByRole('button', { name: 'Search' }).click();
     await page.getByRole('searchbox').fill('bisque');
     await page.locator('.search-hit').first().click();
-    await inFocus(page, 'Kiln Studio', /^Message #kiln-studio/);
+    await inFocus(page, 'Kiln Studio', /^Message kiln-studio/);
     await expect(sheet(page).locator('[data-ref="k1"]')).toBeVisible();
     // a project's own room is a room too
     await rail(page).getByRole('button', { name: touch() && (page.viewportSize()?.width ?? 0) < 600 ? 'More' : 'Search' }).click();
     if (touch() && (page.viewportSize()?.width ?? 0) < 600) await page.getByRole('button', { name: 'Search' }).click();
     await page.getByRole('searchbox').fill('glossy');
     await page.locator('.search-hit').first().click();
-    await inFocus(page, /Glaze Tests|#glaze-tests/, /^Message #glaze-tests/);
+    await inFocus(page, /Glaze Tests|#glaze-tests/, /^Message glaze-tests/);
   });
 
   test('what needs you on the home opens its room, its details showing the task', async ({ page }) => {
@@ -124,7 +124,7 @@ test.describe('every way into a room lands in focus over All', () => {
       localStorage.setItem('uni.tabs.v2', JSON.stringify({ v: 1, tabs: [{ id: 't1', kind: 'room', channel: 'ch-table', title: 'long-table' }], active: 't1', recent: ['t1'] }));
     });
     await boot(page);
-    await inFocus(page, 'Long Table', /^Message #long-table/);
+    await inFocus(page, 'Long Table', /^Message long-table/);
   });
 
   test('an area page saved before this version comes back as its room in focus', async ({ page }) => {
@@ -134,7 +134,7 @@ test.describe('every way into a room lands in focus over All', () => {
       localStorage.setItem('uni.tabs.v2', JSON.stringify({ v: 1, tabs: [{ id: 't1', kind: 'area', path: 'Areas/North Field', channel: 'ch-north', title: 'North Field' }], active: 't1', recent: ['t1'] }));
     });
     await boot(page);
-    await inFocus(page, 'North Field', /^Message #north-field/);
+    await inFocus(page, 'North Field', /^Message north-field/);
   });
 
   test('a room in focus is where the app reopens', async ({ page }) => {
@@ -142,16 +142,20 @@ test.describe('every way into a room lands in focus over All', () => {
     await home(page).locator('.fd-door[data-path="Areas/Bee Garden"]').click();
     await inFocus(page, 'Bee Garden');
     await page.reload();
-    await inFocus(page, 'Bee Garden', /^Message #bee-garden/);
+    await inFocus(page, 'Bee Garden', /^Message bee-garden/);
   });
 
   test('the home\'s composer: "Sent to" opens the room it went to in focus', async ({ page }) => {
     await boot(page);
     const field = home(page).getByRole('textbox', { name: /Talk to Uni|Message for your rooms/ });
     await field.fill('Choir: can we add a carol to the winter set?');
-    await field.press('Enter');
-    await home(page).getByRole('button', { name: /choir/i }).filter({ hasText: /choir/i }).last().click();
-    await inFocus(page, 'Choir');
+    await home(page).getByRole('button', { name: /^Send to Choir/ }).click();
+    const sent = home(page).locator('.all-link', { hasText: 'Choir' });
+    await expect(sent).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => c.args.channel))).toEqual(['ch-choir']);
+    await sent.click();
+    await inFocus(page, 'Choir', /^Message choir/);
+    await expect(sheet(page)).toContainText('can we add a carol to the winter set?');
   });
 });
 
@@ -174,7 +178,7 @@ test.describe('the focus head and the room\'s details', () => {
     // Back: the conversation, then All
     if (touch()) await androidBack(page); else await page.keyboard.press('Escape');
     await expect(details(page)).toHaveCount(0);
-    await expect(sheet(page).getByRole('textbox', { name: /^Message #choir/ })).toBeVisible();
+    await expect(sheet(page).getByRole('textbox', { name: /^Message choir/ })).toBeVisible();
     if (touch()) await androidBack(page); else await page.keyboard.press('Escape');
     await expect(sheet(page)).toHaveCount(0);
     await noOldView(page);
@@ -187,7 +191,7 @@ test.describe('the focus head and the room\'s details', () => {
     await expect(details(page)).toContainText('Find jars for the honey');
     // a task opens its sheet over the focus, and closes back to the details
     await details(page).getByRole('button', { name: /Find jars for the honey/ }).first().click();
-    const taskSheet = page.getByRole('dialog', { name: /Find jars for the honey/ });
+    const taskSheet = page.getByRole('dialog', { name: /twenty jars|Find jars/ });
     await expect(taskSheet).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(taskSheet).toHaveCount(0);
@@ -208,7 +212,7 @@ test.describe('the focus head and the room\'s details', () => {
     await home(page).locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
     await sheet(page).getByRole('button', { name: /Kiln Studio.*details/ }).click();
     await details(page).getByRole('button', { name: /Glaze Tests/ }).first().click();
-    await inFocus(page, /Glaze Tests|#glaze-tests/, /^Message #glaze-tests/);
+    await inFocus(page, /Glaze Tests|#glaze-tests/, /^Message glaze-tests/);
   });
 });
 

@@ -1,58 +1,22 @@
-// T-124: the room's quiet companion. Not a page: one sentence on where the room stands, at most three things that need the user, and what is
-// running (only when something is). Desktop: a side panel that folds to a thin rail. Phone: a one-line strip at the top of the room that opens
-// downward. Each item opens its task sheet; "Everything here" goes one level deeper, to the full node page. The fold is remembered per device.
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+// T-124: what a room says about itself, beside its conversation: at most three things that need the user, what is running (only when something
+// is), and one dated sentence on where it stands. T-335 one surface: it is the room's details, inside its focus over All (AllFocus.tsx); each item
+// opens its task sheet, and "All of X's work" goes one step deeper, still inside the focus.
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import { RefName, RefText } from "./noteRefs";
 import { splitRefs, type NoteRef } from "./noteRefsCore";
 import { useVaultProfile } from "./ProfileContext";
 import { LoadHealth } from "./LoadHealth";
-import { openDialog } from "./focusTrap";
 import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { foldedLead, ROOM_NOT_FOUND, actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, askedShown, requestDate, currentStep, actionOf, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, lastWritten, summaryLine, SUMMARY_LONG, recheckLine, reasonShort, noneLine, approvalAsk, type RecheckScope, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { ROOM_NOT_FOUND, actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, askedShown, requestDate, currentStep, actionOf, rowAction, rowSubParts, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, lastWritten, summaryLine, SUMMARY_LONG, recheckLine, reasonShort, noneLine, type RecheckScope, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 import { ApprovalRows } from "./ApprovalRows";
 import type { RecheckWhy } from "./simpleCore";
 
-const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
-/** Below this width the side panel starts folded: the conversation gets the space. */
-export const SIDE_OPEN_MIN = 1100;
-const read = (key: string, open: boolean): boolean => { try { const v = localStorage.getItem(key); return v === null ? open : v === "1"; } catch { return open; } };
-const roomy = () => typeof window === "undefined" || window.innerWidth >= SIDE_OPEN_MIN;
-/** The side panel keeps one choice per width class (r13): at 1100px and over it opens unless folded there; under 1100px it is folded unless
- *  opened there. A window resized across 1100px takes that width's choice, so a panel open on a wide window folds when it narrows. */
-const keyFor = (variant: "side" | "strip") => (variant === "strip" ? KEYS.strip : roomy() ? KEYS.side : KEYS.sideNarrow);
-const choice = (variant: "side" | "strip") => read(keyFor(variant), variant === "side" && roomy());
-
-/** A short viewport (r16): under 700px tall or 900px wide. The strip starts folded there, whatever was chosen before: the conversation first. */
-export const SHORT_QUERY = "(max-height: 699.98px), (max-width: 899.98px)";
-const isShort = () => typeof window !== "undefined" && !!window.matchMedia?.(SHORT_QUERY).matches;
-
-/** Whether the companion is open on this device: open by default beside the chat on a wide window (folded under 1100px), folded by default as a
- *  phone strip. r16: the strip folds whenever the app opens on, or enters, a short viewport (the saved choice is kept, not applied there). */
-export function useCompanionOpen(variant: "side" | "strip"): [boolean, (v: boolean) => void] {
-  const first = () => (variant === "strip" && isShort() ? false : choice(variant));
-  const [open, setOpen] = useState(first);
-  useEffect(() => {
-    setOpen(first());
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    if (variant === "strip") {
-      const mq = window.matchMedia(SHORT_QUERY);
-      const enter = () => { if (mq.matches) setOpen(false); };
-      mq.addEventListener("change", enter);
-      return () => mq.removeEventListener("change", enter);
-    }
-    const mq = window.matchMedia(`(min-width: ${SIDE_OPEN_MIN}px)`);
-    const cross = () => setOpen(choice(variant));
-    mq.addEventListener("change", cross);
-    return () => mq.removeEventListener("change", cross);
-  }, [variant]); // eslint-disable-line react-hooks/exhaustive-deps
-  return [open, (v) => { setOpen(v); try { localStorage.setItem(keyFor(variant), v ? "1" : "0"); } catch { /* this session only */ } }];
-}
 
 
 export type CompanionProps = {
@@ -96,7 +60,6 @@ const URL_RE = /https?:\/\/\S+|\bwww\.\S+/g;
 export const plainDetail = (s: string): string => s.replace(URL_RE, "").replace(/\s+/g, " ").replace(/\s*[·,;:(\[-]+\s*$/, "").replace(/\(\s*\)/g, "").trim();
 /** Running rows shown; the rest are behind the footer link. */
 const RUNS_SHOWN = 2;
-type Fold = { open: boolean; onToggle: (v: boolean) => void };
 
 /** The ask itself: the "Decision (default yes):" style label a decision's title carries is left to the opened item. */
 export const askOf = (rest: string): string => { const t = plainDetail(rest) || rest; return t.replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").trim() || t; };
@@ -676,7 +639,8 @@ export function Rechecks({ tasks, why, scope = "room", onTask, placeOf }: { task
   </div>;
 }
 
-function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onRun, runMissing, scopeAll, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false, compact = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean;
+/** T-335 one surface: what a room's details say (in its focus): what needs you, what is running, the dated summary, and the way to all of its work. */
+export function CompanionBody({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onRun, runMissing, scopeAll, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false, compact = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean;
   /** r28 (Codex P2-5): the one compact panel: the summary is its date line, the footer is outside what scrolls */
   compact?: boolean }) {
   const live = runs.filter(isActiveRun);
@@ -795,111 +759,3 @@ export function RunText({ what }: { what: string }) {
   const full = runText(what);
   return <span className="cp-run-text" title={full}>{full}</span>;
 }
-
-/**
- * "Needs you · 2: Say go on prod deploy of #38 + #58": the folded strip's line when anything needs the user (r19). The first row whose request
- * is known; the count is the feed's own total, asks and waiting runs alike. `short` is "Needs you · 2": the line when the action doesn't fit
- * whole beside it (r28: a line is whole or short, never cut). Null when nothing needs them.
- */
-export function waitingLine(feed: NeedsFeed): { full: string; short: string } | null {
-  if (!feed.total) return null;
-  const short = `Needs you · ${feed.total}`;
-  const first = feed.rows.map((t) => rowLead(t)).find((r) => r.mode !== "checking" && r.mode !== "unavailable");
-  // T-161: a prompt waiting on the user's OK goes first: a run is blocked on it, and it ends on its own
-  if (feed.approvals?.length) return { short, full: `${short}: ${approvalAsk(feed.approvals[0])}` };
-  const run = !first && feed.waiting?.length ? waitingRunParts(feed.waiting[0].what).step : null;
-  // r28: the line is the first request whole, or just the count: never step 1 of it, never a part (the r21 "step 1 of 2" form is gone)
-  const text = run ?? first?.text;
-  return { short, full: `${short}${text ? `: ${first?.yourCall ? `Your call: ${text}` : text}` : ""}` };
-}
-
-/** One line of text that is whole or is its shorter form: never cut and never "…" (r28). */
-function FitText({ full, short, className }: { full: string; short: string; className: string }) {
-  const ref = useRef<HTMLSpanElement | null>(null);
-  const [mode, setMode] = useState<"full" | "short">("full");
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => { setMode("full"); }, [full, short, width]);
-  useLayoutEffect(() => {
-    const el = ref.current; if (!el || mode !== "full") return;
-    if (el.scrollWidth > el.clientWidth + 1) setMode("short");
-  });
-  useLayoutEffect(() => {
-    const el = ref.current; if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => { const w = Math.round(el.clientWidth); setWidth((cur) => (cur === w ? cur : w)); });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return <span ref={ref} className={className} data-form={mode} title={full}>{mode === "full" ? full : short}</span>;
-}
-
-/** The side panel (wide screens). `open` and `onToggle` come from `useCompanionOpen("side")`. */
-export function CompanionSide({ open, onToggle, ...p }: CompanionProps & Fold) {
-  return <aside className={`cp side cp-fit ${open ? "open" : "folded"}`} aria-label="Where this stands">
-    {open
-      ? <>
-        <button type="button" className="cp-top" aria-expanded="true" aria-label="Hide where this stands" title="Hide where this stands" onClick={() => onToggle(false)}><span>{standsHeading(p.scope, p.ready ? p.stands?.ago : null, p.stands?.asOf)}</span><span className="cp-fold" aria-hidden="true">›</span></button>
-        <Body {...p} fit />
-      </>
-      : <button type="button" className="cp-unfold" aria-expanded="false" aria-label="Show where this stands" title="Show where this stands" onClick={() => onToggle(true)}>
-        <span aria-hidden="true">‹</span>{p.feed.total > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}</button>}
-  </aside>;
-}
-
-/**
- * The strip (the phone's, and a short window's): one line, tap to open. r28 (Codex P2-5): it opens one panel, always the same one: over the
- * room, under its header. The panel's summary is folded to its date line, its footer is outside what scrolls, and it always starts with a whole
- * request. Opening a task from it leaves the panel where it was; closing the task comes back to the panel at the same scroll position.
- */
-export function CompanionStrip({ open, onToggle, onSheet, behind = false, ...p }: CompanionProps & Fold & { /** r20 (Codex 5): the sheet's close, while it is open, so the shell's Back closes it first */ onSheet?: (close: (() => void) | null) => void;
-  /** r28: a task's sheet is open over this panel: the panel stays where it is, out of the way of assistive technology until that sheet is closed */ behind?: boolean }) {
-  const ref = useRef<HTMLElement>(null);
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const close = () => onToggle(false);
-  const closeRef = useRef(close); closeRef.current = close;
-  /** Where the panel starts: under the room's header, so the room it belongs to stays in sight; in a window too short for that, from the top. */
-  const [top, setTop] = useState(0);
-  useLayoutEffect(() => {
-    if (!open) return;
-    const el = ref.current; const room = el?.closest(".sr") as HTMLElement | null;
-    const under = el && room ? Math.max(0, Math.round(el.getBoundingClientRect().top - room.getBoundingClientRect().top)) : 0;
-    setTop(room && room.clientHeight < SHEET_FULL_BELOW ? 0 : under);
-    // r17: focus goes back to the strip's own line when the panel closes. r19: the one dialog contract (focus in, Tab kept inside, the room
-    // under it inert, Escape on the window when it is the top dialog)
-    const line = el?.querySelector<HTMLElement>(".cp-line") ?? null;
-    const box = sheetRef.current; const layer = box?.closest(".cp-sheet-wrap") as HTMLElement | null;
-    onSheet?.(() => closeRef.current());
-    const off = box ? openDialog(box, () => closeRef.current(), { root: layer, initial: box, opener: line }) : undefined;
-    return () => { off?.(); onSheet?.(null); };
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const heading = standsHeading(p.scope, p.ready ? p.stands?.ago : null, p.stands?.asOf);
-  // r18: folded, the line is the sentence cut on a whole word (never "underway ac…"); open, it is the dated heading. r19: when anything needs
-  // the user, the folded line says what is waiting first ("Needs you · 2: Say go on the deploy…"), never only a dot behind a chevron
-  const waiting = p.ready && !p.note ? waitingLine(p.feed) : null;
-  const folded = p.note ?? (p.ready ? (p.stands ? (p.stands.written ? `${foldedLead(p.stands.asOf, p.stands.age, p.stands.by)}${withoutRawIds(p.stands.text)}` : withoutRawIds(p.stands.text)) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
-  const lineRef = useRef<HTMLParagraphElement | null>(null);
-  const lineTokens = [...(p.scope ? [{ node: <b className="cp-scope">{`${p.scope}:`}</b>, space: false }] : []), ...wordTokens(folded).map((w, i) => (i === 0 && p.scope ? { ...w, space: true } : w))];
-  const label = <span className="cp-line-text" title={p.stands?.text}>{open ? heading
-    : waiting ? <FitText className="cp-line-fit" full={waiting.full} short={waiting.short} />
-    : <WordClamp elRef={lineRef} className="cp-line-words" tokens={lineTokens} textKey={`${p.scope ?? ""}\n${folded}`} lines={1} open={false} onCut={() => {}} onClick={() => {}} tag="span" />}</span>;
-  // the strip sits in a room below 900px, which shows the list's health above it (r14)
-  return <>
-    <section ref={ref} className={`cp strip ${open ? "open" : ""}`} aria-label="Where this stands" data-place={open ? "sheet" : "folded"}>
-      <button type="button" className="cp-line" aria-expanded={open} onClick={() => (open ? close() : onToggle(true))}>
-        {label}
-        {p.feed.total > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}
-        <span className="cp-chev" aria-hidden="true">{open ? "⌃" : "⌄"}</span>
-      </button>
-    </section>
-    {open && <div className="cp-sheet-wrap" aria-hidden={behind || undefined}>
-      <button type="button" className="cp-sheet-scrim" aria-label="Close" tabIndex={-1} onClick={close} />
-      <div ref={sheetRef} className="cp cp-sheet" role="dialog" aria-modal="true" aria-label={p.scope ? `Where ${p.scope} stands` : "Where this stands"} tabIndex={-1}
-        style={{ maxHeight: `calc(100% - ${top}px)` }}>
-        <div className="cp-sheet-head"><span className="cp-sheet-lead">{p.scope ?? p.nodeName}</span><button type="button" className="cp-sheet-close" onClick={close}>Close</button></div>
-        {/* one panel: a task opened from it is a sheet over it (the panel stays, and is where Close comes back to); "All of X's work" and a private area leave it */}
-        <Body {...p} fit={false} hideHealth compact onPrivate={p.onPrivate && ((o) => { close(); p.onPrivate!(o); })} onEverything={p.onEverything && (() => { close(); p.onEverything!(); })} />
-      </div>
-    </div>}
-  </>;
-}
-/** A room shorter than this (px) gives the compact panel its whole height, header included. */
-export const SHEET_FULL_BELOW = 520;

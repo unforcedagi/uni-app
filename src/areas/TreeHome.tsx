@@ -1,11 +1,10 @@
-// T-111, r12, r13: the room tree (beside the room on wide screens, the home on a phone, a drawer from the room's header below 900px) and the crumbs.
+// T-111, r12, r13: the tree of places and the crumbs. T-335 one surface: with rooms, a room is only ever in focus over All, so this tree is the home
+// of a vault without rooms (its places, and each one's work); it is never beside a room any more.
 // Styling is in tree.css (the Field Book tokens).
 import { sameWords } from "./sameWords";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { agoLabel, roomSlug, type TreeRow } from "./treeRooms";
-import { VIEWS, type Card, type Chip, type RoomStamp, type SidebarView } from "./viewsCore";
-import type { NavControls } from "../navContext";
-import { useSidebarView, ancestorsOf, hasKids, isOpen, recentLabels, RECENT_FULL_PX, rolledNeeds, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useFolds, useSidebar, visibleRows } from "./sidebarState";
+import { useEffect, type ReactNode } from "react";
+import { roomSlug, type TreeRow } from "./treeRooms";
+import { ancestorsOf, hasKids, isOpen, rolledNeeds, useFolds, visibleRows } from "./sidebarState";
 import type { TaskLoad } from "./Companion";
 import { LoadHealth } from "./LoadHealth";
 import { asksWords, rolledAsks, rolledUnread, unreadShort, unreadWords, type Unread } from "./roomUnread";
@@ -18,8 +17,6 @@ export type OtherRoom = { id: string; name: string };
 export type TreeProps = {
   chat?: boolean; rows: readonly TreeRow[]; needs: ReadonlyMap<string, number>;
   onOpen: (path: string, via?: string | null) => void;
-  /** T-140: the Rooms and Projects views (the tree is the Areas view). Absent: the tree alone. */
-  lists?: { live: readonly RoomStamp[]; archived: readonly RoomStamp[]; cards: readonly Card[]; now: number };
   /** The row of the level being shown (the wide layout keeps the list beside it). */
   selected?: string;
   /** Rooms no node owns: a quiet "Other rooms" group at the bottom, folded unless one of them is open. */
@@ -114,104 +111,12 @@ function othersNew(others: readonly OtherRoom[], by: ReadonlyMap<string, Unread>
 /** How many rows sit directly inside row `i` (a chevron is only drawn when there are some). */
 const kidCount = (rows: readonly TreeRow[], i: number) => { let n = 0; for (let j = i + 1; j < rows.length && rows[j].depth > rows[i].depth; j++) if (rows[j].depth === rows[i].depth + 1) n++; return n; };
 
-const VIEW_LABEL: Record<SidebarView, string> = { rooms: "Rooms", projects: "Projects", areas: "Areas" };
-/** Rooms / Projects / Areas, remembered per device. */
-function ViewSwitch({ view, onView }: { view: SidebarView; onView: (v: SidebarView) => void }) {
-  return <div className="th-views" role="group" aria-label="View">{VIEWS.map((v) => <button key={v} type="button" className="th-view" data-view={v} aria-pressed={view === v} onClick={() => onView(v)}>{VIEW_LABEL[v]}</button>)}</div>;
-}
-
-const whenOf = (now: number, ts: number | null) => ts ? agoLabel(now, ts) : "";
-
-/** Every live room, newest message first; archived rooms stay behind one line. */
-function RoomsView({ lists, selectedRoom, onOpenRoom }: { lists: NonNullable<TreeProps["lists"]>; selectedRoom?: string; onOpenRoom?: (id: string) => void }) {
-  const [more, setMore] = useState(false);
-  const row = (r: RoomStamp) => <li key={r.id} className={`th-room ${selectedRoom === r.id ? "sel" : ""}`}>
-    <button type="button" className="th-go th-room-go" data-room={r.id} aria-current={selectedRoom === r.id ? "page" : undefined} aria-label={`#${roomSlug(r.name)}`} onClick={() => onOpenRoom?.(r.id)}>
-      <span className="th-name"><b>#{roomSlug(r.name)}</b></span><small className="th-when">{whenOf(lists.now, r.last_ts)}</small>
-    </button></li>;
-  return <nav aria-label="Rooms by activity"><ul className="th-rows th-roomlist">{lists.live.map(row)}</ul>
-    {lists.archived.length > 0 && <div className="th-archived"><button type="button" className="th-showarch" aria-expanded={more} onClick={() => setMore(!more)}>{more ? "Hide archived" : `Show archived (${lists.archived.length})`}</button>
-      {more && <ul className="th-rows th-roomlist">{lists.archived.map(row)}</ul>}</div>}
-  </nav>;
-}
-
-const ChipButton = ({ chip, onOpenRoom }: { chip: Chip; onOpenRoom?: (id: string) => void }) =>
-  <button type="button" className="th-chip" data-chip={chip.path} data-room={chip.roomId ?? undefined} disabled={!chip.roomId} onClick={() => chip.roomId && onOpenRoom?.(chip.roomId)}>
-    <b>{chip.name}</b>{chip.roomName && <span> · #{roomSlug(chip.roomName)}</span>}</button>;
-
-/** A card per project, newest room activity first: its room (or "talks in #room"), and its links as chips. A chip or the room opens that room. */
-function ProjectsView({ lists, selected, onOpen, onOpenRoom }: { lists: NonNullable<TreeProps["lists"]>; selected?: string; onOpen: TreeProps["onOpen"]; onOpenRoom?: (id: string) => void }) {
-  return <nav aria-label="Projects by activity"><ul className="th-rows th-cards">{lists.cards.map((c) => <li key={c.path} className={`th-card ${selected === c.path ? "sel" : ""}`} data-card={c.path}>
-    <div className="th-card-head">
-      <button type="button" className="th-go th-card-name" data-path={c.path} aria-current={selected === c.path ? "page" : undefined} onClick={() => onOpen(c.path)}><span className="th-name"><b>{c.name}</b></span></button>
-      <small className="th-when">{whenOf(lists.now, c.lastTs)}</small>
-    </div>
-    {c.roomId && c.roomName && <button type="button" className={`th-cardroom ${c.own ? "own" : "held"}`} data-room={c.roomId} onClick={() => onOpenRoom?.(c.roomId!)}>{c.own ? "" : "talks in "}#{roomSlug(c.roomName)}</button>}
-    {c.chips.length > 0 && <div className="th-chips">{c.chips.map((k) => <ChipButton key={k.path} chip={k} onOpenRoom={onOpenRoom} />)}</div>}
-  </li>)}</ul></nav>;
-}
-
-const NavButtons = ({ nav }: { nav: NavControls | null }) => nav ? <>
-  <button type="button" className="th-nb" aria-label="Back" title="Back (Alt+←)" disabled={!nav.canBack} onClick={nav.back}>←</button>
-  <button type="button" className="th-nb" aria-label="Forward" title="Forward (Alt+→)" disabled={!nav.canForward} onClick={nav.forward}>→</button>
-</> : null;
-
-const FRESHNESS = ["saved", "refresh", "slow"];
-export function TreeScreen({ status, column, nav, onHide, hideLabel = "Hide the sidebar", ...tree }: TreeProps & {
-  status?: ReactNode;
-  /** The left column beside a room (wide screens, and the drawer below 900px): a slim toolbar (Back, Forward, hide), the tree, then the last few places. */
-  column?: boolean;
-  nav?: NavControls | null; onHide?: () => void; hideLabel?: string;
-}) {
-  const { rows, selected, others, selectedRoom } = tree;
-  const [view, setView] = useSidebarView();
-  // the tree may scroll, but Recent never takes its room: with the tree's rows taller than what is left beside five places, Recent shows three
-  const box = useRef<HTMLDivElement>(null);
-  const [tight, setTight] = useState(false);
-  useLayoutEffect(() => {
-    const root = box.current; const wrap = root?.querySelector<HTMLElement>(".th-rows-wrap"); const list = wrap?.firstElementChild as HTMLElement | null;
-    if (!column || !root || !wrap || !list || typeof ResizeObserver === "undefined") return;
-    const measure = () => {
-      const fixed = [...root.children].filter((c) => c !== wrap && !c.classList.contains("th-recent")).reduce((a, c) => a + (c as HTMLElement).offsetHeight, 0);
-      setTight(list.offsetHeight > root.clientHeight - fixed - RECENT_FULL_PX);
-    };
-    // r23: the tree scrolls in its own region above Recent; while rows run on below, its last line fades, so a row never reads as under Recent
-    const more = () => { const on = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight > 2; if (on) wrap.setAttribute("data-more", ""); else wrap.removeAttribute("data-more"); };
-    measure(); more();
-    const ro = new ResizeObserver(() => { measure(); more(); });
-    ro.observe(root); ro.observe(list);
-    wrap.addEventListener("scroll", more, { passive: true });
-    return () => { ro.disconnect(); wrap.removeEventListener("scroll", more); };
-  }, [column]);
-  const here = selectedRoom ? others?.find((o) => o.id === selectedRoom)?.name ?? null : rows.find((r) => r.path === selected)?.name ?? null;
-  return <div ref={box} className={`tree-home th-phone-tree ${column ? "th-column" : ""}`}>
-    {column
-      ? <header className="th-toolbar"><NavButtons nav={nav ?? null} /><span className="th-tb-gap" />{onHide && <button type="button" className="th-nb" aria-label={hideLabel} title={hideLabel} onClick={onHide}>‹</button>}</header>
-      : <header className="th-treehead"><h1 className="note-title">Uni</h1></header>}
+export function TreeScreen({ status, ...tree }: TreeProps & { status?: ReactNode }) {
+  return <div className="tree-home th-phone-tree">
+    <header className="th-treehead"><h1 className="note-title">Uni</h1></header>
     {status}
-    {/* r23: one freshness line at a time: beside a room (the column), the companion or the room's strip says it, so the tree doesn't */}
-    <LoadHealth load={tree.load} ready={!!tree.needsReady} skip={column ? FRESHNESS : undefined} />
-    {tree.lists && <ViewSwitch view={view} onView={setView} />}
-    <div className="th-rows-wrap">{!tree.lists || view === "areas" ? <RoomTree {...tree} /> : view === "rooms" ? <RoomsView lists={tree.lists} selectedRoom={selectedRoom} onOpenRoom={tree.onOpenRoom} /> : <ProjectsView lists={tree.lists} selected={selected} onOpen={tree.onOpen} onOpenRoom={tree.onOpenRoom} />}</div>
-    {column && nav && nav.recent.length > 0 && <section className={`th-recent ${tight ? "tight" : ""}`} aria-label="Recent"><h2>Recent</h2>
-      <ul>{recentLabels(nav.recent, rows, here, tight ? 3 : 5).map(({ r, label }) => <li key={r.key}><button type="button" onClick={r.go} title={label}>{label}</button></li>)}</ul></section>}
-  </div>;
-}
-
-/** The left column: width set by dragging its right edge (180 to 360px, remembered), or hidden down to a thin strip. */
-/** `fold` (T-200, a note beside the chat): folded or not for now, over the choice kept on this device. */
-export function RoomSidebar({ nav, fold = null, ...tree }: TreeProps & { nav?: NavControls | null; fold?: { folded: boolean; set: (open: boolean) => void } | null }) {
-  const [sb, setSb] = useSidebar();
-  const drag = useRef<{ x: number; w: number } | null>(null);
-  if (fold ? fold.folded : sb.hidden) return <div className="th-roomnav hidden"><button type="button" className="th-nb" aria-label="Show the sidebar" title="Show the sidebar" onClick={() => fold ? fold.set(true) : setSb({ hidden: false })}>›</button><NavButtons nav={nav ?? null} /></div>;
-  return <div className="th-roomnav" data-width={sb.width}>
-    <TreeScreen column {...tree} nav={nav} onHide={() => fold ? fold.set(false) : setSb({ hidden: true })} />
-    <div className="th-resize" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" aria-valuemin={SIDEBAR_MIN} aria-valuemax={SIDEBAR_MAX} aria-valuenow={sb.width} tabIndex={0}
-      onPointerDown={(e) => { drag.current = { x: e.clientX, w: sb.width }; e.currentTarget.setPointerCapture(e.pointerId); }}
-      onPointerMove={(e) => { if (drag.current) setSb({ width: drag.current.w + e.clientX - drag.current.x }); }}
-      onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}
-      onDoubleClick={() => setSb({ width: SIDEBAR_DEFAULT })}
-      onKeyDown={(e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); setSb({ width: sb.width + (e.key === "ArrowRight" ? 16 : -16) }); } }} />
+    <LoadHealth load={tree.load} ready={!!tree.needsReady} />
+    <div className="th-rows-wrap"><RoomTree {...tree} /></div>
   </div>;
 }
 

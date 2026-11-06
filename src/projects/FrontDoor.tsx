@@ -104,7 +104,17 @@ export function AllEmpty({ reading, error = null, onBack }: { reading: boolean; 
   </div>;
 }
 
-export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = "known", alsoNeeds = 0, onRetryNeeds }: { /** T-335 as Aaron: only once the tasks have been read, fresh and whole, may the home say nothing needs you */ needsKnown?: NeedsKnown; /** approvals waiting, which the task feed doesn't count */ alsoNeeds?: number; onRetryNeeds?: () => void; doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+/** T-335 one surface: the rooms no area holds, all of them, folded under one line (the tree beside a room used to list them). */
+function OtherRooms({ rooms, onOpen }: { rooms: readonly { id: string; name: string }[]; onOpen: (id: string) => void }) {
+  if (!rooms.length) return null;
+  return <details className="fd-others"><summary>Other rooms · {rooms.length}</summary>
+    <ul>{rooms.map((r) => <li key={r.id}><button type="button" data-room={r.id} onClick={() => onOpen(r.id)}>#{r.name.replace(/^#/, "")}</button></li>)}</ul></details>;
+}
+
+export function FrontDoor({ doors, needs, onOpen, onOpenNeed, me = null, newRooms = [], otherRooms = [], noAreas, onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = "known", alsoNeeds = 0, onRetryNeeds }: {
+  /** T-335 one surface: what needs you opens its place's room with its details (default: as a place does) */ onOpenNeed?: (path: string) => void;
+  /** T-335 one surface: every room no area holds, folded under one line */ otherRooms?: readonly { id: string; name: string }[];
+  /** No areas yet (once that is known): the home says so, with the way to Uni's room when there is one */ noAreas?: (() => void) | null; /** T-335 as Aaron: only once the tasks have been read, fresh and whole, may the home say nothing needs you */ needsKnown?: NeedsKnown; /** approvals waiting, which the task feed doesn't count */ alsoNeeds?: number; onRetryNeeds?: () => void; doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
   /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */
   all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string | null, root?: string | null) => void } | null;
   /** T-335: this is the All place (a place of its own on the rail), and the way back from it; null: the home, with the places. */
@@ -162,7 +172,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
       {needsKnown === "failed" && !needN && onRetryNeeds && <button type="button" className="note-action fd-retry" onClick={onRetryNeeds}>Try again</button>}
     </header>
     {composer}
-    {needs && <NeedsLine needs={needs} onOpen={onOpen} />}
+    {needs && <NeedsLine needs={needs} onOpen={onOpenNeed ?? onOpen} />}
     {toPost && <div className="fd-topost">{toPost}</div>}
     {onOpenRoom && <NewLine rooms={newRooms} onOpen={onOpenRoom} />}
     <h2 className="fd-places-h"><span>Places</span><Weave doors={doors} liveOf={liveOf} /></h2>
@@ -190,6 +200,8 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
         </button>
       </li>;
     })}</ul></nav>
+    {noAreas !== undefined && <p className="fd-none">No areas yet. Tell Uni what you want to look after, and it will set up your first area.{noAreas && <> <button type="button" className="all-link" onClick={noAreas}>Talk to Uni</button></>}</p>}
+    {onOpenRoom && <OtherRooms rooms={otherRooms} onOpen={onOpenRoom} />}
     {(at || ws.partial.length > 0) && <p className="fd-status" role="status">{[at && `${ws.error ? "Couldn't refresh · " : ""}As of ${at}`, ...ws.partial].filter(Boolean).join(" · ")}</p>}
     <UsageLine />
   </div>;

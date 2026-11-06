@@ -1,22 +1,30 @@
-// T-335 one fluid surface: a room in focus, in All. Not a place you go to: the room's real conversation and composer (the same pane a room's page has) come
-// up over the feed, which recedes behind it and keeps its place. One tap on what shows of All, the Back button, Android Back, Escape, the rail's All or a
-// swipe down on the head returns. On a calm screen nothing moves: the room is in full black inside a black edge, All behind it is pale.
+// T-335 one fluid surface: a room in focus, in All. Not a place you go to: the room's real conversation and composer come up over the feed, which
+// recedes behind it and keeps its place. One tap on what shows of All, the Back button, Android Back, Escape, the rail's All or a swipe down on the
+// head returns. On a calm screen nothing moves: the room is in full black inside a black edge, All behind it is pale.
+// T-335 one surface: this is the only way a room is shown. Its head is the room's name and at most one labelled line; a tap on it opens the room's
+// details in the same sheet (what needs you, its summary, its projects and sessions, all of its work, its app), never another screen.
 import { useEffect, useRef, type ReactNode } from "react";
 import { roomTint } from "../glow/roomTint";
 import { calmScreen } from "../motion";
 import { labelBack } from "./AllView";
 import "./focus.css";
 
-/** The room in focus; `leaving`: on its way out, All already in reach. */
-export type AllFocusState = { room: string; root: string | null; leaving: boolean };
+/** What the focus shows: the conversation, the room's details, all of its work, or its app. Back steps from right to left. */
+export type FocusView = "chat" | "details" | "work" | "app";
+/** The room in focus; `root`: a thread of it; `path`: the place it is open for (a place that talks in a room it borrows); `leaving`: on its way out, All already in reach. */
+export type AllFocusState = { room: string; root: string | null; path?: string | null; view?: FocusView; leaving: boolean };
 /** How long the way out takes (focus.css says the same): the room's pane stays until it has gone. */
 export const FOCUS_OUT_MS = 170;
 const PULL_PX = 72;
 
-export function AllFocusSheet({ id, name, stands, root, replies, leaving, onBack, onPage, children }: { id: string; name: string;
-  /** The room's one line on where it stands (a private area's never comes here). */ stands: string | null;
+/** The head's one line: what it is (`src`, said first, so where it comes from is plain) and its words. */
+export type FocusLine = { src: string; text: string };
+
+export function AllFocusSheet({ id, name, line, root, replies, view = "chat", leaving, onBack, onView, details, children }: { id: string; name: string;
+  /** The room's one line under its name (its summary, saying whose; or the room a place talks in), or nothing. */ line: FocusLine | null;
   /** In a thread of the room: Back steps to the room. */ root: string | null; replies: number | null;
-  leaving: boolean; onBack: () => void; /** The room's page: its work, its tree, where it stands in full. */ onPage: () => void; children: ReactNode }) {
+  view?: FocusView; leaving: boolean; onBack: () => void; onView: (view: FocusView) => void;
+  /** The room's details (or its work, or its app), shown in place of the conversation while `view` isn't the conversation. */ details: ReactNode; children: ReactNode }) {
   const sheet = useRef<HTMLElement>(null);
   // a coarse pointer keeps the keyboard down, so the reader gets the thread: the keys' place is the sheet. The label has them back at the end.
   useEffect(() => {
@@ -24,7 +32,7 @@ export function AllFocusSheet({ id, name, stands, root, replies, leaving, onBack
     return () => labelBack();
   }, []);
   // a pull that stepped from a thread to its room is over
-  useEffect(() => { sheet.current?.style.removeProperty("--pull"); }, [root]);
+  useEffect(() => { sheet.current?.style.removeProperty("--pull"); }, [root, view]);
   // a swipe down on the head puts the room back
   const pull = useRef<{ id: number; y: number } | null>(null);
   const setPull = (dy: number) => {
@@ -34,7 +42,13 @@ export function AllFocusSheet({ id, name, stands, root, replies, leaving, onBack
     el.style.transform = dy ? `translateY(${dy}px)` : "";
   };
   const endPull = () => { pull.current = null; setPull(0); };
-  return <section ref={sheet} className="all-focus" role="region" tabIndex={-1} aria-label={`${name}, in focus`} data-leaving={leaving || undefined} style={{ ["--room-tint" as string]: roomTint(id) }}>
+  const inChat = view === "chat";
+  const back = !inChat ? (view === "details" ? { label: "Chat", aria: `Back to the conversation in ${name}` } : { label: "Details", aria: `Back to ${name}'s details` })
+    : root ? { label: name, aria: `Back to ${name}` } : { label: "All", aria: "Back to All" };
+  const sub: FocusLine | null = view === "details" ? { src: "Room details", text: "" } : view === "work" ? { src: "All of its work", text: "" } : view === "app" ? { src: "Its app", text: "" }
+    : root ? { src: `Thread${replies !== null ? ` · ${replies} ${replies === 1 ? "reply" : "replies"}` : ""}`, text: "" } : line;
+  const region = view === "details" ? `${name} details` : view === "work" ? `${name}'s work` : `${name}'s app`;
+  return <section ref={sheet} className="all-focus" role="region" tabIndex={-1} aria-label={`${name}, in focus`} data-leaving={leaving || undefined} data-view={view} style={{ ["--room-tint" as string]: roomTint(id) }}>
     <header className="all-focus-head"
       onPointerDown={(e) => { if (e.pointerType === "touch") pull.current = { id: e.pointerId, y: e.clientY }; }}
       onPointerMove={(e) => { const p = pull.current; if (p && p.id === e.pointerId && !calmScreen()) setPull(Math.max(0, e.clientY - p.y)); }}
@@ -45,13 +59,17 @@ export function AllFocusSheet({ id, name, stands, root, replies, leaving, onBack
         if (e.clientY - p.y >= PULL_PX) { sheet.current!.style.transform = ""; onBack(); } else setPull(0);
       }}
       onPointerCancel={endPull}>
-      <button type="button" className="note-action all-focus-back" aria-label={root ? `Back to ${name}` : "Back to All"} onClick={onBack}><span aria-hidden="true">←</span> {root ? name : "All"}</button>
-      <div className="all-focus-titles">
-        <h2 className="all-focus-title">{name}</h2>
-        {root ? <p className="all-focus-stands">Thread{replies !== null ? ` · ${replies} ${replies === 1 ? "reply" : "replies"}` : ""}</p> : stands && <p className="all-focus-stands">{stands}</p>}
-        {!root && <button type="button" className="all-focus-page" aria-label={`Open ${name}'s page`} title={`${name}'s page`} onClick={onPage}><span aria-hidden="true">›</span></button>}
-      </div>
+      <button type="button" className="note-action all-focus-back" aria-label={back.aria} onClick={onBack}><span aria-hidden="true">←</span> {back.label}</button>
+      {/* the whole head is one button: the room's details, and from them (or its work) the conversation again */}
+      <button type="button" className="all-focus-titles" aria-expanded={!inChat} aria-label={inChat ? `${name}: room details` : `${name}: back to the conversation`} title={inChat ? "Room details" : "Back to the conversation"}
+        onClick={() => onView(inChat ? "details" : "chat")}>
+        <span className="all-focus-title">{name}</span>
+        {sub && <span className="all-focus-line"><span className="all-focus-src">{sub.src}{sub.text ? ":" : ""}</span>{sub.text && <> {sub.text}</>}</span>}
+        <span className="all-focus-more" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{inChat ? <path d="M4 6l4 4 4-4" /> : <path d="M4 10l4-4 4 4" />}</svg></span>
+      </button>
     </header>
-    {children}
+    {/* the conversation stays as it was (its place, its draft) while the details are up */}
+    <div className="all-focus-chat" hidden={!inChat}>{children}</div>
+    {!inChat && <section className="all-focus-details" role="region" aria-label={region}>{details}</section>}
   </section>;
 }

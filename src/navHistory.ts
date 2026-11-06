@@ -1,5 +1,5 @@
-// Back and Forward over the places visited (pure, unit-tested in scripts/navtree.test.ts). One entry per place: a room (as its node), Uni,
-// the Journal, a thread. A note or a vault browser opens over a place and has its own Back, so it is never an entry.
+// Back and Forward over the places visited (pure, unit-tested in scripts/navtree.test.ts). One entry per place: Uni, All (a room in focus
+// there is All's own step: Back leaves it first), the Journal. A note or a vault browser opens over a place and has its own Back, so it is never an entry.
 import type { Tab, TabTarget } from "./tabs.ts";
 import { isSurface, sameTarget } from "./tabs.ts";
 
@@ -25,13 +25,11 @@ export const step = (h: History, by: -1 | 1): { history: History; target: TabTar
   const i = h.index + by;
   return i < 0 || i >= h.entries.length ? null : { history: { ...h, index: i }, target: h.entries[i] };
 };
-/** A place's identity (r12): Uni, an area or project by path, a room by id, a thread by its root. Never its name: two projects may share one. */
+/** A place's identity (r12): Uni, an area or project by path. Never its name: two projects may share one. */
 export function placeKey(t: TabTarget): string {
   switch (t.kind) {
     case "areas": return "uni";
     case "area": return `area:${t.path ?? ""}`;
-    case "thread": return `thread:${t.channel ?? ""}:${t.root ?? ""}`;
-    case "room": return `room:${t.channel ?? ""}`;
     case "posts": return `posts:${t.path ?? ""}`;
     default: return t.kind;
   }

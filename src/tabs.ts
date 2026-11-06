@@ -1,14 +1,14 @@
-// Tabs (pure, unit-tested). Rooms, threads, vault notes and the Journal open
-// as tabs that stay open until closed; the set and the active tab persist in
-// localStorage per device. The App renders them; this module only decides.
+// Tabs (pure, unit-tested). Places (Uni, All, the Journal, Mail…) and vault notes open
+// as tabs; the set and the active tab persist in localStorage per device. The App renders
+// them; this module only decides. T-335 one surface: a room is never a tab of its own. It is
+// in focus over All, and the All tab carries which (`channel`, and `root` for a thread).
 
 import type { VaultRef } from "./vaultlinks.ts";
 
-export type TabKind = "room" | "thread" | "note" | "journal" | "vault" | "areas" | "area" | "mail" | "calendar" | "messages" | "posts" | "all" | "arcade";
-/** `channel` on an `areas` (Uni) or `area` tab is the node's room: the one its chat pane shows. */
-export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; /** `area`: the node's note path (an `Areas/<Name>` area, or a project under one). */ path?: string; title: string;
-  /** `area` (r15): the node has no room of its own and talks in an ancestor's (or Uni's). Unset until the shell knows. */
-  borrowed?: boolean };
+export type TabKind = "note" | "journal" | "vault" | "areas" | "area" | "mail" | "calendar" | "messages" | "posts" | "all" | "arcade";
+/** `channel` on the `all` tab is the room in focus over All (`root`: a thread of it; `path`: the place it is open for, when the room is one
+ *  that place borrows). An `area` tab is a node's work, for a vault without rooms. */
+export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; /** `area`: the node's note path (an `Areas/<Name>` area, or a project under one). */ path?: string; title: string };
 export type TabTarget = Omit<Tab, "id">;
 /** `recent`: tab ids by last activation, most recent last (drives the cap and close). */
 export type Tabs = { tabs: Tab[]; active: string | null; recent: string[] };
@@ -38,8 +38,6 @@ export function sameTarget(a: TabTarget, b: TabTarget): boolean {
     // T-335: the To post queue, all of it or one area's
     case "posts": return (a.path ?? "") === (b.path ?? "");
     case "vault": return a.vault === b.vault;
-    case "room": return a.channel === b.channel;
-    case "thread": return a.channel === b.channel && a.root === b.root;
     case "note": return !!a.note && !!b.note && a.note.vault === b.note.vault && a.note.ref === b.note.ref;
   }
 }
@@ -139,34 +137,35 @@ export function serializeTabs(s: Tabs): string {
   return JSON.stringify({ v: 1, tabs: s.tabs, active: s.active, recent: s.recent });
 }
 
-const KINDS: TabKind[] = ["room", "thread", "note", "journal", "vault", "areas", "area", "mail", "calendar", "messages", "posts", "all", "arcade"];
+const KINDS: TabKind[] = ["note", "journal", "vault", "areas", "area", "mail", "calendar", "messages", "posts", "all", "arcade"];
 const str = (x: unknown): x is string => typeof x === "string" && x.length > 0;
 
 function validTab(x: unknown): Tab | null {
   if (!x || typeof x !== "object") return null;
   const t = x as Record<string, unknown>;
-  if (!str(t.id) || !KINDS.includes(t.kind as TabKind)) return null;
+  if (!str(t.id)) return null;
+  // T-335 one surface: a room or a thread saved by an older version is that room in focus over All
+  if ((t.kind === "room" || t.kind === "thread") && str(t.channel)) return { id: t.id, kind: "all", title: "All", channel: t.channel, ...(t.kind === "thread" && str(t.root) ? { root: t.root } : {}) };
+  if (!KINDS.includes(t.kind as TabKind)) return null;
   const title = typeof t.title === "string" ? t.title : "";
   const kind = t.kind as TabKind;
   if (kind === "journal") return { id: t.id, kind, title: title || "Journal" };
   if (kind === "mail") return { id: t.id, kind, title: "Mail" };
   if (kind === "calendar") return { id: t.id, kind, title: "Calendar" };
   if (kind === "messages") return { id: t.id, kind, title: "Messages" };
-  if (kind === "all") return { id: t.id, kind, title: "All" };
+  if (kind === "all") return { id: t.id, kind, title: "All", ...(str(t.channel) ? { channel: t.channel, ...(str(t.root) ? { root: t.root } : {}), ...(typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { path: t.path } : {}) } : {}) };
   if (kind === "arcade") return { id: t.id, kind, title: "Arcade" };
   if (kind === "posts") return { id: t.id, kind, title: "To post", ...(typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { path: t.path } : {}) };
   // The areas tab is Uni's home (saved tabs from before were titled "Areas").
   if (kind === "areas") return { id: t.id, kind, title: "Uni", ...(str(t.channel) ? { channel: t.channel } : {}) };
-  if (kind === "area") return typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { id: t.id, kind, path: t.path, title: title || t.path.split("/").pop()!, ...(str(t.channel) ? { channel: t.channel } : {}), ...(typeof t.borrowed === "boolean" ? { borrowed: t.borrowed } : {}) } : null;
+  if (kind === "area") return typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { id: t.id, kind, path: t.path, title: title || t.path.split("/").pop()!, ...(str(t.channel) ? { channel: t.channel } : {}) } : null;
   if (kind === "vault") return str(t.vault) ? { id: t.id, kind, vault: t.vault, title: title || t.vault } : null;
   if (kind === "note") {
     const n = t.note as Record<string, unknown> | undefined;
     if (!n || !str(n.vault) || !str(n.ref)) return null;
     return { id: t.id, kind, note: { hub: typeof n.hub === "string" ? n.hub : null, vault: n.vault, ref: n.ref, ...(n.recover === true ? { recover: true } : {}) }, title };
   }
-  if (!str(t.channel)) return null;
-  if (kind === "thread") return str(t.root) ? { id: t.id, kind, channel: t.channel, root: t.root, title } : null;
-  return { id: t.id, kind, channel: t.channel, title };
+  return null;
 }
 
 /** Parse saved tabs; tabs for rooms that no longer exist are dropped silently. */
@@ -184,12 +183,11 @@ export function restoreTabs(raw: string | null, roomIds: Iterable<string>): Tabs
   for (const x of d.tabs) {
     const t = validTab(x);
     if (!t || seen.has(t.id)) continue;
-    if ((t.kind === "room" || t.kind === "thread") && !rooms.has(t.channel!)) continue;
     const same = tabs.find((o) => sameTarget(o, t));
     if (same) { twin.set(t.id, same.id); continue; }
     seen.add(t.id);
-    // An area whose room has gone keeps its tab; only the room link is dropped.
-    tabs.push((t.kind === "area" || t.kind === "areas") && t.channel && !rooms.has(t.channel) ? { id: t.id, kind: t.kind, title: t.title, ...(t.path ? { path: t.path } : {}) } : t);
+    // A place whose room has gone keeps its tab; only the room is dropped (All with a room gone from focus is All).
+    tabs.push(t.channel && !rooms.has(t.channel) ? { id: t.id, kind: t.kind, title: t.title, ...(t.path && t.kind !== "all" ? { path: t.path } : {}) } : t);
   }
   const recentRaw = Array.isArray(d.recent) ? d.recent.filter((x): x is string => typeof x === "string").map((x) => twin.get(x) ?? x).filter((x) => seen.has(x)) : [];
   const recent = [...new Set(recentRaw)];
@@ -199,13 +197,13 @@ export function restoreTabs(raw: string | null, roomIds: Iterable<string>): Tabs
   return capped({ tabs, active, recent: active ? touch(recent, active) : recent });
 }
 
-/** Kinds that are a place you can be (a room, Uni, an area, a thread, the Journal). A note or a vault browser is something opened over one. */
+/** Kinds that are a place you can be (Uni, All with a room in focus, the Journal…). A note or a vault browser is something opened over one. */
 export const isSurface = (t: Pick<Tab, "kind">): boolean => t.kind !== "note" && t.kind !== "vault";
 
-/** What to save: the surfaces only, so a note or a vault browser is never what the app reopens to. T-335: nor is All: it is optional, never
- *  where the app opens. */
+/** What to save: the surfaces only, so a note or a vault browser is never what the app reopens to. T-335: All only with a room in focus (the
+ *  room the app reopens to); All alone is never where the app opens. */
 export function persistable(s: Tabs): Tabs {
-  const tabs = s.tabs.filter((t) => isSurface(t) && t.kind !== "all");
+  const tabs = s.tabs.filter((t) => isSurface(t) && (t.kind !== "all" || !!t.channel));
   const ids = new Set(tabs.map((t) => t.id));
   const recent = s.recent.filter((id) => ids.has(id));
   const active = s.active && ids.has(s.active) ? s.active : recent[recent.length - 1] ?? tabs[0]?.id ?? null;
@@ -220,36 +218,13 @@ export function migrateLegacyTabs(raw: string | null, roomIds: Iterable<string>)
   return hit ? { tabs: [hit], active: hit.id, recent: [hit.id] } : EMPTY_TABS;
 }
 
-/** The last place opened that is a room in its own right (r15): what the app reopens to when the saved place only borrows a room. */
-export const LAST_ROOM_KEY = "uni.lastRoom.v1";
-/** A place that is a real conversation: a room, a thread, Uni, or a node known to have a room of its own. */
-export const isRealRoom = (t: Pick<Tab, "kind" | "borrowed">): boolean => t.kind === "room" || t.kind === "thread" || t.kind === "areas" || (t.kind === "area" && t.borrowed === false);
-/** What to keep as the last real room: the target alone, without its id. */
-export const lastRoomOf = (t: Tab): string | null => { if (!isRealRoom(t)) return null; const { id: _id, ...target } = t; return JSON.stringify(target); };
-
-/**
- * The place to reopen (r15). A saved node that only borrows a room (Expression, talking in #Uni) is not where Aaron last talked: the last real
- * room opened is (`lastRoom`, from `lastRoomOf`), else nothing, so the caller opens Uni. Any other saved place is kept.
- */
-export function restorePlace(s: Tabs, lastRoom: string | null, roomIds: Iterable<string>, newId: () => string): Tabs {
-  const cur = activeTab(s);
-  if (!cur || cur.kind !== "area" || cur.borrowed !== true) return s;
-  const rest: Tabs = { tabs: s.tabs.filter((t) => t.id !== cur.id), active: null, recent: s.recent.filter((x) => x !== cur.id) };
-  let target: unknown = null;
-  try { target = lastRoom ? JSON.parse(lastRoom) : null; } catch { target = null; }
-  const hit = target && typeof target === "object" ? activeTab(restoreTabs(JSON.stringify({ v: 1, tabs: [{ ...(target as object), id: "last" }], active: "last", recent: [] }), roomIds)) : null;
-  if (!hit || !isRealRoom(hit)) return rest;
-  const { id: _id, ...t } = hit;
-  return openTab(rest, t, "new", newId);
-}
-
 // ── T-294: the Uni side's last place ───────────────────────────────────────────────────────────────────────────────────
 // Uni's rooms and the utilities beside them (Messages, Mail, Calendar, the Journal) are sides of one app: going to one and coming back finds
 // the other where it was left. Uni's side is kept here: its last place, and the spot in that place's conversation when it wasn't at the newest.
 
 export const UNI_PLACE_KEY = "uni.place.v1";
-/** A place on Uni's side: Uni, an area, a room, a thread. */
-export const isUniSide = (t: Pick<Tab, "kind">): boolean => t.kind === "areas" || t.kind === "area" || t.kind === "room" || t.kind === "thread";
+/** A place on Uni's side: Uni, an area's work, All (with a room in focus or not). */
+export const isUniSide = (t: Pick<Tab, "kind">): boolean => t.kind === "areas" || t.kind === "area" || t.kind === "all";
 /** The conversation a place shows, as the App names it (`channel|root`); none without a room. */
 export const viewOf = (t: Pick<Tab, "channel" | "root">): string | null => t.channel ? `${t.channel}|${t.root ?? null}` : null;
 /** Where the reader was: the first message in sight, how far below the list's top it starts, and how many messages were loaded then. */

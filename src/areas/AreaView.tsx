@@ -37,8 +37,8 @@ export type AreaActions = {
 export type AppView = { bar: ReactNode; main: ReactNode };
 
 /**
- * An area's sealed app (T-74), shown inside the room shell (r14): the same header, tree and conversation; the app takes the chat's place, like
- * "All of X's work", with "‹ Back to chat". There is no second chat layout: a draft the app suggests goes into the room's own composer.
+ * An area's sealed app (T-74). T-335 one surface: it is a step inside the room's focus (its details → its app), and the focus head's Back is the
+ * way out. There is no second chat layout: a draft the app suggests goes into the room's own composer.
  */
 export default function AreaView({ area, mode, roomName, actions, room, open, onOpen, render }: {
   area: Area; mode: GateMode | "closed"; roomName: (id: string) => string; actions: AreaActions;
@@ -151,7 +151,6 @@ export default function AreaView({ area, mode, roomName, actions, room, open, on
   const idle = ready_ && granted && !running;
   if (!onApp) return <>{render(null, openApp)}</>;
   const bar = <div className="sr-thread sr-workbar sr-appbar">
-    <button type="button" className="sr-thread-back sr-work-back" onClick={() => onOpen(false)}><span aria-hidden="true">‹</span> {chatOn ? "Back to chat" : "Back to the room"}</button>
     <span className="sr-thread-label">{name} app</span>
     {framed && mode === "approved-code" && <span className="area-mode-chip" title="On this device apps can reach the network through WebRTC, so this app is only as safe as its code. You approved this version.">Approved code</span>}
     {framed && <span className="area-bar-controls">

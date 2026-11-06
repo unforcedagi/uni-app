@@ -24,16 +24,34 @@
 
 .all-focus-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 8px max(14px, calc((100% - 720px) / 2)) 8px; touch-action: none; }
 .all-focus-back { flex: none; min-height: 40px; padding: 0 14px 0 11px; font: 500 14px/1 var(--g-font-ui); white-space: nowrap; max-width: 44vw; overflow: hidden; text-overflow: ellipsis; }
-.all-focus-titles { position: relative; flex: 1; min-width: 0; padding-right: 26px; }
+/* the head's titles are one button: the room's details (and back to the conversation from them) */
+.all-focus-titles { all: unset; box-sizing: border-box; position: relative; flex: 1; min-width: 0; padding: 4px 30px 4px 0; cursor: pointer; display: flex; flex-direction: column; -webkit-tap-highlight-color: transparent; }
+.all-focus-titles:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; border-radius: 8px; }
 .all-focus-title { margin: 0; display: flex; align-items: center; gap: 8px; font: 520 19px/1.2 var(--g-font-display); font-variation-settings: "SOFT" 60, "opsz" 72; color: var(--g-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .all-focus-title::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--room-tint, var(--g-accent)); }
-.all-focus-stands { margin: 1px 0 0; font: 400 13px/1.35 var(--g-font-uni); color: var(--g-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.all-focus-page { all: unset; box-sizing: border-box; position: absolute; top: 50%; right: 0; transform: translateY(-50%); width: 24px; height: 24px; display: grid; place-items: center; cursor: pointer; font: 400 18px/1 var(--g-font-ui); color: var(--g-ink-3); }
-/* the whole of the room's name and line is the way to its page */
-.all-focus-page::after { content: ""; position: absolute; inset: -22px 0 -22px -2000px; }
-.all-focus-titles { overflow: hidden; }
-.all-focus-page:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; border-radius: 6px; }
-@media (hover: hover) { .all-focus-titles:hover .all-focus-page { color: var(--g-ink); } }
+/* its one line says where it comes from first ("#choir's summary:"), then the words */
+.all-focus-line { display: block; margin: 1px 0 0; font: 400 13px/1.35 var(--g-font-uni); color: var(--g-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.all-focus-src { font: 600 12px/1.35 var(--g-font-ui); color: var(--g-ink-2); letter-spacing: .01em; }
+.all-focus-more { position: absolute; top: 50%; right: 2px; transform: translateY(-50%); width: 24px; height: 24px; display: grid; place-items: center; font: 400 16px/1 var(--g-font-ui); color: var(--g-ink-3); }
+@media (hover: hover) { .all-focus-titles:hover .all-focus-more, .all-focus-titles:hover .all-focus-title { color: var(--g-ink); } }
+
+/* the conversation stays mounted under the details (its place and draft kept); the details take its place in the sheet */
+.all-focus-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.all-focus-chat[hidden] { display: none; }
+.all-focus-chat > .sr-chat { flex: 1; min-height: 0; }
+.all-focus-details { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-top: var(--g-hair) solid var(--g-line); padding: 14px max(20px, calc((100% - 720px) / 2)) 32px; }
+.all-focus-details .fx { display: flex; flex-direction: column; gap: 18px; }
+.all-focus-details .cp-body { padding: 0; }
+.fx-sec { display: flex; flex-direction: column; gap: 6px; }
+.fx-context { margin: 0; font: 400 14px/1.45 var(--g-font-uni); color: var(--g-ink-2); }
+.fx-places { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fx-place { all: unset; box-sizing: border-box; width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-height: 44px; padding: 10px 0; border-bottom: var(--g-hair) solid var(--g-line); cursor: pointer; font: 500 15px/1.3 var(--g-font-ui); color: var(--g-ink); }
+.fx-place small { font: 400 13px/1.3 var(--g-font-ui); color: var(--g-ink-3); }
+.fx-place:focus-visible, .fx-link:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; border-radius: 6px; }
+.fx-more { align-items: flex-start; }
+.fx-link { all: unset; cursor: pointer; min-height: 36px; display: inline-flex; align-items: center; font: 500 14px/1.3 var(--g-font-ui); color: var(--g-ink); text-decoration: underline; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; }
+.fx-work .wv, .fx-app .area-app { padding: 0; }
+.fx-app { display: flex; flex-direction: column; min-height: 100%; }
 .all-focus .sr-chat .message-list { padding-inline: max(20px, calc((100% - 720px) / 2)); }
 
 @media (min-width: 600px) and (max-width: 899px) {
@@ -57,7 +75,7 @@
 @media (max-height: 500px) {
   .all-focus, .shell.composer-focused .all-focus { inset-block-start: 4px; }
   .all-focus-head { padding-block: 2px; }
-  .all-focus-stands { display: none; }
+  .all-focus-line { display: none; }
 }
 
 /* no colour and no shadow to lean on: a black edge, and All gone pale on white */
@@ -65,19 +83,14 @@
 :root[data-screen="ink"] .all-focus { border-color: #000; border-width: 1.5px; box-shadow: none; }
 :root[data-screen="ink"] .all-focus-head { border-bottom: 1.5px solid #000; }
 :root[data-screen="ink"] .all-focus-title::before { background: #000; }
-:root[data-screen="ink"] .all-focus-stands { color: #262626; }
+:root[data-screen="ink"] .all-focus-line, :root[data-screen="ink"] .all-focus-src { color: #000; }
+:root[data-screen="ink"] .all-focus-details { border-top: 0; }
+:root[data-screen="ink"] .fx-place { border-bottom: 1px solid #000; color: #000; }
+:root[data-screen="ink"] .fx-link { color: #000; text-decoration-color: #000; }
 
 :root[data-screen="ink"] .message.search-focus .message-content { background: none; box-shadow: none; outline: 1.5px solid #000; outline-offset: 7px; border-radius: 6px; }
 
 .message .message-content { transition: background-color 500ms var(--g-ease), box-shadow 500ms var(--g-ease); }
 
-/* A room's own page: the same conversation as the focus, in the same column as All, under one quiet line instead of three ruled bands. */
-.sr .sr-chat .message-list { padding-inline: max(20px, calc((100% - 720px) / 2)); }
-@media (min-width: 600px) { .sr .sr-chat .composer { padding-inline: max(10px, calc((100% - 720px) / 2)); } }
-.th-simple.phone .sr .sr-chat .message-list { padding-inline: 20px; }
-.th-simple.phone .sr .sr-head { padding: 6px 14px 2px 4px; }
-.th-simple.phone .sr .cp.strip { border-top: 0; border-bottom: 0; box-shadow: none; }
-.th-simple.phone .sr .cp.strip .cp-line { border: 0; min-height: 34px; padding-top: 0; padding-bottom: 6px; font: 400 13.5px/1.35 var(--g-font-uni); color: var(--g-ink-2); }
-.sr .sr-chat { border-top: var(--g-hair) solid var(--g-line); }
 .all-focus .sr-chat { border-top: var(--g-hair) solid var(--g-line); }
 :root[data-screen="ink"] .all-focus .sr-chat { border-top: 0; }
