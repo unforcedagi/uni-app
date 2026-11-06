@@ -464,7 +464,10 @@ test.describe('a room in focus', () => {
     await expect(sheet(page)).toBeVisible();
     await page.waitForTimeout(320);
     const mine = sheet(page).locator('article.message.mine').first();
+    // (a script's scroll isn't a person's: wait out the room's settling at its end, as a finger would end it)
+    await page.waitForTimeout(1600);
     await mine.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.waitForTimeout(100);
     const b = (await mine.boundingBox())!;
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: b.x + b.width / 2, y: b.y + b.height / 2 }] });
