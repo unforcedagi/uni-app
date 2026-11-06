@@ -552,11 +552,12 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => { if (restoring.current) return; if ((recededRef.current || !keepTapped()) && stick.current) toNewest(el); });
     ro.observe(el);
-    // and when it gets longer from inside (a picture with no known size coming in)
+    // and when it gets longer from inside (a picture with no known size coming in): only following the newest, never back to a tapped message: you may be reading elsewhere
+    const grow = new ResizeObserver(() => { if (!restoring.current && stick.current && !tappedRef.current) toNewest(el); });
     const stack = el.firstElementChild;
-    if (stack) ro.observe(stack);
-    return () => ro.disconnect();
-  }, [keepTapped]);
+    if (stack) grow.observe(stack);
+    return () => { ro.disconnect(); grow.disconnect(); };
+  }, [keepTapped, toNewest]);
   // a swipe sideways on a message is the same as a tap on it; up and down is the feed's own scroll (touch-action: pan-y)
   const swipe = useRef<{ id: number; x: number; y: number; el: HTMLElement; ref: string; on: boolean } | null>(null);
   const swiped = useRef(-Infinity);

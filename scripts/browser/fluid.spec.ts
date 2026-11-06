@@ -166,6 +166,27 @@ test.describe('a long message, in place', () => {
     await expect.poll(() => feed(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(4);
   });
 
+  test('a reply aimed at one message, reading elsewhere: what arrives, or a message opened, leaves the page where it is', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await row(page, 'k3').locator('.message-content').click();
+    await expect(page.locator('.all-reply-chip')).toBeVisible();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await feed(page).evaluate((el) => { el.scrollTop = el.scrollHeight - el.clientHeight - 260; });
+    await page.waitForTimeout(250);
+    const at = await feed(page).evaluate((el) => el.scrollTop);
+    await page.evaluate(() => (window as any).__arrive('ch-bees', 'Uni', 'A new line from the bees.'));
+    await expect(feed(page)).toContainText('A new line from the bees.');
+    await page.waitForTimeout(200);
+    expect(Math.abs(await feed(page).evaluate((el) => el.scrollTop) - at)).toBeLessThan(2);
+    const m = row(page, 'pic1');
+    await m.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.waitForTimeout(150);
+    await m.getByRole('button', { name: 'Read the rest' }).click();
+    await page.waitForTimeout(1100);
+    await expect(m.getByRole('button', { name: 'Show less' })).toBeInViewport();
+  });
+
   test('a message over the length that fits anyway shows no "Read the rest"', async ({ page }) => {
     test.skip(project() !== 'desktop', 'needs the wide column');
     await boot(page);
