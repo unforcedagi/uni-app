@@ -121,7 +121,7 @@ function PausedCard({ title, controls, finish, overSidebar, onJump }: { title: s
       </li>)}
     </ol>}
     {controls.canUndo && <button className="rec-undo" onClick={undo} disabled={!ready} aria-label="Undo delete">Undo delete</button>}
-    {problem && <p className="rec-problem" role="alert">{problem}</p>}
+    {(problem || controls.micLost) && <p className="rec-problem" role="alert">{problem || "The microphone stopped. What you recorded is still here."}</p>}
     {/* Resume sits under the finger that tapped Pause: a second, quick tap can never send */}
     <div className="rec-actions">
       {none

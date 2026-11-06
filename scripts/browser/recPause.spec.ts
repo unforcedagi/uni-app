@@ -327,18 +327,49 @@ for (const view of ['upright', 'on its side'] as const) test(`Two quick taps on 
   await startInRoom(page);
   await wait(page, 600);
   await pause(page);
-  // at the point of Resume where, once it's the running pill again, Stop will be
+  // at the point of Resume where, once it's running again, Stop will be: the pill's upright, the composer's mic on its side
+  const target = view === 'upright' ? button(page, 'Stop recording for Test room') : button(page, 'Stop recording voice message');
   await resume(page);
-  const stop = (await button(page, 'Stop recording for Test room').boundingBox())!;
+  const stop = (await target.boundingBox())!;
   await pause(page);
   const resumeBox = (await button(page, 'Resume recording').boundingBox())!;
-  const x = Math.min(stop.x + stop.width / 2, resumeBox.x + resumeBox.width - 4);
-  const y = view === 'upright' ? Math.max(Math.min(stop.y + stop.height / 2, resumeBox.y + resumeBox.height - 4), resumeBox.y + 4) : resumeBox.y + resumeBox.height / 2;
-  await page.touchscreen.tap(x, y);
-  await page.touchscreen.tap(x, y);
+  const x = Math.max(resumeBox.x + 4, Math.min(stop.x + stop.width / 2, resumeBox.x + resumeBox.width - 4));
+  const y = Math.max(resumeBox.y + 4, Math.min(stop.y + stop.height / 2, resumeBox.y + resumeBox.height - 4));
+  // sent together: on a busy box two awaited taps can land further apart than a person's double tap
+  await page.evaluate(() => { (window as any).taps = []; addEventListener('click', () => (window as any).taps.push(performance.now()), true); });
+  await Promise.all([page.touchscreen.tap(x, y), page.touchscreen.tap(x, y)]);
   await wait(page, 600);
+  const [first, second] = await page.evaluate(() => (window as any).taps);
+  test.skip(second !== undefined && second - first > 300, 'the box spread the taps too far apart to be a double tap');
   expect(await posts(page)).toBe(0);
   await expect(button(page, 'Pause recording')).toBeVisible(); // still going
+});
+
+test('The mic going mid-section: a paused recording waits, says why, and carries on', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const gum = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async (c) => { const s = await gum(c); (window as any).mic = s; (window as any).micAsks = ((window as any).micAsks ?? 0) + 1; return s; };
+  });
+  await startInRoom(page);
+  await wait(page, 1000);
+  await pause(page);
+  await resume(page);
+  await wait(page, 1000);
+  await page.evaluate(() => (window as any).mic.getTracks().forEach((t: MediaStreamTrack) => t.stop())); // what an unplugged mic does, in the real recorder
+  const card = page.getByRole('group', { name: 'Paused recording' });
+  await expect(card).toBeVisible();
+  await expect(card.getByRole('alert')).toContainText('The microphone stopped');
+  await expect(card.getByRole('listitem')).toHaveCount(2);
+  expect(await posts(page)).toBe(0);
+  await wait(page, BETWEEN_TAPS);
+  await resume(page);
+  expect(await page.evaluate(() => (window as any).micAsks)).toBe(2);
+  await wait(page, 1000);
+  await press(page, button(page, 'Stop recording voice message'));
+  await expect.poll(() => posts(page)).toBe(1);
+  const out = probe((await uploads(page))[0].bytes, 'webm');
+  expect(out.duration).toBeGreaterThan(1.8); // all three sections
 });
 
 test('Two quick taps on delete take one section', async ({ page }) => {

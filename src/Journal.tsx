@@ -202,7 +202,8 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
     setSaving(true);
     setStatus("Saving journal entry…");
     // One recording's typed words go with its first entry only, however many entries it becomes
-    const note = noteTaken.current ? "" : live.current.text.trim();
+    const carriesNote = !noteTaken.current;
+    const note = carriesNote ? live.current.text.trim() : "";
     noteTaken.current = true;
     const rev = live.current.rev;
     const submitted = live.current.text;
@@ -213,7 +214,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
       // offered once its transcript lands (the menu waits for it too), and only when it reached the vault
       if (!r.error) setOffer(draft.entry_id);
       // the typed words went with the recording: clear them only if they are still what was sent
-      if (clearIf(rev, submitted)) { setSame(null); send.current = null; }
+      if (carriesNote && clearIf(rev, submitted)) { setSame(null); send.current = null; }
       await afterFlush(r, "Journal entry");
       if (!r.error) setStatus("Journal entry saved · transcribing…");
     } catch (e) { setError(String(e)); setStatus("Journal entry not saved"); }

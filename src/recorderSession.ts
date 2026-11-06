@@ -41,7 +41,10 @@ export class RecorderSession<Origin> {
   private activeSeconds = 0;
   private afterSection: "pause" | "finish" | null = null;
   private pauseLanded: (() => void) | null = null;
+  private everPaused = false;
   phase: RecorderPhase = "idle";
+  /** Paused because the mic went, not by choice. */
+  micLost = false;
   sections: RecordedSection[] = [];
 
   private onDone: (blob: Blob, mime: string, origin: Origin) => void | Promise<void>;
@@ -98,9 +101,10 @@ export class RecorderSession<Origin> {
     const landed = this.pauseLanded;
     this.pauseLanded = null;
     // The recorder stopped by itself (the mic went): a recording that's been paused or edited isn't sent without its look.
-    const edited = this.sections.length > 1 || this.removed.length > 0;
-    if (this.afterSection === "pause" || (this.afterSection === null && edited)) {
+    if (this.afterSection === "pause" || (this.afterSection === null && this.everPaused)) {
+      this.micLost = this.afterSection === null;
       this.afterSection = null;
+      if (this.micLost) this.changed();
       this.setPhase("paused");
     } else {
       this.afterSection = null;
@@ -114,6 +118,8 @@ export class RecorderSession<Origin> {
     this.origin = null;
     this.sections = [];
     this.removed = [];
+    this.everPaused = false;
+    this.micLost = false;
     this.changed();
     releaseRecording(this.token);
     this.setPhase("idle");
@@ -186,6 +192,7 @@ export class RecorderSession<Origin> {
     this.activeSeconds = (this.now() - this.activeSince) / 1000;
     this.activeSince = null;
     this.afterSection = "pause";
+    this.everPaused = true;
     this.setPhase("pausing");
     const recorder = this.recorder;
     await new Promise<void>((resolve) => {
@@ -208,6 +215,8 @@ export class RecorderSession<Origin> {
         this.stream = stream;
       }
       this.beginSection(stream);
+      this.micLost = false;
+      this.changed();
       this.setPhase("recording");
     } catch (e) {
       if (this.phaseNow() === "resuming") this.setPhase("paused");

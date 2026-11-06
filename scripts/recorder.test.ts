@@ -57,6 +57,8 @@ try {
 }
 // Pause, resume and delete: every section is its own recorder on one held mic.
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** Time-limit cases: wait on the outcome, not a guess at how long a busy box takes. */
+async function until(done: () => boolean) { for (let i = 0; i < 2000 && !done(); i++) await new Promise((resolve) => setTimeout(resolve, 5)); }
 async function editing(run: (ctx: { session: RecorderSession<string>; clips: { origin: string; text: string; mime: string }[]; discarded: string[]; clock: { now: number }; rec: () => FakeRecorder; stream: FakeStream; streams: () => number; joined: string[][] }) => Promise<void>, join?: (blobs: Blob[]) => Promise<Blob>) {
   const stream = new FakeStream();
   let asked = 0;
@@ -262,13 +264,26 @@ await editing(async ({ session, clips, rec, joined }) => {
   await session.resume();
   rec().finish("two");
   assert.equal(session.phase, "paused");
+  assert.equal(session.micLost, true, "and it says why");
   await tick(); await tick();
   assert.deepEqual(clips, []);
   assert.deepEqual(joined, []);
   assert.deepEqual(session.sections.length, 2);
   await session.resume();
   assert.equal(session.phase, "recording", "and it can go on");
+  assert.equal(session.micLost, false);
   session.stop();
+});
+// ...even when the section that stopped held nothing, so one section is all there is
+await editing(async ({ session, clips, rec }) => {
+  await session.start("A", "for A");
+  const p = session.pause(); rec().finish("one"); await p;
+  await session.resume();
+  rec().onstop?.(); // no data at all
+  assert.equal(session.phase, "paused");
+  await tick();
+  assert.deepEqual(clips, []);
+  assert.equal(session.sections.length, 1);
 });
 
 // Calls out of turn do nothing
@@ -301,7 +316,7 @@ await editing(async ({ session, clips, rec }) => {
 });
 
 // Review: while Stop's join runs, pause, resume and delete do nothing
-await editing(async ({ session, rec, joined }) => {
+await editing(async ({ session, clips, rec, joined }) => {
   await session.start("A", "for A");
   const p = session.pause(); rec().finish("one"); await p;
   await session.resume();
@@ -309,9 +324,13 @@ await editing(async ({ session, rec, joined }) => {
   rec().finish("two");
   assert.equal(session.phase, "finishing");
   await session.pause(); await session.resume();
-  session.removeSection(session.sections[0]?.id ?? 1); session.undoRemove(); session.discard();
+  session.removeSection(session.sections[0].id); session.undoRemove(); session.discard();
+  assert.equal(session.phase, "finishing");
+  assert.equal(session.sections.length, 2);
+  assert.equal(FakeRecorder.instances.length, 2, "no new recorder");
   await tick(); await tick();
   assert.deepEqual(joined, [["one", "two"]], "both sections, once");
+  assert.deepEqual(clips.map((c) => c.text), ["joined"]);
 });
 
 // Review: a muted mic is no mic; resume asks again and lets the old one go
@@ -340,7 +359,7 @@ await editing(async ({ session, rec, stream, streams }) => {
   await session.resume();
   session.stop();
   FakeRecorder.instances[1].finish("two");
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await until(() => session.phase === "idle" && texts.length === 2);
   assert.deepEqual(texts, ["one", "two"]);
   assert.equal(session.phase, "idle");
   assert.equal(recordingHolder(), null);
@@ -364,7 +383,7 @@ await editing(async ({ session, rec, stream, streams }) => {
   await session.resume();
   session.stop();
   FakeRecorder.instances[1].finish("two");
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await until(() => session.phase === "idle");
   assert.deepEqual(saved, ["typed words", ""]);
   assert.equal(session.phase, "idle");
   session.dispose();
@@ -438,7 +457,7 @@ await (async () => {
   await session.resume();
   session.stop();
   FakeRecorder.instances[1].finish("two");
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await until(() => session.phase === "idle");
   assert.equal(handed, 2);
   assert.equal(session.phase, "idle");
   session.dispose();

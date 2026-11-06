@@ -11,6 +11,7 @@ export type RecorderControls = {
   elapsed: number;
   sections: RecordedSection[];
   canUndo: boolean;
+  micLost: boolean;
   stop: () => void;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
@@ -29,6 +30,7 @@ export function useRecorder<Origin = void>(onDone: (blob: Blob, mime: string, or
   const [elapsed, setElapsed] = useState(0);
   const [sections, setSections] = useState<RecordedSection[]>([]);
   const [canUndo, setCanUndo] = useState(false);
+  const [micLost, setMicLost] = useState(false);
   const timer = useRef<number | null>(null);
   const done = useRef(onDone);
   done.current = onDone;
@@ -44,6 +46,7 @@ export function useRecorder<Origin = void>(onDone: (blob: Blob, mime: string, or
     onChange: () => {
       setSections(session.current!.sections);
       setCanUndo(session.current!.canUndo);
+      setMicLost(session.current!.micLost);
       if (session.current!.phase !== "finishing") setElapsed(session.current!.elapsed()); // the last time stays on show while it goes
     },
   });
@@ -60,7 +63,7 @@ export function useRecorder<Origin = void>(onDone: (blob: Blob, mime: string, or
     return true;
   }
   const lastEdit = useRef(0);
-  const tooSoon = () => Date.now() - lastEdit.current < DOUBLE_TAP_MS;
+  const tooSoon = () => lastEdit.current > 0 && performance.now() - lastEdit.current < DOUBLE_TAP_MS;
   function stop() {
     if (tooSoon()) return; // never set unless this recording was paused, so a recording never paused stops as it always has
     if (timer.current !== null) { clearInterval(timer.current); timer.current = null; }
@@ -68,18 +71,18 @@ export function useRecorder<Origin = void>(onDone: (blob: Blob, mime: string, or
   }
   async function pause() {
     if (tooSoon()) return;
-    lastEdit.current = Date.now();
+    lastEdit.current = performance.now();
     await session.current!.pause();
   }
   async function resume() {
     if (tooSoon()) return;
-    lastEdit.current = Date.now();
+    lastEdit.current = performance.now();
     await session.current!.resume();
   }
   return {
     recording: phase === "recording" || phase === "pausing" || phase === "paused" || phase === "resuming",
     paused: phase === "paused",
-    busy: phase !== "idle", phase, elapsed, sections, canUndo, start, stop,
+    busy: phase !== "idle", phase, elapsed, sections, canUndo, micLost, start, stop,
     pause, resume,
     removeSection: (id: number) => session.current!.removeSection(id),
     undoRemove: () => session.current!.undoRemove(),
