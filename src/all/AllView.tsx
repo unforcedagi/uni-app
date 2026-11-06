@@ -439,9 +439,9 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
   recededRef.current = receded;
   const heldSpot = useRef<{ stick: boolean; spot: FeedSpot | null } | null>(null);
   const readHold = useRef(0);
-  /** Where the feed put itself at its newest: the scroll event that follows isn't the reader leaving, even if a picture has grown by the time it arrives. */
-  const ownTop = useRef(-1);
-  const toNewest = useCallback((el: HTMLElement) => { el.scrollTop = el.scrollHeight; ownTop.current = el.scrollTop; }, []);
+  /** Only the feed moving up is the reader leaving the newest: a picture growing moves it down, with the browser's own scroll anchoring, and that scroll event isn't a person. */
+  const lastTop = useRef(0);
+  const toNewest = useCallback((el: HTMLElement) => { el.scrollTop = el.scrollHeight; lastTop.current = el.scrollTop; }, []);
   // T-335 one fluid surface: a room can run on for many messages, or one long message past the screen, with its label scrolled away. The room you are reading is
   // named at the top of the feed then, and is one tap into focus at the message you are on.
   const [reading, setReading] = useState<string | null>(null);
@@ -579,7 +579,7 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     {reading && nameOf.has(reading) && <div className="all-reading-band"><button type="button" className="all-place all-reading" style={{ ["--room-tint" as string]: tint(reading) }} aria-label={`Focus ${nameOf.get(reading)}, at this message`} title={`Focus ${nameOf.get(reading)}`}
       onClick={(e) => { label.el = null; label.rect = e.currentTarget.getBoundingClientRect(); onOpen(reading, readingRow.current); }}>{nameOf.get(reading)}</button></div>}
     <div className="all-feed" ref={list} role="log" aria-label="All rooms, by time" aria-live="polite"
-    onScroll={(e) => { const el = e.currentTarget; if (performance.now() >= readHold.current && Math.abs(el.scrollTop - ownTop.current) >= 1) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; if (!lookFrame.current) lookFrame.current = requestAnimationFrame(lookAtTop); }}
+    onScroll={(e) => { const el = e.currentTarget; const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80, up = el.scrollTop < lastTop.current - 1; lastTop.current = el.scrollTop; if (performance.now() >= readHold.current) { if (near) stick.current = true; else if (up) stick.current = false; } if (!lookFrame.current) lookFrame.current = requestAnimationFrame(lookAtTop); }}
     onPointerDown={(e) => {
       if (e.pointerType !== "touch" || e.clientX < EDGE_PX || e.clientX > innerWidth - EDGE_PX || !(e.target instanceof Element)) return;
       if (e.target.closest("pre, table, .md-table-wrap, a, button, video, audio, input, textarea, summary, .attachments")) return;
