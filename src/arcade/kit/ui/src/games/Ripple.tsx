@@ -54,10 +54,12 @@ export function Ripple() {
     return () => { clearInterval(t); cancelAnimationFrame(raf); };
   }, [phase, voice, calm]);
 
-  // leaving mid-recording throws it away rather than leaving the mic open
+  // leaving mid-recording, or while the mic is still opening, throws it away rather than leaving the mic open
   const listening = useRef(false);
   listening.current = phase === "listening";
-  useEffect(() => () => { if (listening.current) voice?.cancel(); }, [voice]);
+  const starting = useRef(false);
+  const [opening, setOpening] = useState(false);
+  useEffect(() => () => { if (listening.current || starting.current) voice?.cancel(); }, [voice]);
 
   const q = qs[idx];
   // in the app a recording, or a typed answer the host keeps, lands in the journal; otherwise it only joins the taste
@@ -68,7 +70,9 @@ export function Ripple() {
   const kept = keptLine(typing ? "typed" : "voice", true);
 
   const start = async () => {
-    if (!voice) return;
+    if (!voice || starting.current) return; // a second tap while the mic opens is the same tap
+    starting.current = true;
+    setOpening(true);
     setNote("");
     try {
       await voice.start();
@@ -77,6 +81,9 @@ export function Ripple() {
     } catch (e) {
       setNote(`${e instanceof Error && e.message ? e.message : "The microphone isn't available."} You can write the answer instead.`);
       setTyping(true);
+    } finally {
+      starting.current = false;
+      setOpening(false);
     }
   };
 
@@ -148,7 +155,7 @@ export function Ripple() {
                   <span className="ta-rip-stop" aria-hidden="true" />
                 </button>
               ) : (
-                <button type="button" className="ta-rip-mic" onClick={() => void start()} disabled={phase === "saving"} aria-label="Answer out loud">
+                <button type="button" className="ta-rip-mic" onClick={() => void start()} disabled={phase === "saving" || opening} aria-label="Answer out loud">
                   <Mic size={34} />
                 </button>
               )}
@@ -158,7 +165,7 @@ export function Ripple() {
               <div className="ta-rip-alt">
                 {phase === "listening"
                   ? <button type="button" className="ta-btn ta-btn-quiet" onClick={cancel}>Throw it away</button>
-                  : <button type="button" className="ta-btn ta-btn-quiet" onClick={() => { setTyping(true); setNote(""); }}><Keyboard size={20} /> Write it instead</button>}
+                  : <button type="button" className="ta-btn ta-btn-quiet" disabled={opening} onClick={() => { setTyping(true); setNote(""); }}><Keyboard size={20} /> Write it instead</button>}
               </div>
             </div>
           ) : (

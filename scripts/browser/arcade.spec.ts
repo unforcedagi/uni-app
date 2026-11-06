@@ -78,7 +78,9 @@ async function boot(page: Page) {
     };
     // a microphone that hears a quiet tone, so the app's own recorder session runs for real
     const md = navigator.mediaDevices ?? ((navigator as any).mediaDevices = {});
-    md.getUserMedia = async () => { const ctx = new AudioContext(); const o = ctx.createOscillator(); const d = ctx.createMediaStreamDestination(); o.connect(d); o.start(); return d.stream; };
+    // __micDelay: a mic slow to open, as a phone's can be. __tracks: every track handed out, to see the mic was let go.
+    w.__tracks = [];
+    md.getUserMedia = async () => { await new Promise((r) => setTimeout(r, w.__micDelay ?? 0)); const ctx = new AudioContext(); const o = ctx.createOscillator(); const d = ctx.createMediaStreamDestination(); o.connect(d); o.start(); w.__tracks.push(...d.stream.getTracks()); return d.stream; };
   }, { cards: CARDS, tonal: TONAL, ask: ASK, askGrey: ASK_GREY, askQ: ASK_Q, question: QUESTION, claims: CLAIMS, noteId: NOTE_ID, gallery: GALLERY, askGal: ASK_GAL, fix: FIX, askFix: ASK_FIX, voices: VOICES, askWho: ASK_WHO });
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true });
   await page.locator('[data-place="front-door"]').waitFor();
@@ -126,6 +128,7 @@ test('the Arcade opens from the app, a burst saves each pick once, and the way b
   await tap(page, page.locator('.ta-arcade').getByRole('button', { name: 'Arcade' }).first());
   await tap(page, page.locator('.ta-home').getByRole('button', { name: /leave|back|close/i }).first());
   await expect(page.locator('.arcade-place')).toHaveCount(0);
+  await expect(page.locator('[data-place="front-door"]')).toBeVisible();
 });
 
 test('in the app: a pair says what it asks; the greyscale switch reaches the door, and a pick is marked', async ({ page }) => {
@@ -267,4 +270,44 @@ test('Who Said It: each guess is scored against who wrote the line, and saved', 
   const rs = await reactions(page);
   expect(rs.map((r) => r.card).sort()).toEqual([...seen].sort());
   for (const r of rs) expect(r).toMatchObject({ game: 'who-said-it', kind: 'guess', guess: { said: 'owner', right: r.card === 't-v-own' } });
+});
+
+const liveMics = (page: Page) => page.evaluate(() => (window as any).__tracks.filter((t: MediaStreamTrack) => t.readyState === 'live').length);
+const micOpens = (page: Page) => page.evaluate(() => (window as any).__tracks.length);
+
+test('Ripple: two taps while the mic opens start one recording, and it can still be stopped', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await page.evaluate(() => { (window as any).__micDelay = 500; });
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  // the second tap lands while the first is still waiting for the mic
+  await page.locator('.ta-rip-mic').evaluate((b: HTMLButtonElement) => { b.click(); b.click(); });
+  await expect(page.getByRole('button', { name: /Write it instead/ })).toBeDisabled(); // no way out of sight of Stop while it opens
+  await expect(page.locator('.ta-rip.is-listening')).toBeVisible();
+  await expect(page.getByLabel('Your answer')).toHaveCount(0);
+  await page.waitForTimeout(800);
+  await tap(page, page.getByRole('button', { name: /Keep it: stop/ }));
+  await expect(page.getByText('In your journal. Uni will fold it into Systems.')).toBeVisible();
+  expect(await calls(page, 'journal_save_voice')).toHaveLength(1);
+  expect(await micOpens(page)).toBe(1);
+  await expect.poll(() => liveMics(page)).toBe(0);
+});
+
+test('Ripple: leaving while the mic opens lets it go, and the next recording can start', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await page.evaluate(() => { (window as any).__micDelay = 500; });
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: 'Answer out loud' }));
+  await tap(page, page.locator('.ta-arcade').getByRole('button', { name: 'Arcade' }).first());
+  await expect(page.locator('.ta-home')).toBeVisible();
+  await expect.poll(() => micOpens(page)).toBe(1); // the mic has opened, with nobody left to hold it
+  await expect.poll(() => liveMics(page)).toBe(0);
+  // nothing is left holding the recording lock
+  await page.evaluate(() => { (window as any).__micDelay = 0; });
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: 'Answer out loud' }));
+  await expect(page.locator('.ta-rip.is-listening')).toBeVisible();
+  await tap(page, page.getByRole('button', { name: 'Throw it away' }));
+  await expect.poll(() => liveMics(page)).toBe(0);
 });
