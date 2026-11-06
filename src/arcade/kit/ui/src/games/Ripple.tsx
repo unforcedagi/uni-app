@@ -28,8 +28,10 @@ export function Ripple() {
   const { session, save, retry, clear, failed, busy } = useSaver();
   const rings = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
+  const micHeld = useRef(false);
 
   useEffect(() => {
+    if (micHeld.current) return; // the screen changed mid-answer: the answer, and its Stop, stay
     let live = true;
     setPhase("loading"); setIdx(0); clear();
     host.rounds("ripple", 5, deal).then(
@@ -54,12 +56,10 @@ export function Ripple() {
     return () => { clearInterval(t); cancelAnimationFrame(raf); };
   }, [phase, voice, calm]);
 
-  // leaving mid-recording, or while the mic is still opening, throws it away rather than leaving the mic open
-  const listening = useRef(false);
-  listening.current = phase === "listening";
-  const starting = useRef(false);
+  // whoever holds the mic holds it from the first tap until stop or throw-away: leaving at any moment in between
+  // (while it opens, or just after, before the screen has caught up) throws it away rather than leaving the mic open
   const [opening, setOpening] = useState(false);
-  useEffect(() => () => { if (listening.current || starting.current) voice?.cancel(); }, [voice]);
+  useEffect(() => () => { if (micHeld.current) voice?.cancel(); }, [voice]);
 
   const q = qs[idx];
   // in the app a recording, or a typed answer the host keeps, lands in the journal; otherwise it only joins the taste
@@ -70,8 +70,8 @@ export function Ripple() {
   const kept = keptLine(typing ? "typed" : "voice", true);
 
   const start = async () => {
-    if (!voice || starting.current) return; // a second tap while the mic opens is the same tap
-    starting.current = true;
+    if (!voice || micHeld.current) return; // a second tap while the mic opens is the same tap
+    micHeld.current = true;
     setOpening(true);
     setNote("");
     try {
@@ -79,16 +79,17 @@ export function Ripple() {
       setSecs(0);
       setPhase("listening");
     } catch (e) {
+      micHeld.current = false;
       setNote(`${e instanceof Error && e.message ? e.message : "The microphone isn't available."} You can write the answer instead.`);
       setTyping(true);
     } finally {
-      starting.current = false;
       setOpening(false);
     }
   };
 
   const stop = async () => {
     if (!voice || !q) return;
+    micHeld.current = false; // leaving now keeps the answer: it's already on its way to being saved
     setPhase("saving");
     try {
       const got = await voice.stop();
@@ -102,7 +103,7 @@ export function Ripple() {
     }
   };
 
-  const cancel = () => { voice?.cancel(); setPhase("ask"); setNote("Thrown away. Nothing was kept."); };
+  const cancel = () => { micHeld.current = false; voice?.cancel(); setPhase("ask"); setNote("Thrown away. Nothing was kept."); };
 
   const keepText = async () => {
     const t = text.trim();
@@ -160,7 +161,7 @@ export function Ripple() {
                 </button>
               )}
               <p className="ta-rip-hint" aria-live="polite">
-                {phase === "listening" ? <>Listening <span className="ta-rip-clock">{clock(secs)}</span>. Tap to keep it.</> : phase === "saving" ? "Keeping it…" : "Tap and say it however it comes."}
+                {phase === "listening" ? <>Listening <span className="ta-rip-clock">{clock(secs)}</span>. Tap to keep it.</> : phase === "saving" ? "Keeping it…" : opening ? "Opening the microphone…" : "Tap and say it however it comes."}
               </p>
               <div className="ta-rip-alt">
                 {phase === "listening"

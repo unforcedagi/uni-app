@@ -21,6 +21,7 @@ export function journalVoice(save: (blob: Blob, mime: string) => Promise<string>
   let session: RecorderSession<null> | null = null;
   let done: ((v: { blob: Blob; mime: string } | null) => void) | null = null;
   let stopping: Promise<{ ref: string; seconds: number } | null> | null = null;
+  let stoppingSession: RecorderSession<null> | null = null;
   // a recording that ended on its own (the mic went away) before stop was asked for
   let early: { blob: Blob; mime: string } | null = null;
   let t0 = 0;
@@ -37,17 +38,20 @@ export function journalVoice(save: (blob: Blob, mime: string) => Promise<string>
       t0 = Date.now();
     },
     stop() {
-      if (stopping) return stopping;
+      // a second stop of this recording waits for the first; a recording started while the last one saves is its own
+      if (stopping && (!session || session === stoppingSession)) return stopping;
       if (!session) return Promise.resolve(null);
       const s = session;
+      stoppingSession = s;
       stopping = (async () => {
         try {
           const got = early ?? (s.phase === "idle" ? null : await new Promise<{ blob: Blob; mime: string } | null>((resolve) => { done = resolve; s.stop(); }));
           early = null;
           if (session === s) end();
           if (!got || got.blob.size < 200) return null;
-          return { ref: await save(got.blob, got.mime), seconds: (Date.now() - t0) / 1000 };
-        } finally { stopping = null; }
+          const seconds = (Date.now() - t0) / 1000; // the time spoken: taken before a slow save, and before a next recording's start
+          return { ref: await save(got.blob, got.mime), seconds };
+        } finally { if (stoppingSession === s) stopping = null; }
       })();
       return stopping;
     },

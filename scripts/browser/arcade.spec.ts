@@ -72,7 +72,7 @@ async function boot(page: Page) {
       if (cmd === 'arcade_profile') return { profile: profile(), markdown: '# Taste profile', note: { vault: 'uni', path: 'Taste/Profile' } };
       if (cmd === 'arcade_distill') return { queued: true };
       if (cmd === 'arcade_media') return new ArrayBuffer(8);
-      if (cmd === 'journal_save_voice') return { sent: [noteId], remaining: 0, error: null };
+      if (cmd === 'journal_save_voice') { await new Promise((r) => setTimeout(r, w.__saveDelay ?? 0)); return { sent: [noteId], remaining: 0, error: null }; }
       if (cmd === 'journal_save_text') return { sent: [noteId], remaining: 0, error: null };
       return undefined;
     };
@@ -80,7 +80,10 @@ async function boot(page: Page) {
     const md = navigator.mediaDevices ?? ((navigator as any).mediaDevices = {});
     // __micDelay: a mic slow to open, as a phone's can be. __tracks: every track handed out, to see the mic was let go.
     w.__tracks = [];
-    md.getUserMedia = async () => { await new Promise((r) => setTimeout(r, w.__micDelay ?? 0)); const ctx = new AudioContext(); const o = ctx.createOscillator(); const d = ctx.createMediaStreamDestination(); o.connect(d); o.start(); w.__tracks.push(...d.stream.getTracks()); return d.stream; };
+    md.getUserMedia = async () => { await new Promise((r) => setTimeout(r, w.__micDelay ?? 0)); const ctx = new AudioContext(); const o = ctx.createOscillator(); const d = ctx.createMediaStreamDestination(); o.connect(d); o.start(); w.__tracks.push(...d.stream.getTracks());
+      // __leaveInTheGap: the game's way out is tapped after the mic opens and before the screen has said so
+      if (w.__leaveInTheGap) { w.__leaveInTheGap = false; const mc = new MessageChannel(); mc.port1.onmessage = () => { w.__leftInTheGap = !document.querySelector('.ta-rip.is-listening'); (document.querySelector('.ta-game .ta-back') as HTMLElement)?.click(); }; mc.port2.postMessage(0); }
+      return d.stream; };
   }, { cards: CARDS, tonal: TONAL, ask: ASK, askGrey: ASK_GREY, askQ: ASK_Q, question: QUESTION, claims: CLAIMS, noteId: NOTE_ID, gallery: GALLERY, askGal: ASK_GAL, fix: FIX, askFix: ASK_FIX, voices: VOICES, askWho: ASK_WHO });
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true });
   await page.locator('[data-place="front-door"]').waitFor();
@@ -296,11 +299,12 @@ test('Ripple: two taps while the mic opens start one recording, and it can still
 test('Ripple: leaving while the mic opens lets it go, and the next recording can start', async ({ page }) => {
   await boot(page);
   await openArcade(page);
-  await page.evaluate(() => { (window as any).__micDelay = 500; });
+  await page.evaluate(() => { (window as any).__micDelay = 1500; });
   await tap(page, page.locator('[data-toy="ripple"]'));
   await tap(page, page.getByRole('button', { name: 'Answer out loud' }));
   await tap(page, page.locator('.ta-arcade').getByRole('button', { name: 'Arcade' }).first());
   await expect(page.locator('.ta-home')).toBeVisible();
+  expect(await micOpens(page)).toBe(0); // gone before the mic answered
   await expect.poll(() => micOpens(page)).toBe(1); // the mic has opened, with nobody left to hold it
   await expect.poll(() => liveMics(page)).toBe(0);
   // nothing is left holding the recording lock
@@ -310,4 +314,54 @@ test('Ripple: leaving while the mic opens lets it go, and the next recording can
   await expect(page.locator('.ta-rip.is-listening')).toBeVisible();
   await tap(page, page.getByRole('button', { name: 'Throw it away' }));
   await expect.poll(() => liveMics(page)).toBe(0);
+});
+
+test('Ripple: leaving in the moment after the mic opens, before the screen shows it, lets it go too', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await page.evaluate(() => { const w = window as any; w.__micDelay = 200; w.__leaveInTheGap = true; });
+  await tap(page, page.getByRole('button', { name: 'Answer out loud' }));
+  await expect(page.locator('.ta-home')).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__leftInTheGap)).toBe(true);
+  await expect.poll(() => liveMics(page)).toBe(0);
+});
+
+test('Ripple: the screen settling mid-answer (reduced motion, Calm) keeps the recording and its Stop', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: 'Answer out loud' }));
+  const stop = page.getByRole('button', { name: /Keep it: stop/ });
+  await expect(stop).toBeVisible();
+  await page.emulateMedia({ reducedMotion: 'no-preference' }); // the games deal again for a screen that changed
+  await page.waitForTimeout(500);
+  await expect(stop).toBeVisible();
+  await page.waitForTimeout(800);
+  await tap(page, stop);
+  await expect(page.getByText('In your journal. Uni will fold it into Systems.')).toBeVisible();
+  expect(await calls(page, 'journal_save_voice')).toHaveLength(1);
+  await expect.poll(() => liveMics(page)).toBe(0);
+});
+
+test('Ripple: a second answer while the first is still saving is its own recording, with its own length', async ({ page }) => {
+  test.setTimeout(60_000);
+  await boot(page);
+  await openArcade(page);
+  await page.evaluate(() => { (window as any).__saveDelay = 4000; });
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: 'Answer out loud' }));
+  await page.waitForTimeout(1000);
+  await tap(page, page.getByRole('button', { name: /Keep it: stop/ }));
+  await expect(page.getByText('Keeping it…')).toBeVisible();
+  await tap(page, page.locator('.ta-arcade').getByRole('button', { name: 'Arcade' }).first());
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: 'Answer out loud' }));
+  await page.waitForTimeout(1000);
+  await tap(page, page.getByRole('button', { name: /Keep it: stop/ }));
+  await expect.poll(() => liveMics(page)).toBe(0); // the second Stop stopped the second mic
+  await expect(page.getByText('In your journal. Uni will fold it into Systems.')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => (await calls(page, 'journal_save_voice')).length).toBe(2); // each answer saved
+  await expect.poll(async () => (await reactions(page)).length).toBe(2);
+  for (const r of await reactions(page)) expect(r.voice.seconds).toBeLessThan(3); // the time spoken, not the time saving
 });
