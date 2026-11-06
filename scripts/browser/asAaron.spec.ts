@@ -364,6 +364,25 @@ test('the home: a quiet day has its own line, the places sit on one thread, and 
   await expect(page.locator('.all-why')).toHaveCount(0);
 });
 
+test('the home never says less than the cards beside it: an approval waiting is not "Nothing needs you" (review round 3)', async ({ page }) => {
+  await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, strayRoom: true });
+  await page.locator('[data-place="front-door"]').waitFor();
+  await page.evaluate(([c, n, b]) => (window as any).__arrive(c, n, b), ['ch-garden', 'Uni', PROMPTS.prompts.two_answers_30min] as const);
+  await expect(page.locator('.cp-approval')).toBeVisible();
+  await expect(page.locator('.fd-statement')).not.toContainText('Nothing needs you');
+});
+
+test('a failed read of what needs you says so and offers another try, instead of "Nothing needs you" (review round 3)', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__extraInvoke = async (cmd: string, a: any) => { if (cmd.startsWith('vault_query') && a.tag === 'task' && (window as any).__failTasks !== false) throw new Error('the vault did not answer'); return undefined; }; });
+  await bootAreas(page, 'seed', { tree: true, tasks: true, uniMember: true });
+  await page.locator('[data-place="front-door"]').waitFor();
+  await expect(page.locator('.fd-statement')).toContainText("Couldn't check what needs you.");
+  await expect(page.locator('.fd-statement')).not.toContainText('Nothing needs you');
+  await page.evaluate(() => { (window as any).__failTasks = false; });
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.locator('.fd-statement')).not.toContainText("Couldn't check");
+});
+
 // ---------------------------------------------------------------- Mail, Calendar, Messages
 test('Mail\'s account tags speak in words, not capitals', async ({ page }) => {
   await mailMock.boot(page, 'ok');

@@ -207,10 +207,10 @@ function heldTo(p: Parked): string {
 function HeldRow({ e, selected, onOpen }: { e: HeldEntry; selected: boolean; onOpen: () => void }) {
   const p = e.item;
   const state = e.outcome && e.outcome.kind !== "failed" ? e.outcome.kind : waiting(e) ? "waiting" : "failed";
-  const tag = state === "sent" ? "SENT" : state === "declined" ? "NOT SENT" : state === "failed" ? "ASK #MAIL" : "WAITING";
+  const tag = state === "sent" ? "Sent" : state === "declined" ? "Not sent" : state === "failed" ? "Ask #mail" : "Waiting";
   const files = p.files?.length ?? 0;
   return <li><button type="button" className={`mail-row mail-held-row held-${state} ${selected ? "selected" : ""}`} aria-current={selected ? "true" : undefined} onClick={onOpen}
-    aria-label={`${tag === "WAITING" ? "Waiting for you" : tag}. From Uni's address to ${heldTo(p)}: ${subjectLabel(p.fields?.subject ?? "")}${files ? `, with ${filesWord(files)}` : ""}`}>
+    aria-label={`${tag === "Waiting" ? "Waiting for you" : tag}. From Uni's address to ${heldTo(p)}: ${subjectLabel(p.fields?.subject ?? "")}${files ? `, with ${filesWord(files)}` : ""}`}>
     <span className="mail-row-top"><WhoTag who="uni" /><span className="mail-from">To {heldTo(p)}</span><span className="mail-held-tag">{tag}</span></span>
     <span className="mail-row-subject">{files > 0 && <span aria-hidden="true">📎 {files} · </span>}{subjectLabel(p.fields?.subject ?? "")}</span>
     <span className="mail-row-preview">{e.outcome?.text ?? p.reason ?? p.problem ?? ""}</span>
@@ -678,7 +678,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
           </div>}
           {pendingNote && <p className="mail-note mail-pending-note" role="status">{pendingNote}</p>}
           {!waitingScope && heldAccount && <button type="button" className="mail-held-banner" onClick={() => pick({ kind: "waiting", accountId: heldAccount.id })}>
-            <span className="mail-held-tag">WAITING</span> {waitingAll === 1 ? "A send from Uni's address waits for you" : `${waitingAll} sends from Uni's address wait for you`} · Review</button>}
+            <span className="mail-held-tag">Waiting</span> {waitingAll === 1 ? "A send from Uni's address waits for you" : `${waitingAll} sends from Uni's address wait for you`} · Review</button>}
           {waitingScope ? <div className="mail-scroll">
             {heldProblem && <Problem p={heldProblem} onRetry={() => overview && void loadHeld(overview)} />}
             {waitingAcct && !can(waitingAcct, "send.parked") && <p className="mail-note mail-held-unlisted" role="note">This mail bridge can't list Uni's held sends yet. Each one is also a task for you; ask #mail.</p>}

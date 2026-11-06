@@ -375,7 +375,7 @@ function Conflicts({ list, tz, onOpen, onClose }: { list: Conflict[]; tz: string
     <ul>{list.map((c) => <li key={c.id} className="cal-conflict">
       <p><strong>{c.title}</strong>{c.created && <small> · {dayLabel(dayKey(Date.parse(c.created), tz), "short")}</small>}</p>
       <div className="cal-conflict-sides">
-        <div><span className="cal-tag">KEPT</span> {span(c.vault)}{c.vault.location ? ` · ${c.vault.location}` : ""}</div>
+        <div><span className="cal-tag">Kept</span> {span(c.vault)}{c.vault.location ? ` · ${c.vault.location}` : ""}</div>
         <div><span className="cal-tag tag-free">{from(c.adapter).toUpperCase().split(" ")[0]}</span> {span(c.outside)}{c.outside.location ? ` · ${c.outside.location}` : ""} <small>({from(c.adapter)})</small></div>
       </div>
       <button className="cal-link" onClick={() => onOpen(c)}>Show the event ›</button>
@@ -555,7 +555,7 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
   return <section className={`cal ${still ? "cal-still" : ""}`} aria-label="Calendar" aria-busy={busy || undefined}>
     <header className="note-bar cal-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
-      <span className="cal-title"><strong>Calendar</strong>{offline && <span className="cal-offline" role="status">OFFLINE{savedWords ? ` · saved ${savedWords}` : ""}</span>}{sess?.role === "uni" && <small> · as Uni</small>}</span>
+      <span className="cal-title"><strong>Calendar</strong>{offline && <span className="cal-offline" role="status">Offline{savedWords ? ` · saved ${savedWords}` : ""}</span>}{sess?.role === "uni" && <small> · as Uni</small>}</span>
       {offline ? <button className="note-action" onClick={() => void load(true)}>Retry</button> : <button className="note-action note-refresh" aria-label="Refresh" title="Refresh" onClick={() => void load(true)}><RefreshIcon /></button>}
     </header>
     <div className="cal-head">

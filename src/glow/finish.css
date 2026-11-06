@@ -40,7 +40,8 @@
 @media (pointer: coarse) { .note-refresh, .note-back { min-height: 44px; } .note-refresh { width: 44px; min-width: 44px; } }
 .note-bar { flex-wrap: nowrap; gap: 6px; }
 .note-bar > .note-action:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 340px) { .note-bar { flex-wrap: wrap; } }
+@media (max-width: 380px) { .note-bar { flex-wrap: wrap; } }
+.note-bar .note-back { min-width: 44px; }
 .note-bar .note-back { flex: 0 1 auto; min-width: 0; margin-right: auto; }
 .note-pane .note-back:has(.note-back-arrow) .note-back-label { display: none; }
 .note-pane .note-back { width: 44px; min-width: 44px; padding: 0; justify-content: center; }
@@ -127,6 +128,8 @@
   .rail-extras.open button:nth-child(6n) { --tile: #5a5f8c; }
   :root[data-screen="ink"] .rail-extras.open button i { background: none; color: #000 !important; }
 }
+
+.fd-retry { margin-top: 10px; }
 
 /* ── A rail dot is a dot, top right of its glyph, wherever it is ── */
 .rail i .rail-dot { top: 2px; left: auto; right: 9px; width: 8px; height: 8px; background: var(--g-accent); box-shadow: 0 0 0 2px var(--g-ground); }

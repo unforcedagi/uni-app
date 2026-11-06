@@ -58,8 +58,9 @@ const count = (n: number) => WORDS[n] ?? String(n);
 /** T-335 as Aaron: nothing happening is good news, and it needn't read the same every day. One line a day, the same all day. */
 export const QUIET_LINES = ["All quiet.", "The rooms are resting.", "The mycelium has it.", "Go look at a tree.", "Nothing's on fire.", "Breathe out.", "The garden keeps itself today."];
 export const quietLine = (day: number) => QUIET_LINES[((day % QUIET_LINES.length) + QUIET_LINES.length) % QUIET_LINES.length];
-export function statement(needs: number, moving: number, day = 0, known = true): string[] {
-  if (!known && !needs) return ["Looking in on your places.", moving ? `${count(moving)} place${moving === 1 ? " is" : "s are"} moving.` : ""].filter(Boolean);
+export type NeedsKnown = "known" | "reading" | "failed";
+export function statement(needs: number, moving: number, day = 0, known: NeedsKnown = "known"): string[] {
+  if (known !== "known" && !needs) return [known === "failed" ? "Couldn't check what needs you." : "Looking in on your places.", moving ? `${count(moving)} place${moving === 1 ? " is" : "s are"} moving.` : ""].filter(Boolean);
   const first = needs ? `${count(needs)} thing${needs === 1 ? " needs" : "s need"} you.` : "Nothing needs you.";
   const second = moving ? `${count(moving)} place${moving === 1 ? " is" : "s are"} moving.` : needs ? "The rest is quiet." : quietLine(day);
   return [first, second];
@@ -103,7 +104,7 @@ export function AllEmpty({ reading, error = null, onBack }: { reading: boolean; 
   </div>;
 }
 
-export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = true }: { /** T-335 as Aaron: the tasks have been read: only then may the home say nothing needs you */ needsKnown?: boolean; doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = "known", alsoNeeds = 0, onRetryNeeds }: { /** T-335 as Aaron: only once the tasks have been read, fresh and whole, may the home say nothing needs you */ needsKnown?: NeedsKnown; /** approvals waiting, which the task feed doesn't count */ alsoNeeds?: number; onRetryNeeds?: () => void; doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
   /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */
   all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string) => void } | null;
   /** T-335: this is the All place (a place of its own on the rail), and the way back from it; null: the home, with the places. */
@@ -140,7 +141,8 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   // T-335 glow-up: how many places are moving (a session or the room's Uni at work), for the home's one sentence
   const liveOf = (d: Door) => { const a = areaAt.get(d.path); return (a ? liveInArea(work, a.id).length : 0) + (d.room && turns.has(d.room) ? 1 : 0); };
   const moving = doors.filter((d) => liveOf(d) > 0).length;
-  const needN = needs ? needs.rows.length + needs.privates.reduce((k, p) => k + p.count, 0) : 0;
+  // the sentence never says less than the doors and the cards beside it
+  const needN = Math.max(needs ? needs.rows.length + needs.privates.reduce((k, p) => k + p.count, 0) : 0, doors.reduce((k, d) => k + (d.needs ?? 0), 0), alsoNeeds);
   if (all && view === "all") return <div className="fd fd-all" data-place="front-door" data-view="all">
     <header className="fd-head fd-allhead">
       <div className="fd-mark"><h1 className="fd-title"><Enso />All</h1><span className="fd-date">Every room, newest at the bottom</span></div>
@@ -153,6 +155,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
     <header className="fd-head" data-moving={moving > 0 ? "true" : undefined}>
       <div className="fd-mark"><h1 className="fd-title"><Enso />Uni</h1><span className="fd-date">{today()}</span></div>
       <p className="fd-statement">{statement(needN, moving, Math.floor((now - new Date(now).getTimezoneOffset() * 60_000) / 86_400_000), needsKnown).map((line) => <span key={line}>{line}</span>)}</p>
+      {needsKnown === "failed" && !needN && onRetryNeeds && <button type="button" className="note-action fd-retry" onClick={onRetryNeeds}>Try again</button>}
     </header>
     {composer}
     {needs && <NeedsLine needs={needs} onOpen={onOpen} />}

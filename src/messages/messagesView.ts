@@ -234,11 +234,11 @@ export const shownFlows = (network: string, flows: Flow[]) => flows.filter((f) =
 
 export function linkWords(s: LinkState): string {
   switch (s) {
-    case "checking": return "CHECKING";
+    case "checking": return "Checking";
     case "linked": return "Linked";
     case "not_linked": return "Not linked";
     case "needs_attention": return "Needs attention";
-    case "unavailable": return "NOT RUNNING";
+    case "unavailable": return "Not running";
   }
 }
 

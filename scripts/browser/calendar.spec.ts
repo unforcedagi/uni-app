@@ -271,7 +271,7 @@ test.describe('T-229 Calendar', () => {
     await cal(page).getByRole('button', { name: 'Conflicts (1)' }).click();
     const list = cal(page).getByRole('region', { name: 'Conflicts' });
     await expect(list.getByRole('listitem')).toContainText(['Lunch with Kai']);
-    await expect(list.getByText(/KEPT Thursday, Oct 22 · 12\sPM – 1\sPM/)).toBeVisible();
+    await expect(list.getByText(/Kept Thursday, Oct 22 · 12\sPM – 1\sPM/)).toBeVisible();
     await expect(list.getByText(/Thursday, Oct 22 · 12:30\sPM – 1:30\sPM/)).toBeVisible();
     await expect(list.getByText('(Google)')).toBeVisible();
     await shot(page, 'conflicts');
@@ -286,7 +286,7 @@ test.describe('T-229 Calendar', () => {
     d.down = true;
     await page.reload();
     const c = cal(page);
-    await expect(c.getByRole('status').filter({ hasText: /^OFFLINE · saved Wed, Oct 21, 10\sAM$/ })).toBeVisible();
+    await expect(c.getByRole('status').filter({ hasText: /^Offline · saved Wed, Oct 21, 10\sAM$/ })).toBeVisible();
     await expect(c.getByRole('note')).toContainText("The calendar door isn't answering.");
     await expect(ev(page, 'Lunch with Kai')).toBeVisible();
     await expect(c.getByRole('button', { name: 'New event', exact: true })).toHaveCount(0);

@@ -77,8 +77,8 @@ test("a held send shows what it sends and why; Send it takes a confirm, never En
   await rail.getByRole('button', { name: 'Journal', exact: true }).click();
   await expect(page.locator('.mail')).toHaveCount(0);
   await rail.getByRole('button', { name: 'Mail', exact: true }).click();
-  await expect(heldRows(page).filter({ hasText: BARN })).toContainText('SENT');
-  await expect(heldRows(page).filter({ hasText: QUOTE })).toContainText('WAITING');
+  await expect(heldRows(page).filter({ hasText: BARN })).toContainText('Sent');
+  await expect(heldRows(page).filter({ hasText: QUOTE })).toContainText('Waiting');
   expect(await submissions(page)).toHaveLength(1);
 });
 
@@ -94,7 +94,7 @@ test('a decision still on its way when you leave Mail shows its outcome in the M
   await rail.getByRole('button', { name: 'Mail', exact: true }).click();
   const back = page.getByRole('button', { name: '← Waiting' }).filter({ visible: true });
   if (await back.count()) await back.first().click();
-  await expect(heldRows(page).filter({ hasText: BARN })).toContainText('SENT', { timeout: 8000 });
+  await expect(heldRows(page).filter({ hasText: BARN })).toContainText('Sent', { timeout: 8000 });
   await expect(badge(page)).toHaveText('1');
   expect(await calls(page, 'mail_send_approve')).toHaveLength(1);
   expect(await submissions(page)).toHaveLength(1);
@@ -127,7 +127,7 @@ test("Don't send takes a confirm, Cancel keeps it waiting, and declining sends n
   expect(await calls(page, 'mail_send_approve')).toEqual([]);
   expect(await submissions(page)).toEqual([]);
   await expect(badge(page)).toHaveText('1');
-  await expect(heldRows(page).filter({ hasText: QUOTE })).toContainText('NOT SENT');
+  await expect(heldRows(page).filter({ hasText: QUOTE })).toContainText('Not sent');
   await shot(page, 'a5-declined');
 });
 
@@ -145,7 +145,7 @@ test('a held draft that changed after you saw it is refused and never sent; one 
   await shot(page, 'a6-changed-refused');
   // the refused send has left the bridge's list; what happened stays on it
   await mail(page).getByRole('button', { name: 'Refresh' }).click();
-  await expect(heldRows(page).filter({ hasText: BARN })).toContainText('ASK #MAIL');
+  await expect(heldRows(page).filter({ hasText: BARN })).toContainText('Ask #mail');
   await expect(badge(page)).toHaveText('1');
   // another held draft changes before you open it: the bridge lists it as changed, with what it says now, and only
   // Don't send is offered

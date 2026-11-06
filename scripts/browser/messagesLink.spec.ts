@@ -108,7 +108,7 @@ test.describe('T-282 Link an account, on the live bridges', () => {
         await expect(tg.getByLabel(/Phone number/)).toBeVisible({ timeout: 30_000 });
         await cancel(tg);
       } else {
-        await expect(tag(tg)).toHaveText('NOT RUNNING', { timeout: 60_000 });
+        await expect(tag(tg)).toHaveText('Not running', { timeout: 60_000 });
         await expect(tg.getByText(/needs a key you make at my\.telegram\.org/)).toBeVisible();
         // the keys go to the door on the box, which starts the bridge (not sent here: the dev bridge has no device key)
         const keys = tg.getByRole('form', { name: 'Telegram app keys' });

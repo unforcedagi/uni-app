@@ -346,7 +346,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
   return <section className="msgs" aria-label="Messages" data-pane={pane}>
     <header className="note-bar msgs-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
-      <span className="msgs-title"><strong>Messages</strong>{signedIn && <small className="msgs-account">{status?.user_id}<span className={`msgs-live st-${status?.state}`} role="status">{status?.state === "live" ? "" : ` · ${statusWords(status)}`}</span></small>}</span>
+      <span className="msgs-title"><strong>Messages</strong>{signedIn && <small className="msgs-account">{status?.user_id}{status?.state !== "live" && " · "}<span className={`msgs-live st-${status?.state}`} role="status">{status?.state === "live" ? "" : statusWords(status)}</span></small>}</span>
       {signedIn ? <button className="note-quiet" onClick={() => { if (outArmed) void out(); else setOutArmed(true); }}>{outArmed ? "Sign out?" : "Sign out"}</button> : <span className="msgs-bar-gap" />}
     </header>
     {!status && !problem ? <p className="msgs-loading" role="status">Opening Messages…</p>
