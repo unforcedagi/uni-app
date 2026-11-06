@@ -22,6 +22,7 @@
 //! - [`secret`]: T-176 secret handoff — answer Uni's secret request with a NIP-59 gift wrap.
 //! - [`mail`]: read-only mail through the NIP-98 mail bridge (T-45).
 
+pub mod arcade;
 pub mod archive;
 pub mod backoff;
 pub mod buzz;

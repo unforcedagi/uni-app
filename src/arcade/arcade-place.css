@@ -1,0 +1,4 @@
+/* T-335 Taste Arcade in the app: the games fill the conversation pane and scroll inside it, above the rail on a phone. */
+.arcade-place { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(env(safe-area-inset-bottom)); }
+.arcade-place > .ta-arcade { min-height: 100%; }
