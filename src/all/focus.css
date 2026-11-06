@@ -25,7 +25,7 @@
 .all-focus-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 8px max(14px, calc((100% - 720px) / 2)) 8px; touch-action: none; }
 .all-focus-back { flex: none; min-height: 40px; padding: 0 14px 0 11px; font: 500 14px/1 var(--g-font-ui); white-space: nowrap; max-width: 44vw; overflow: hidden; text-overflow: ellipsis; }
 .all-focus-titles { position: relative; flex: 1; min-width: 0; padding-right: 26px; }
-.all-focus-title { margin: 0; display: flex; align-items: center; gap: 8px; font: 520 19px/1.2 var(--g-font-display); font-variation-settings: "SOFT" 60, "opsz" 72; color: var(--g-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transform-origin: 0 50%; }
+.all-focus-title { margin: 0; display: flex; align-items: center; gap: 8px; font: 520 19px/1.2 var(--g-font-display); font-variation-settings: "SOFT" 60, "opsz" 72; color: var(--g-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .all-focus-title::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--room-tint, var(--g-accent)); }
 .all-focus-stands { margin: 1px 0 0; font: 400 13px/1.35 var(--g-font-uni); color: var(--g-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .all-focus-page { all: unset; box-sizing: border-box; position: absolute; top: 50%; right: 0; transform: translateY(-50%); width: 24px; height: 24px; display: grid; place-items: center; cursor: pointer; font: 400 18px/1 var(--g-font-ui); color: var(--g-ink-3); }

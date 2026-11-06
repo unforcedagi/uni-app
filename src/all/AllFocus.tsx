@@ -1,10 +1,10 @@
 // T-335 one fluid surface: a room in focus, in All. Not a place you go to: the room's real conversation and composer (the same pane a room's page has) come
 // up over the feed, which recedes behind it and keeps its place. One tap on what shows of All, the Back button, Android Back, Escape, the rail's All or a
 // swipe down on the head returns. On a calm screen nothing moves: the room is in full black inside a black edge, All behind it is pale.
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { roomTint } from "../glow/roomTint";
-import { calmMotion, calmScreen } from "../motion";
-import { labelBack, takeLabelRect } from "./AllView";
+import { calmScreen } from "../motion";
+import { labelBack } from "./AllView";
 import "./focus.css";
 
 /** The room in focus; `leaving`: on its way out, All already in reach. */
@@ -18,14 +18,6 @@ export function AllFocusSheet({ id, name, stands, root, replies, leaving, onBack
   /** In a thread of the room: Back steps to the room. */ root: string | null; replies: number | null;
   leaving: boolean; onBack: () => void; /** The room's page: its work, its tree, where it stands in full. */ onPage: () => void; children: ReactNode }) {
   const sheet = useRef<HTMLElement>(null);
-  const title = useRef<HTMLHeadingElement>(null);
-  // the head grows out of the label that was tapped
-  useLayoutEffect(() => {
-    const from = takeLabelRect(), el = title.current;
-    if (!from || !el || calmMotion()) return;
-    const to = el.getBoundingClientRect();
-    el.animate([{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)` }, { transform: "none" }], { duration: 240, easing: "cubic-bezier(.22, .8, .2, 1)" });
-  }, []);
   // a coarse pointer keeps the keyboard down, so the reader gets the thread: the keys' place is the sheet. The label has them back at the end.
   useEffect(() => {
     if (matchMedia("(pointer: coarse)").matches) sheet.current?.focus({ preventScroll: true });
@@ -55,7 +47,7 @@ export function AllFocusSheet({ id, name, stands, root, replies, leaving, onBack
       onPointerCancel={endPull}>
       <button type="button" className="note-action all-focus-back" aria-label={root ? `Back to ${name}` : "Back to All"} onClick={onBack}><span aria-hidden="true">←</span> {root ? name : "All"}</button>
       <div className="all-focus-titles">
-        <h2 ref={title} className="all-focus-title">{name}</h2>
+        <h2 className="all-focus-title">{name}</h2>
         {root ? <p className="all-focus-stands">Thread{replies !== null ? ` · ${replies} ${replies === 1 ? "reply" : "replies"}` : ""}</p> : stands && <p className="all-focus-stands">{stands}</p>}
         {!root && <button type="button" className="all-focus-page" aria-label={`Open ${name}'s page`} title={`${name}'s page`} onClick={onPage}><span aria-hidden="true">›</span></button>}
       </div>

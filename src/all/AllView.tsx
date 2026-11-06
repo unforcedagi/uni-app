@@ -89,9 +89,8 @@ const feedMemory = { spot: null as FeedSpot | null, at: 0, open: new Set<string>
 /** A spot this old is another visit: All opens at its newest. */
 const SPOT_KEEP_MS = 15 * 60_000;
 type FeedSpot = { ref: string; offset: number };
-/** The label that was tapped: the focus head grows out of it, and it has the keys back when the focus ends. */
-const label = { el: null as HTMLElement | null, rect: null as DOMRect | null };
-export const takeLabelRect = () => { const r = label.rect; label.rect = null; return r; };
+/** The label that was tapped: it has the keys back when the focus ends. */
+const label = { el: null as HTMLElement | null };
 export const labelBack = () => { const el = label.el; label.el = null; if (el?.isConnected) el.focus({ preventScroll: true }); };
 
 /**
@@ -119,7 +118,7 @@ function useHeld() {
 /** Forget this device's key: nothing typed under it stays in memory, or could be read to a model under the next key. */
 export function forgetComposer() {
   setHeld({ text: "", chosen: null, target: null, attempt: null, sending: false, outcome: null, lost: [], era: held.era + 1 });
-  feedMemory.spot = null; feedMemory.open = new Set(); label.el = null; label.rect = null;
+  feedMemory.spot = null; feedMemory.open = new Set(); label.el = null;
   forgetModelRoute();
 }
 if (import.meta.env.VITE_AREAS_TESTHOOKS === "1" && typeof window !== "undefined") (window as unknown as { __allHeld: typeof held }).__allHeld = held;
@@ -381,7 +380,7 @@ const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named,
       onTap(m);
     }}>
     {run && <div className="all-run"><button type="button" className="all-place" style={{ ["--room-tint" as string]: tint(m.channel) }} aria-label={`Focus ${place}, at this message`} title={`Focus ${place}`}
-      onClick={(e) => { label.el = e.currentTarget; label.rect = e.currentTarget.getBoundingClientRect(); onOpen(m.channel, m.ref); }}>{place}</button>
+      onClick={(e) => { label.el = e.currentTarget; onOpen(m.channel, m.ref); }}>{place}</button>
       {!mine && <strong>{m.author_name}</strong>}<time>{clock(m.ts)}</time></div>}
     <div className="message-content" ref={box}>
       {named && !run && !mine && <div className="all-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}
@@ -582,7 +581,7 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
   }
   return <div className="all-feed-box">
     {reading && nameOf.has(reading) && <div className="all-reading-band"><button type="button" className="all-place all-reading" style={{ ["--room-tint" as string]: tint(reading) }} aria-label={`Focus ${nameOf.get(reading)}, at this message`} title={`Focus ${nameOf.get(reading)}`}
-      onClick={(e) => { label.el = null; label.rect = e.currentTarget.getBoundingClientRect(); onOpen(reading, readingRow.current); }}>{nameOf.get(reading)}</button></div>}
+      onClick={() => { label.el = null; onOpen(reading, readingRow.current); }}>{nameOf.get(reading)}</button></div>}
     <div className="all-feed" ref={list} role="log" aria-label="All rooms, by time" aria-live="polite"
     onScroll={(e) => { const el = e.currentTarget; if (tappedRef.current) { const r = el.querySelector<HTMLElement>(`article[data-ref="${CSS.escape(tappedRef.current)}"]`); tapInSight.current = !!r && r.offsetTop + r.offsetHeight > el.scrollTop && r.offsetTop < el.scrollTop + el.clientHeight; }
       if (restoring.current) return;
