@@ -241,6 +241,14 @@ check("T-335: a private place's rooms, done or archived ones too, and never a ro
     assert.equal(isPrivateRoom(tree5, "r-bou", shared, UNI), false, `the public area's room, with ${JSON.stringify(pub)}`);
     assert.equal(isPrivateRoom(tree5, "r-sec", shared, UNI), true, "the private project's own");
   }
+  // a public area that holds its room only by the room's name matching in the tree's own way, not by these exact words
+  const loosely = [UNI, { id: "r-ufd", name: "Unforced Dev" }, { id: "r-sec", name: "secret" }];
+  const held = buildTree([
+    area("a-sad", "Sanctum", { room: "sanctum" }), area("a-ufd", "Unforced Development", { room: "unforced-dev" }), proj("p-sec", "Secret", "Areas/Sanctum", { room: "secret" }),
+    parseProject({ id: "p-pub", path: "Projects/Pub", tags: ["project"], content: "# Pub", metadata: { status: "foreground", channel: "r-ufd", links: ["Projects/Secret"] } })!,
+  ]);
+  assert.equal(roomView(held, "Areas/Unforced Development", loosely, UNI).own, true, "the shape this case needs");
+  assert.equal(isPrivateRoom(held, "r-ufd", loosely, UNI), false, "the public area's room, held loosely");
   // two hops through a plain project: the same
   const hop = buildTree([
     area("a-sad", "Sanctum", { room: "sanctum" }), area("a-bou", "Boulder", { room: "boulder" }), proj("p-sec", "Secret", "Areas/Sanctum", { room: "secret" }),

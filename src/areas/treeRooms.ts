@@ -97,7 +97,7 @@ export function isPrivateRoom(tree: Tree, channel: string, rooms: readonly RoomR
   if (room && roomSlug(room.name).split("/").some(isPrivateName)) return true;
   const names = (n: Area) => [...n.rooms, ...n.channels, ...(typeof n.metadata.room === "string" ? [n.metadata.room] : [])].some((c) => c === channel || (!!room && roomSlug(c).toLowerCase() === roomSlug(room.name).toLowerCase()));
   const { under } = privateClosure(tree);
-  const publicAreaHas = [...tree.nodes.values()].some((n) => n.kind === "area" && !isPrivatePath(tree, n.path) && names(n));
+  const publicAreaHas = [...tree.nodes.values()].some((n) => n.kind === "area" && !isPrivatePath(tree, n.path) && (names(n) || (() => { const v = roomView(tree, n.path, rooms, uni); return v.own && v.target?.id === channel; })()));
   const counts = (n: Area) => !publicAreaHas || under.has(n.path);
   for (const n of tree.nodes.values()) {
     if (!isPrivatePath(tree, n.path) || !counts(n)) continue;
