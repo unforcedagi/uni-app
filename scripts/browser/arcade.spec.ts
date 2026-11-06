@@ -105,6 +105,24 @@ test('Ripple out loud files a journal voice entry; the reaction names the note, 
   expect(rs[0].words).toBeUndefined();
 });
 
+test('Ripple typed files a journal text entry; the reaction names the note, never its words', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: /Write it instead/ }));
+  await page.getByLabel('Your answer').fill('Made-up: hold it all until Monday.');
+  await tap(page, page.getByRole('button', { name: 'Keep it' }));
+  await expect(page.getByText('In your journal. Uni will fold it into Systems.')).toBeVisible();
+  const text = await calls(page, 'journal_save_text');
+  expect(text).toHaveLength(1);
+  expect(text[0].entry.content).toBe('Made-up: hold it all until Monday.');
+  expect(text[0].saveAnother).toBe(true);
+  const sent = (await calls(page, 'arcade_react')).flatMap((a: any) => a.reactions);
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({ game: 'ripple', kind: 'voice', card: QUESTION.id, voice: { ref: NOTE_ID } });
+  expect(JSON.stringify(sent)).not.toContain('Monday');
+});
+
 test('Garden: "Not me" saves a verdict and moves the plant to the patch at once', async ({ page }) => {
   await boot(page);
   await openArcade(page);

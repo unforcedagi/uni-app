@@ -8,46 +8,59 @@ import type { ArcadeHost, PlayGame, VoiceCapture } from "./kit/ui/src/index.ts";
 import type { Card, GameId, Profile, Reaction, Round, Stats } from "./kit/engine/src/types.ts";
 import { RecorderSession } from "../recorderSession.ts";
 import { newDraft, type FlushReport } from "../journalCore.ts";
-import { arcadeError, journalRef, mediaType } from "./arcadeCore.ts";
+import { arcadeError, journalRef, mediaType, typedAnswer } from "./arcadeCore.ts";
 import "./arcade-place.css";
 
 const GAMES: GameId[] = ["this-or-that", "gallery", "fix-it", "who-said-it", "ripple", "garden"];
 
 type Home = { stats: Stats; fresh?: Partial<Record<PlayGame, number>> };
 
-/** Voice for Ripple: the app's own recorder session, saved as a journal voice entry. */
-function journalVoice(): VoiceCapture {
+/** Voice for Ripple: the app's own recorder session, saved as a journal voice entry. One recording at a time: a second
+ *  start is refused, a second stop waits for the first, and cancel during a stop resolves it with nothing kept. */
+export function journalVoice(save: (blob: Blob, mime: string) => Promise<string> = saveVoiceEntry): VoiceCapture {
   let session: RecorderSession<null> | null = null;
   let done: ((v: { blob: Blob; mime: string } | null) => void) | null = null;
+  let stopping: Promise<{ ref: string; seconds: number } | null> | null = null;
   let t0 = 0;
-  let dropped = false;
+  const end = () => { session?.dispose(); session = null; };
   return {
     async start() {
-      dropped = false;
-      session = new RecorderSession<null>((blob, mime) => { const d = done; done = null; d?.(dropped ? null : { blob, mime }); });
-      const ok = await session.start(null, "in the Arcade");
-      if (!ok) throw new Error("the microphone is busy with another recording");
+      if (session) throw new Error("already recording");
+      const s = new RecorderSession<null>((blob, mime) => { const d = done; done = null; d?.({ blob, mime }); });
+      session = s;
+      try {
+        if (!(await s.start(null, "in the Arcade"))) throw new Error("the microphone is busy with another recording");
+      } catch (e) { if (session === s) end(); throw e; }
       t0 = Date.now();
     },
-    async stop() {
-      if (!session) return null;
-      const got = await new Promise<{ blob: Blob; mime: string } | null>((resolve) => { done = resolve; session!.stop(); });
-      session.dispose();
-      session = null;
-      if (!got || got.blob.size < 200) return null;
-      const seconds = (Date.now() - t0) / 1000;
-      const draft = newDraft("", "voice");
-      const bytes = new Uint8Array(await got.blob.arrayBuffer());
-      const r = await invoke<FlushReport>("journal_save_voice", bytes, { headers: { "x-entry": JSON.stringify(draft), "x-audio-mime": got.mime } });
-      return { ref: journalRef(r, draft.path), seconds };
+    stop() {
+      if (stopping) return stopping;
+      if (!session) return Promise.resolve(null);
+      const s = session;
+      stopping = (async () => {
+        try {
+          const got = await new Promise<{ blob: Blob; mime: string } | null>((resolve) => { done = resolve; s.stop(); });
+          if (session === s) end();
+          if (!got || got.blob.size < 200) return null;
+          return { ref: await save(got.blob, got.mime), seconds: (Date.now() - t0) / 1000 };
+        } finally { stopping = null; }
+      })();
+      return stopping;
     },
     cancel() {
-      dropped = true;
+      const d = done; done = null; d?.(null);
       session?.stop();
-      session?.dispose();
-      session = null;
+      end();
     },
   };
+}
+
+async function saveVoiceEntry(blob: Blob, mime: string): Promise<string> {
+  const draft = newDraft("", "voice");
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const r = await invoke<FlushReport>("journal_save_voice", bytes, { headers: { "x-entry": JSON.stringify(draft), "x-audio-mime": mime } });
+  if (r.error && r.remaining === 0) throw new Error(r.error);
+  return journalRef(r, draft.path);
 }
 
 export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: string | null; onBack: () => void; onOpenNote: (vault: string, path: string) => void }) {
@@ -56,17 +69,24 @@ export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: strin
     for (const p of urls.current.values()) void p.then((u) => { if (u) URL.revokeObjectURL(u); });
     urls.current.clear();
   }, []);
+  const voice = useRef<VoiceCapture | null>(null);
+  voice.current ??= journalVoice();
+  // a typed Ripple answer is filed as a journal entry; the door hears where it landed, never the words (as for voice)
+  const typedRef = useRef(new Map<string, string>());
   const host = useMemo<ArcadeHost>(() => {
     const call = async <T,>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
       try { return await invoke<T>(cmd, args); } catch (e) { throw new Error(arcadeError(e)); }
     };
     let home: Promise<Home> | null = null;
-    const fetchHome = () => (home ??= call<Home>("arcade_home").finally(() => { setTimeout(() => { home = null; }, 2000); }));
+    const fetchHome = () => (home ??= call<Home>("arcade_home").then(
+      (h) => { setTimeout(() => { home = null; }, 2000); return h; },
+      (e) => { home = null; throw e; },
+    ));
     return {
       owner: { name: ownerName ?? "you", you: false },
       games: GAMES,
       rounds: async (game, n) => (await call<{ rounds: Round[] }>("arcade_rounds", { game, n })).rounds,
-      react: async (reactions: Reaction[]) => { await call("arcade_react", { reactions }); home = null; },
+      react: async (reactions: Reaction[]) => { await call("arcade_react", { reactions: reactions.map((r) => typedAnswer(r, typedRef.current)) }); home = null; },
       profile: async () => (await call<{ profile: Profile }>("arcade_profile")).profile,
       stats: async () => (await fetchHome()).stats,
       fresh: async () => (await fetchHome()).fresh ?? {},
@@ -83,11 +103,15 @@ export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: strin
         }
         return p;
       },
-      voice: journalVoice(),
-      saveAnswer: async (_q: Card, text: string) => {
+      voice: voice.current!,
+      saveAnswer: async (q: Card, text: string) => {
         const draft = newDraft(text, "text");
-        const r = await invoke<FlushReport>("journal_save_text", { entry: draft });
-        return { ref: journalRef(r, draft.path) };
+        // the same words saved twice in the Arcade are two answers: never held back as a duplicate
+        const r = await invoke<FlushReport>("journal_save_text", { entry: draft, saveAnother: true });
+        if (r.error && r.remaining === 0) throw new Error(r.error);
+        const ref = journalRef(r, draft.path);
+        typedRef.current.set(`${q.id}\n${text.trim()}`, ref);
+        return { ref };
       },
       distill: async () => { await call("arcade_distill", { deep: false }); },
       openProfile: () => {

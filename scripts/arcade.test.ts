@@ -1,7 +1,7 @@
 // T-335 Taste Arcade: the app host's pure pieces. Run: node --experimental-strip-types scripts/arcade.test.ts
 import assert from "node:assert/strict";
-import { arcadeError, journalRef, mediaType } from "../src/arcade/arcadeCore.ts";
-import type { Card } from "../src/arcade/kit/engine/src/types.ts";
+import { arcadeError, journalRef, mediaType, typedAnswer } from "../src/arcade/arcadeCore.ts";
+import type { Card, Reaction } from "../src/arcade/kit/engine/src/types.ts";
 
 const ID = "01M6QAF6FYXD39R6BP1TW2TEST";
 // a voice answer that reached the vault is named by its note id (the sweep renames its path later)
@@ -25,4 +25,14 @@ assert.equal(mediaType(card({ src: "x", mime: "image/svg+xml" }), "src"), "appli
 assert.match(arcadeError({ kind: "unreachable", message: "x" }), /tailnet/);
 assert.match(arcadeError({ kind: "refused", status: 400, message: "words too long" }), /words too long/);
 assert.equal(arcadeError("plain"), "plain");
+// words held back as a duplicate: nothing new was sent, so the last id is someone else's entry
+assert.equal(journalRef({ sent: [ID], error: null, duplicate: { kind: "saved", id: "x", created_at: "" } }, "Journal/x"), "Journal/x");
+
+// a typed Ripple answer reaches the door as where it landed, never its words
+const typed: Reaction = { id: "r1", at: "2026-11-05T10:00:00Z", game: "ripple", kind: "words", card: "q1", words: " made-up answer " };
+const refs = new Map([["q1\nmade-up answer", ID]]);
+assert.deepEqual(typedAnswer(typed, refs), { id: "r1", at: "2026-11-05T10:00:00Z", game: "ripple", kind: "voice", card: "q1", voice: { ref: ID } });
+assert.equal(typedAnswer(typed, new Map()), typed, "no known entry: unchanged");
+const pick: Reaction = { id: "r2", at: "2026-11-05T10:00:00Z", game: "gallery", kind: "pin", card: "c", words: "kept" };
+assert.equal(typedAnswer(pick, refs), pick);
 console.log("arcade: ok");
