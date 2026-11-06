@@ -2,7 +2,7 @@
 // any number of them may be live; stop and finish change only the session they name; archiving is for projects, and an archived project
 // has no live sessions. Then the same rules on the vault's own shapes (workFrom), and the words the room is sent.
 import assert from "node:assert/strict";
-import { ModelError, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
+import { ModelError, UNFILED, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
 import { HEARD_MS, freshen, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
 import { DASHES, FOLD, HIDDEN, LABEL, PHRASES, REDACT_RULES, answerDraft, askOf, endWords, feedPages, HELD_MAX, labelOk, leftItems, parseFeed, partBefore, redactRaw, safeStep, withHead, withPart, type FeedItem } from "../src/projects/sessionWords.ts";
@@ -151,9 +151,12 @@ check("from the vault: many sessions on one project, any number live; a run find
   assert.deepEqual(liveSessions(live, "p-coop").map((s) => s.id).sort(), ["run-donate", "run-events"]);
   assert.equal(S("run-mail").project, "p-mail", "filed on the area, run in the project's folder");
   assert.equal(S("run-restore").project, "p-backups", "through its task's node");
-  assert.equal(live.sessions.some((s) => s.id === "run-loose"), false, "on an area, in no project's folder: not under a project");
+  const loose = live.sessions.find((s) => s.id === "run-loose");
+  assert.ok(loose, "on an area, in no project's folder: still a session");
+  assert.equal(live.projects.find((p) => p.id === loose.project)?.kind, "home", "not under a project: under its area's home");
   const twoFolders = workFrom({ nodes: [...vault.nodes, { ...vault.nodes.find((n) => n.id === "p-mail")!, id: "p-mail2", path: "Projects/Mail again" }], runs: vault.runs, tasks: vault.tasks }, NOW);
-  assert.equal(twoFolders.sessions.some((s) => s.id === "run-mail"), false, "a folder two projects share names neither");
+  const shared = twoFolders.sessions.find((s) => s.id === "run-mail")!;
+  assert.equal(shared.project, "home:area-engine", "a folder two projects share names neither: the session waits in their area's home");
 });
 check("from the vault: a session says what it is doing in words, its steps, and what it left; never a task number or a run id", () => {
   const ev = S("run-events");
@@ -170,6 +173,51 @@ check("from the vault: a session says what it is doing in words, its steps, and 
   assert.equal(resultWords("mts abcd1234: failed", "failed"), null);
   assert.equal(resultWords("closed by T-302 tidy: unit gone", "failed"), "Its worker was gone; closed when the old runs were tidied.");
   assert.equal(sessionState("lost"), "failed", "a run closed because its worker was gone didn't finish");
+});
+check("no run is ever invisible: its project, else its area (node, task's node, room id, room name), else Unfiled", () => {
+  const at = new Date(NOW - 30 * MIN).toISOString();
+  const r = (id: string, md: Record<string, unknown>) => ({ id, path: `Runs/2026-10-20 ${id}`, tags: ["run"], createdAt: at, updatedAt: at, metadata: { state: "running", started_at: at, doing_at: at, ...md } });
+  const tasks = [...vault.tasks, { id: "t-area", path: "Tasks/T-950 An umbrella on the area", tags: ["task"], metadata: { node: "area-guild" } }];
+  const runs = [
+    r("on-project", { node: "p-mail", channel: "demo-guild" }),
+    r("on-area", { node: "area-guild" }),
+    r("via-task", { node: "gone", task: "T-950" }),
+    r("via-channel", { node: "gone", channel: "demo-town" }),
+    r("via-starter", { node: "gone", starter_channel: "demo-desk" }),
+    r("via-room", { node: "gone", room: "engine-room" }),
+    r("via-hash-room", { node: "gone", room: "#town-hall" }),
+    r("via-root", { node: "node-uni", room: "guild" }),
+    r("nowhere", { node: "gone", room: "long-gone" }),
+    r("bare", {}),
+  ];
+  const w = workFrom({ nodes: vault.nodes, runs, tasks }, NOW);
+  assert.deepEqual(w.sessions.map((s) => s.id).sort(), runs.map((x) => x.id).sort(), "every run note is a session");
+  assert.deepEqual(problems(w), []);
+  const home = (id: string) => w.projects.find((p) => p.id === w.sessions.find((s) => s.id === id)!.project)!;
+  assert.equal(home("on-project").name, "Mail move", "a project wins");
+  assert.equal(home("on-project").kind ?? "project", "project");
+  for (const [id, area] of [["on-area", "area-guild"], ["via-task", "area-guild"], ["via-channel", "area-town"], ["via-starter", "area-desk"], ["via-room", "area-engine"], ["via-hash-room", "area-town"], ["via-root", "area-guild"]] as const) {
+    assert.equal(home(id).kind, "home", id);
+    assert.equal(home(id).area, area, id);
+  }
+  for (const id of ["nowhere", "bare"]) assert.equal(home(id).id, UNFILED, id);
+  assert.equal(liveInArea(w, "area-guild").length, 3, "the home's working mark counts them");
+  assert.deepEqual(liveSessions(w, UNFILED).map((s) => s.id).sort(), ["bare", "nowhere"]);
+  assert.deepEqual(w.projects.filter((p) => p.kind !== "home").map((p) => p.id), workFrom({ nodes: vault.nodes, runs: [], tasks: [] }, NOW).projects.map((p) => p.id), "a home is made only for sessions, and makes no project");
+});
+check("a run that names a private place never lands in Unfiled, where its words would show outside it", () => {
+  const at = new Date(NOW - 30 * MIN).toISOString();
+  const nodes = [...vault.nodes, { id: "area-sanctum", path: "Areas/Sanctum", tags: ["node", "area"], metadata: { channel: "demo-sanctum", room: "sanctum" }, createdAt: at, updatedAt: at }];
+  const run = { id: "r-private", path: "Runs/2026-10-20 A private errand", tags: ["run"], createdAt: at, updatedAt: at, metadata: { state: "running", started_at: at, doing_at: at, node: "gone", room: "relationships" } };
+  const w = workFrom({ nodes, runs: [run], tasks: [] }, NOW);
+  const s = w.sessions.find((x) => x.id === "r-private")!;
+  assert.equal(w.projects.find((p) => p.id === s.project)!.area, "area-sanctum", "into the private area");
+  // and with no private area to go to, it is counted but keeps its words to itself
+  const alone = workFrom({ nodes: vault.nodes, runs: [run], tasks: [] }, NOW).sessions.find((x) => x.id === "r-private")!;
+  assert.equal(alone.project, UNFILED);
+  assert.equal(alone.ask, "A session in a private place");
+  assert.equal(alone.now, null);
+  assert.equal(alone.feed, null);
 });
 check("a note that still says running but hasn't been heard from for hours is silent, not working (and has an end: when it was last heard)", () => {
   const at = (ms: number) => new Date(NOW - ms).toISOString();

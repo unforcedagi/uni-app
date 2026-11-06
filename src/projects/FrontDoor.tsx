@@ -6,7 +6,7 @@ import { roomTint } from "../glow/roomTint";
 import { sameWords } from "../areas/sameWords";
 import { useEffect, useRef, useCallback, useMemo, useState, type ReactNode } from "react";
 import { AllComposer, AllFeed, roomWords, useEchoes, useReplyTarget, useRoomsFeed, type AllRoom } from "../all/AllView";
-import { liveInArea, span } from "./model";
+import { liveSessions, liveInArea, sessionsOf, span, UNFILED } from "./model";
 import { asOf, useWork } from "./store";
 import { useRoomTurns } from "./roomTurns";
 import { UsageLine } from "./UsageLine";
@@ -104,14 +104,15 @@ export function AllEmpty({ reading, error = null, onBack }: { reading: boolean; 
   </div>;
 }
 
-export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = "known", alsoNeeds = 0, onRetryNeeds }: { /** T-335 as Aaron: only once the tasks have been read, fresh and whole, may the home say nothing needs you */ needsKnown?: NeedsKnown; /** approvals waiting, which the task feed doesn't count */ alsoNeeds?: number; onRetryNeeds?: () => void; doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+export function FrontDoor({ onOpenProject, doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = "known", alsoNeeds = 0, onRetryNeeds }: { /** T-335 as Aaron: only once the tasks have been read, fresh and whole, may the home say nothing needs you */ needsKnown?: NeedsKnown; /** approvals waiting, which the task feed doesn't count */ alsoNeeds?: number; onRetryNeeds?: () => void; doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
   /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */
   all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string | null, root?: string | null) => void } | null;
   /** T-335: this is the All place (a place of its own on the rail), and the way back from it; null: the home, with the places. */
   allPlace?: { backTo: string; onBack: () => void; /** A room in focus over All. */ focusRoom?: string | null } | null; onComposerFocus?: (on: boolean) => void;
   /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
   /** Your key: a turn is the room's Uni at work on your message. */ me?: string | null;
-  /** T-335: the To post queue's one quiet line, under what needs you */ toPost?: ReactNode }) {
+  /** T-335: the To post queue's one quiet line, under what needs you */ toPost?: ReactNode;
+  /** Opens a project or home in place (here: the Unfiled sessions). */ onOpenProject?: (id: string) => void }) {
   const ws = useWork();
   const turns = useRoomTurns(doors.map((d) => ({ room: d.room ?? null, lastTs: d.lastTs })), me);
   const { work } = ws;
@@ -190,6 +191,10 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
         </button>
       </li>;
     })}</ul></nav>
+    {onOpenProject && work.projects.some((p) => p.id === UNFILED) && (() => {
+      const n = liveSessions(work, UNFILED).length;
+      return <button type="button" className="fd-unfiled" onClick={() => onOpenProject(UNFILED)}>Unfiled sessions · {sessionsOf(work, UNFILED).length}{n > 0 && <span className="fd-live"><i aria-hidden="true" />{n} working{at ? ` at ${at}` : ""}</span>}</button>;
+    })()}
     {(at || ws.partial.length > 0) && <p className="fd-status" role="status">{[at && `${ws.error ? "Couldn't refresh · " : ""}As of ${at}`, ...ws.partial].filter(Boolean).join(" · ")}</p>}
     <UsageLine />
   </div>;

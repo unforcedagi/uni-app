@@ -6,10 +6,13 @@
 //   project the model refuses (no area, no folder) is a gap: named, never shown as if it were whole.
 // - Sessions are the `run` notes mts writes. A run belongs to the project its `project`, its `node`, its task's node or (last) its
 //   repo `folder` names. What it is doing now is `doing_now` (mts writes it while it runs); words, never ids.
+// - No run is dropped. One that names no project sits in its area's home: the area its node, its task's node, a shared folder, its room's
+//   id or its room's name says. One that says no area is in the Unfiled home, unless it names a private place: then it goes to the private
+//   area, or (with none) keeps its words to itself.
 import type { RawNote } from "../areas/taskCore.ts";
 import { isPrivateName } from "../areas/treeRooms.ts";
 import { redactRaw, safeStep } from "./sessionWords.ts";
-import { END_WHYS, isFolder, makeProject, ModelError, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type Work } from "./model.ts";
+import { END_WHYS, isFolder, makeProject, ModelError, UNFILED, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type Work } from "./model.ts";
 
 /** A project the model can't take, named so it is never silently missing. `areaPath`: the area it sits under (even one with no room), so
  *  that area's strip can name it. */
@@ -212,6 +215,34 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     if (node) taskNode.set(id, node);
     taskTitle.set(id, plainTitle(path.replace(/^Tasks\//, "").replace(/∕/g, "/")));
   }
+  /** The areas by the names their rooms go by: each area's room first (so a shared older name can't take it), then its other and old ones. */
+  const roomKey = (v: unknown) => (str(v) ?? "").replace(/^#/, "").replace(/\s*\(.*$/, "").trim().toLowerCase();
+  const byRoom = new Map<string, string>();
+  const nameRooms = (area: LiveArea, names: unknown[]) => { for (const v of names) for (const part of String(v ?? "").split(",")) { const k = roomKey(part); if (k && !byRoom.has(k)) byRoom.set(k, area.id); } };
+  const areaNote = (a: LiveArea) => meta(areaNotes.find((n) => keyOf(n) === a.id)!);
+  for (const a of areas) nameRooms(a, [a.room, areaNote(a).room]);
+  for (const a of areas) nameRooms(a, [areaNote(a).rooms, a.name, areaNote(a).room_was, areaNote(a).room_renamed_from]);
+  const areaOfNode = (ref: string | null): string | null => {
+    const n = ref ? byKey.get(unlink(ref)) : undefined;
+    const up = n ? areaUp(n) : null;
+    return up && areaIds.has(up) ? up : null;
+  };
+  const areaOfRoom = (v: unknown): string | null => (roomKey(v) ? byRoom.get(roomKey(v)) ?? null : null);
+  const projectArea = new Map(projects.map((p) => [p.id, p.area]));
+  /** The area a run with no project belongs to, from the surest clue on it down; null when nothing says. */
+  const areaOfRun = (m: Record<string, unknown>, task: string | null, viaFolder: string[] | undefined): string | null => {
+    const shared = viaFolder?.length && viaFolder.every((p) => projectArea.get(p) === projectArea.get(viaFolder[0])) ? projectArea.get(viaFolder[0]) ?? null : null;
+    return areaOfNode(str(m.project)) ?? areaOfNode(str(m.node)) ?? (task ? areaOfNode(taskNode.get(task) ?? null) : null) ?? shared
+      ?? areaOfRoom(m.channel) ?? areaOfRoom(m.starter_channel) ?? areaOfRoom(m.room) ?? areaOfRoom(m.starter_room);
+  };
+  const namesPrivate = (m: Record<string, unknown>) => [m.room, m.starter_room].some((v) => isPrivateName(roomKey(v)))
+    || isPrivateName(lastName(str(byKey.get(unlink(str(m.node) ?? ""))?.path) ?? ""));
+  const homes = new Map<string, Project>();
+  const homeOf = (area: LiveArea | null): string => {
+    const id = area ? `home:${area.id}` : UNFILED;
+    if (!homes.has(id)) homes.set(id, { id, area: area?.id ?? "", name: area?.name ?? "Unfiled sessions", folder: "", status: "active", about: "", kind: "home" });
+    return id;
+  };
   const sessions: Session[] = [];
   const byAttempt = new Map<string, string>();
   const asked = new Map<string, { kind: "fresh" | "resume"; attempt: string }>();
@@ -227,9 +258,14 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const task = str(m.task)?.toUpperCase() ?? null;
     const folder = str(m.folder);
     const viaFolder = folder ? byFolder.get(folderKey(folder)) : undefined;
-    const project = projectOfNode(str(m.project)) ?? projectOfNode(str(m.node)) ?? (task ? projectOfNode(taskNode.get(task) ?? null) : null)
+    const filed = projectOfNode(str(m.project)) ?? projectOfNode(str(m.node)) ?? (task ? projectOfNode(taskNode.get(task) ?? null) : null)
       ?? (viaFolder?.length === 1 ? viaFolder[0] : null);
-    if (!project) continue;
+    const areaId = filed ? null : areaOfRun(m, task, viaFolder);
+    const secret = !filed && !areaId && namesPrivate(m);
+    const hiddenArea = secret ? areas.find((a) => a.private) ?? null : null;
+    // a private place's run with no private area to go to: counted in Unfiled, with none of its words
+    const sealed = secret && !hiddenArea;
+    const project = filed ?? homeOf(hiddenArea ?? areas.find((a) => a.id === areaId) ?? null);
     // a run stopped by hand closes as failed with the launcher's "stopped" line: it was stopped, not a failure
     // a note marked running stays "running" here with its heartbeat (nowAt); freshen() below decides, from the clock, whether it is
     // still heard from (the same rule re-applied to a saved copy, so a cached session can't stay "working" forever)
@@ -237,17 +273,17 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const live = state === "running";
     const ended = live ? null : time(m.ended_at) ?? time(r.updatedAt) ?? startedAt;
     const title = plainTitle((str(r.path) ?? "").replace(/^Runs\/\d{4}-\d{2}-\d{2}\s*/, ""));
-    const ask = title || (task ? taskTitle.get(task) : null) || "A session";
+    const ask = sealed ? "A session in a private place" : title || (task ? taskTitle.get(task) : null) || "A session";
     const steps = typeof m.steps === "number" && Number.isFinite(m.steps) ? Math.max(0, Math.floor(m.steps)) : 0;
     sessions.push({
       id, project, state, ask,
-      now: live && str(m.doing_now) ? safeStep(str(m.doing_now)!) : null, nowAt: live ? time(m.doing_at) : null,
+      now: !sealed && live && str(m.doing_now) ? safeStep(str(m.doing_now)!) : null, nowAt: live ? time(m.doing_at) : null,
       startedAt, endedAt: ended, steps,
-      result: live ? null : resultWords(m.summary, state),
-      video: str(m.video) && /^https:\/\//.test(str(m.video)!) ? str(m.video) : null,
+      result: sealed || live ? null : resultWords(m.summary, state),
+      video: !sealed && str(m.video) && /^https:\/\//.test(str(m.video)!) ? str(m.video) : null,
       why: null,
-      end: sessionEnd(m, state),
-      feed: str(m.feed),
+      end: sealed ? null : sessionEnd(m, state),
+      feed: sealed ? null : str(m.feed),
     });
     const att = attemptOf(m);
     if (att) byAttempt.set(att, id);
@@ -262,5 +298,5 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const others = sessions.filter((o) => o !== s && o.project === s.project && o.startedAt < s.startedAt && (o.endedAt ?? Infinity) > s.startedAt).length;
     if (others) s.why = { kind: "alongside", others };
   }
-  return freshen({ areas, projects, sessions, gaps }, now);
+  return freshen({ areas, projects: [...projects, ...homes.values()], sessions, gaps }, now);
 }

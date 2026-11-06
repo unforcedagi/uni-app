@@ -20,6 +20,8 @@ const clock = (t: number, now: number) => {
   return d.toDateString() === today.toDateString() ? hm : `${d.toLocaleDateString("en-US", { weekday: "short" })} ${hm}`;
 };
 const quoted = (s: string) => `“${s.replace(/\s+/g, " ").trim()}”`;
+/** Where a session is, in the message: a project's name; for a home (no project), the area's. */
+const place = (p: Project) => `${p.kind === "home" ? "in" : "on"} ${p.name}`;
 const which = (s: Session, now: number) => `the session on ${quoted(s.ask)} (started ${clock(s.startedAt, now)})`;
 
 /** The message an action posts in the area's room, word for word. */
@@ -27,9 +29,9 @@ export function actionMessage(a: Action, now = Date.now()): string {
   const p = a.project.name;
   switch (a.kind) {
     case "stop":
-      return `Stop ${which(a.session, now)} on ${p}.`;
+      return `Stop ${which(a.session, now)} ${place(a.project)}.`;
     case "fresh":
-      return `Fresh start on ${p}: end ${which(a.session, now)} and start a new session on the same project, with a short handoff of where it got to.`;
+      return `Fresh start ${place(a.project)}: end ${which(a.session, now)} and start a new session on the same ${a.project.kind === "home" ? "work" : "project"}, with a short handoff of where it got to.`;
     case "add":
       return `Add a session on ${p}, in ${a.project.folder}, alongside any already running: ${a.ask.replace(/\s+/g, " ").trim()}`;
     case "archive":

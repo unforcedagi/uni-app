@@ -16,6 +16,7 @@ import { activeProfile, onVaultChange } from "../areas/profile";
 import type { RawNote } from "../areas/taskCore";
 import { allPages } from "../areas/vaultTasks";
 import { freshen, workFrom, type LiveWork, type Sources } from "./live";
+import { isHome } from "./model";
 import type { Action } from "./actions";
 import { setFeedOwner } from "./feed";
 
@@ -107,7 +108,10 @@ const FILL_MAX = 40;
  *  sessions still without a project because their task couldn't be read (one that doesn't exist at all isn't missing: there is nothing to
  *  read). */
 async function fillTasks(vault: string, runs: readonly RawNote[], nodes: readonly RawNote[], have: readonly RawNote[]): Promise<{ rows: RawNote[]; missing: number }> {
-  const placed = new Set(workFrom({ nodes, runs, tasks: have }).sessions.map((x) => x.id));
+  // a run in a home is on the screen, but its task may still say which project it belongs to
+  const read = workFrom({ nodes, runs, tasks: have });
+  const homes = new Set(read.projects.filter(isHome).map((p) => p.id));
+  const placed = new Set(read.sessions.filter((x) => !homes.has(x.project)).map((x) => x.id));
   const known = new Set(have.map((t) => taskIdIn(t.path)));
   const want = new Map<string, number>();
   for (const r of runs) {
