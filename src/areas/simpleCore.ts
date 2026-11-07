@@ -292,7 +292,7 @@ export function stepAudience(next: string | null | undefined, room: string | nul
     // r20: the words to say are the step's first clause ("Go on prod deploy of #38 + #58"), never the notes after it ("; Harper signs off…")
     // 0.2.2: words in quotes are the words ('Say "approve cards" in #systems' says approve cards), never the quote and what follows it
     // (a closing quote of the same kind, and a single one only where a word ends: 'don't merge yet' is all of it)
-    const said = (/^["“](.{1,120}?)["”](?=[\s.,;:!?)]|$)/.exec(rest) ?? /^['‘](.{1,120}?)['’](?=[\s.,;:!?)]|$)/.exec(rest))?.[1];
+    const said = (/^["“](.{1,120}?)["”](?=[\s.,;:!?)—–-]|$)/.exec(rest) ?? /^['‘](.{1,120}?)['’](?=[\s.,;:!?)—–-]|$)/.exec(rest))?.[1];
     return { kind: "room", text: QUESTION_WORD.test(rest) ? "" : said ? said.trim() : capFirst(unquote(firstClause(rest))) };
   }
   // "Tell Uni …", "Tell the room …", "Ask Uni to …", "Reply to Uni …"

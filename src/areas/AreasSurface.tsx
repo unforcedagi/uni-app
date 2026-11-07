@@ -99,7 +99,7 @@ function ChatWait({ placeholder, retry }: { placeholder: string; retry: (() => v
 const viaMemory: { path: string | null; via: string | null } = { path: null, via: null };
 /** 0.2.2: an ask opened from the home's drawer, waiting for its room to come into focus (module memory: opening the room may draw this
  *  surface afresh). `shown`: its sheet has been up over that room, so leaving the room ends it. */
-const askMemory: { pending: { id: string; room: string; shown: boolean } | null } = { pending: null };
+const askMemory: { pending: { id: string; room: string; shown: boolean; who: string | null } | null } = { pending: null };
 
 /**
  * T-335 one surface (0.2: one home). With rooms: the home is All (the stream, the composer that routes, and the drawer: what needs you,
@@ -258,6 +258,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   useEffect(() => { tasks.refreshIfStale(); }, [node?.path, focus?.room]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // (an ask opened from the drawer waits for its room: the sheet opens over it; another room, or leaving it once it was shown, ends it)
+    // (an ask from another key, or one no longer among the tasks, is dropped: never an empty sheet holding Back)
+    if (askMemory.pending && (askMemory.pending.who !== identity || (tasks.all && !tasks.all.some((t) => t.id === askMemory.pending!.id)))) askMemory.pending = null;
     const p = askMemory.pending;
     const here = !!p && !!focus && !focus.leaving && focus.room === p.room;
     if (p && here) p.shown = true;
@@ -365,8 +367,9 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     closeProject();
     const t = tasks.all?.find((x) => x.id === row.id); if (t) lastSheet.current = t;
     if (!row.room) { askMemory.pending = null; setSheetId(row.id); return; }
-    askMemory.pending = { id: row.id, room: row.room, shown: false };
-    if (focus && !focus.leaving && focus.room === row.room) { askMemory.pending.shown = true; allPlace?.onView("chat"); setSheetId(row.id); return; }
+    askMemory.pending = { id: row.id, room: row.room, shown: false, who: identity };
+    // its room is already here, or on its way out (brought back): the sheet comes up now
+    if (focus && focus.room === row.room) { askMemory.pending.shown = true; if (focus.leaving) actions.openRoom(row.room); else allPlace?.onView("chat"); setSheetId(row.id); return; }
     setSheetId(null);
     // its room is its place's (its own, or the one it talks in): the place comes forward, as a door opens it; else the room itself
     const place = row.path && row.path !== ROOT && roomOfNode(row.path)?.id === row.room ? row.path : null;

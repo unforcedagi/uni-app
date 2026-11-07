@@ -20,6 +20,7 @@ check("curly quotes too", () => assert.deepEqual(stepAudience("Say “ship it”
 check("an apostrophe inside single quotes is part of the words", () => assert.deepEqual(stepAudience("Say 'don't merge yet' in #garden", "garden"), { kind: "room", text: "don't merge yet" }));
 check("curly single quotes with an apostrophe", () => assert.deepEqual(stepAudience("Say ‘we’re ready’ in #garden", "garden"), { kind: "room", text: "we’re ready" }));
 check("double quotes close only on a double quote", () => assert.deepEqual(stepAudience('Say "it\'s on" when ready', "garden"), { kind: "room", text: "it's on" }));
+check("a dash after the closing quote ends the words", () => assert.deepEqual(stepAudience('Say "ok"—then go', "garden"), { kind: "room", text: "ok" }));
 check("an unquoted word keeps its clause", () => assert.deepEqual(stepAudience("Say go to deploy the site", "garden"), { kind: "room", text: "Go to deploy the site" }));
 
 if (failed) process.exit(1);
