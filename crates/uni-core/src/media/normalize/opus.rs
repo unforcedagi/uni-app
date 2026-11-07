@@ -324,6 +324,74 @@ fn clean_cluster(b: &[u8], unknown: bool) -> Result<(Vec<u8>, usize)> {
     ))
 }
 
+fn number(b: &[u8]) -> u64 {
+    b.iter().fold(0u64, |v, x| (v << 8) | u64::from(*x))
+}
+
+/// How long a WebM from [`normalize_webm`] runs, as the relay measures it (`audio.rs`): the later of the declared length
+/// and the last block's start, in seconds.
+pub(super) fn webm_seconds(clean: &[u8]) -> f64 {
+    let Some((segment, _)) = element(clean, element(clean, 0).map_or(0, |(_, end)| end)) else {
+        return 0.0;
+    };
+    let mut scale = 1_000_000u64; // one tick is a millisecond unless Info says otherwise
+    let mut end = 0.0f64;
+    for e in elements(segment.body) {
+        match e.id {
+            INFO => {
+                for f in elements(e.body) {
+                    match (f.id, f.body.len()) {
+                        (0x2ad7b1, _) => scale = number(f.body),
+                        (0x4489, 4) => end = end.max(f64::from(f32::from_be_bytes(f.body.try_into().unwrap_or_default()))),
+                        (0x4489, 8) => end = end.max(f64::from_be_bytes(f.body.try_into().unwrap_or_default())),
+                        _ => {}
+                    }
+                }
+            }
+            CLUSTER => {
+                let mut timecode = 0u64;
+                let mut latest: Option<i16> = None;
+                let mut seen = |block: &[u8]| {
+                    if let Some(rel) = block.get(1..3) {
+                        let rel = i16::from_be_bytes([rel[0], rel[1]]);
+                        latest = Some(latest.map_or(rel, |l| l.max(rel)));
+                    }
+                };
+                for f in elements(e.body) {
+                    match f.id {
+                        0xe7 => timecode = number(f.body),
+                        0xa3 => seen(f.body),
+                        0xa0 => elements(f.body).iter().filter(|g| g.id == 0xa1).for_each(|g| seen(g.body)),
+                        _ => {}
+                    }
+                }
+                if let Some(rel) = latest {
+                    end = end.max((timecode as f64 + f64::from(rel)).max(0.0));
+                }
+            }
+            _ => {}
+        }
+    }
+    end * scale as f64 / 1e9
+}
+
+/// How long an Ogg Opus from [`normalize_ogg`] runs, as the relay measures it: the furthest granule, less the pre-skip,
+/// in 48 kHz samples.
+pub(super) fn ogg_seconds(clean: &[u8]) -> f64 {
+    let (pages, _) = pages(clean);
+    let pre_skip = pages
+        .first()
+        .and_then(|p| p.body.get(10..12))
+        .map_or(0, |b| u64::from(u16::from_le_bytes([b[0], b[1]])));
+    let end = pages
+        .iter()
+        .map(|p| u64::from_le_bytes(p.granule))
+        .filter(|g| *g != u64::MAX)
+        .max()
+        .unwrap_or(0);
+    end.saturating_sub(pre_skip) as f64 / 48_000.0
+}
+
 // ── Ogg ─────────────────────────────────────────────────────────────────
 const OGG_CRC_TABLE: [u32; 256] = {
     let mut table = [0u32; 256];

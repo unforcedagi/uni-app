@@ -4,10 +4,11 @@
 //! `audio.rs`, `api/media.rs` for routing). Its rules, and who covers each:
 //!
 //! - Anything starting with `ftyp` is treated as video, and must be MP4-branded, `moov` before `mdat`, boxes from a short
-//!   list only, exactly one H.264 track and at most one AAC track, up to 600 s and 3840x2160, up to 500 MB: [`iso`].
-//!   An audio-only MP4 is refused outright, so sound gets a one-frame H.264 track beside it.
+//!   list only, exactly one H.264 track and at most one AAC track, up to 3840x2160, up to 500 MB: [`iso`].
+//!   An audio-only MP4 is refused outright, so sound gets a one-frame H.264 track beside it. One frame over an AAC
+//!   track is audio, up to 3 hours; more frames is video, up to 60 minutes. The longer track decides.
 //! - JPEG, PNG, GIF and WebP with no metadata chunks, up to 25 MP, 50 MB (GIF 10 MB): [`image`].
-//! - Other audio and video are refused, except single-track Opus in WebM or Ogg with no tags: [`opus`].
+//! - Other audio and video are refused, except single-track Opus in WebM or Ogg with no tags, up to 3 hours: [`opus`].
 //! - Everything else is a download, up to 100 MB, unless it's a page or a program: [`classify`].
 //!
 //! What can't be made acceptable is a [`refuse`]: one plain line, ready to show as it is.
@@ -28,7 +29,9 @@ pub const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 pub const MAX_GIF_BYTES: u64 = 10 * 1024 * 1024;
 pub const MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
 pub const MAX_PIXELS: u64 = 25_000_000;
-pub const MAX_VIDEO_SECONDS: f64 = 600.0;
+/// The relay's per-kind lengths (validation.rs `MAX_VIDEO_DURATION_SECS`, `MAX_AUDIO_DURATION_SECS`).
+pub const MAX_VIDEO_SECONDS: f64 = 3_600.0;
+pub const MAX_AUDIO_SECONDS: f64 = 10_800.0;
 pub const MAX_VIDEO_WIDTH: u32 = 3840;
 pub const MAX_VIDEO_HEIGHT: u32 = 2160;
 
@@ -61,6 +64,38 @@ pub(crate) fn io_failed(e: std::io::Error) -> Error {
     } else {
         refuse("Couldn't read or prepare the file on this device. Attach it again.")
     }
+}
+
+/// "3 hours", "60 minutes", "10 minutes": a length limit in words, for messages.
+pub(crate) fn limit_words(seconds: f64) -> String {
+    let s = seconds.round() as u64;
+    let unit = |n: u64, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
+    if s >= 7200 && s.is_multiple_of(3600) {
+        unit(s / 3600, "hour")
+    } else if s >= 60 && s.is_multiple_of(60) {
+        unit(s / 60, "minute")
+    } else {
+        unit(s, "second")
+    }
+}
+
+/// "1:02:05" or "35:05", for messages. Rounded up, so a length just over a limit never reads as the limit.
+pub(crate) fn clock(seconds: f64) -> String {
+    let s = seconds.ceil() as u64;
+    if s >= 3600 {
+        format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+    } else {
+        format!("{}:{:02}", s / 60, s % 60)
+    }
+}
+
+/// Sound past the relay's limit for audio, in one line.
+pub(crate) fn audio_too_long(seconds: f64) -> Error {
+    refuse(format!(
+        "This audio is {} long; Buzz takes audio up to {}. Trim it, then attach it again.",
+        clock(seconds),
+        limit_words(MAX_AUDIO_SECONDS)
+    ))
 }
 
 /// "612 MB", for messages.
@@ -133,12 +168,14 @@ fn normalize_into(input: &Path, filename: &str, head: &[u8], size: u64, out: &Pa
         Kind::Webm => {
             let clean = opus::normalize_webm(&read_bounded(input, size)?)?;
             within_file_limit(clean.len() as u64)?;
+            within_audio_limit(opus::webm_seconds(&clean))?;
             std::fs::write(out, clean).map_err(io_failed)?;
             Ok(rewritten(filename.to_string(), false))
         }
         Kind::Ogg => {
             let clean = opus::normalize_ogg(&read_bounded(input, size)?)?;
             within_file_limit(clean.len() as u64)?;
+            within_audio_limit(opus::ogg_seconds(&clean))?;
             std::fs::write(out, clean).map_err(io_failed)?;
             Ok(rewritten(filename.to_string(), false))
         }
@@ -150,6 +187,14 @@ fn normalize_into(input: &Path, filename: &str, head: &[u8], size: u64, out: &Pa
 fn within_file_limit(size: u64) -> Result<()> {
     if size > MAX_FILE_BYTES {
         return Err(refuse(format!("This recording is {} once cleaned up; Buzz takes WebM or Ogg audio up to {}.", megabytes(size), megabytes(MAX_FILE_BYTES))));
+    }
+    Ok(())
+}
+
+/// The relay measures Opus by where its last block or page ends, and so does this.
+fn within_audio_limit(seconds: f64) -> Result<()> {
+    if seconds > MAX_AUDIO_SECONDS {
+        return Err(audio_too_long(seconds));
     }
     Ok(())
 }

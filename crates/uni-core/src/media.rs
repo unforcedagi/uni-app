@@ -319,7 +319,16 @@ fn relay_refusal(status: u16, body: &str) -> String {
     } else if has("media codec") {
         "Buzz only takes H.264 video with AAC sound, and this file uses something else.".into()
     } else if has("too long") {
-        "Buzz takes videos up to 10 minutes, and this one is longer.".into()
+        // "audio too long: duration exceeds 10800 seconds". Older relays said only video, at 600.
+        let audio = has("audio too long");
+        let limit = said
+            .split("exceeds ")
+            .nth(1)
+            .and_then(|r| r.split(' ').next())
+            .and_then(|n| n.parse::<f64>().ok())
+            .unwrap_or(if audio { normalize::MAX_AUDIO_SECONDS } else { normalize::MAX_VIDEO_SECONDS });
+        let what = if audio { "audio" } else { "videos" };
+        format!("Buzz takes {what} up to {}, and this one is longer.", normalize::limit_words(limit))
     } else if has("resolution") {
         "Buzz takes videos up to 3840x2160, and this one is larger.".into()
     } else if has("unsupported container") {
@@ -1926,6 +1935,10 @@ mod tests {
             (422, r#"{"error":"media contains metadata or a non-canonical metadata channel"}"#, "after it was cleaned up"),
             (415, r#"{"error":"unsupported media codec: only H.264 video and AAC audio are accepted"}"#, "H.264"),
             (415, r#"{"error":"disallowed content type: audio/mpeg"}"#, "audio/mpeg"),
+            (422, r#"{"error":"audio too long: duration exceeds 10800 seconds"}"#, "Buzz takes audio up to 3 hours, and this one is longer."),
+            (422, r#"{"error":"video too long: duration exceeds 3600 seconds"}"#, "Buzz takes videos up to 60 minutes, and this one is longer."),
+            // A relay still on the old rule says its own limit, not ours.
+            (422, r#"{"error":"video too long: duration exceeds 600 seconds"}"#, "Buzz takes videos up to 10 minutes, and this one is longer."),
             (401, r#"{"error":"authentication failed"}"#, "sign-in"),
             (500, r#"{"error":"internal error"}"#, "Retry"),
             (502, "<html>bad gateway</html>", "Retry"),

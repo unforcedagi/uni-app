@@ -420,6 +420,7 @@ fn relay_accepts(path: &Path) -> Result<(), String> {
         return Err("qt brand".into());
     }
     let (mut videos, mut audios) = (0, 0);
+    let (mut frames, mut longest) = (0, 0.0f64);
     for t in mp4.tracks().values() {
         match t.track_type().map_err(|e| e.to_string())? {
             mp4::TrackType::Video => {
@@ -428,9 +429,11 @@ fn relay_accepts(path: &Path) -> Result<(), String> {
                     return Err("wrong video codec".into());
                 }
                 let secs = t.duration().as_millis() as f64 / 1000.0;
-                if secs <= 0.0 || secs > 600.0 {
+                if secs <= 0.0 {
                     return Err(format!("duration {secs}"));
                 }
+                frames = t.sample_count();
+                longest = longest.max(secs);
                 if t.width() > 3840 || t.height() > 2160 {
                     return Err("resolution".into());
                 }
@@ -440,12 +443,18 @@ fn relay_accepts(path: &Path) -> Result<(), String> {
                 if t.media_type().map_err(|e| e.to_string())? != mp4::MediaType::AAC {
                     return Err("wrong audio codec".into());
                 }
+                longest = longest.max(t.duration().as_millis() as f64 / 1000.0);
             }
             _ => return Err("extra track".into()),
         }
     }
     if videos != 1 || audios > 1 {
         return Err(format!("{videos} video and {audios} audio tracks"));
+    }
+    // One frame over sound is audio (3 hours); more is video (60 minutes). The longer track decides.
+    let limit = if audios == 1 && frames == 1 { 10_800.0 } else { 3_600.0 };
+    if longest > limit {
+        return Err(format!("duration {longest} over {limit}"));
     }
     Ok(())
 }
@@ -610,6 +619,111 @@ fn m4a_keeps_its_sound_and_gains_a_still_frame_the_relay_requires() {
         n.filename, "voice memo.m4a",
         "named as sound, so the app shows an audio player"
     );
+}
+
+// ── Length limits per kind: audio 3 hours, video 60 minutes ─────────────
+/// `t` with each sample lasting `delta` seconds.
+fn timed(mut t: T, delta: u32) -> T {
+    t.timescale = 1;
+    t.delta = delta;
+    t
+}
+#[test]
+fn m4a_up_to_3_hours_is_sent_and_one_second_more_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let head = ftyp(b"M4A ", &[b"M4A ", b"mp42", b"isom"]);
+    // 35:05, the recording that was refused at 10 minutes.
+    let f = write_file(d.path(), "talk.m4a", &head, &[timed(audio(1, samples(0xB2, 5, 100)), 421)], &[], &[1]);
+    let n = run(d.path(), &f.path, "talk.m4a");
+    assert_clean(&n);
+    assert_eq!(n.filename, "talk.m4a");
+    // Exactly three hours. The builder's track header runs 1 ms past the media; make it exact.
+    let f = write_file(d.path(), "three.m4a", &head, &[timed(audio(1, samples(0xB2, 8, 100)), 1350)], &[], &[1]);
+    let mut bytes = std::fs::read(&f.path).unwrap();
+    let tk = bytes.windows(4).position(|w| w == b"tkhd").unwrap() + 4;
+    bytes[tk + 20..tk + 24].copy_from_slice(&10_800_000u32.to_be_bytes());
+    std::fs::write(&f.path, bytes).unwrap();
+    assert_clean(&run(d.path(), &f.path, "three.m4a"));
+    // One second over.
+    let f = write_file(d.path(), "over.m4a", &head, &[timed(audio(1, samples(0xB2, 7, 100)), 1543)], &[], &[]);
+    assert_eq!(
+        refused(d.path(), &f.path, "over.m4a"),
+        "This audio is 3:00:01 long; Buzz takes audio up to 3 hours. Trim it, then attach it again."
+    );
+}
+#[test]
+fn video_up_to_60_minutes_is_sent_and_61_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let head = ftyp(b"isom", &[b"isom"]);
+    let hour = [timed(video(1, 640, 360, samples(0xA1, 4, 100)), 900), timed(audio(2, samples(0xB2, 4, 100)), 900)];
+    let f = write_file(d.path(), "hour.mp4", &head, &hour, &[], &[1, 2]);
+    let n = run(d.path(), &f.path, "hour.mp4");
+    assert_clean(&n);
+    assert_samples(&n, &f);
+    let over = [timed(video(1, 640, 360, samples(0xA1, 4, 100)), 915), timed(audio(2, samples(0xB2, 4, 100)), 915)];
+    let f = write_file(d.path(), "over.mp4", &head, &over, &[], &[]);
+    assert_eq!(
+        refused(d.path(), &f.path, "over.mp4"),
+        "This video is 1:01:00 long; Buzz takes video up to 60 minutes. Trim it, then attach it again."
+    );
+    // A short picture can't carry sound past the video limit: the sound track counts too.
+    let long_sound = [timed(video(1, 640, 360, samples(0xA1, 4, 100)), 10), timed(audio(2, samples(0xB2, 4, 100)), 915)];
+    let f = write_file(d.path(), "sound.mp4", &head, &long_sound, &[], &[]);
+    assert!(refused(d.path(), &f.path, "sound.mp4").contains("60 minutes"));
+}
+#[test]
+fn a_one_frame_picture_over_sound_is_audio() {
+    // Sound with a cover picture already in a track: the relay counts it as audio, so it may run past an hour.
+    let d = tempfile::tempdir().unwrap();
+    let head = ftyp(b"isom", &[b"isom"]);
+    let covered = [timed(video(1, 640, 360, samples(0xA1, 1, 100)), 7200), timed(audio(2, samples(0xB2, 4, 100)), 1800)];
+    let f = write_file(d.path(), "cover.mp4", &head, &covered, &[], &[1, 2]);
+    assert_clean(&run(d.path(), &f.path, "cover.mp4"));
+}
+
+/// Ogg Opus whose last page ends `secs` after its pre-skip.
+fn ogg_ending_at(secs: u64) -> Vec<u8> {
+    let head = b"OpusHead\x01\x01\x38\x01\x80\xbb\0\0\0\0\0".to_vec(); // pre-skip 312
+    let mut tags = b"OpusTags".to_vec();
+    tags.extend_from_slice(&7u32.to_le_bytes());
+    tags.extend_from_slice(b"libopus");
+    tags.extend_from_slice(&0u32.to_le_bytes());
+    let mut f = ogg_page(2, 0, &head);
+    f.extend_from_slice(&ogg_page(0, 1, &tags));
+    let mut last = ogg_page(4, 2, &[0xfc; 80]);
+    last[6..14].copy_from_slice(&(secs * 48_000 + 312).to_le_bytes());
+    let crc = ogg_crc(&last);
+    last[22..26].copy_from_slice(&crc.to_le_bytes());
+    f.extend_from_slice(&last);
+    f
+}
+#[test]
+fn opus_up_to_3_hours_is_sent_and_one_second_more_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    for (name, secs) in [("talk.ogg", 35 * 60 + 5), ("three.ogg", 3 * 3600)] {
+        let p = d.path().join(name);
+        std::fs::write(&p, ogg_ending_at(secs)).unwrap();
+        run(d.path(), &p, name);
+    }
+    let p = d.path().join("over.ogg");
+    std::fs::write(&p, ogg_ending_at(3 * 3600 + 1)).unwrap();
+    assert_eq!(
+        refused(d.path(), &p, "over.ogg"),
+        "This audio is 3:00:01 long; Buzz takes audio up to 3 hours. Trim it, then attach it again."
+    );
+    // WebM as ffmpeg writes it, its clock starting late: the relay measures where it ends.
+    if have_ffmpeg() {
+        for (offset, ok) in [("2100", true), ("10801", false)] {
+            let w = d.path().join(format!("at{offset}.webm"));
+            ffmpeg(&["-f", "lavfi", "-i", "sine=d=1", "-c:a", "libopus", "-output_ts_offset", offset, w.to_str().unwrap()]);
+            let name = w.file_name().unwrap().to_str().unwrap().to_string();
+            if ok {
+                run(d.path(), &w, &name);
+            } else {
+                assert!(refused(d.path(), &w, &name).contains("up to 3 hours"));
+            }
+        }
+    }
 }
 
 // ── Large files go through disk, not memory ─────────────────────────────
@@ -859,9 +973,12 @@ fn what_cant_be_fixed_is_refused_in_one_plain_line() {
 
     let mut long = video(1, 640, 360, samples(0xA1, 4, 100));
     long.timescale = 1;
-    long.delta = 200; // 800 seconds
+    long.delta = 915; // 61 minutes
     let f = write_file(d.path(), "l.mp4", &head, &[long], &[], &[]);
-    assert!(refused(d.path(), &f.path, "l.mp4").contains("10 minutes"));
+    assert_eq!(
+        refused(d.path(), &f.path, "l.mp4"),
+        "This video is 1:01:00 long; Buzz takes video up to 60 minutes. Trim it, then attach it again."
+    );
 
     let f = write_file(
         d.path(),
@@ -888,17 +1005,20 @@ fn what_cant_be_fixed_is_refused_in_one_plain_line() {
     // Sound just under the limit with a late start: its picture has to last until the sound ends, which is over it.
     let mut late = audio(1, samples(0xB2, 4, 100));
     late.timescale = 1;
-    late.delta = 150; // 600 seconds of sound
+    late.delta = 2700; // three hours of sound
     let mut f = write_file(d.path(), "n.m4a", &head, &[late], &[], &[]);
     {
         // The track header says longer than its media: a lead-in before the sound.
         let mut bytes = std::fs::read(&f.path).unwrap();
         let tk = bytes.windows(4).position(|w| w == b"tkhd").unwrap() + 4;
-        bytes[tk + 20..tk + 24].copy_from_slice(&601_000u32.to_be_bytes());
+        bytes[tk + 20..tk + 24].copy_from_slice(&10_801_000u32.to_be_bytes());
         std::fs::write(&f.path, bytes).unwrap();
         f.keep.clear();
     }
-    assert!(refused(d.path(), &f.path, "n.m4a").contains("10 minutes"));
+    assert_eq!(
+        refused(d.path(), &f.path, "n.m4a"),
+        "This audio is 3:00:01 long; Buzz takes audio up to 3 hours. Trim it, then attach it again."
+    );
 
     // Cut short: the samples moov promises aren't in the file.
     let f = write_file(

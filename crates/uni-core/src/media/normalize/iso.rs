@@ -9,15 +9,17 @@ use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use super::{
-    damaged, io_failed, megabytes, refuse, MAX_VIDEO_BYTES, MAX_VIDEO_HEIGHT, MAX_VIDEO_SECONDS,
+    audio_too_long, clock, damaged, io_failed, limit_words, megabytes, refuse, MAX_AUDIO_SECONDS,
+    MAX_VIDEO_BYTES, MAX_VIDEO_HEIGHT, MAX_VIDEO_SECONDS,
     MAX_VIDEO_WIDTH,
 };
 use crate::Result;
 
-/// A real `moov` is a few MB at most, even for ten minutes at 60 fps.
+/// A real `moov` is a few MB at most, even for an hour at 60 fps.
 const MAX_INDEX_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_TOP_LEVEL_BOXES: usize = 200_000;
-/// Far beyond ten minutes of anything the relay takes (120 fps is 72,000). Keeps a crafted table from filling memory.
+/// Far beyond anything the relay takes: an hour at 120 fps is 432,000, three hours of 48 kHz AAC about 506,000. Keeps a
+/// crafted table from filling memory.
 const MAX_SAMPLES: usize = 5_000_000;
 /// What a killed recorder can leave unreadable at the end of a file. More than this past the last box is damage, and in a
 /// fragmented file there would be samples lost beyond it without a word.
@@ -860,10 +862,6 @@ fn printable(kind: &[u8; 4]) -> String {
         })
         .collect()
 }
-fn clock(seconds: f64) -> String {
-    let s = seconds.ceil() as u64;
-    format!("{}:{:02}", s / 60, s % 60)
-}
 
 /// The picture and sound to keep, or why neither can stand.
 fn choose<'t, 'a>(
@@ -1400,20 +1398,34 @@ pub(super) fn rewrite(input: &Path, size: u64, out: &Path) -> Result<Option<Rewr
     let (picture, sound) = choose(&tracks)?;
     let audio_only = picture.is_none();
 
-    // The relay's limits, on the numbers it reads.
-    if let Some(p) = picture.or(sound) {
-        if p.timescale == 0 {
+    // The relay's limits, on the numbers it reads: each kept track's media header, the longer one deciding. One frame
+    // over sound (the still frame added below, or a picture that is one frame already) is audio; more is video.
+    let secs_of = |t: &Track<'_>| -> Result<f64> {
+        if t.timescale == 0 {
             return Err(damaged());
         }
         // The relay's arithmetic: milliseconds, rounded down, from the media header.
-        let millis = u128::from(p.duration) * 1000 / u128::from(p.timescale);
-        let secs = millis as f64 / 1000.0;
-        if secs <= 0.0 {
+        let millis = u128::from(t.duration) * 1000 / u128::from(t.timescale);
+        Ok(millis as f64 / 1000.0)
+    };
+    if let Some(p) = picture.or(sound) {
+        if secs_of(p)? <= 0.0 {
             return Err(damaged());
         }
-        if secs > MAX_VIDEO_SECONDS {
-            let what = if audio_only { "audio" } else { "video" };
-            return Err(refuse(format!("This {what} is {} long; Buzz takes up to 10 minutes. Trim it, then attach it again.", clock(secs))));
+        let longest = match (picture.map(secs_of).transpose()?, sound.map(secs_of).transpose()?) {
+            (Some(a), Some(b)) => a.max(b),
+            (a, b) => a.or(b).unwrap_or(0.0),
+        };
+        let is_audio = sound.is_some() && picture.is_none_or(|p| p.tables.samples == 1);
+        if is_audio && longest > MAX_AUDIO_SECONDS {
+            return Err(audio_too_long(longest));
+        }
+        if !is_audio && longest > MAX_VIDEO_SECONDS {
+            return Err(refuse(format!(
+                "This video is {} long; Buzz takes video up to {}. Trim it, then attach it again.",
+                clock(longest),
+                limit_words(MAX_VIDEO_SECONDS)
+            )));
         }
     }
     if let Some(p) = picture {
@@ -1509,13 +1521,9 @@ pub(super) fn rewrite(input: &Path, size: u64, out: &Path) -> Result<Option<Rewr
     // The still frame lasts as long as the movie, lead-in included, and that's what the relay measures.
     if audio_only
         && u128::from(movie_duration) * 1000 / u128::from(movie_timescale)
-            > MAX_VIDEO_SECONDS as u128 * 1000
+            > MAX_AUDIO_SECONDS as u128 * 1000
     {
-        let secs = movie_duration as f64 / f64::from(movie_timescale);
-        return Err(refuse(format!(
-            "This audio is {} long; Buzz takes up to 10 minutes. Trim it, then attach it again.",
-            clock(secs)
-        )));
+        return Err(audio_too_long(movie_duration as f64 / f64::from(movie_timescale)));
     }
     let still = audio_only.then(|| {
         let id = used_ids.iter().max().copied().unwrap_or(0) + 1;
