@@ -209,7 +209,7 @@ export function FrontDoor({ onOpenProject, doors, needs, onOpen, onOpenNeed, me 
     return <div className="fd fd-all fd-home" data-place="front-door" data-view="all" data-pulled={open ? "true" : undefined}>
       <header className="fd-head fd-homehead" data-moving={moving > 0 ? "true" : undefined}>
         <div className="fd-mark"><h1 className="fd-title"><Enso />Uni</h1><span className="fd-date">{today()}</span></div>
-        <button type="button" className="fd-pull" aria-expanded={open} aria-controls="fd-drawer" disabled={!all} onClick={() => onPull?.(!pulled)}
+        <button type="button" className="fd-pull" aria-expanded={open} aria-controls={open ? "fd-drawer" : undefined} disabled={!all} onClick={() => onPull?.(!pulled)}
           aria-label={`${lines.join(" ")}${forYou?.fresh ? " Something new in For you." : ""} ${open ? "Close" : "Open"} what needs you and your places`}>
           <span className="fd-statement">{lines.map((line) => <span key={line}>{line}</span>)}</span>
           <span className="fd-pull-row" aria-hidden="true"><Weave doors={doors} liveOf={liveOf} />{all && <i className="ps-chev" />}{forYou?.fresh && <span className="fd-pull-dot" />}</span>
@@ -231,7 +231,8 @@ export function FrontDoor({ onOpenProject, doors, needs, onOpen, onOpenNeed, me 
         {onOpenRoom && <OtherRooms rooms={otherRooms} onOpen={onOpenRoom} />}
         {health}
       </div>}
-      {all ? <AllFeed rooms={allRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={openFromFeed} target={target} onTarget={setTarget} echoes={echoes.shown} receded={!!focusRoom || open} /> : <div className="all-feed-box" />}
+      {/* under the drawer the stream is out of reach (keys, screen readers) until it is put away */}
+      <div className="fd-stream" inert={open}>{all ? <AllFeed rooms={allRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={openFromFeed} target={target} onTarget={setTarget} echoes={echoes.shown} receded={!!focusRoom || open} /> : <div className="all-feed-box" />}</div>
       </div>
       {composer}
     </div>;

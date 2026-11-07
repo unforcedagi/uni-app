@@ -196,8 +196,22 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     if (up && up.path !== ROOT) onOpenArea(up.path, up.name, null); else { setRootOpen(false); onOpenArea(null, "Uni", null); }
   } : rootOpen ? () => setRootOpen(false) : null;
   const overlay: Overlay | null = projectOpen ? { close: closeProject, modal: true, history: false } : sheetId ? { close: closeSheet, modal: true, history: false }
-    : appOpen && !chat ? { close: () => setAppOpen(false), modal: false, history: true } : null;
-  const overlayKey = `${projectOpen ? "project" : ""}${sheetId ? "sheet" : ""}${appOpen && !chat ? "app" : ""}${pulled && chat && allPlace ? "pulled" : ""}`;
+    : appOpen && !chat ? { close: () => setAppOpen(false), modal: false, history: true }
+    // 0.2: the home's drawer is over the stream: Back, Alt+← and Escape put it away first
+    : pulled && chat && allPlace && !allPlace.focus ? { close: () => setPulled(false), modal: false, history: true } : null;
+  const overlayKey = `${projectOpen ? "project" : ""}${sheetId ? "sheet" : ""}${appOpen && !chat ? "app" : ""}${pulled && chat && allPlace && !allPlace.focus ? "pulled" : ""}`;
+  // Escape at the home puts the drawer away (a room in focus over it has its own Escape; a field or a dialog keeps its own)
+  const drawerUp = pulled && !!chat && !!allPlace && !allPlace.focus;
+  useEffect(() => {
+    if (!drawerUp) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (e.target instanceof Element && e.target.closest("input, textarea, [contenteditable=true], [role=dialog], [role=alertdialog]")) return;
+      setPulled(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerUp, setPulled]);
   // (layout effects: what is over the place is known to the host's Back before the first key can reach it)
   useLayoutEffect(() => {
     onBackChange(projectOpen ? closeProject : sheetId ? closeSheet : appOpen && !chat ? () => setAppOpen(false) : pulled && chat && allPlace ? () => setPulled(false) : back);
@@ -425,7 +439,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     // 0.2 one home: with rooms, the home is All; what the old home held (what needs you, the approvals, For you, To post, the places, the
     // rooms no area holds, the Unfiled sessions) is in the drawer under its head
     const home = <>{status}{!allPlace && approvalRows}
-      <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={(p) => openPlace(p)} onOpenNeed={(p) => openPlace(p, "details")} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
+      <FrontDoor needsKnown={needsKnown} alsoNeeds={allPlace ? approvalsAll.list.filter((x) => !privateChannel(x.channel)).length : approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={(p) => openPlace(p)} onOpenNeed={(p) => openPlace(p, "details")} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
         otherRooms={others} noAreas={!!data && !error && !doorAreas.length ? (uniRef ? () => actions.openRoom(uniRef.id) : null) : undefined}
         toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} onOpenProject={setProjectOpen}
         pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.some((x) => !privateChannel(x.channel)) ? approvalRows : null} forYou={allPlace?.forYou ?? null} />

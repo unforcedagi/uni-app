@@ -8,22 +8,23 @@ export const project = () => test.info().project.name;
 export const phone = (page: Page) => (page.viewportSize()?.width ?? 0) < 600;
 export const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 
-/** The audit's targets: the most visible controls each screen may show, per device. Set from the 0.1.103 walk (the report has both counts). */
+/** The audit's targets: the most visible controls each screen may show, per device (phone 360, Daylight 828, desktop 1440): 0.2's count, plus one where
+ *  that stays under 0.1.103's. The old home's numbers are its places page; All was a second screen (13 / 21 / 19) and is now the same one. */
 export const TARGETS: Record<string, { phone: number; daylight: number; desktop: number }> = {
-  'home': { phone: 14, daylight: 14, desktop: 22 },
-  'home-open': { phone: 22, daylight: 26, desktop: 30 },
-  'room': { phone: 18, daylight: 20, desktop: 26 },
-  'room-details': { phone: 16, daylight: 18, desktop: 24 },
-  'task': { phone: 12, daylight: 12, desktop: 20 },
-  'journal': { phone: 10, daylight: 12, desktop: 20 },
-  'mail': { phone: 14, daylight: 20, desktop: 28 },
-  'vault': { phone: 18, daylight: 22, desktop: 30 },
-  'note': { phone: 10, daylight: 10, desktop: 18 },
-  'search': { phone: 10, daylight: 10, desktop: 18 },
-  'settings': { phone: 12, daylight: 14, desktop: 22 },
-  'for-you': { phone: 6, daylight: 6, desktop: 14 },
-  'arcade': { phone: 14, daylight: 16, desktop: 24 },
-  'more': { phone: 10, daylight: 10, desktop: 10 },
+  'home': { phone: 11, daylight: 15, desktop: 17 }, // 0.1.103 11 / 20 / 18 → 0.2 11 / 14 / 17
+  'home-open': { phone: 15, daylight: 18, desktop: 20 }, // 0.1.103 14 / 23 / 21 → 0.2 15 / 17 / 19
+  'room': { phone: 16, daylight: 16, desktop: 22 }, // 0.1.103 18 / 23 / 23 → 0.2 15 / 15 / 21
+  'room-details': { phone: 9, daylight: 10, desktop: 14 }, // 0.1.103 10 / 15 / 15 → 0.2 9 / 9 / 13
+  'task': { phone: 5, daylight: 5, desktop: 5 }, // 0.1.103 5 / 5 / 5 → 0.2 5 / 5 / 5
+  'journal': { phone: 11, daylight: 12, desktop: 15 }, // 0.1.103 13 / 18 / 16 → 0.2 10 / 11 / 15
+  'mail': { phone: 14, daylight: 14, desktop: 28 }, // 0.1.103 15 / 20 / 30 → 0.2 13 / 13 / 27
+  'vault': { phone: 10, daylight: 10, desktop: 14 }, // 0.1.103 16 / 21 / 21 → 0.2 9 / 9 / 13
+  'note': { phone: 11, daylight: 11, desktop: 15 }, // 0.1.103 14 / 19 / 19 → 0.2 10 / 10 / 14
+  'search': { phone: 8, daylight: 9, desktop: 4 }, // 0.1.103 9 / 14 / 4 → 0.2 8 / 8 / 4
+  'settings': { phone: 11, daylight: 12, desktop: 16 }, // 0.1.103 12 / 17 / 17 → 0.2 11 / 11 / 15
+  'for-you': { phone: 6, daylight: 7, desktop: 11 }, // 0.1.103 7 / 12 / 12 → 0.2 6 / 6 / 10
+  'arcade': { phone: 8, daylight: 12, desktop: 17 }, // 0.1.103 9 / 18 / 18 → 0.2 8 / 11 / 16
+  'more': { phone: 10, daylight: 10, desktop: 10 }, // 0.1.103 11 / - / - → 0.2 9 / - / -
 };
 
 export type Measure = { controls: number; names: string[]; overflow: string[]; overlap: string[]; small: string[]; contrast: string[] };
@@ -36,6 +37,8 @@ export async function measure(page: Page): Promise<Measure> {
     const shown = (el: Element) => {
       const r = el.getBoundingClientRect(), s = getComputedStyle(el);
       if (r.width < 1 || r.height < 1 || s.visibility === 'hidden' || s.display === 'none') return false;
+      // (a closed <details> keeps its content's boxes in Chromium; checkVisibility knows it isn't drawn)
+      if (!(el as any).checkVisibility?.({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true }) ?? false) return false;
       for (let e: Element | null = el; e; e = e.parentElement) { const st = getComputedStyle(e); if (Number(st.opacity) === 0 || e.hasAttribute('inert') || e.getAttribute('aria-hidden') === 'true') return false; }
       return r.bottom > 0 && r.right > 0 && r.top < H && r.left < W;
     };
@@ -60,7 +63,8 @@ export async function measure(page: Page): Promise<Measure> {
     controls.forEach((el, i) => {
       const r = rs[i];
       const full = el.getBoundingClientRect();
-      if (Math.min(full.width, full.height) < 24 && !el.matches('input[type=checkbox], input[type=radio]')) small.push(`${name(el)} ${Math.round(full.width)}×${Math.round(full.height)}`);
+      // (a link inside running text is exempt, as WCAG's target size exempts it)
+      if (Math.min(full.width, full.height) < 24 && !el.matches('input[type=checkbox], input[type=radio]') && getComputedStyle(el).display !== 'inline') small.push(`${name(el)} ${Math.round(full.width)}×${Math.round(full.height)}`);
       for (let j = i + 1; j < controls.length; j++) {
         const q = rs[j], ix = Math.min(r.right, q.right) - Math.max(r.left, q.left), iy = Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top);
         // (a field may hold a mark inside its own padding, as the composer's "Uni listening" ring does: r12)
@@ -134,7 +138,7 @@ export async function boot(page: Page, extra: Record<string, unknown> = {}) {
     };
   }, { calm: project() === 'daylight', forYou: FOR_YOU, tasks: [{ id: 't-jars', path: 'Tasks/T-41 Find jars for the honey', extension: 'md', tags: ['task'], createdAt: T0, updatedAt: T0, fixtureTask: true, metadata: { node: 'Areas/Bee Garden', state: 'open', owner: 'aaron', priority: 'now', next: 'Ask the neighbours for twenty jars.' } }] });
   await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, tasks: true, noWait: true, unread: { 'ch-kiln': 1, 'ch-bees': 2 }, ...extra } as any);
-  await page.locator('[data-place="front-door"]').first().waitFor();
+  await page.locator('[data-place="front-door"], nav[aria-label="Rooms and areas"]').first().waitFor();
 }
 /** A place on the rail, or behind More on a phone. */
 export async function go(page: Page, name: string) {

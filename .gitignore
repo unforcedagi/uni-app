@@ -58,3 +58,4 @@ dist-fluid/
 *.local.config.ts
 *.local.spec.ts
 /dist-tourafter/
+/dist-v02red/

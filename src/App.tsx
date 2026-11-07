@@ -430,7 +430,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const openArcadeNote = useCallback((vault: string, path: string) => { openTargetRef.current({ kind: "note", note: { hub: null, vault, ref: path }, title: "Taste profile" }, "new"); }, []);
   function openForYou() {
     if (topNote?.ref !== FOR_YOU_ID) {
-      const surfaces = tabsRef.current.tabs.filter((t) => (t.kind === "all" && !!t.channel) || t.kind === "journal");
+      // (0.2: All with no room in focus is the home, a place to come back to as well)
+      const surfaces = tabsRef.current.tabs.filter((t) => t.kind === "all" || t.kind === "journal");
       const previous = [...tabsRef.current.recent].reverse().map((id) => surfaces.find((t) => t.id === id)).find(Boolean);
       // the room in focus, named as its head names it: its place, else the room itself
       forYouBack.current = previous?.kind === "all" && previous.channel ? (previous.path ? previous.path.split("/").pop() : null) || nodeOfRoom(previous.channel)?.name || `#${(roomsRef.current.find((r) => r.id === previous.channel)?.name ?? "room").replace(/^#/, "")}` : previous?.title ?? "Uni";
@@ -2551,7 +2552,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const cur = activeTab(tabsRef.current);
     // 0.2 one home: All with nothing in focus is the home, as Uni's places page was
     if (atHome(cur)) return;
-    openTarget(cur && isUniSide(cur) && cur.kind !== "all" ? originRef.current ?? uniHome() : origin(), "replace");
+    openTarget(cur && isUniSide(cur) ? originRef.current ?? uniHome() : origin(), "replace");
   };
   // At Uni's room tree (nothing open over it) the system's own Back runs: the app goes to the background.
   const [modalOpen, setModalOpenState] = useState(false);
@@ -2733,7 +2734,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   return <ApprovalsContext.Provider value={approvalsView}><NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault" || active?.kind === "mail" || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "arcade"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
     <nav ref={railRef} className="rail" aria-label="Main navigation" onClickCapture={(e) => { if (!(e.target as HTMLElement).closest(".rail-more")) setRailMore(false); }}>
       {/* 0.2 one home: Uni is the home, All's stream with its places under the head; a room is in focus over it */}
-      <button aria-label="Uni" aria-current={uniShown || (!panel && !searchOpen && !topNote && allOpen) ? "page" : undefined} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
+      <button aria-label="Uni" aria-current={uniShown || (!panel && !searchOpen && (!topNote || topNote.ref === FOR_YOU_ID) && allOpen) || (!panel && !searchOpen && topNote?.ref === FOR_YOU_ID && homeIsAll) ? "page" : undefined} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
       <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })} aria-describedby={[held > 0 && "rail-mail-held", unreadMail > 0 && "rail-mail-unread"].filter(Boolean).join(" ") || undefined}><i><MailIcon />{held > 0 && <span className="rail-count" aria-hidden="true">{held}</span>}{unreadMail > 0 && <span className="rail-dot" aria-hidden="true" />}</i><span>Mail</span>{held > 0 && <span id="rail-mail-held" hidden>{held} waiting for you</span>}{unreadMail > 0 && <span id="rail-mail-unread" hidden>{unreadMail} unread in your Inbox</span>}</button>
       {/* T-335 as Aaron: on a phone the bar is four places and More; the rest open from a sheet above it. On a wider screen More is hidden and the rest sit on the rail (display: contents) */}
