@@ -38,7 +38,8 @@ export async function measure(page: Page): Promise<Measure> {
       const r = el.getBoundingClientRect(), s = getComputedStyle(el);
       if (r.width < 1 || r.height < 1 || s.visibility === 'hidden' || s.display === 'none') return false;
       // (a closed <details> keeps its content's boxes in Chromium; checkVisibility knows it isn't drawn)
-      if (!(el as any).checkVisibility?.({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true }) ?? false) return false;
+      const cv = (el as any).checkVisibility as undefined | ((o: object) => boolean);
+      if (cv && !cv.call(el, { contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true })) return false;
       for (let e: Element | null = el; e; e = e.parentElement) { const st = getComputedStyle(e); if (Number(st.opacity) === 0 || e.hasAttribute('inert') || e.getAttribute('aria-hidden') === 'true') return false; }
       return r.bottom > 0 && r.right > 0 && r.top < H && r.left < W;
     };
