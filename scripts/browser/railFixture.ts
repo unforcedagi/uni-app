@@ -27,6 +27,8 @@ export async function bootRail(page: Page) {
           case 'vault_list': return ['uni', 'garden'];
           case 'vault_note':
             if (args.noteRef === 'stale-note') return { hub: 'https://example.invalid', vault: 'uni', note: { id: 'stale-note', path: 'ATLAS — Phase 02B.md', extension: 'md', content: '# ATLAS — Phase 02B\n\nA previous note.' } };
+            // (the retired For you note: 0.2.2 never reads it; the rail spec counts any read)
+            if (args.noteRef === '01M3ZQF7EM4ADC7HEY36D3DC3B') w.forYouReads = (w.forYouReads ?? 0) + 1;
             return { hub: 'https://example.invalid', vault: 'uni', note: { id: '01M3ZQF7EM4ADC7HEY36D3DC3B', path: 'For you.md', extension: 'md', content: w.content, updatedAt: w.updated } };
           case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
           case 'journal_flush': return { sent: [], remaining: 0, error: null };

@@ -74,12 +74,12 @@ composer: the same send path, drafts and signing), not a copy. The interface nev
   interface with a draggable divider, width kept in `uni.area.chatWidth.v1`, at most 60% of the view),
   `sheet` (default on a phone: a pull-up sheet over the bottom; the peek bar shows the last message and an
   unread count, tap or drag to expand) or `hidden` (no chat; suggestions stay above the interface and *Add to
-  draft* opens the room as a tab). `side` on a phone is a sheet. The hint does not change the grant key.
+  draft* brings the room into focus over the home). `side` on a phone is a sheet. The hint does not change the grant key.
 - The suggestion bar sits directly above the chat composer; *Add to draft* fills that composer. A suggestion
   arriving while the sheet is down opens it.
-- The bar has **Open #room**, which opens the full room as a tab (the draft carries over). An area with no
+- The bar has **Open #room**, which brings the room into focus over the home (the draft carries over). An area with no
   room says "This area has no room yet".
-- The area tab remembers its room (`channel` on the tab), so the room view follows the tab.
+- The place remembers its room (`channel` on its saved target), so the room in focus follows it.
 - **Live messages:** with `chat.read`, the host pushes `{uni:1, event:"chat.message", data:{id, author, content,
   created_at, room}}` for each message that arrives in a granted room (not the history already there when the
   area opened). Text is cleaned with `stripHidden` and capped like `chat.recent`; each event costs one token

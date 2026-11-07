@@ -25,17 +25,14 @@ function openExternal(url: string) {
   void invoke("open_link", { url }).catch(() => {});
 }
 
-export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onRendered, onSearch, readOnly = false, backIcon = "←", actions, compact = false }: {
+export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onSearch, backIcon = "←", actions, compact = false }: {
   /** T-200: a note beside the chat closes rather than goes back (×), carries the pane's own buttons, and keeps to reading and editing:
    *  no New note or Copy markdown in its narrow bar (Open as page has them). T-204: Download .md stays, in short form. */
   backIcon?: string;
   actions?: ReactNode;
   compact?: boolean;
-  /** r21 (Codex 5): a page that reads, not a document to edit (For you): no Edit, New note or Copy markdown until "Open as a note". */
-  readOnly?: boolean;
   onSearch: (query: string) => void;
   onResolved: (id: string) => void;
-  onRendered?: (note: VaultNote["note"]) => void;
   startEditing?: boolean;
   onDirty: (dirty: boolean) => void;
   onCreate: (folder: string) => void;
@@ -50,9 +47,8 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
   onTitle?: (title: string) => void;
 }) {
   const [editing, setEditing] = useState(startEditing);
-  /** r21: a read-only page opened as its note (an explicit choice): the note's own tools appear */
-  const [asNote, setAsNote] = useState(false);
-  const tools = !readOnly || asNote;
+  /** (0.2.2: every note has its tools; the read-only For you page, which hid them, is retired) */
+  const tools = true;
   const [data, setData] = useState<VaultNote | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -105,7 +101,6 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
   }, [target.vault, target.ref, attempt]);
 
   // Report only after React commits the loaded note to the view.
-  useEffect(() => { if (data) onRendered?.(data.note); }, [data]);
 
   const origin = data?.hub ?? target.hub ?? hub;
   const webUrl = origin ? noteUrl(origin, data?.vault ?? target.vault, data?.note.id ?? target.ref) : null;
@@ -147,7 +142,6 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
       <button className="note-back" onClick={onBack} aria-label={backIcon === "←" ? `Back to ${backLabel}` : backLabel}>
         <span className="note-back-arrow" aria-hidden="true">{backIcon}</span><span className="note-back-label">{backLabel}</span>
       </button>
-      {note && !tools && <button className="note-action quiet" onClick={() => setAsNote(true)}>Open as a note</button>}
       {note && tools && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
       {/* 0.2: Back, Edit and one More: a new note, Copy and Download live in it (the note beside a chat keeps its own short bar) */}
       {note && tools && !compact && !editing && <NoteDownload note={note} title={heading} markdown={isMarkdownNote(note.extension)} extra={[

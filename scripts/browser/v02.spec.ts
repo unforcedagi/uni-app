@@ -35,7 +35,8 @@ test.describe('one home', () => {
     await openHead(page);
     await expect(page.getByRole('region', { name: 'Needs you' })).toContainText('Find jars for the honey');
     await expect(page.locator('.fd-door[data-path="Areas/Kiln Studio"]')).toBeVisible();
-    await expect(page.getByRole('button', { name: /^For you/ })).toBeVisible();
+    // 0.2.2: no For you (the retired Aaron/For you note): asks live in their rooms and in Needs you
+    await expect(page.getByRole('button', { name: /^For you/ })).toHaveCount(0);
     await check(page, 'home-open');
     // a place opens its room in focus over the home; Back comes home with the head as it was
     await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
@@ -57,20 +58,15 @@ test.describe('one home', () => {
     await expect(page.locator('.fd-door[data-path="Areas/Kiln Studio"]')).toBeVisible();
   });
 
-  test('For you, opened from the home after a visit to the Journal, comes back to the home (review 1)', async ({ page }) => {
+  test('the rail\'s Uni, after a visit to the Journal, comes back to the home and its drawer (review 1)', async ({ page }) => {
     await boot(page);
     await go(page, 'Journal');
     await expect(page.locator('.journal-tab-content')).toBeVisible();
     await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
     await openHead(page);
-    await page.getByRole('button', { name: /^For you/ }).click();
-    await expect(page.getByText('Worth a look')).toBeVisible();
-    // the place that is current on the rail while For you is open is the home it came from
-    if (!phone(page)) await expect(rail(page).getByRole('button', { name: 'Uni', exact: true })).toHaveAttribute('aria-current', 'page');
-    await expect(page.locator('.note-sheet').getByRole('button', { name: 'Back to Uni' })).toBeVisible();
-    await page.locator('.note-sheet').getByRole('button', { name: 'Back to Uni' }).click();
     await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible();
     await expect(page.locator('.journal-tab-content')).toBeHidden();
+    if (!phone(page)) await expect(rail(page).getByRole('button', { name: 'Uni', exact: true })).toHaveAttribute('aria-current', 'page');
   });
 
   test('the open drawer: Escape puts it away, and the stream under it is out of reach (review 1)', async ({ page }) => {
@@ -80,16 +76,6 @@ test.describe('one home', () => {
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-place="front-door"] .fd-pull')).toHaveAttribute('aria-expanded', 'false');
     await expect(page.locator('.fd-body > .fd-stream')).not.toHaveAttribute('inert', '');
-  });
-
-  test('For you opens from the home and comes back to it', async ({ page }) => {
-    await boot(page);
-    await openHead(page);
-    await page.getByRole('button', { name: /^For you/ }).click();
-    await expect(page.getByText('Worth a look')).toBeVisible();
-    await check(page, 'for-you');
-    await page.locator('.note-sheet').getByRole('button', { name: /Uni/ }).first().click();
-    await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible();
   });
 });
 

@@ -4,7 +4,8 @@ An Android-first, Telegram-like Buzz conversation client. The product contract a
 
 ## What works in this branch
 
-- Responsive room list, chronological cached messages, focused root/reply threads, per-room public-key recipient, text compose, manual/on-resume sync and explicit error states.
+- One home (since 0.2): All, every area room's stream, with a drawer for what needs you, To post and the places; a room opens in focus over it. An ask (a task on you) acts in its own room.
+- Chronological cached messages, focused root/reply threads, per-room public-key recipient, text compose, manual/on-resume sync and explicit error states.
 - Rust core discovers joined channels, authenticates with NIP-42, fetches kind-9 history and kind-0 profiles, persists messages in SQLite, and stores NIP-10 root/parent references alongside legacy rows.
 - Sending signs a Buzz SDK kind-9 event with `h`/`e`/`p` tags; it checks the selected room and cached reply target, waits for relay `OK`, and only then persists the event. Relay rejection does not clear the draft.
 - CLI `key init|show`, `sync`, `live`, `show`, `search`, and `probe` remain available. The live loop is not used by the mobile shell.

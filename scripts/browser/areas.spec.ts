@@ -148,18 +148,16 @@ test.describe('dark theme', () => {
   });
 });
 
-test.describe('For you badge', () => {
-  // 0.2: For you left the rail and More; it opens from the home drawer's "For you" line, which carries its mark
-  test('a zero For you count renders no badge', async ({ page }) => {
+test.describe('For you is gone', () => {
+  // 0.2.2: the Aaron/For you note was retired (10-27): no For you on the rail, in More or in the home's drawer, and no badge or dot for it
+  test('no For you anywhere, and no badge', async ({ page }) => {
     await bootAreas(page, 'seed');
     await openRailMore(page);
     await expect(rail(page).getByRole('button', { name: 'For you' })).toHaveCount(0);
     await expect(page.locator('.rail-count')).toHaveCount(0);
     if ((page.viewportSize()?.width ?? 0) < 1100) await rail(page).getByRole('button', { name: 'More', exact: true }).click();
     await openPlaces(page);
-    const line = page.getByRole('region', { name: 'Your places' }).getByRole('button', { name: /^For you/ });
-    await expect(line).toBeVisible();
-    await expect(line).toContainText("Uni's picks");
+    await expect(page.getByRole('region', { name: 'Your places' }).getByRole('button', { name: /^For you/ })).toHaveCount(0);
     await expect(page.locator('.fd-pull-dot')).toHaveCount(0);
   });
 });

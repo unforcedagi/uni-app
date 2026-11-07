@@ -1,6 +1,7 @@
 // Rooms in the tree (pure, unit-tested in scripts/treehome.test.ts): the real name of a node's room (`cohere`, `atlas/build`), whether the
 // node owns that room or is held by an ancestor's, the archived-room fallback, and the updates the rooms below have posted.
-// Builds on stewardOf's rule (talkCore.steward): a node's own room, else the nearest ancestor's, else #Uni.
+// Builds on stewardOf's rule (talkCore.steward): a node's own room, else the nearest ancestor's, else #Uni where an account still has
+// one (archived 10-26: on the live relay, none, and a node with no room on its way has no room).
 import type { Area } from "./areasCore.ts";
 import { ancestry, ROOT, type Tree } from "./treeCore.ts";
 import { pathResolver } from "./refs.ts";
@@ -212,7 +213,7 @@ export function roomNodeOf(n: Area): RoomNode {
 export const fellBack = (n: Area): boolean => /^(archived|missing)$/i.test(String(n.metadata.room_status ?? ""));
 
 export type RoomView = {
-  /** Where a note to this node goes: its own room, else an ancestor's, else #Uni. */
+  /** Where a note to this node goes: its own room, else an ancestor's, else #Uni if there is one (archived: usually none). */
   target: RoomRef | null;
   /** The room's own name (`cohere`, `atlas/build`): shown when the node has a room of its own. */
   slash: string | null;

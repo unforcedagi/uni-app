@@ -1,4 +1,5 @@
-// T-301/T-302: the front door. Tapping Uni shows every area's room, each with one line on where it stands. Calm: a name, a line, when
+// T-301/T-302: the front door (0.2: the home, All's stream, with these doors in the drawer under its head; a vault without the Uni
+// glue keeps them as its places page). Every area's room, each with one line on where it stands. Calm: a name, a line, when
 // the room last talked, and a small mark when sessions are working there. No ids. Above the rooms, one quiet line on what needs you
 // (round 2: #Uni is archived, so this is where it lives); under them, one quiet line on the Claude accounts, which opens the full card.
 // T-304: the working mark counts the room's Uni at work on your message too, not only Claude Code sessions.
@@ -120,17 +121,16 @@ function OtherRooms({ rooms, onOpen }: { rooms: readonly { id: string; name: str
     <ul>{rooms.map((r) => <li key={r.id}><button type="button" data-room={r.id} onClick={() => onOpen(r.id)}>#{r.name.replace(/^#/, "")}</button></li>)}</ul></details>;
 }
 
-export function FrontDoor({ onOpenProject, doors, needs, onOpen, onOpenNeed, onOpenAsk, me = null, newRooms = [], otherRooms = [], noAreas, onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = "known", alsoNeeds = 0, onRetryNeeds, pulled = false, onPull, approvals = null, forYou = null }: {
-  /** 0.2 one home: the head's drawer (what needs you, For you, the places) is open, and how to open or close it */ pulled?: boolean; onPull?: (open: boolean) => void;
+export function FrontDoor({ onOpenProject, doors, needs, onOpen, onOpenNeed, onOpenAsk, me = null, newRooms = [], otherRooms = [], noAreas, onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = "known", alsoNeeds = 0, onRetryNeeds, pulled = false, onPull, approvals = null }: {
+  /** 0.2 one home: the head's drawer (what needs you, To post, the places) is open, and how to open or close it */ pulled?: boolean; onPull?: (open: boolean) => void;
   /** 0.2: the approval prompts waiting, shown under what needs you in the drawer */ approvals?: ReactNode;
-  /** 0.2: For you, Uni's page of recommendations, opened from the drawer (`fresh`: new since you last read it) */ forYou?: { fresh: boolean; open: () => void } | null;
   /** T-335 one surface: what needs you opens its place's room with its details (default: as a place does) */ onOpenNeed?: (path: string) => void;
   /** 0.2.2: an ask opens in its own room, in focus, with its sheet over it (a private area's count still opens its place) */ onOpenAsk?: (row: { id: string; room: string | null }) => void;
   /** T-335 one surface: every room no area holds, folded under one line */ otherRooms?: readonly { id: string; name: string }[];
-  /** No areas yet (once that is known): the home says so, with the way to Uni's room when there is one */ noAreas?: (() => void) | null; /** T-335 as Aaron: only once the tasks have been read, fresh and whole, may the home say nothing needs you */ needsKnown?: NeedsKnown; /** approvals waiting, which the task feed doesn't count */ alsoNeeds?: number; onRetryNeeds?: () => void; doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+  /** No areas yet (once that is known): the home says so, with the way to the old #Uni where an account still has one (archived 10-26) */ noAreas?: (() => void) | null; /** T-335 as Aaron: only once the tasks have been read, fresh and whole, may the home say nothing needs you */ needsKnown?: NeedsKnown; /** approvals waiting, which the task feed doesn't count */ alsoNeeds?: number; onRetryNeeds?: () => void; doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
   /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */
   all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string | null, root?: string | null) => void } | null;
-  /** T-335: this is the All place (a place of its own on the rail), and the way back from it; null: the home, with the places. */
+  /** 0.2: this is the home (All's stream, the drawer under its head); null: the places page of a vault without the Uni glue. */
   allPlace?: { backTo: string; onBack: () => void; /** A room in focus over All. */ focusRoom?: string | null } | null; onComposerFocus?: (on: boolean) => void;
   /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
   /** Your key: a turn is the room's Uni at work on your message. */ me?: string | null;
@@ -143,7 +143,6 @@ export function FrontDoor({ onOpenProject, doors, needs, onOpen, onOpenNeed, onO
   // round 3: a read that failed, or a saved copy not read again yet, is "as of" its time; the working counts say so too
   const at = asOf(ws, now);
   const areaAt = new Map(work.areas.map((a) => [a.path, a]));
-  // T-335 All view: every room at once is a place of its own on the rail; the home is always the places
   // 0.2 one home: with rooms, the home is All's stream with the places folded under its head (no rooms with an area yet: the places, open)
   const view: "places" | "all" = allPlace ? "all" : "places";
   // the rooms' recent messages: the feed in All; in Places only once the composer is used (for the route's words)
@@ -206,30 +205,27 @@ export function FrontDoor({ onOpenProject, doors, needs, onOpen, onOpenNeed, onO
   const health = (at || ws.partial.length > 0) ? <p className="fd-status" role="status">{[at && `${ws.error ? "Couldn't refresh · " : ""}As of ${at}`, ...ws.partial].filter(Boolean).join(" · ")}</p> : null;
   if (view === "all") {
     // 0.2 one home: the day in one sentence is the head, and the way to everything the old home held: one tap pulls down what needs you,
-    // For you, To post and every place; the stream of the rooms stays under it, as it was. No rooms with an area yet: the places, open.
+    // To post and every place (0.2.2: For you, the retired Aaron/For you note, is gone); the stream of the rooms stays under it, as it was. No rooms with an area yet: the places, open.
     const open = pulled || !all;
     return <div className="fd fd-all fd-home" data-place="front-door" data-view="all" data-pulled={open ? "true" : undefined}>
       <header className="fd-head fd-homehead" data-moving={moving > 0 ? "true" : undefined}>
         <div className="fd-mark"><h1 className="fd-title"><Enso />Uni</h1><span className="fd-date">{today()}</span></div>
         <button type="button" className="fd-pull" aria-expanded={open} aria-controls={open ? "fd-drawer" : undefined} disabled={!all} onClick={() => onPull?.(!pulled)}
-          aria-label={`${lines.join(" ")}${forYou?.fresh ? " Something new in For you." : ""} ${open ? "Close" : "Open"} what needs you and your places`}>
+          aria-label={`${lines.join(" ")} ${open ? "Close" : "Open"} what needs you and your places`}>
           <span className="fd-statement">{lines.map((line) => <span key={line}>{line}</span>)}</span>
-          <span className="fd-pull-row" aria-hidden="true"><Weave doors={doors} liveOf={liveOf} />{all && <i className="ps-chev" />}{forYou?.fresh && <span className="fd-pull-dot" />}</span>
+          <span className="fd-pull-row" aria-hidden="true"><Weave doors={doors} liveOf={liveOf} />{all && <i className="ps-chev" />}</span>
         </button>
       </header>
       <div className="fd-body">
       {open && <div id="fd-drawer" className="fd-drawer" role="region" aria-label="Your places">
         {needsKnown === "failed" && !needN && onRetryNeeds && <button type="button" className="note-action fd-retry" onClick={onRetryNeeds}>Try again</button>}
         {needs && <NeedsLine needs={needs} onOpen={onOpenNeed ?? onOpen} onAsk={onOpenAsk} shown approvals={approvals} />}
-        {(forYou || toPost) && <div className="fd-lines">
-          {forYou && <button type="button" className="fd-line fd-foryou" onClick={forYou.open}><span>For you</span><small>{forYou.fresh ? "New from Uni" : "Uni's picks"}</small>{forYou.fresh && <i className="fd-pull-dot" aria-label="New" />}<span aria-hidden="true" className="fd-line-go">›</span></button>}
-          {toPost && <div className="fd-topost">{toPost}</div>}
-        </div>}
+        {toPost && <div className="fd-lines"><div className="fd-topost">{toPost}</div></div>}
         {onOpenRoom && <NewLine rooms={newRooms} onOpen={onOpenRoom} />}
         <h2 className="fd-sec-h">Places</h2>
         {doorList}
         {unfiled}
-        {noAreas !== undefined && <p className="fd-none">No areas yet. Tell Uni what you want to look after, and it will set up your first area.{noAreas && <> <button type="button" className="all-link" onClick={noAreas}>Talk to Uni</button></>}</p>}
+        {noAreas !== undefined && <p className="fd-none">No areas yet. Tell Uni in any room what you want to look after, and it will set up your first area.{noAreas && <> <button type="button" className="all-link" onClick={noAreas}>Talk to Uni</button></>}</p>}
         {onOpenRoom && <OtherRooms rooms={otherRooms} onOpen={onOpenRoom} />}
         {health}
       </div>}
@@ -252,7 +248,7 @@ export function FrontDoor({ onOpenProject, doors, needs, onOpen, onOpenNeed, onO
     <h2 className="fd-places-h"><span>Places</span><Weave doors={doors} liveOf={liveOf} /></h2>
     {doorList}
     {unfiled}
-    {noAreas !== undefined && <p className="fd-none">No areas yet. Tell Uni what you want to look after, and it will set up your first area.{noAreas && <> <button type="button" className="all-link" onClick={noAreas}>Talk to Uni</button></>}</p>}
+    {noAreas !== undefined && <p className="fd-none">No areas yet. Tell Uni in any room what you want to look after, and it will set up your first area.{noAreas && <> <button type="button" className="all-link" onClick={noAreas}>Talk to Uni</button></>}</p>}
     {onOpenRoom && <OtherRooms rooms={otherRooms} onOpen={onOpenRoom} />}
     {health}
     <UsageLine />

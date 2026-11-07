@@ -5,7 +5,7 @@ import { railGo } from './railGo';
 
 test('All reading surfaces fit the screen', async ({ page }, info) => {
   // the rail's world has no areas: its vault answers the areas read with none (the bare fake answers null, which reads as a failed read and
-  // leaves the home with nothing but "Try again"), so the home has its drawer: For you, the rooms no area holds
+  // leaves the home with nothing but "Try again"), so the home has its drawer: the rooms no area holds
   await page.addInitScript(() => {
     let inner: any;
     Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, get: () => inner, set: (v: any) => {
@@ -37,7 +37,7 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: `${dir}/${info.project.name}-${view}.png` });
   };
-  // The rail holds Uni, Journal, Vault, Search and Settings at every width it shows (0.2: For you opens from the home's drawer). A short
+  // The rail holds Uni, Journal, Vault, Search and Settings at every width it shows (0.2.2: no For you). A short
   // landscape screen hides the rail (r13): Uni's home shows the app's places itself (T-335: a room is in focus over All; its Back goes home).
   const home = page.locator('[data-place="front-door"][data-view="all"]');
   const toHome = async () => {
@@ -52,15 +52,14 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
     await expect(home).toBeVisible();
     await expect(page.getByRole('region', { name: /in focus$/ })).toHaveCount(0);
   };
-  /** 0.2 one home: the drawer under the home's head (For you, the places, the rooms no area holds); open already with no area room. */
+  /** 0.2 one home: the drawer under the home's head (the places, the rooms no area holds); open already with no area room. */
   const drawer = async () => {
     const pull = home.locator('.fd-pull');
     if ((await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
     await expect(home.getByRole('region', { name: 'Your places' })).toBeVisible();
     return home.getByRole('region', { name: 'Your places' });
   };
-  const place = async (name: 'Uni' | 'Journal' | 'For you' | 'Settings' | 'Search') => {
-    if (!short && name === 'For you') { await railGo(page, 'Uni'); await toHome(); await (await drawer()).getByRole('button', { name: /^For you/ }).click(); return; }
+  const place = async (name: 'Uni' | 'Journal' | 'Settings' | 'Search') => {
     if (!short) { await railGo(page, name); return; }
     await expect(rail).toBeHidden();
     await toHome();
@@ -92,11 +91,9 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
   await expect(rail).toBeHidden();
   await shot('focus');
   await page.getByRole('button', { name: 'Focus', exact: true }).click();
-  await place('For you');
-  await expect(page.locator('.note-title')).toHaveText('For you');
-  await fits(page.locator('.note-back'), true);
-  await shot('for-you');
-  await page.locator('.note-back').click();
+  // 0.2.2: For you (the retired note) is in neither the drawer nor the short screens' places row
+  if (short) { await toHome(); await expect(page.locator('.th-places-short:visible').getByRole('button', { name: 'For you', exact: true })).toHaveCount(0); }
+  else { await railGo(page, 'Uni'); await toHome(); await expect((await drawer()).getByRole('button', { name: /^For you/ })).toHaveCount(0); }
   await place('Uni');
   await toHome();
   // the rooms no area holds are folded on Uni's home: its last one fits and is a touch target on a phone

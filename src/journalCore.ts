@@ -116,7 +116,7 @@ export function shareText(note: Pick<JournalNote, "id" | "path" | "content" | "c
 export const AREA_ASK = "New journal entry.";
 
 /**
- * The rooms an entry can be sent to (T-263): the area rooms, so no direct message and not #Uni (it has "Pass to Uni"). Only a room
+ * The rooms an entry can be sent to (T-263): the area rooms, so no direct message and not #Uni (archived 10-26; a room by that name is never an area's). Only a room
  * known to be one: `dm` is null until the relay's metadata says (every channel cached before the app knew DMs, and a channel just
  * joined), and absent in a room list cached by an older app; neither is offered. Archived rooms never reach the room list (the core
  * drops them). A room named Uni is never one, whichever room findUniRoom took. By name: the room list reorders as messages land,

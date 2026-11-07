@@ -1,7 +1,8 @@
 import { answersLine, commandLine, endsLine, type Approval, type ApprovalOutcome } from "./approvals";
 import { clockTime, DoneCard, PendingCard, QuietCard } from "./CompactCard";
 
-// T-335: a Hermes approval prompt in its room, drawn short. Waiting: one row with the command and how to answer; it is still answered by
+// T-335: a Hermes approval prompt in its room, drawn short. Waiting: one row with the command and how to answer. (11-07: Hermes now asks with
+// a tap card, drawn as SealedCard; this typed prompt is its fallback when a card can't be posted.) It is answered by
 // typing /approve or /deny in the composer (r30: one answer mechanism, no approval buttons in chat). Ended: one line saying how. A state
 // the store hasn't told yet (checking, unchecked) or one too old for its read (past) says only that, never "waiting" or an outcome.
 

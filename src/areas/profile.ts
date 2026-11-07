@@ -105,5 +105,5 @@ export function vaultChoices(vaults: readonly string[]): string[] {
 /** The vault the Life OS surface actually shows: the saved choice, or uni when the (known) vault list no longer has it. */
 export const effectiveLifeVault = (saved: string, vaults: readonly string[]) => (!vaults.length || vaults.includes(saved) ? saved : UNI_VAULT);
 
-/** Uni shell glue (the "For you" pin, the primary-vault row) belongs to the uni vault only. */
+/** Uni shell glue (the home as All, To post, the primary-vault row) belongs to the uni vault only. */
 export const showUniGlue = (vault: string) => vault === UNI_VAULT;

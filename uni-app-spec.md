@@ -1,10 +1,12 @@
 # Talk to Uni — Android conversation client
 
-**Status:** implementation target. This replaces the September 20 unified Buzz/Parachute timeline proposal. Aaron wants a small, Telegram-like app for talking to Uni, not a second Buzz desktop or a vault browser.
+**Status:** history: the phase-1 contract (September). Since 0.2 the app opens on one home, All (every area room's stream, with a drawer for what needs you, To post and the places); a room opens in focus over it; #Uni was archived on 10-26 and there is no room for everything; an ask acts in its own room. Read what follows as where the app started.
+
+This replaces the September 20 unified Buzz/Parachute timeline proposal. Aaron wants a small, Telegram-like app for talking to Uni, not a second Buzz desktop or a vault browser.
 
 ## Product contract
 
-Open the app, see conversations, tap the Uni room, read newest messages, type a reply, and follow a thread without losing the room. Other joined Buzz channels are available, but the Uni conversation is the home screen. A note feed, task dashboard, workflow builder, and Parachute write UI do not belong in phase 1. The app is Aaron's personal client, never the Uni agent identity; only Aaron's key signs outbound events.
+Open the app, see conversations, tap the Uni room, read newest messages, type a reply, and follow a thread without losing the room. Other joined Buzz channels are available, but the Uni conversation is the home screen (phase 1; since 0.2 the home is All and #Uni is archived). A note feed, task dashboard, workflow builder, and Parachute write UI do not belong in phase 1. The app is Aaron's personal client, never the Uni agent identity; only Aaron's key signs outbound events.
 
 **Navigation:** room list (name, last message, timestamp, mention marker) → chronological message view → focused thread with root and replies; back preserves room and draft. On a narrow screen, one pane at a time; on desktop, the same React/Rust code can use a wider layout. Empty/loading/auth-rejected/offline states distinguish cached data from successful sync. No implicit background socket on Android: reconnect and catch up on open/resume/manual refresh. Drafts survive thread navigation in memory; durable drafts are later work.
 
@@ -22,7 +24,7 @@ The SQLite store resides in Tauri app data. Sync is connect → authenticate →
 
 ## Phase 1 acceptance
 
-1. A joined Uni room and other joined channels appear with cached last message, even offline; tapping one shows chronological messages and a visible sync/error state.
+1. (phase 1) A joined Uni room and other joined channels appear with cached last message, even offline; tapping one shows chronological messages and a visible sync/error state.
 2. A reply opens a focused thread; direct and nested replies survive restart, and local legacy rows remain visible after migration.
 3. Sending plain text and a thread reply uses the selected room, correct `h`/`e`/`p` tags, and only clears the draft after relay `OK`. Rejection leaves the draft and gives a useful error.
 4. A mock-relay integration test exercises auth → discovery → read → publish → `OK` → stored thread, including rejection; Rust and TypeScript builds pass. On-device Android and real relay verification are separate gates and must be reported honestly.

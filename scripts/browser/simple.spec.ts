@@ -617,7 +617,7 @@ test.describe('simple', () => {
     await shot(page, 'chat-off');
   });
 
-  test('For you has no number, at most a quiet dot', async ({ page }) => {
+  test('the rail carries no count badge', async ({ page }) => {
     await boot(page);
     await expect(page.locator('.rail-count')).toHaveCount(0);
   });
@@ -2780,7 +2780,8 @@ test.describe('r21', () => {
     await expect(list.getByRole('button', { name: 'More for this entry' })).toHaveCount(3);
     await list.getByRole('button', { name: 'More for this entry' }).first().click();
     const menu = list.getByRole('group', { name: 'Entry actions' });
-    await expect(menu.getByRole('button')).toHaveText(['Pass to Uni', 'Share to a room…']);
+    // 0.2.2: no "Pass to Uni" (#Uni is archived): an entry goes to an area room
+    await expect(menu.getByRole('button')).toHaveText(['Share to a room…']);
     expect(await calls(page, 'journal_share')).toHaveLength(0);
   });
 
@@ -2803,12 +2804,13 @@ test.describe('r21', () => {
 
   test('P2 (Codex 7) a slow note says so with Retry and Back; a failed search says so in words, with Retry, its reason a detail', async ({ page }) => {
     test.skip(!wide(page), 'the rail');
-    await page.addInitScript(() => { (window as any).__noteDelay = { '01M3ZQF7EM4ADC7HEY36D3DC3B': 11000 }; });
+    await page.addInitScript(() => { (window as any).__noteDelay = { 'a-techne': 11000 }; });
     await boot(page);
     const rail = page.getByRole('navigation', { name: 'Main navigation' });
-    // 0.2: For you opens from the home's drawer
-    await homeF(page);
-    await page.getByRole('region', { name: 'Your places' }).getByRole('button', { name: /^For you/ }).click();
+    // a note opened from Search's notes (0.2.2: For you, which this used, is retired)
+    await rail.getByRole('button', { name: 'Search', exact: true }).click();
+    await page.getByRole('searchbox').or(page.getByRole('textbox', { name: /Search/ })).first().fill('daily practice of making');
+    await page.locator('.search-hit[aria-label^="Note Areas/Techne "]').click();
     await expect(page.locator('.note-sheet')).toContainText('Opening note…');
     await expect(page.locator('.note-sheet')).toContainText('Still opening this note.', { timeout: 10_000 });
     await expect(page.locator('.note-sheet').getByRole('button', { name: 'Retry' })).toBeVisible();

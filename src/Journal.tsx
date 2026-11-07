@@ -7,8 +7,8 @@ import { forgetPublishOrigins } from "./PublishedPlayer";
 
 type Room = { id: string; name: string; dm?: boolean | null };
 type VaultConfig = { hub: string; vault: string };
-/** Post `note` to a room, addressed to its Uni; `toUni`: the room is #Uni, so Uni must be there. Resolves when accepted. */
-export type ShareFn = (note: JournalNote, roomId: string, toUni: boolean, vault: string, hub: string) => Promise<void>;
+/** Post `note`'s link to an area room, addressed to its Uni. Resolves when accepted. */
+export type ShareFn = (note: JournalNote, roomId: string, vault: string, hub: string) => Promise<void>;
 
 const PAGE = 30;
 
@@ -238,18 +238,18 @@ export default function Journal({ rooms, uniRoomId, onShare, onRecordingChange, 
     catch (e) { setError(`Microphone unavailable: ${e}`); }
   }
 
-  async function share(note: JournalNote, roomId: string, toUni: boolean) {
+  async function share(note: JournalNote, roomId: string) {
     const key = `${note.id} ${roomId}`;
     if (!cfg || inFlight.current.has(key)) return;
     inFlight.current.add(key);
     setShareFor(null);
     setSending((s) => ({ ...s, [key]: true }));
-    setStatus(toUni ? "Passing to Uni…" : "Sending…");
+    setStatus("Sending…");
     try {
-      await onShare(note, roomId, toUni, cfg.vault, cfg.hub);
-      const name = toUni ? "Uni" : rooms.find((r) => r.id === roomId)?.name ?? "room";
+      await onShare(note, roomId, cfg.vault, cfg.hub);
+      const name = rooms.find((r) => r.id === roomId)?.name ?? "room";
       setShared((s) => ({ ...s, [note.id]: [...(s[note.id] ?? []).filter((x) => x.id !== roomId), { id: roomId, name }] }));
-      setStatus(toUni ? "Passed to Uni in #Uni" : `Sent to #${name}`);
+      setStatus(`Sent to #${name}`);
     } catch (e) { setError(String(e)); setStatus("Not sent"); }
     finally { inFlight.current.delete(key); setSending((s) => { const { [key]: _, ...rest } = s; return rest; }); }
   }
@@ -258,7 +258,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onRecordingChange, 
   const areaChip = (e: JournalNote, r: Room, after?: () => void) => {
     const sent = sentTo(e.id, r.id);
     return <button key={r.id} type="button" className={sent ? "sent" : undefined} disabled={sent || !!sending[`${e.id} ${r.id}`]}
-      aria-label={sent ? `#${r.name}, sent` : `Send to #${r.name}`} onClick={() => { after?.(); void share(e, r.id, false); }}>{sent ? "✓ " : ""}#{r.name}</button>;
+      aria-label={sent ? `#${r.name}, sent` : `Send to #${r.name}`} onClick={() => { after?.(); void share(e, r.id); }}>{sent ? "✓ " : ""}#{r.name}</button>;
   };
 
   const queuedOnly = queued.filter((q) => !q.note_id || !entries.some((e) => e.id === q.note_id));
@@ -303,15 +303,14 @@ export default function Journal({ rooms, uniRoomId, onShare, onRecordingChange, 
           {areas.map((r) => areaChip(e, r))}
           <button type="button" className="journal-offer-close" onClick={() => setOffer(null)}>{shared[e.id]?.some((x) => x.id !== uniRoomId) ? "Done" : "Not now"}</button>
         </div>}
-        {/* r21 (Codex 6): no action strip repeated under every entry: one menu per entry, as in the chat ("⋯", then Pass to Uni, Share to a room) */}
+        {/* r21: no action strip repeated under every entry: one menu per entry, as in the chat ("⋯", then Share to a room) */}
         {!e.pending && <div className={`message-more journal-more ${menuFor === e.id ? "open" : ""}`}>
           <button type="button" className="message-more-go" aria-label="More for this entry" aria-expanded={menuFor === e.id} onClick={() => { setMenuFor(menuFor === e.id ? null : e.id); setShareFor(null); }}>⋯</button>
           {menuFor === e.id && <div className="message-menu" role="group" aria-label="Entry actions">
-            <button type="button" onClick={() => { setMenuFor(null); if (uniRoomId) void share(e, uniRoomId, true); }} disabled={!uniRoomId}>Pass to Uni</button>
             <button type="button" aria-expanded={shareFor === e.id} onClick={() => setShareFor(shareFor === e.id ? null : e.id)}>Share to a room…</button>
             {shareFor === e.id && <div className="share-picker" role="group" aria-label="Choose a room">
               {areas.map((r) => areaChip(e, r, () => setMenuFor(null)))}
-              {areas.length === 0 && <span className="empty">{cfg?.hub ? "No area rooms cached. Refresh conversations first." : "Set the Parachute hub in Journal settings to send a link."}</span>}
+              {areas.length === 0 && <span className="empty">{cfg?.hub ? "No area rooms cached. Refresh conversations first." : "Set the Parachute hub in Settings (Developer) to send a link."}</span>}
             </div>}
           </div>}
         </div>}

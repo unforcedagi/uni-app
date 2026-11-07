@@ -99,13 +99,14 @@ function ChatWait({ placeholder, retry }: { placeholder: string; retry: (() => v
 const viaMemory: { path: string | null; via: string | null } = { path: null, via: null };
 
 /**
- * T-335 one surface. With rooms: Uni's home (the places, what needs you, the composer that routes) and All, with a room in focus over it. Every
+ * T-335 one surface (0.2: one home). With rooms: the home is All (the stream, the composer that routes, and the drawer: what needs you,
+ * To post, the places), with a room in focus over it. Every
  * room is shown in that focus and nowhere else; its details (what needs you, its summary, its projects and sessions, all of its work, its app)
  * are a step inside it. Without rooms (a vault whose profile has no chat): the tree of its places, and each place's work.
  */
 export default function AreasSurface({ allPlace = null, identity, path, rooms: hostRooms, roomsPending = false, actions, roomFor, onOpenArea, onBackChange, onOverlayChange }: {
   /** T-335: this surface is the All place: every area's room at once, the room in focus over it, and the way back to Uni. */
-  allPlace?: { backTo: string; from?: { path?: string; channel?: string } | null; onBack: () => void; /** 0.2: For you, opened from the home's drawer */ forYou?: { fresh: boolean; open: () => void } | null;
+  allPlace?: { backTo: string; from?: { path?: string; channel?: string } | null; onBack: () => void;
     /** The room in focus over All, and how to put one there (at a message, in a thread, for a place); how it ends; its steps. */
     focus: AllFocusState | null; onFocus: (room: string, ref?: string | null, root?: string | null, place?: { path?: string | null; view?: FocusView }) => void;
     /** Ends the focus (a tap on All behind it). */ onUnfocus: () => void; /** One step back inside the focus, the last one to All. */ onFocusBack: () => void;
@@ -260,7 +261,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     if (p && focus?.room && p.room !== focus.room) pendingSheet.current = null;
     setSheetId(p && p.room === focus?.room ? p.id : null); setProjectOpen(null); setAppOpen(false);
   }, [node?.path, focus?.room]); // eslint-disable-line react-hooks/exhaustive-deps
-  /** Who stewards a node: its own room, else the nearest ancestor's (an archived room's `room_fallback` stands in), else #Uni. */
+  /** Who stewards a node: its own room, else the nearest ancestor's (an archived room's `room_fallback` stands in), else #Uni if the account
+   *  still has one (archived 10-26: on the live relay, no room). An ask's own `room` comes first (`roomOfAsk`). */
   const stewardOf = (p: string): Steward => {
     const v = data ? roomView(data.tree, p, roomRefs, uniRef) : { target: uniRef, own: false, heldBy: uniRef };
     return { room: v.target, via: v.own ? "own" : v.heldBy && v.heldBy.id !== uniRef?.id ? "inherited" : "uni", from: null };
@@ -469,7 +471,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
       <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={(p) => openPlace(p)} onOpenNeed={(p) => openPlace(p, "details")} onOpenAsk={openAsk} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
         otherRooms={others} noAreas={!!data && !error && !doorAreas.length ? (uniRef ? () => actions.openRoom(uniRef.id) : null) : undefined}
         toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} onOpenProject={setProjectOpen}
-        pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.length > 0 ? approvalRows : null} forYou={allPlace?.forYou ?? null} />
+        pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.length > 0 ? approvalRows : null} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>;
     // the home's Unfiled sessions open in place over it
     if (!allPlace) return <div className="areas-home tree-home-wrap">{home}{sheetView}{projectSheet}</div>;

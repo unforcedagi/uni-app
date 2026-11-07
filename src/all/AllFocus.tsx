@@ -1,5 +1,5 @@
 // T-335 one fluid surface: a room in focus, in All. Not a place you go to: the room's real conversation and composer come up over the feed, which
-// recedes behind it and keeps its place. One tap on what shows of All, the Back button, Android Back, Escape, the rail's All or a swipe down on the
+// recedes behind it and keeps its place. One tap on what shows of All, the Back button, Android Back, Escape, the rail's Uni or a swipe down on the
 // head returns. On a calm screen nothing moves: the room is in full black inside a black edge, All behind it is pale.
 // T-335 one surface: this is the only way a room is shown. Its head is the room's name and at most one labelled line; a tap on it opens the room's
 // details in the same sheet (what needs you, its summary, its projects and sessions, all of its work, its app), never another screen.

@@ -1,7 +1,7 @@
 // Tabs (pure, unit-tested). Places (Uni, All, the Journal, Mail…) and vault notes open
 // as tabs; the set and the active tab persist in localStorage per device. The App renders
 // them; this module only decides. T-335 one surface: a room is never a tab of its own. It is
-// in focus over All, and the All tab carries which (`channel`, and `root` for a thread).
+// in focus over All, and the home (kind `all`) carries which (`channel`, and `root` for a thread).
 
 import type { VaultRef } from "./vaultlinks.ts";
 

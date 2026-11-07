@@ -1,6 +1,6 @@
 /* Uni 0.2: one home, one calm language. Last in the bundle, so it is the final word over the glow-up and the finishing pass.
    The one home: the day's sentence is the head (oversized, the way the old home said it), and a tap on it pulls down everything the old
-   home held: what needs you, For you, To post, the places. The rooms' stream stays under it, where it was. */
+   home held: what needs you, To post, the places. The rooms' stream stays under it, where it was. */
 
 /* times and hints read in greyscale (4.5:1 on the ground once the Daylight takes the colour out) */
 :root:root { --g-ink-3: #6b6358; }
@@ -19,7 +19,6 @@
 .fd-pull-row .ps-chev { flex: none; width: 9px; height: 9px; margin: 0 4px 4px 0; border-right: 1.5px solid var(--g-ink-2); border-bottom: 1.5px solid var(--g-ink-2); transform: rotate(45deg); transition: transform var(--g-t-state) var(--g-ease); }
 .fd-pull[aria-expanded="true"] .ps-chev { transform: rotate(225deg); margin-bottom: -4px; }
 @media (hover: hover) { .fd-pull:not(:disabled):hover .fd-weave path { stroke: var(--g-ink-2); } }
-.fd-pull-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--g-accent); }
 /* the stream and, pulled down over it, the drawer: the stream keeps its place underneath */
 .fd-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .fd-drawer { position: absolute; inset: 0; z-index: 4; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(-1 * clamp(20px, 5vw, 64px)); padding: 6px clamp(20px, 5vw, 64px) 32px; background: var(--g-ground); border-top: var(--g-hair) solid var(--g-line); }
@@ -31,11 +30,6 @@
 .fd-needs-shown .fd-needs-list { margin-top: 0; }
 .fd-needs-shown .fd-sec-h::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--g-needs); vertical-align: 1px; }
 .fd-lines { margin-top: 18px; border-top: var(--g-hair) solid var(--g-line); }
-.fd-line { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 0; border-bottom: var(--g-hair) solid var(--g-line); }
-.fd-line > span:first-child { font: 520 18px/1.2 var(--g-font-display); color: var(--g-ink); }
-.fd-line small { font: 400 13px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
-.fd-line-go { margin-left: auto; font: 400 18px/1 var(--g-font-ui); color: var(--g-ink-2); }
-.fd-line:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .fd-drawer .fd-topost { margin: 0; }
 .fd-drawer .fd-topost .tp-line { min-height: 48px; border-bottom: var(--g-hair) solid var(--g-line); }
 .fd-drawer .fd-doors { margin-top: 0; }
@@ -48,7 +42,7 @@
   .fd-drawer { margin: 0 -20px; padding: 4px 20px 28px; }
 }
 :root[data-screen="ink"] .fd-pull-row .ps-chev { border-color: #000; }
-:root[data-screen="ink"] .fd-pull-dot, :root[data-screen="ink"] .fd-needs-shown .fd-sec-h::before { background: #000; }
+:root[data-screen="ink"] .fd-needs-shown .fd-sec-h::before { background: #000; }
 :root[data-screen="ink"] .fd-drawer { border-top: 1.5px solid #000; }
 
 /* ── the rail: a tablet (the Daylight) gets the phone's few places and More too; the rest open in a sheet beside the rail ── */

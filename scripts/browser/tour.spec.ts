@@ -889,7 +889,7 @@ test('121-approval-prompt-card-in-room', async ({ page }) => {
   await snap(page, '121-approval-prompt-card-in-room');
 });
 
-// ---------------------------------------------------------------------------------------------------------- thread, To post, For you, Journal, app, composer
+// ---------------------------------------------------------------------------------------------------------- thread, To post, Journal, app, composer
 test('130-thread-view', async ({ page }) => {
   await atlas(page, { thread: true });
   await focusSheet(page).locator('.sr-chat .thread-summary').first().click();
@@ -929,14 +929,6 @@ test('141-to-post-queue', async ({ page }) => {
   await page.getByRole('button', { name: 'To post · 3' }).click();
   await expect(page.getByRole('region', { name: 'To post' }).getByRole('heading', { name: 'To review · 3' })).toBeVisible();
   await snap(page, '141-to-post-queue');
-});
-
-test('142-for-you', async ({ page }) => {
-  await glow(page, {}, {}, { forYou: true });
-  await openPlaces(page);
-  await page.getByRole('button', { name: /^For you/ }).click();
-  await expect(page.getByText('Worth a look')).toBeVisible();
-  await snap(page, '142-for-you');
 });
 
 test('143-journal-empty', async ({ page }) => {

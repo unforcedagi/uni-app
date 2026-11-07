@@ -37,13 +37,16 @@ export default function LifeOsSurface({ vaults, identity, ...rest }: { vaults: s
   // open, as the way back; otherwise it lives in Settings → Life OS vault.
   const picker = choices.length > 1 && chosen !== UNI_VAULT ? <label className="lifeos-vault"><span>Areas and projects vault</span>
     <select value={chosen} onChange={(e) => pick(e.target.value)}>{choices.map((v) => <option key={v} value={v}>{v}</option>)}</select></label> : null;
-  // r15: the ways on, said as actions: ask Uni (its room's composer, filled in, never sent), look again, or go back to Uni's own vault
+  // r15: the ways on, said as actions: ask Uni (the old #Uni's composer where an account still has it, filled in, never sent; else in words),
+  // look again, or go back to Uni's own vault
   const uniRoom = rest.rooms.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rest.rooms)?.id ?? null;
   if (ready && !ready.hasPack) return <div className="areas-home lifeos-nopack">{picker}
     <h1>“{chosen}” isn't set up for Uni yet</h1>
     <p className="empty">It has no areas or projects for Uni to show yet.</p>
     <p className="sr-missing-go">
       {uniRoom && <button type="button" className="task-do primary" onClick={() => rest.actions.compose(uniRoom, `@Uni Please set up the "${chosen}" vault so it has areas and projects to show.`)}>Ask Uni to set it up ›</button>}
+      {/* 0.2.2: #Uni is archived, so there is usually no Uni room to ask in: any room's Uni can set it up, and no room is picked for you */}
+      {!uniRoom && <span className="lifeos-ask">Ask Uni in any of your rooms to set it up.</span>}
       <button type="button" className="task-do" onClick={() => { setFound(null); setTries((n) => n + 1); }}>Retry</button>
       {choices.includes(UNI_VAULT) && <button type="button" className="task-do" onClick={() => pick(UNI_VAULT)}>Back to Uni's vault</button>}
     </p>

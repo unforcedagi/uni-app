@@ -110,15 +110,15 @@ export function mailProblem(e: unknown): MailProblem {
     case "unreachable":
       return { kind: err.kind, title: "Mail isn't reachable right now.", help: "The mail bridge runs on the hub's host and answers on the tailnet only. Check that this device is on the tailnet, then retry.", detail: err.message, pubkey: null, retry: true };
     case "not_allowed":
-      return { kind: err.kind, title: "This device isn't allowed to read mail yet.", help: "The mail bridge only answers keys on its allowlist. Ask in #mail to add this device's key:", detail: err.message, pubkey: err.pubkey, retry: true };
+      return { kind: err.kind, title: "This device isn't allowed to read mail yet.", help: "The mail bridge only answers keys on its allowlist. Ask in #systems to add this device's key:", detail: err.message, pubkey: err.pubkey, retry: true };
     case "server":
       return { kind: err.kind, title: "The mail server didn't answer.", help: "The bridge is up but the mail server behind it failed. Retry in a minute.", detail: err.message, pubkey: null, retry: true };
     case "refused":
       // the bridge 404s only an unknown path; a 404 here means something else answers at the bridge's address
-      if (err.status === 404) return { kind: err.kind, title: "The mail bridge isn't at its address.", help: "Something else answers on the bridge's tailnet port, so it may have moved. Report it in #mail.", detail: `${err.status}: ${err.message}`, pubkey: null, retry: true };
-      return { kind: err.kind, title: "The mail bridge refused this request.", help: err.status === 401 ? "Its signature check failed. If this keeps happening, check this device's clock." : "Retry; if it keeps happening, report it in #mail.", detail: `${err.status}: ${err.message}`, pubkey: null, retry: true };
+      if (err.status === 404) return { kind: err.kind, title: "The mail bridge isn't at its address.", help: "Something else answers on the bridge's tailnet port, so it may have moved. Report it in #systems.", detail: `${err.status}: ${err.message}`, pubkey: null, retry: true };
+      return { kind: err.kind, title: "The mail bridge refused this request.", help: err.status === 401 ? "Its signature check failed. If this keeps happening, check this device's clock." : "Retry; if it keeps happening, report it in #systems.", detail: `${err.status}: ${err.message}`, pubkey: null, retry: true };
     case "invalid":
-      return { kind: err.kind, title: "Couldn't read mail.", help: "Retry; if it keeps happening, report it in #mail.", detail: err.message, pubkey: null, retry: true };
+      return { kind: err.kind, title: "Couldn't read mail.", help: "Retry; if it keeps happening, report it in #systems.", detail: err.message, pubkey: null, retry: true };
   }
 }
 
@@ -411,7 +411,7 @@ export function fileKind(name: string, mime: string): string {
   return type === "application/pdf" ? "PDF" : type.startsWith("image/") ? "Image" : type.startsWith("text/") ? "Text" : "File";
 }
 
-/** What deciding a held send did. `sent` and `declined` are final; `failed` says why and to ask #mail. */
+/** What deciding a held send did. `sent` and `declined` are final; `failed` says why and to ask #systems. */
 export type HeldOutcome = { kind: "sent" | "declined" | "failed"; text: string };
 
 export function approveOutcome(out: SendOutcome, uniAddress: string): HeldOutcome {
@@ -421,17 +421,17 @@ export function approveOutcome(out: SendOutcome, uniAddress: string): HeldOutcom
     case "declined":
       return { kind: "declined", text: "Declined earlier. Nothing was sent." };
     case "unknown": case "submitting": case "reserved": case "drafting":
-      return { kind: "failed", text: "Couldn't confirm it was sent: ask #mail. It won't be sent twice." };
+      return { kind: "failed", text: "Couldn't confirm it was sent: ask #systems. It won't be sent twice." };
     case "awaiting-approval":
-      return { kind: "failed", text: "Not sent: it is still waiting. Ask #mail." };
+      return { kind: "failed", text: "Not sent: it is still waiting. Ask #systems." };
     default:
-      return { kind: "failed", text: `Couldn't send: ${out.reason ?? "the bridge refused it"}. Ask #mail.` };
+      return { kind: "failed", text: `Couldn't send: ${out.reason ?? "the bridge refused it"}. Ask #systems.` };
   }
 }
 
 export function declineOutcome(out: SendOutcome): HeldOutcome {
   return out.state === "declined" ? { kind: "declined", text: "Declined. Nothing was sent from Uni's address." }
-    : { kind: "failed", text: `Couldn't decline it: it is ${out.state}. Ask #mail.` };
+    : { kind: "failed", text: `Couldn't decline it: it is ${out.state}. Ask #systems.` };
 }
 
 /** A call that failed: what the screen says. A 409 is the bridge's own sentence (the draft changed, already decided). */
@@ -440,5 +440,5 @@ export function heldFailure(e: unknown, approving: boolean): HeldOutcome {
   // a 404 or 409 here is the bridge's own sentence about this send (no such send, already decided, changed)
   const said = p.kind === "refused" && /^40[49]:/.test(p.detail) ? p.detail.replace(/^40[49]:\s*/, "") : p.title.replace(/\.$/, "");
   const why = said.charAt(0).toLowerCase() + said.slice(1);
-  return { kind: "failed", text: `${approving ? "Couldn't send" : "Couldn't decline it"}: ${why}. Ask #mail.` };
+  return { kind: "failed", text: `${approving ? "Couldn't send" : "Couldn't decline it"}: ${why}. Ask #systems.` };
 }

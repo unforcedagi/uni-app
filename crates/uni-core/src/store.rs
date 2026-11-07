@@ -1023,7 +1023,7 @@ impl Store {
         Ok(rows)
     }
 
-    /// Joined channels, sorted with Uni first and the most active rooms next.
+    /// Joined channels, the most active first (0.2.2: no room is pinned first; #Uni was archived 10-26).
     /// No unread counts (see [`Store::rooms_for`]).
     pub fn rooms(&self) -> Result<Vec<Room>> {
         self.rooms_for(None)
@@ -1046,8 +1046,7 @@ impl Store {
                 c.dm
              FROM channels c LEFT JOIN read_state rs ON rs.channel=c.id
              WHERE archived=0
-             ORDER BY CASE WHEN lower(c.name)='uni' THEN 0 ELSE 1 END,
-                      (SELECT MAX(ts) FROM visible_items WHERE source='buzz' AND channel=c.id) DESC,c.id",
+             ORDER BY (SELECT MAX(ts) FROM visible_items WHERE source='buzz' AND channel=c.id) DESC,c.id",
         )?;
         let rows = stmt
             .query_map(params![me], |r| {
@@ -1890,6 +1889,18 @@ mod tests {
             .map(|t| t.message.item.r#ref)
             .collect();
         assert_eq!(refs, vec!["r1"]);
+    }
+
+    #[test]
+    fn rooms_sort_by_activity_with_no_room_pinned_first() {
+        // #Uni was archived 10-26: a room named Uni is a room like any other, not the head of the list
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_channel("c1", Some("Uni"), None, false, 1).unwrap();
+        s.upsert_channel("c2", Some("garden"), None, false, 1).unwrap();
+        s.upsert_item(&item("a", "c1", 10)).unwrap();
+        s.upsert_item(&item("b", "c2", 20)).unwrap();
+        let ids: Vec<_> = s.rooms().unwrap().into_iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec!["c2", "c1"]);
     }
 
     #[test]

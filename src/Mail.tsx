@@ -207,7 +207,7 @@ function heldTo(p: Parked): string {
 function HeldRow({ e, selected, onOpen }: { e: HeldEntry; selected: boolean; onOpen: () => void }) {
   const p = e.item;
   const state = e.outcome && e.outcome.kind !== "failed" ? e.outcome.kind : waiting(e) ? "waiting" : "failed";
-  const tag = state === "sent" ? "Sent" : state === "declined" ? "Not sent" : state === "failed" ? "Ask #mail" : "Waiting";
+  const tag = state === "sent" ? "Sent" : state === "declined" ? "Not sent" : state === "failed" ? "Ask #systems" : "Waiting";
   const files = p.files?.length ?? 0;
   return <li><button type="button" className={`mail-row mail-held-row held-${state} ${selected ? "selected" : ""}`} aria-current={selected ? "true" : undefined} onClick={onOpen}
     aria-label={`${tag === "Waiting" ? "Waiting for you" : tag}. From Uni's address to ${heldTo(p)}: ${subjectLabel(p.fields?.subject ?? "")}${files ? `, with ${filesWord(files)}` : ""}`}>
@@ -253,7 +253,7 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
       <h2 className="mail-subject">{subjectLabel(f?.subject ?? "")}</h2>
       <p className="mail-triage mail-held-why" role="note"><span className="eyebrow">Why it waits</span><span>{p.reason ?? "Uni's outbound rules want your approval."}</span></p>
       {p.changed && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">Changed</span><span>This draft changed after Uni's rules held it, so the bridge won't send it. Don't send it, and ask Uni to send it again.</span></p>}
-      {p.problem && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">Can't show it</span><span>{p.problem}. Nothing can be sent from here; ask #mail.</span></p>}
+      {p.problem && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">Can't show it</span><span>{p.problem}. Nothing can be sent from here; ask #systems.</span></p>}
       {f && !p.problem && !heldShownWhole(p) && <p className="mail-draft-note" role="note"><span>It may have formatting or attachments this app can't show in full, so only Don't send is offered here.</span></p>}
       {f && <article className="mail-card mail-card-draft" aria-label="What it sends">
         <dl className="mail-headers">
@@ -682,7 +682,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
             <span className="mail-held-tag">Waiting</span> {waitingAll === 1 ? "A send from Uni's address waits for you" : `${waitingAll} sends from Uni's address wait for you`} · Review</button>}
           {waitingScope ? <div className="mail-scroll">
             {heldProblem && <Problem p={heldProblem} onRetry={() => overview && void loadHeld(overview)} />}
-            {waitingAcct && !can(waitingAcct, "send.parked") && <p className="mail-note mail-held-unlisted" role="note">This mail bridge can't list Uni's held sends yet. Each one is also a task for you; ask #mail.</p>}
+            {waitingAcct && !can(waitingAcct, "send.parked") && <p className="mail-note mail-held-unlisted" role="note">This mail bridge can't list Uni's held sends yet. Each one is also a task for you; ask #systems.</p>}
             {heldShown.length === 0 && !heldProblem && waitingAcct && can(waitingAcct, "send.parked") && <p className="empty mail-empty">{heldLoading ? "Loading…" : "Nothing is waiting for you."}</p>}
             {heldShown.length > 0 && <ul className="mail-rows" aria-label="Held sends">{heldShown.map((e) => <HeldRow key={e.item.op_id} e={e} selected={openHeld === e.item.op_id}
               onOpen={() => { if (compose && !compose.hidden) setCompose({ ...compose, hidden: true }); threadSeq.current++; setOpen(null); setThread(null); setOpenHeld(e.item.op_id); setPane("thread"); }} />)}</ul>}

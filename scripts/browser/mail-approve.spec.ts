@@ -106,7 +106,7 @@ test('a decision still on its way when you leave Mail shows its outcome in the M
   await rail.getByRole('button', { name: 'Journal', exact: true }).click();
   await rail.getByRole('button', { name: 'Mail', exact: true }).click();
   if (await back.count()) await back.first().click();
-  await expect(heldRows(page).filter({ hasText: QUOTE })).toContainText("Couldn't send: the mail server didn't answer. Ask #mail.", { timeout: 8000 });
+  await expect(heldRows(page).filter({ hasText: QUOTE })).toContainText("Couldn't send: the mail server didn't answer. Ask #systems.", { timeout: 8000 });
   await expect(badge(page)).toHaveText('1');
 });
 
@@ -139,13 +139,13 @@ test('a held draft that changed after you saw it is refused and never sent; one 
   await page.evaluate(() => { (window as any).__msgs.find((m: any) => m.id === 'h1').text += '\nP.S. Bring the account number.'; });
   await h.getByRole('button', { name: /^Send it/ }).click();
   await h.getByRole('button', { name: "Yes, send from Uni's address" }).click();
-  await expect(h.getByRole('status')).toHaveText("Couldn't send: the draft changed since it was reviewed. Ask #mail.");
+  await expect(h.getByRole('status')).toHaveText("Couldn't send: the draft changed since it was reviewed. Ask #systems.");
   expect((await calls(page, 'mail_send_approve'))[0].fingerprint).toBe(shown);
   expect(await submissions(page)).toEqual([]);
   await shot(page, 'a6-changed-refused');
   // the refused send has left the bridge's list; what happened stays on it
   await mail(page).getByRole('button', { name: 'Refresh' }).click();
-  await expect(heldRows(page).filter({ hasText: BARN })).toContainText('Ask #mail');
+  await expect(heldRows(page).filter({ hasText: BARN })).toContainText('Ask #systems');
   await expect(badge(page)).toHaveText('1');
   // another held draft changes before you open it: the bridge lists it as changed, with what it says now, and only
   // Don't send is offered
@@ -159,13 +159,13 @@ test('a held draft that changed after you saw it is refused and never sent; one 
   expect(await calls(page, 'mail_send_approve')).toHaveLength(1);
 });
 
-test('a send that fails says to ask #mail and can be tried again, and is sent once', async ({ page }) => {
+test('a send that fails says to ask #systems and can be tried again, and is sent once', async ({ page }) => {
   await boot(page, 'ok', { writes: true, held: true });
   const h = await openHeld(page, BARN);
   await page.evaluate(() => { (window as any).__decideFails = 1; });
   await h.getByRole('button', { name: /^Send it/ }).click();
   await h.getByRole('button', { name: "Yes, send from Uni's address" }).click();
-  await expect(h.getByRole('status')).toHaveText("Couldn't send: the mail server didn't answer. Ask #mail.");
+  await expect(h.getByRole('status')).toHaveText("Couldn't send: the mail server didn't answer. Ask #systems.");
   await expect(badge(page)).toHaveText('2');
   await h.getByRole('button', { name: /^Send it/ }).click();
   await h.getByRole('button', { name: "Yes, send from Uni's address" }).click();

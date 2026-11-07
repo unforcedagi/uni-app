@@ -1,5 +1,6 @@
 // Who stewards a node, and so where a note dropped on it goes (pure, unit-tested in scripts/tasks.test.ts). Rule: a node's own room,
-// else the nearest ancestor's, up to #Uni. A node names its room two ways: `channel` (room ids, which survive a rename) and `room`
+// else the nearest ancestor's, up to #Uni where an account still has one (#Uni was archived 10-26: on the live relay there is none, so
+// the chain ends with no room, and nothing is said anywhere for it). A node names its room two ways: `channel` (room ids, which survive a rename) and `room`
 // (a Buzz channel name, the T-84 field); an id that matches a known room wins, the name is the fallback.
 export type RoomRef = { id: string; name: string };
 export type RoomNode = { path: string; name?: string; room: string | null; channels: readonly string[] };
@@ -28,7 +29,7 @@ export function askRoom(t: { room?: string | null; node: string }, rooms: readon
   return own ?? nodeRoom(t.node);
 }
 
-/** `own`: the node's room; `inherited`: an ancestor's (`from` is that ancestor); `uni`: nothing on the way, so #Uni. */
+/** `own`: the node's room; `inherited`: an ancestor's (`from` is that ancestor); `uni`: nothing on the way, so #Uni (null when there is none). */
 export type Steward = { room: RoomRef | null; via: "own" | "inherited" | "uni"; from: RoomNode | null };
 
 /** `chain` runs from the node up to the top level. A named room that does not exist is skipped, not an error. */

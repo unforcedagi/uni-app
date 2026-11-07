@@ -140,24 +140,20 @@ test('dismissing posts nothing, and the next save brings the offer back for the 
   expect(await posts(page)).toEqual([]);
 });
 
-test('the entry menu offers the same area rooms, and Pass to Uni still goes to #Uni', async ({ page }) => {
+test('the entry menu offers the same area rooms, and no Pass to Uni (#Uni is archived)', async ({ page }) => {
   await boot(page);
   const entry = await save(page, 'Notes on the compost temperature.');
   await entry.getByRole('button', { name: 'Not now' }).click();
   await entry.getByRole('button', { name: 'More for this entry' }).click();
+  // 0.2.2: no room for everything: an entry goes to the area rooms only
+  await expect(entry.getByRole('button', { name: 'Pass to Uni' })).toHaveCount(0);
   await entry.getByRole('button', { name: 'Share to a room…' }).click();
   const picker = entry.getByRole('group', { name: 'Choose a room' });
   await expect(picker.getByRole('button')).toHaveText(['#garden', '#library', '#workshop']);
   await picker.getByRole('button', { name: 'Send to #workshop' }).click();
   await expect(entry.locator('.queued-tag')).toHaveText('shared · workshop');
-
-  await entry.getByRole('button', { name: 'More for this entry' }).click();
-  await entry.getByRole('button', { name: 'Pass to Uni' }).click();
-  await expect(entry.locator('.queued-tag')).toHaveText('shared · workshop, Uni');
   const sent = await posts(page);
-  expect(sent.map((p) => p.channel)).toEqual(['workshop-room', 'uni-room']);
-  expect(sent[1].recipients).toEqual([UNI]);
-  expect(sent[1].body.startsWith("@Uni here's a journal entry.")).toBe(true);
+  expect(sent.map((p) => p.channel)).toEqual(['workshop-room']);
 });
 
 test('with no hub set there is no link, so no room is offered and the entry\'s words are never posted', async ({ page }) => {

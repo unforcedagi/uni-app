@@ -22,7 +22,6 @@ export const TARGETS: Record<string, { phone: number; daylight: number; desktop:
   'note': { phone: 11, daylight: 11, desktop: 15 }, // 0.1.103 14 / 19 / 19 → 0.2 10 / 10 / 14
   'search': { phone: 8, daylight: 9, desktop: 4 }, // 0.1.103 9 / 14 / 4 → 0.2 8 / 8 / 4
   'settings': { phone: 11, daylight: 12, desktop: 16 }, // 0.1.103 12 / 17 / 17 → 0.2 11 / 11 / 15
-  'for-you': { phone: 6, daylight: 7, desktop: 11 }, // 0.1.103 7 / 12 / 12 → 0.2 6 / 6 / 10
   'arcade': { phone: 8, daylight: 12, desktop: 17 }, // 0.1.103 9 / 18 / 18 → 0.2 8 / 11 / 16
   'more': { phone: 10, daylight: 10, desktop: 10 }, // 0.1.103 11 / - / - → 0.2 9 / - / -
 };

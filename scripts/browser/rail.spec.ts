@@ -12,8 +12,8 @@ test.beforeEach(async ({ page }) => {
   });
   await bootRail(page);
 });
-/** 0.2: For you is no longer on the rail or in More; it is a line in the home's drawer (its dot says something new). */
-const homeForYou = (page: import('@playwright/test').Page) => page.locator('#fd-drawer .fd-foryou');
+/** 0.2.2: For you (the retired Aaron/For you note) is gone: not on the rail, in More, or in the home's drawer. */
+const drawer = (page: import('@playwright/test').Page) => page.locator('#fd-drawer');
 async function toHomeDrawer(page: import('@playwright/test').Page) {
   // Uni's own room in focus is Uni already (the rail's Uni leaves it be): its Back steps out to the home
   // (the home comes back with the room it had in focus, as All did: step out of it)
@@ -24,7 +24,7 @@ async function toHomeDrawer(page: import('@playwright/test').Page) {
   if (await focus.isVisible()) { await focus.getByRole('button', { name: 'Back to Uni' }).first().click(); await expect(focus).toHaveCount(0); }
   const pull = page.locator('[data-place="front-door"] .fd-pull');
   if ((await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
-  await expect(homeForYou(page)).toBeVisible();
+  await expect(drawer(page)).toBeVisible();
 }
 
 test('a saved Uni room opens as Uni\'s room at every width; on a phone it is the place shown (r12: no rooms sidebar beside it)', async ({ page }) => {
@@ -88,24 +88,14 @@ test('Rail surfaces, overlay panels, focus; a room no area holds is on Uni\'s ho
   await expect(page.getByRole('button', { name: 'Focus' })).toHaveAttribute('aria-pressed', 'false');
   await page.getByRole('button', { name: 'Focus' }).click();
   await page.getByRole('button', { name: 'Focus' }).click();
-  // 0.2: For you is on neither the rail nor More; the home's drawer has it, with a dot while something is new
+  // 0.2.2: For you is gone everywhere: not on the rail, in More or in the home's drawer, and the retired note is never read
   await openRailMore(page);
   await expect(rail.getByRole('button', { name: 'For you', exact: true })).toHaveCount(0);
   if (page.viewportSize()!.width < 1100) await rail.getByRole('button', { name: 'More', exact: true }).click(); // More closes again
-  const fy = homeForYou(page);
-  await toHomeDrawer(page);
-  await expect(fy.locator('.fd-pull-dot')).toBeVisible();
-  await fy.click();
-  await expect(page.locator('.note-title')).toHaveText('For you');
-  // r21 (Codex 5): a page to read, not a vault document: its note's tools only after "Open as a note"
-  for (const name of ['Edit', 'New note', 'Copy markdown']) await expect(page.locator('.note-bar').getByRole('button', { name, exact: true })).toHaveCount(0);
-  await expect(page.locator('.note-bar').getByRole('button', { name: 'Open as a note' })).toBeVisible();
-  // r24 (Codex 5): nor its metadata, tags, backlinks or Parachute footer
-  for (const sel of ['.note-meta-line', '.note-tags', '.note-backlinks', '.note-footer']) await expect(page.locator(sel), sel).toHaveCount(0);
-  await shot('for-you');
   {
     await toHomeDrawer(page);
-    await expect(fy.locator('.fd-pull-dot')).toHaveCount(0);
+    await expect(drawer(page).getByText('For you')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).forYouReads ?? 0)).toBe(0);
     // T-335: a room no node owns is under "Other rooms" on Uni's home, folded, and opens in focus over All
     const others = page.locator('details.fd-others');
     await others.locator('summary').click();
@@ -125,43 +115,8 @@ test('Rail surfaces, overlay panels, focus; a room no area holds is on Uni\'s ho
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
-    await page.evaluate(() => { (window as any).updated = '2026-10-02T12:00:00Z'; (window as any).content += '\n- A new suggestion'; document.dispatchEvent(new Event('visibilitychange')); });
-    await toHomeDrawer(page);
-    await expect(fy.locator('.fd-pull-dot')).toBeVisible();
+    expect(await page.evaluate(() => (window as any).forYouReads ?? 0)).toBe(0);
   }
-});
-
-test('Active For you renders the newer version before clearing its dot', async ({ page }, info) => {
-  const fy = homeForYou(page);
-  await toHomeDrawer(page);
-  await fy.click();
-  await expect(page.locator('.note-sheet li').filter({ hasText: 'Read something slowly' })).toBeVisible();
-  await page.evaluate(() => {
-    const w = window as any;
-    w.updated = '2026-10-02T12:00:00Z';
-    w.content += '\n- A new suggestion';
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
-  await toHomeDrawer(page);
-  await expect(fy.locator('.fd-pull-dot')).toBeVisible();
-  await page.evaluate(() => {
-    const w = window as any;
-    const invoke = w.__TAURI_INTERNALS__.invoke;
-    w.releaseNote = null;
-    w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => {
-      if (cmd === 'vault_note') await new Promise(resolve => { w.releaseNote = resolve; });
-      return invoke(cmd, args);
-    };
-  });
-  await fy.click();
-  // the newer version is still on its way: it is not yet counted as read (the dot is drawn from this)
-  await page.waitForFunction(() => !!(window as any).releaseNote);
-  expect(await page.evaluate(() => localStorage.getItem('uni.forYou.opened.v1'))).toBe('2026-10-01T12:00:00Z');
-  await page.evaluate(() => (window as any).releaseNote());
-  await expect(page.locator('.note-sheet li').filter({ hasText: 'A new suggestion' })).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem('uni.forYou.opened.v1'))).toBe('2026-10-02T12:00:00Z');
-  await toHomeDrawer(page);
-  await expect(fy.locator('.fd-pull-dot')).toHaveCount(0);
 });
 
 for (const size of [{ width: 844, height: 390 }, { width: 1092, height: 600 }]) {
@@ -185,28 +140,3 @@ for (const size of [{ width: 844, height: 390 }, { width: 1092, height: 600 }]) 
     if (size.height === 390) await page.screenshot({ path: '/home/uni/Code/uni-sketches/t21/built/landscape-short.png' });
   });
 }
-
-test('For you opened after an old tab set (a note was active) returns to the reading surface; the note itself is not reopened (r7)', async ({ page }) => {
-  await page.evaluate(() => {
-    localStorage.removeItem('uni.lastSurface.v1');
-    localStorage.removeItem('uni.tabs.v2');
-    localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [
-      { id: 'uni', kind: 'room', channel: 'uni-room', title: 'Uni' },
-      { id: 'stale', kind: 'note', title: 'ATLAS — Phase 02B', note: { hub: null, vault: 'uni', ref: 'stale-note' } },
-    ], active: 'stale', recent: ['uni', 'stale'] }));
-  });
-  await page.reload();
-  // 0.1.46: only places are restored, so the old set opens on its last place, not on the note
-  await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
-  // T-335: the room is in focus over All; For you's Back names it as its head does
-  const head = page.getByRole('region', { name: /in focus$/ }).locator('.all-focus-title');
-  const name = (await head.textContent())!;
-  expect(name).toMatch(/^#?Uni$/);
-  // 0.2: For you opens from the home's drawer, so its Back names the home, which is called Uni (not All), and goes there
-  await toHomeDrawer(page);
-  await homeForYou(page).click();
-  await expect(page.locator('.note-back-label')).toHaveText('Uni');
-  await page.locator('.note-back').click();
-  await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible();
-  await expect(page.locator('.note-title')).toHaveCount(0);
-});

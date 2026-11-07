@@ -45,9 +45,12 @@ pub const MEDIA_CACHE_BUDGET: u64 = 2 * 1024 * 1024 * 1024;
 pub const MAX_RANGE_CHUNK: u64 = 1024 * 1024;
 /// How long an upload token stays good. The relay checks it when the body has arrived, and allows a video an hour.
 const MEDIA_UPLOAD_AUTH_EXPIRY_SECS: u64 = 3600;
-/// Whole-transfer limit for video, inside that hour.
+/// Whole-transfer limit for an MP4 (video, and M4A audio: the relay takes both on its streamed path), inside that hour.
 const VIDEO_UPLOAD_TIMEOUT: Duration = Duration::from_secs(55 * 60);
-/// The relay gives anything but video ten minutes, checked after the last byte, however fast the start was.
+/// The relay's buffered path (images, files, WebM and Ogg audio) checks the upload token ten minutes after it was signed, after the
+/// last byte, however fast the start was. Audio may run 3 hours (11-06), but the length is not the size: 3 h of Opus at 32 kbit/s
+/// is about 43 MB, inside ten minutes on any link faster than about 0.6 Mbit/s; a longer or larger M4A goes on the hour's path above.
+/// A longer window for WebM/Ogg is the relay's to give (buzz-media upload.rs, the buffered path's 600 s).
 const OTHER_UPLOAD_TIMEOUT: Duration = Duration::from_secs(590);
 const UPLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const UPLOAD_ANSWER_BODY_LIMIT: Duration = Duration::from_secs(30);
@@ -362,7 +365,7 @@ fn relay_refusal(status: u16, body: &str) -> String {
 /// `out_of_time`: the attempt used its whole limit. A dead connection is a timeout too, and that's not the file's fault.
 fn unreachable_line(e: &reqwest::Error, relay_video: bool, out_of_time: bool) -> String {
     if e.is_timeout() && out_of_time && !relay_video {
-        "The upload timed out: Buzz allows ten minutes for anything but video, and this connection is too slow for this file.".into()
+        "The upload timed out: Buzz allows ten minutes for a file that isn't an MP4 or M4A, and this connection is too slow for this file.".into()
     } else if e.is_timeout() {
         "Can't reach Buzz: the upload timed out. Is Tailscale on? Retry when you're back online.".into()
     } else {

@@ -23,7 +23,7 @@ async function boot(page: Page, scenario: string) {
           case 'refresh': return { total_items: 0, channel_errors: {}, truncated_channels: [] };
           case 'open_link': w.openLinks.push(args.url); return null;
           case 'vault_note':
-            // For you refreshes independently of the note under test.
+            // (the retired For you note: 0.2.2 never reads it; kept so an older build's read is answered)
             if (args.noteRef === '01M3ZQF7EM4ADC7HEY36D3DC3B') return { vault: 'uni', note: { id: args.noteRef, content: '' } };
             w.noteCalls.push(args);
             if (scenario === 'denied') throw 'vault: unauthorized';

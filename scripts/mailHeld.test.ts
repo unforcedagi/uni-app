@@ -40,14 +40,14 @@ assert.equal(fileKind("sheet", "application/vnd.openxmlformats-officedocument.sp
 // what each answer says
 const out = (state: SendOutcome["state"], reason: string | null = null): SendOutcome => ({ op_id: "op-a", account_id: "U", draft_id: "h1", state, reason, submission_id: null, delivery: null, note: null });
 assert.deepEqual(approveOutcome(out("cleaned"), "uni@example.com"), { kind: "sent", text: "Sent from Uni's address (uni@example.com)." });
-assert.equal(approveOutcome(out("refused", "the draft changed since it was reviewed"), "u").text, "Couldn't send: the draft changed since it was reviewed. Ask #mail.");
-for (const s of ["unknown", "submitting", "reserved", "drafting"] as const) assert.match(approveOutcome(out(s), "u").text, /^Couldn't confirm it was sent: ask #mail/, s);
+assert.equal(approveOutcome(out("refused", "the draft changed since it was reviewed"), "u").text, "Couldn't send: the draft changed since it was reviewed. Ask #systems.");
+for (const s of ["unknown", "submitting", "reserved", "drafting"] as const) assert.match(approveOutcome(out(s), "u").text, /^Couldn't confirm it was sent: ask #systems/, s);
 assert.equal(approveOutcome(out("awaiting-approval"), "u").kind, "failed");
 assert.equal(declineOutcome(out("declined")).kind, "declined");
 assert.equal(declineOutcome(out("cleaned")).kind, "failed");
-assert.equal(heldFailure({ kind: "refused", status: 404, message: "no such send" }, true).text, "Couldn't send: no such send. Ask #mail.");
-assert.equal(heldFailure({ kind: "refused", status: 409, message: "that send was already declined" }, true).text, "Couldn't send: that send was already declined. Ask #mail.");
-assert.equal(heldFailure({ kind: "server", message: "URLError" }, false).text, "Couldn't decline it: the mail server didn't answer. Ask #mail.");
+assert.equal(heldFailure({ kind: "refused", status: 404, message: "no such send" }, true).text, "Couldn't send: no such send. Ask #systems.");
+assert.equal(heldFailure({ kind: "refused", status: 409, message: "that send was already declined" }, true).text, "Couldn't send: that send was already declined. Ask #systems.");
+assert.equal(heldFailure({ kind: "server", message: "URLError" }, false).text, "Couldn't decline it: the mail server didn't answer. Ask #systems.");
 assert.equal(settled("declined"), true, "a declined send is settled: it leaves the pending list");
 
 // the store: a listing never undoes what you decided here, and a decision on its way survives a listing without it

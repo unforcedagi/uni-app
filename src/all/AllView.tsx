@@ -3,7 +3,7 @@
 // person sees the route and can change it, and one tap sends to one room or several. Sending posts the message into each chosen room,
 // as the person, with that room's Uni addressed, so each room's own Uni session takes it. Nothing is posted anywhere else, and nothing
 // is posted on a guess: with no room chosen there is no Send.
-// T-335 All v2: All is a place on the rail, reachable from every room and back, never where the app opens. A tap or a swipe on a message
+// T-335 All v2 (0.2: All is the home, the rail's Uni, and where the app opens; a room opens in focus over it). A tap or a swipe on a message
 // replies in that room (or its thread) with no routing at all; the room's label is the way into the room. An unaddressed message gets the word
 // match at once and the small model's route if it answers in time (modelRoute.ts).
 // T-335 one fluid surface: a long message opens where it is, whole, with its markdown, media and links; a room's label puts that room in focus over

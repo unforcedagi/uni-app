@@ -10,7 +10,7 @@ export function quote(body: string, max = MAX_QUOTE): string {
   return text.split("\n").map((l) => (l ? `> ${l}` : ">")).join("\n");
 }
 
-/** The Uni room: named "Uni" (case-insensitive). */
+/** The old Uni room, named "Uni" (case-insensitive): archived 10-26, so on the live relay there is none. Kept for accounts that still have one. */
 export function findUniRoom<R extends { id: string; name: string }>(rooms: R[]): R | undefined {
   return rooms.find((r) => r.name.trim().toLowerCase() === "uni");
 }
@@ -25,8 +25,8 @@ const MAX_SEARCH_QUERY = 500;
 
 /**
  * "Ask Uni" for vault search: the fallback when the app can't reach the hub
- * directly. The query is handed to Uni in #Uni, which runs the Parachute
- * meaning search itself (see docs/ask-everything.md). Whitespace is collapsed to one line so the
+ * directly. The query is handed to the Uni of the room you were last in (0.2.2:
+ * #Uni is archived), which runs the Parachute meaning search itself (see docs/ask-everything.md). Whitespace is collapsed to one line so the
  * query can't smuggle extra paragraphs; long queries are truncated.
  */
 export function searchHandoffText(query: string, uniLabel: string): string {

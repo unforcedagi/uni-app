@@ -39,7 +39,7 @@ function moveFocus(e: React.KeyboardEvent<HTMLElement>) {
   items[e.key === "ArrowDown" ? Math.min(items.length - 1, at + 1) : at - 1]?.focus();
 }
 
-export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, initialQuery = "", initialVault = "", initialPathPrefix = "", onQuery, recent = [] }: {
+export default function Search({ onOpen, onOpenNote, onAskUni, askIn = null, onClose, vaults, initialQuery = "", initialVault = "", initialPathPrefix = "", onQuery, recent = [] }: {
   vaults: string[];
   /** T-335 glow-up: each change of the query, so Find can open on it again */
   onQuery?: (query: string) => void;
@@ -50,8 +50,9 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
   initialPathPrefix?: string;
   onOpen: (target: { channel: string; root: string | null; focus: string }) => void;
   onOpenNote: (hit: NoteHit) => void;
-  /** Hand a notes query to Uni in #Uni; resolves true once posted. */
+  /** Hand a notes query to the Uni of the room you were last in; resolves true once posted. */
   onAskUni: (query: string) => Promise<boolean>;
+  /** 0.2.2: that room's name (no #), or null: no room to ask in, so no button. */ askIn?: string | null;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"meaning" | "keyword">("meaning");
@@ -139,7 +140,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
       {!q && !recent.length && <p className="search-empty">Every room on this device, and your notes.</p>}
       {q && <>
         {/* one line when nothing is found anywhere, a section only for what has something to show */}
-        {state === "done" && noteState === "done" && msgFor === q && noteFor === q && hits.length === 0 && notes.length === 0 ? <div className="search-nothing"><p>Nothing here for “{q}”.</p><small>Only rooms already on this device are searched; older history may not be here yet.</small><button type="button" className="note-action" onClick={() => void ask()} disabled={asking || asked === q}>{asked === q ? "✓ Asked Uni" : asking ? "Asking…" : "Ask Uni to look"}</button></div>
+        {state === "done" && noteState === "done" && msgFor === q && noteFor === q && hits.length === 0 && notes.length === 0 ? <div className="search-nothing"><p>Nothing here for “{q}”.</p><small>Only rooms already on this device are searched; older history may not be here yet.</small>{askIn && <button type="button" className="note-action" onClick={() => void ask()} disabled={asking || asked === q}>{asked === q ? `✓ Asked Uni in #${askIn}` : asking ? "Asking…" : `Ask Uni in #${askIn} to look`}</button>}</div>
         : (state !== "done" || hits.length > 0) && <h2 className="search-section">Messages{state === "searching" ? " · searching…" : state === "done" ? ` · ${hits.length}${hits.length >= 60 ? "+" : ""}` : ""}</h2>}
         {/* r21 (Codex 7): a failed search says so in words, with Retry; the technical reason is a detail */}
         {state === "done" && msgFor === q && hits.length === 0 && noteState === "error" && <p className="search-none">No messages match “{q}”. Only rooms already on this device are searched.</p>}
@@ -167,7 +168,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
         {noteState === "error" && <div className="search-notes">
           <p role="alert">Couldn't reach your vault just now. <button type="button" className="cp-retry" onClick={() => setRetry((n) => n + 1)}>Retry</button></p>
           {noteError && <details className="note-error-more"><summary>Details</summary><p className="note-error-detail">{noteError}</p></details>}
-          <button className="send" onClick={() => void ask()} disabled={asking || asked === q}>{asked === q ? "✓ Asked Uni" : asking ? "Asking…" : "✦ Ask Uni to search my notes"}</button>
+          {askIn && <button className="send" onClick={() => void ask()} disabled={asking || asked === q}>{asked === q ? `✓ Asked Uni in #${askIn}` : asking ? "Asking…" : `✦ Ask Uni in #${askIn} to search my notes`}</button>}
         </div>}
       </>}
     </div>

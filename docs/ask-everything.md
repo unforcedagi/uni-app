@@ -91,7 +91,9 @@ Search uses the same door:
 - Access is exactly what your key has on the hub; revoke it by removing the
   pubkey's grant (`revoke_access`) or forgetting the identity on the device.
 - If the hub is unreachable (e.g. off the tailnet), the section shows the error
-  and offers the old **"✦ Ask Uni to search my notes"** handoff to #Uni.
+  and offers **"✦ Ask Uni in #room to search my notes"**: the query goes to the Uni of the room you
+  were last in, which answers there (0.2.2: #Uni is archived, so there is no room for everything). With no
+  room open yet, there is no button.
 
 ### Unified ranking (later)
 

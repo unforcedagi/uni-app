@@ -1,7 +1,6 @@
 import { mark } from "./startupTrace";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "./chatCache";
 import { keepSame } from "./keepSame";
-import { nodeOfRoom } from "./areas/roomLabels";
 import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
@@ -32,7 +31,7 @@ import { appendDraft } from "./areas/composeDraft";
 import { openDialog } from "./areas/focusTrap";
 import { ArcadeView } from "./arcade/ArcadeView.tsx";
 import { ArcadeIcon } from "./arcade/ArcadeIcon.tsx";
-import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
+import { readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { draftBox, type DraftBox } from "./draftBox";
 import { invoke } from "@tauri-apps/api/core";
@@ -366,33 +365,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** `nav`: the navigation panel where the rail is out of reach (short landscape screens): the surfaces, Vault, Search and the vaults. */
   const [panel, setPanel] = useState<"nav" | "vault" | "settings" | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
-  /** The rail is hidden on short windows up to 950px (one rule, r14): the room then shows its Places drawer. */
+  /** The rail is hidden on short windows up to 950px (one rule, r14): the home's drawer then carries the app's places. */
   const railHidden = useRailHidden();
   const [railMore, setRailMore] = useState(false);
   useEffect(() => { if (!railMore) return; const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRailMore(false); }; const width = window.innerWidth; const onSize = () => { if (window.innerWidth !== width) setRailMore(false); }; window.addEventListener("keydown", onKey); window.addEventListener("resize", onSize); return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("resize", onSize); }; }, [railMore]);
-  const forYouBack = useRef("Uni");
-  const forYouReturn = useRef<string | null>(null);
   const [journalFocus, setJournalFocus] = useState(false);
-  const [forYou, setForYou] = useState({ count: 0, fresh: false, updatedAt: null as string | null });
-  const renderedForYou = useRef<string | null>(null);
-  const [forYouReload, setForYouReload] = useState(0);
-  const lifeVault = effectiveLifeVault(useLifeOsVault(), vaults); // PR 6: the For you pin is Uni glue, shown (and fetched) only while the selected vault is uni
+  const lifeVault = effectiveLifeVault(useLifeOsVault(), vaults);
   /** 0.2 one home: All is the home wherever the Uni glue is on (a vault of your own without it keeps its places page) */
   const homeIsAll = showUniGlue(lifeVault);
   const homeIsAllRef = useRef(homeIsAll);
   homeIsAllRef.current = homeIsAll;
-  async function refreshForYou() {
-    if (!showUniGlue(lifeVault)) return;
-    try {
-      const data = await invoke<{ note: { content?: string; updatedAt?: string } }>("vault_note", { vault: "uni", noteRef: FOR_YOU_ID });
-      const updated = data.note.updatedAt ?? null;
-      let last: string | null = null;
-      try {
-        last = localStorage.getItem(FOR_YOU_OPENED_KEY);
-      } catch { /* unavailable storage */ }
-      setForYou({ count: countRecommendations(data.note.content ?? ""), updatedAt: updated, fresh: isRecommendationNew(updated, last) });
-    } catch { /* keep the last successful count while offline */ }
-  }
   // T-229: Calendar is on the rail once the calendar door has answered this device's key
   const calOn = useSyncExternalStore(onCalShown, calShown, calShown);
   useEffect(() => {
@@ -418,30 +400,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return () => { off(); window.clearTimeout(soon); document.removeEventListener("visibilitychange", visible); };
   }, []);
   useEffect(() => {
-    void refreshForYou();
-    const visible = () => { if (document.visibilityState === "visible") void refreshForYou(); };
-    document.addEventListener("visibilitychange", visible);
-    return () => document.removeEventListener("visibilitychange", visible);
-  }, [lifeVault]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
     const escape = (e: KeyboardEvent) => { if (e.key === "Escape") { setJournalFocus(false); setPanel(null); setSearchOpen(false); } };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
   }, []);
   /** T-335 Taste Arcade: the profile note opens like any note, over the Arcade */
   const openArcadeNote = useCallback((vault: string, path: string) => { openTargetRef.current({ kind: "note", note: { hub: null, vault, ref: path }, title: "Taste profile" }, "new"); }, []);
-  function openForYou() {
-    if (topNote?.ref !== FOR_YOU_ID) {
-      // (0.2: All with no room in focus is the home, a place to come back to as well)
-      const surfaces = tabsRef.current.tabs.filter((t) => t.kind === "all" || t.kind === "journal");
-      const previous = [...tabsRef.current.recent].reverse().map((id) => surfaces.find((t) => t.id === id)).find(Boolean);
-      // the room in focus, named as its head names it: its place, else the room itself
-      forYouBack.current = previous?.kind === "all" && previous.channel ? (previous.path ? previous.path.split("/").pop() : null) || nodeOfRoom(previous.channel)?.name || `#${(roomsRef.current.find((r) => r.id === previous.channel)?.name ?? "room").replace(/^#/, "")}` : previous?.title ?? "Uni";
-      forYouReturn.current = previous?.id ?? null;
-    }
-    openTarget({ kind: "note", note: { hub: null, vault: "uni", ref: FOR_YOU_ID }, title: "For you" }, "new");
-    if (topNote?.vault === "uni" && topNote.ref === FOR_YOU_ID && isRecommendationNew(forYou.updatedAt, renderedForYou.current)) setForYouReload((n) => n + 1);
-  }
   const [journalRecording, setJournalRecording] = useState<{ controls: RecorderControls } | null>(null);
   const journalRecordingRef = useRef(false);
   const [channel, setChannel] = useState<string | null>(null);
@@ -829,7 +793,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const next = openTab(base, target, effectiveMode, () => crypto.randomUUID());
     const removed = tabsRef.current.tabs.filter((t) => !next.tabs.some((n) => n.id === t.id));
     if (removed.some((t) => t.id === originId || (t.kind === "journal" && journalRecordingRef.current))) {
-      setError("Stop the recording before replacing its tab."); return;
+      setError("Stop the recording before leaving it."); return;
     }
     if (!confirmed && removed.some(isTabDirty)) {
       setConfirmation({ text: UNSAVED_NOTE, go: "Leave note", run: () => openTarget(target, mode, true, fromHistory, then) }); return;
@@ -850,10 +814,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setConfirmation({ text: UNSAVED_NOTE, go: "Close note", run: () => closeTabById(id, true) }); return;
     }
     if (!recordingTabCanClose(id, recordingOrigin.current?.tabId ?? null)) {
-      setError("Stop the voice recording before closing its tab."); return;
+      setError("Stop the voice recording before leaving the room."); return;
     }
     if (journalRecordingRef.current && tabsRef.current.tabs.find((t) => t.id === id)?.kind === "journal") {
-      setError("Stop the Journal recording before closing its tab."); return;
+      setError("Stop the Journal recording before leaving the Journal."); return;
     }
     const wasActive = tabsRef.current.active === id;
     const next = closeTab(tabsRef.current, id);
@@ -1087,7 +1051,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (place) { uniPlace.current = place.target; returnSpot.current = place.spot ? { ...place.spot, seq: -1 } : null; }
       if (!activeTab(next)) {
         const uni = rows.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rows)?.id;
-        // The app opens to Uni: the front door of the area rooms (T-302: the archived Uni room is no longer the home, so none is attached).
+        // The app opens to Uni: the home (T-302: the archived Uni room is no longer the home, so none is attached).
         // 0.2.2: #Uni is archived (10-26), so the relay lists no Uni room: with the Uni glue the home is All, whatever the rooms are. Only an
         // account without the glue and without a Uni room opens its first room.
         const target: TabTarget = readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" }
@@ -1520,18 +1484,21 @@ function Conversations({ onForget }: { onForget: () => void }) {
     openRoom(t.channel, { ref: t.focus, root: t.root, path: null });
   }
 
-  // Fallback when the hub is unreachable: Uni searches the vault and replies in #Uni.
+  // Fallback when the hub is unreachable: the Uni of the room you were last in searches the vault and replies there (0.2.2: #Uni is
+  // archived; there is no room for everything, so the ask goes where you were, and the button says which room).
+  const searchRoom = channel ? rooms.find((r) => r.id === channel && r.dm !== true) ?? null : null;
   async function askUniSearch(query: string): Promise<boolean> {
     setError(null);
-    const uniRoom = findUniRoom(rooms);
-    if (!uniRoom) { setError("No room named Uni is joined. Refresh, or join #Uni in Buzz."); return false; }
+    const room = searchRoom;
+    if (!room) { setError("Open a room first: its Uni searches your notes and answers there."); return false; }
+    const name = `#${room.name.replace(/^#/, "")}`;
     try {
-      const roster = await invoke<Member[]>("get_members", { channel: uniRoom.id });
+      const roster = await invoke<Member[]>("get_members", { channel: room.id });
       const uni = findUniMember(roster);
-      if (!uni) { setError("Uni isn't in the Uni room's member list yet. Try again in a moment."); return false; }
+      if (!uni) { setError(`Uni isn't in ${name}'s member list yet. Try again in a moment.`); return false; }
       const label = memberLabels(roster).get(uni.pubkey) ?? uni.name;
-      await invoke<Message>("post_message", { channel: uniRoom.id, body: searchHandoffText(query, label), replyTo: null, recipients: [uni.pubkey] });
-      setStatus("Asked Uni · results will arrive in #Uni");
+      await invoke<Message>("post_message", { channel: room.id, body: searchHandoffText(query, label), replyTo: null, recipients: [uni.pubkey] });
+      setStatus(`Asked Uni · results will arrive in ${name}`);
       setTick((n) => n + 1);
       await loadRooms();
       return true;
@@ -1554,29 +1521,26 @@ function Conversations({ onForget }: { onForget: () => void }) {
     } catch (e) { if (channelRef.current === ch) { setError(String(e)); setOlder("idle"); } }
   }
 
-  // Journal → room, addressed to the room's Uni and p-tagged (Hermes in a group room wakes only on a mention); the entry itself
-  // stays in the vault. #Uni needs its Uni; an area room without one gets the plain line (T-263).
-  async function shareEntry(note: JournalNote, roomId: string, toUni: boolean, vault: string, journalHub: string) {
+  // Journal → an area room, addressed to the room's Uni and p-tagged (Hermes in a group room wakes only on a mention); the entry itself
+  // stays in the vault, and the room gets its link (T-263). (0.2.2: no "Pass to Uni": #Uni is archived, and every room has its Uni.)
+  async function shareEntry(note: JournalNote, roomId: string, vault: string, journalHub: string) {
     // an area room gets the link only: without a hub the message would carry the entry's words
-    if (!toUni && !journalHub) throw new Error("No Parachute hub set, so there's no link to send.");
+    if (!journalHub) throw new Error("No Parachute hub set, so there's no link to send.");
     // the chip may be older than what the core knows now (a room that turned out to be a DM, or was archived): ask again before posting
-    if (!toUni) {
-      const now = await invoke<Room[]>("get_rooms");
-      if (!areaRooms(now, findUniRoom(now)?.id ?? null).some((r) => r.id === roomId)) {
-        await loadRooms();
-        throw new Error("That isn't an area room any more, so nothing was sent.");
-      }
+    const now = await invoke<Room[]>("get_rooms");
+    if (!areaRooms(now, findUniRoom(now)?.id ?? null).some((r) => r.id === roomId)) {
+      await loadRooms();
+      throw new Error("That isn't an area room any more, so nothing was sent.");
     }
     let label: string | null = null;
     const recipients: string[] = [];
     const roster = await invoke<Member[]>("get_members", { channel: roomId });
     const uni = findUniMember(roster);
-    if (!uni && toUni) throw new Error("Uni isn't in the Uni room's member list yet. Refresh conversations.");
     if (uni) {
       label = memberLabels(roster).get(uni.pubkey) ?? uni.name;
       recipients.push(uni.pubkey);
     }
-    await invoke<Message>("post_message", { channel: roomId, body: shareText(note, vault, label, toUni ? "" : AREA_ASK, journalHub), replyTo: null, recipients });
+    await invoke<Message>("post_message", { channel: roomId, body: shareText(note, vault, label, AREA_ASK, journalHub), replyTo: null, recipients });
     await loadRooms();
   }
 
@@ -2526,7 +2490,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // search, thread, Journal, room) before leaving it. The listener is only
   // registered while there is somewhere to go back to, so at the room list
   // the system default runs (the app goes to the background, as usual).
-  // T-302: Uni's home is the front door of the area rooms (Uni's own level, with its room, is a row of the tree); asking for the home
+  // T-302 (0.2: the home is All; a vault without the Uni glue has the places page and its tree); asking for the home
   // closes that level wherever it is open.
   // 0.2 one home: with the Uni glue (rooms and areas in the uni vault) the home is All's stream, its places folded under its head
   /** At the home: Uni's places page, or (0.2, with the Uni glue) All with no room in focus. The system's own Back runs there. */
@@ -2724,7 +2688,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       { label: "Mail", go: () => openTarget({ kind: "mail", title: "Mail" }) },
       ...(calOn ? [{ label: "Calendar", go: () => openTarget({ kind: "calendar", title: "Calendar" }) }] : []),
       ...(msgsOn ? [{ label: "Messages", go: () => openTarget({ kind: "messages", title: "Messages" }) }] : []),
-      ...(showUniGlue(lifeVault) ? [{ label: "For you", go: openForYou }, { label: "To post", go: () => openTarget({ kind: "posts", title: "To post" }) }, { label: "Arcade", go: () => openTarget({ kind: "arcade", title: "Arcade" }) }] : []),
+      ...(showUniGlue(lifeVault) ? [{ label: "To post", go: () => openTarget({ kind: "posts", title: "To post" }) }, { label: "Arcade", go: () => openTarget({ kind: "arcade", title: "Arcade" }) }] : []),
       { label: "Vault", go: () => openVaultPlace(false) },
       { label: "Search", go: openFind },
       { label: "Settings", go: () => { setSearchOpen(false); setPanel("settings"); setForgetArmed(false); } },
@@ -2733,7 +2697,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     recent: histRecent(hist, RECENT_SHOWN, placeOf).filter((t) => !active || placeOf(t) !== placeOf(active)).map((t) => ({ key: placeOf(t), title: t.title, path: t.kind === "area" ? t.path ?? null : null, room: t.kind === "all" ? t.channel ?? null : null, go: () => openTarget(t, "focus") })),
   };
   /** The open utility panel's own name (r14): its frame says where you are. */
-  const panelTitle = searchOpen ? "Search" : panel === "settings" ? "Settings" : panel === "vault" ? "Vault" : "Places";
+  const panelTitle = searchOpen ? "Search" : panel === "settings" ? "Settings" : panel === "vault" ? "Vault" : "Rooms";
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, tabId: recordingTab.tabId, controls: recorder as RecorderControls, finish: "send" as const } :
     journalRecording && journalTab ? { title: "Journal", tabId: journalTab.id, controls: journalRecording.controls, finish: "save" as const } : null;
@@ -2741,18 +2705,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
     <nav ref={railRef} className="rail" aria-label="Main navigation" onClickCapture={(e) => { if (!(e.target as HTMLElement).closest(".rail-more")) setRailMore(false); }}>
       {/* 0.2 one home: Uni is the home, All's stream with its places under the head; a room is in focus over it. From Mail, the Journal or
           another place it goes back to where you were on Uni's side (the room you left, kept on the device), as their old "← Uni" did */}
-      <button aria-label="Uni" aria-current={uniShown || (!panel && !searchOpen && (!topNote || topNote.ref === FOR_YOU_ID) && allOpen) || (!panel && !searchOpen && topNote?.ref === FOR_YOU_ID && homeIsAll) ? "page" : undefined} onClick={() => openTarget(active && !isUniSide(active) && active.kind !== "note" && !panel && !searchOpen ? origin() : uniHome())}><i><UniIcon /></i><span>Uni</span></button>
+      <button aria-label="Uni" aria-current={uniShown || (!panel && !searchOpen && !topNote && allOpen) ? "page" : undefined} onClick={() => openTarget(active && !isUniSide(active) && active.kind !== "note" && !panel && !searchOpen ? origin() : uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
       <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })} aria-describedby={[held > 0 && "rail-mail-held", unreadMail > 0 && "rail-mail-unread"].filter(Boolean).join(" ") || undefined}><i><MailIcon />{held > 0 && <span className="rail-count" aria-hidden="true">{held}</span>}{unreadMail > 0 && <span className="rail-dot" aria-hidden="true" />}</i><span>Mail</span>{held > 0 && <span id="rail-mail-held" hidden>{held} waiting for you</span>}{unreadMail > 0 && <span id="rail-mail-unread" hidden>{unreadMail} unread in your Inbox</span>}</button>
       {/* T-335 as Aaron: on a phone the bar is four places and More; the rest open from a sheet above it. On a wider screen More is hidden and the rest sit on the rail (display: contents) */}
-      <button className="rail-more" aria-label="More" aria-expanded={railMore} aria-controls="rail-extras" aria-current={!railMore && (panel || searchOpen || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "arcade" || active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID)) ? "page" : undefined} onClick={() => { setPanel(null); setSearchOpen(false); setRailMore((o) => !o); }}><i><MoreIcon /></i><span>More</span></button>
+      <button className="rail-more" aria-label="More" aria-expanded={railMore} aria-controls="rail-extras" aria-current={!railMore && (panel || searchOpen || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "arcade" || active?.kind === "vault" || !!topNote) ? "page" : undefined} onClick={() => { setPanel(null); setSearchOpen(false); setRailMore((o) => !o); }}><i><MoreIcon /></i><span>More</span></button>
       <div id="rail-extras" className={`rail-extras${railMore ? " open" : ""}`}>
       {calOn && <button aria-label="Calendar" aria-current={!panel && !searchOpen && (active?.kind === "calendar" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "calendar", title: "Calendar" })}><i><CalendarIcon /></i><span>Calendar</span></button>}
       {msgsOn && <button aria-label="Messages" aria-current={!panel && !searchOpen && (active?.kind === "messages" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "messages", title: "Messages" })}><i><MessagesIcon /></i><span>Messages</span></button>}
       {showUniGlue(lifeVault) && <button aria-label="To post" aria-current={!panel && !searchOpen && (active?.kind === "posts" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "posts", title: "To post" })}><i aria-hidden="true"><ToPostIcon /></i><span>To post</span></button>}
       {/* T-335 Taste Arcade: small games that teach Uni your taste */}
       {showUniGlue(lifeVault) && <button aria-label="Arcade" aria-current={!panel && !searchOpen && (active?.kind === "arcade" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "arcade", title: "Arcade" })}><i><ArcadeIcon /></i><span>Arcade</span></button>}
-      <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={vaults.length === 1 ? undefined : panel === "vault"} onClick={() => openVaultPlace(true)}><i><VaultIcon /></i><span>Vault</span></button>
+      <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || topNote ? "page" : undefined)} aria-expanded={vaults.length === 1 ? undefined : panel === "vault"} onClick={() => openVaultPlace(true)}><i><VaultIcon /></i><span>Vault</span></button>
       <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} aria-keyshortcuts="Control+K Meta+K" onClick={openFind}><i><SearchIcon /></i><span>Search</span></button>
       <button className="rail-settings" aria-label="Settings" aria-expanded={panel === "settings"} onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setForgetArmed(false); }}><i><SettingsIcon /></i><span>Settings</span></button>
       </div>
@@ -2770,7 +2734,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         <section className="settings-device" aria-label="This device"><h2>This device</h2><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary settings-forget" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget. You'll need to pair again." : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep it</button>}</section>
         {/* r13: the machinery (the app sandbox's self-test, where the app connects) is for whoever builds Uni, not part of ordinary Settings */}
         <details className="settings-dev"><summary>Developer</summary>{hub && <p className="settings-dev-line">Notes hub: <code>{hub}</code></p>}{syncDetail && <p className="settings-dev-line">Last sync: {syncDetail}</p>}<JournalVaultSetting /><AreaSelfTest /></details></div>}
-      {searchOpen && <Search initialQuery={searchQuery} onQuery={(q) => { lastSearch.current = q; }} recent={navControls.recent} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
+      {searchOpen && <Search initialQuery={searchQuery} onQuery={(q) => { lastSearch.current = q; }} recent={navControls.recent} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} askIn={searchRoom ? searchRoom.name.replace(/^#/, "") : null} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
       <section className="vault-sidebar" aria-label="Vaults"><div className="vault-heading"><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Look for new vaults</button></div>
@@ -2797,7 +2761,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       : active?.kind === "posts" ? <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} />
       : active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix, query = "") => { setSearchQuery(query); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : shellOpen && active ? <AreasSurface allPlace={allOpen ? { backTo: "Uni", from: null, onBack: () => openTarget(uniHome()), forYou: homeIsAll ? { fresh: forYou.fresh, open: openForYou } : null, focus: allFocus, onFocus: (room, ref, threadRoot, place) => focusInAll(room, ref ?? null, threadRoot ?? null, place), onUnfocus: endAllFocus, onFocusBack: stepBackInFocus, onView: setFocusView } : null} noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={allOpen ? `home:${identity ?? ""}` : `${active.id}:${identity ?? ""}`} path={shellPath} rooms={rooms} actions={areaActions} roomFor={areaRoomFor}
+      : shellOpen && active ? <AreasSurface allPlace={allOpen ? { backTo: "Uni", from: null, onBack: () => openTarget(uniHome()), focus: allFocus, onFocus: (room, ref, threadRoot, place) => focusInAll(room, ref ?? null, threadRoot ?? null, place), onUnfocus: endAllFocus, onFocusBack: stepBackInFocus, onView: setFocusView } : null} noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={allOpen ? `home:${identity ?? ""}` : `${active.id}:${identity ?? ""}`} path={shellPath} rooms={rooms} actions={areaActions} roomFor={areaRoomFor}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>
@@ -2817,29 +2781,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {pill && <RecordingPill title={pill.title} controls={pill.controls} finish={pill.finish} overSidebar={sidebarVisible} onJump={() => { const o = recordingOrigin.current, tab = tabsRef.current.tabs.find((t) => t.id === pill.tabId); focusTabById(pill.tabId); if (tab?.kind === "all" && o?.channel && pill.finish === "send") focusInAll(o.channel, null, o.root ?? null); }} />}
     {/* A note opens over the place you were in; Back pops the note's own stack (or closes it at the first note). */}
     {topNote && !searchOpen && <section className="note-sheet" role="region" aria-label="Note">
-      <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}:${topNote.ref === FOR_YOU_ID ? forYouReload : 0}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={() => { if (topNote.ref === FOR_YOU_ID && forYouReturn.current && tabsRef.current.tabs.some((t) => t.id === forYouReturn.current)) focusTabById(forYouReturn.current); else closeNote(); }}
+      <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={closeNote}
         onResolved={(id) => {
           if (tabsRef.current.active) commitTabs(updateTab(tabsRef.current, tabsRef.current.active, { note: { hub: null, vault: topNote.vault, ref: id } }));
           aliases.current[JSON.stringify([topNote.vault, topNote.ref])] = id;
           try { localStorage.setItem(ALIASES_KEY, JSON.stringify(aliases.current)); } catch { /* session alias remains */ }
         }}
-        onRendered={(note) => {
-          if (topNote.vault !== "uni" || note.id !== FOR_YOU_ID) return;
-          const updatedAt = note.updatedAt ?? null;
-          renderedForYou.current = updatedAt;
-          if (updatedAt) {
-            try { localStorage.setItem(FOR_YOU_OPENED_KEY, updatedAt); } catch { /* unavailable storage */ }
-          }
-          setForYou((known) => isRecommendationNew(known.updatedAt, updatedAt)
-            ? { ...known, fresh: true }
-            : { count: countRecommendations(note.content ?? ""), updatedAt, fresh: false });
-        }}
-        // r21 (Codex 5): For you is a page of recommendations to read, not a vault document to edit (its note opens on request)
-        readOnly={topNote.vault === "uni" && topNote.ref === FOR_YOU_ID}
         startEditing={editOnOpen.current.has(noteKey(topNote))}
         onDirty={(dirty) => { reportDirty(tabs.active!, noteKey(topNote), dirty); if (!dirty) editOnOpen.current.delete(noteKey(topNote)); }}
         onCreate={(folder) => requestCreate(topNote.vault, folder)}
-        backLabel={topNote.ref === FOR_YOU_ID ? forYouBack.current : notes.length > 1 ? noteTitles[noteKey(notes[notes.length - 2])] ?? notes[notes.length - 2].ref.split("/").pop() ?? "note" : backTo}
+        backLabel={notes.length > 1 ? noteTitles[noteKey(notes[notes.length - 2])] ?? notes[notes.length - 2].ref.split("/").pop() ?? "note" : backTo}
         onTitle={(t) => rememberTitle(noteKey(topNote), t)} />
     </section>}
     {creating && <SurfaceModal onCancel={() => { if (!createBusy) setCreating(null); }}><form role="dialog" aria-modal="true" aria-label="New note" onSubmit={(e) => { e.preventDefault(); void createNote(); }}><h2>New note in {creating.vault}</h2><label>Name, with any folders before it<input autoFocus placeholder="Projects/Glaze Tests/Firing notes" value={creating.path} disabled={createBusy} onChange={(e) => setCreating({ ...creating, path: e.target.value })} /></label>{createError && <p className="error" role="alert">{createError}</p>}<button disabled={createBusy} type="submit">{createBusy ? "Creating…" : "Create note"}</button><button disabled={createBusy} type="button" onClick={() => setCreating(null)}>Cancel</button></form></SurfaceModal>}

@@ -6,6 +6,7 @@ import { linkGraph } from "./nodeLinks.ts";
 
 /** The Uni root's key in `children`. Never a note path. */
 export const ROOT = "";
+/** The old #Uni room's id. #Uni was archived 10-26 and the core drops archived rooms, so on the live relay it is never among the rooms. */
 export const UNI_CHANNEL = "1b667c1f-95c8-45e5-a7cc-1df13b7d0e2a";
 
 export type Tree = {
