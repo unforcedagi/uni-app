@@ -2,32 +2,27 @@
 // an empty Needs you says "No confirmed asks" while any wait to be confirmed; a summary is a dated account below Needs you.
 // Run: SIMPLE_TEST_PORT=5711 npx playwright test --config playwright.simple.config.ts r29
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { bootAreas, leaveFrontDoor, toOldHome } from './areasFixture';
+import { bootAreas, focusSheet, openAreasHome, openDetails } from './areasFixture';
 
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
-const treeBeside = (page: Page) => wide(page) && (page.viewportSize()?.height ?? 0) >= 400;
 const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
-/** T-302: the app opens on the front door; a test starts where the old home put it (toOldHome) */
-const boot = async (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => { await bootAreas(page, 'seed', { ...base, ...extra }); await toOldHome(page); };
-const scope = (page: Page) => (treeBeside(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
-async function unfoldAll(page: Page) {
-  await scope(page).locator('.th-row.d1').first().waitFor();
-  for (let i = 0; i < 12; i++) { const f = scope(page).locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) return; await f.first().click(); }
+const boot = async (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => { await bootAreas(page, 'seed', { ...base, ...extra }); };
+const home = (page: Page) => page.locator('[data-place="front-door"][data-view="places"]');
+/** T-335 one surface: a room is in focus over All, opened from its door on Uni's home, or (a place inside an area) from the area's details */
+const INSIDE: Record<string, string> = { 'Atlas Institute': 'Atlas', 'Learn Vibe Build': 'Atlas', ATLAS: 'Atlas' };
+async function openRoom(page: Page, name: string, parent: string | null = INSIDE[name] ?? null) {
+  if (!(await home(page).isVisible())) await openAreasHome(page);
+  await home(page).locator(`.fd-door[data-path="Areas/${parent ?? name}"]`).click();
+  if (parent) { await openDetails(page); await focusSheet(page).getByRole('region', { name: `Inside ${parent}` }).locator('.fx-place').filter({ has: page.getByText(name, { exact: true }) }).click(); }
+  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(name);
 }
-async function openRoom(page: Page, name: string) {
-  if (!wide(page) && await page.locator('.cp-sheet').count()) { await page.keyboard.press('Escape'); await expect(page.locator('.cp-sheet')).toHaveCount(0); }
-  await leaveFrontDoor(page); // T-302: the tree is in a room
-  if (!treeBeside(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
-  await unfoldAll(page);
-  await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();
-  await expect(page.locator('.sr')).toHaveAttribute('data-node', name);
-}
+const details = (page: Page) => focusSheet(page).locator('.all-focus-details .cp-body');
+/** T-335: what the old companion held (Needs you, Running, the dated summary) is the room's details, inside its focus */
 async function openCompanion(page: Page) {
-  const strip = !wide(page) || await page.locator('.cp.strip').count() > 0;
-  if (strip && await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
-  await expect(page.locator('.cp-body').first()).toBeVisible();
+  await openDetails(page);
+  await expect(focusSheet(page).locator('.all-focus-details .cp-body').first()).toBeVisible();
 }
-async function openWork(page: Page) { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).first().click(); await expect(page.locator('.sr-work')).toBeVisible(); }
+async function openWork(page: Page) { await openCompanion(page); await focusSheet(page).getByRole('button', { name: /^All of .*'s work/ }).first().click(); await expect(page.locator('.fx-work')).toBeVisible(); }
 const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
 const NOW = '2026-10-14T09:00:00.000Z';
 const refresh = async (page: Page, at: string = NOW) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
@@ -37,7 +32,7 @@ const add = (page: Page, n: { id: string; title: string; node: string; tag?: str
   (window as any).__tasks.push({ id: x.id, path: `Tasks/${x.title}`, extension: 'md', tags: [x.tag ?? 'task'], createdAt: '2026-10-06T16:00:00.000Z', updatedAt: x.updatedAt ?? '2026-10-13T12:00:00.000Z', lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.title,
     metadata: { node: x.node, state: 'open', owner: 'aaron', priority: 'now', asked_at: x.asked_at === undefined ? '2026-10-13T12:00:00.000Z' : x.asked_at, ...(x.meta ?? {}) } });
 }, n);
-const section = (page: Page, label: string) => page.locator('.sr-work').getByRole('region', { name: label });
+const section = (page: Page, label: string) => page.locator('.fx-work').getByRole('region', { name: label });
 /** nothing on a row is cut: no element clips its own text, no cut mark */
 async function rowsWhole(rows: Locator) {
   const bad = await rows.evaluateAll((lis) => lis.flatMap((li) => [li, ...li.querySelectorAll('*')].filter((el) => {
@@ -77,18 +72,18 @@ test.describe('r29', () => {
   });
 
   test('P1-2: the quiet line claims no work; the empty Needs you says "No confirmed asks" while any wait to be confirmed, in the panel and in all of the work', async ({ page }) => {
-    test.skip(!wide(page), 'side panel');
+    test.skip(!wide(page), 'one wide window');
     await boot(page);
     await add(page, { id: 'q1', title: 'T-821 Placeholder unconfirmed one', node: 'Projects/Atlas Institute', asked_at: null, meta: { next: 'Say go on the first unconfirmed' } });
     await add(page, { id: 'q2', title: 'T-822 Placeholder unconfirmed two', node: 'Projects/Atlas Institute', asked_at: null, meta: { next: 'Say go on the second unconfirmed' } });
     await refresh(page);
     await openRoom(page, 'Atlas Institute');
     await openCompanion(page);
-    const panel = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
+    const panel = details(page).getByRole('region', { name: 'Needs you' });
     await expect(panel.locator('.cp-none')).toHaveText('No confirmed asks');
     await expect(panel.locator('.cp-recheck-line')).toHaveText(/^2 requests need confirming in this room\+$/);
     await expect(panel.locator('.cp-list > li.cp-item')).toHaveCount(0);
-    await expect(page.locator('.cp-body')).not.toContainText(/rechecking|Nothing needs you here/);
+    await expect(details(page)).not.toContainText(/rechecking|Nothing needs you here/);
     await panel.locator('.cp-recheck-line').click();
     await expect(panel.locator('.cp-recheck-list')).toHaveAttribute('aria-label', 'Requests that need confirming');
     await openWork(page);
@@ -96,11 +91,11 @@ test.describe('r29', () => {
     await expect(needs.locator('.cp-none')).toHaveText('No confirmed asks');
     await expect(needs.locator('.wv-n')).toHaveText('0');
     await expect(needs.locator('.cp-recheck-line')).toHaveText(/^2 requests need confirming in this room\+$/);
-    await expect(page.locator('.sr-work')).not.toContainText(/rechecking|Nothing needs you here/);
+    await expect(page.locator('.fx-work')).not.toContainText(/rechecking|Nothing needs you here/);
   });
 
   test('P1-2: with none of either, it is still "Nothing needs you here."', async ({ page }) => {
-    test.skip(!wide(page), 'side panel');
+    test.skip(!wide(page), 'one wide window');
     await boot(page);
     await openRoom(page, 'Unforced Development');
     await openCompanion(page);
@@ -111,21 +106,21 @@ test.describe('r29', () => {
   });
 
   test('P1-2: with a confirmed ask the empty line is gone and the quiet line still counts only what needs confirming', async ({ page }) => {
-    test.skip(!wide(page), 'side panel');
+    test.skip(!wide(page), 'one wide window');
     await boot(page);
     await add(page, { id: 'q1', title: 'T-831 Placeholder confirmed', node: 'Projects/Atlas Institute', asked_at: '2026-10-14T08:30:00.000Z', meta: { next: 'Say go on the confirmed one' } });
     await add(page, { id: 'q2', title: 'T-832 Placeholder unconfirmed', node: 'Projects/Atlas Institute', asked_at: null, meta: { next: 'Say go on the unconfirmed one' } });
     await refresh(page);
     await openRoom(page, 'Atlas Institute');
     await openCompanion(page);
-    const panel = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
+    const panel = details(page).getByRole('region', { name: 'Needs you' });
     await expect(panel.locator('.cp-none')).toHaveCount(0);
     await expect(panel.locator('.cp-list > li.cp-item').filter({ hasText: 'confirmed one' })).toHaveCount(1);
     await expect(panel.locator('.cp-recheck-line')).toHaveText(/^1 request needs confirming in this room\+$/);
   });
 
   test('P1-3: the summary is below Needs you, labelled with its date and room, muted, and carries no stale notice', async ({ page }) => {
-    test.skip(!wide(page), 'side panel');
+    test.skip(!wide(page), 'one wide window');
     await boot(page);
     await add(page, { id: 's1', title: 'T-841 Placeholder after the summary', node: 'Projects/Learn Vibe Build', asked_at: '2026-10-14T08:00:00.000Z', meta: { next: 'Say go on after the summary' } });
     await page.evaluate(() => (window as any).__setStands('p-lvb', "Cohort two starts Oct 15; prod waits on Aaron's go for #38.", '2026-10-14T06:00:00.000Z'));
@@ -146,7 +141,7 @@ test.describe('r29', () => {
 
 test.describe('r29 compact', () => {
   for (const size of [{ width: 800, height: 600 }, { width: 740, height: 360 }]) {
-    test(`P1-2/P1-3 at ${size.width}×${size.height}: the compact panel says "No confirmed asks" with asks to confirm, and its summary is below Needs you`, async ({ page }) => {
+    test(`P1-2/P1-3 at ${size.width}×${size.height}: the room's details say "No confirmed asks" with asks to confirm, and the summary is below Needs you`, async ({ page }) => {
       test.skip(page.viewportSize()?.width !== 1440, 'one project is enough for the fixed sizes');
       await page.setViewportSize(size);
       await boot(page);
@@ -154,13 +149,13 @@ test.describe('r29 compact', () => {
       await page.evaluate(() => (window as any).__setStands('p-ai', 'The institute site is staged.', '2026-10-14T06:00:00.000Z'));
       await refresh(page);
       await openRoom(page, 'Atlas Institute');
-      await page.locator('.cp-line').click();
-      const sheet = page.locator('.cp-sheet');
+      await openCompanion(page);
+      const sheet = details(page);
       await expect(sheet.locator('.cp-none')).toHaveText('No confirmed asks');
       await expect(sheet.locator('.cp-recheck-line')).toHaveText(/^1 request needs confirming in this room\+$/);
       await expect(sheet.locator('.cp-asof')).toHaveText(/^Last written Oct 14 by #\S+:$/);
       await expect(sheet.locator('.cp-stale, [data-stale-why]')).toHaveCount(0);
-      expect(await page.evaluate(() => { const n = document.querySelector('.cp-sheet .cp-stands-note')!; const w = document.querySelector('.cp-sheet section[aria-label="Needs you"]')!; return !!(w.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING); })).toBe(true);
+      expect(await page.evaluate(() => { const n = document.querySelector('.all-focus-details .cp-stands-note')!; const w = document.querySelector('.all-focus-details section[aria-label="Needs you"]')!; return !!(w.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING); })).toBe(true);
     });
   }
 });

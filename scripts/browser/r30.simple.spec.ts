@@ -1,33 +1,28 @@
 // T-124 r30: the words Aaron reads are the words stored, and every row can be acted on.
 // Run: SIMPLE_TEST_PORT=5711 npx playwright test --config playwright.simple.config.ts r30
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { bootAreas, leaveFrontDoor, toOldHome } from './areasFixture';
+import { bootAreas, focusSheet, openAreasHome, openDetails } from './areasFixture';
 import { readFileSync } from 'node:fs';
 
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
-const treeBeside = (page: Page) => wide(page) && (page.viewportSize()?.height ?? 0) >= 400;
 const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
-/** T-302: the app opens on the front door; a test starts where the old home put it (toOldHome) */
-const boot = async (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => { await bootAreas(page, 'seed', { ...base, ...extra }); await toOldHome(page); };
-const scope = (page: Page) => (treeBeside(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
-async function unfoldAll(page: Page) {
-  await scope(page).locator('.th-row.d1').first().waitFor();
-  for (let i = 0; i < 12; i++) { const f = scope(page).locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) return; await f.first().click(); }
+const boot = async (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => { await bootAreas(page, 'seed', { ...base, ...extra }); };
+const home = (page: Page) => page.locator('[data-place="front-door"][data-view="places"]');
+/** T-335 one surface: a room is in focus over All, opened from its door on Uni's home, or (a place inside an area) from the area's details */
+const INSIDE: Record<string, string> = { 'Atlas Institute': 'Atlas', 'Learn Vibe Build': 'Atlas', ATLAS: 'Atlas' };
+async function openRoom(page: Page, name: string, parent: string | null = INSIDE[name] ?? null) {
+  if (!(await home(page).isVisible())) await openAreasHome(page);
+  await home(page).locator(`.fd-door[data-path="Areas/${parent ?? name}"]`).click();
+  if (parent) { await openDetails(page); await focusSheet(page).getByRole('region', { name: `Inside ${parent}` }).locator('.fx-place').filter({ has: page.getByText(name, { exact: true }) }).click(); }
+  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(name);
 }
-async function openRoom(page: Page, name: string) {
-  if (!wide(page) && await page.locator('.cp-sheet').count()) { await page.keyboard.press('Escape'); await expect(page.locator('.cp-sheet')).toHaveCount(0); }
-  await leaveFrontDoor(page); // T-302: the tree is in a room
-  if (!treeBeside(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
-  await unfoldAll(page);
-  await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();
-  await expect(page.locator('.sr')).toHaveAttribute('data-node', name);
-}
+const details = (page: Page) => focusSheet(page).locator('.all-focus-details .cp-body');
+/** T-335: what the old companion held (Needs you, Running, the dated summary) is the room's details, inside its focus */
 async function openCompanion(page: Page) {
-  const strip = !wide(page) || await page.locator('.cp.strip').count() > 0;
-  if (strip && await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
-  await expect(page.locator('.cp-body').first()).toBeVisible();
+  await openDetails(page);
+  await expect(focusSheet(page).locator('.all-focus-details .cp-body').first()).toBeVisible();
 }
-async function openWork(page: Page) { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).first().click(); await expect(page.locator('.sr-work')).toBeVisible(); }
+async function openWork(page: Page) { await openCompanion(page); await focusSheet(page).getByRole('button', { name: /^All of .*'s work/ }).first().click(); await expect(page.locator('.fx-work')).toBeVisible(); }
 const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
 const NOW = '2026-10-14T09:00:00.000Z';
 const refresh = async (page: Page, at: string = NOW) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
@@ -37,7 +32,7 @@ const add = (page: Page, n: { id: string; title: string; node: string; tag?: str
   (window as any).__tasks.push({ id: x.id, path: `Tasks/${x.title}`, extension: 'md', tags: [x.tag ?? 'task'], createdAt: '2026-10-06T16:00:00.000Z', updatedAt: x.updatedAt ?? '2026-10-13T12:00:00.000Z', lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.title,
     metadata: { node: x.node, state: 'open', owner: 'aaron', priority: 'now', asked_at: x.asked_at === undefined ? '2026-10-13T12:00:00.000Z' : x.asked_at, ...(x.meta ?? {}) } });
 }, n);
-const section = (page: Page, label: string) => page.locator('.sr-work').getByRole('region', { name: label });
+const section = (page: Page, label: string) => page.locator('.fx-work').getByRole('region', { name: label });
 /** nothing on a row is cut: no element clips its own text, no cut mark */
 async function rowsWhole(rows: Locator) {
   const bad = await rows.evaluateAll((lis) => lis.flatMap((li) => [li, ...li.querySelectorAll('*')].filter((el) => {
@@ -72,7 +67,7 @@ test.describe('r30', () => {
       await refresh(page);
       await openRoom(page, 'Techne');
       await openCompanion(page);
-      const row = page.locator('.cp-body li.cp-item').filter({ hasText: 'morning-practice' }).first();
+      const row = details(page).locator('li.cp-item').filter({ hasText: 'morning-practice' }).first();
       await expect(row).toBeVisible();
       const lead = words(await row.locator('.cp-lead').innerText());
       expect(lead).toBe(NEXT113);
@@ -127,7 +122,7 @@ test.describe('r30 sheet', () => {
       await refresh(page);
       await openRoom(page, 'Techne');
       await openCompanion(page);
-      await page.locator('.cp-body li.cp-item').filter({ hasText: 'morning-practice' }).first().locator('.cp-need').click();
+      await details(page).locator('li.cp-item').filter({ hasText: 'morning-practice' }).first().locator('.cp-need').click();
       const sheet = sheetOf(page);
       await expect(sheet.locator('.task-items li')).toHaveCount(10);
       await expect(sheet.locator('.task-items li').first()).toHaveText('Already registered? Sign in');
@@ -147,14 +142,14 @@ test.describe('r30 sheet', () => {
   }
 
   test('2: the row carries the labels, whole: two items, then the one total ("10 labels in all"), the same at any width', async ({ page }) => {
-    test.skip(!wide(page), 'side panel');
+    test.skip(!wide(page), 'one wide window');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
     await add(page, { id: 'c1', title: TITLE113, node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, room: 'techne', state: 'waiting', waiting_on: 'aaron' } });
     await refresh(page);
     await openRoom(page, 'Techne');
     await openCompanion(page);
-    const row = page.locator('.cp-body li.cp-item').filter({ hasText: 'morning-practice' }).first();
+    const row = details(page).locator('li.cp-item').filter({ hasText: 'morning-practice' }).first();
     await expect(row.locator('.cp-item-line')).toHaveText(['Already registered? Sign in', 'Update your registration']);
     await expect(row.locator('.cp-item-more')).toHaveText(/^10 \w+ in all$/);
     await expect(row.locator('.cp-lead')).not.toContainText('Already registered');
@@ -164,7 +159,7 @@ test.describe('r30 sheet', () => {
 test.describe('r30 confirming', () => {
   const NEXT = (w: string) => `Say go on the ${w} ledger from the placeholder books`;
   test('4: the line says requests, and where it counts; each list row its reason; no Answer anyway on a row; the sheet has it after the reason', async ({ page }) => {
-    test.skip(!wide(page), 'side panel');
+    test.skip(!wide(page), 'one wide window');
     await boot(page);
     await add(page, { id: 'r1', title: 'T-901 Placeholder chat after', node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT('amber') } });
     await add(page, { id: 'r2', title: 'T-902 Placeholder old', node: 'Areas/Techne', asked_at: '2026-10-05T08:00:00.000Z', meta: { next: NEXT('cobalt') } });
@@ -174,10 +169,10 @@ test.describe('r30 confirming', () => {
     await refresh(page);
     await openRoom(page, 'Techne');
     await openCompanion(page);
-    const panel = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
+    const panel = details(page).getByRole('region', { name: 'Needs you' });
     await expect(panel.locator('.cp-recheck-line')).toHaveText(/^\d+ requests need confirming in this room\+$/);
     expect(Number((await panel.locator('.cp-recheck-line').innerText()).match(/\d+/)![0])).toBeGreaterThanOrEqual(3);
-    await expect(page.locator('.cp-body')).not.toContainText(/\bolder\b/i);
+    await expect(details(page)).not.toContainText(/\bolder\b/i);
     await panel.locator('.cp-recheck-line').click();
     const items = panel.locator('.cp-recheck-item');
     // r31: chat said "T-901 is off" and changed nothing: the record says it was asked recently, so it is a row, not a recheck
@@ -219,59 +214,29 @@ test.describe('r30 waiting runs', () => {
     await expect(run).toHaveCount(1);
     await expect(run.getByRole('button')).toHaveCount(1);
     await run.getByRole('button').click();
-    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Techne');
-    await expect(page.locator(`.message.search-focus[data-ref="${ref}"]`)).toBeVisible();
+    await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('Techne');
+    await expect(focusSheet(page).locator('.all-focus-details')).toHaveCount(0);
+    await expect(focusSheet(page).locator(`.message.search-focus[data-ref="${ref}"]`)).toBeVisible();
     await expect.poll(() => composerFocused(page)).toBe(true);
-    expect(await page.locator('.composer textarea').inputValue()).toBe('');
+    expect(await focusSheet(page).locator('.composer textarea').inputValue()).toBe('');
   });
 
-  test('6: with no message ref the row opens the room, the composer focused; the panel\'s row does the same', async ({ page }) => {
-    test.skip(!wide(page), 'side panel');
+  test('6: with no message ref the row opens the room, the composer focused; the details\' row does the same', async ({ page }) => {
+    test.skip(!wide(page), 'one wide window');
     await boot(page);
     await page.evaluate(() => (window as any).__addRun('wr2', 'Areas/Techne', '', 'Waiting on your answer in #Techne: Say go on the placeholder?', 'decision', { room: 'techne' }));
     await refresh(page);
     await openRoom(page, 'Techne');
     await openCompanion(page);
-    const run = page.locator('.cp-body .cp-waiting > li');
+    const run = details(page).locator('.cp-waiting > li');
     await expect(run).toHaveCount(1);
     await page.locator('.composer textarea').blur().catch(() => {});
     await run.getByRole('button').click();
+    await expect(focusSheet(page).locator('.all-focus-details')).toHaveCount(0);
     await expect.poll(() => composerFocused(page)).toBe(true);
     await expect(page.locator('.message.search-focus')).toHaveCount(0);
   });
 });
 
-test.describe('r30 summary', () => {
-  const SUMMARY = "Cohort two starts Oct 15 with twelve people; the staging site is live, the sign-in flow was checked on a phone, and prod waits on one go from Aaron for the labels and the three practice lines Harper still owes us.";
-  for (const size of [{ width: 1280, height: 720 }, { width: 1280, height: 600 }, { width: 800, height: 600 }, { width: 740, height: 360 }, { width: 920, height: 360 }]) {
-    test(`7: at ${size.width}×${size.height} the summary is never cut by the panel's edge: whole, folded to its one line, or below the footer`, async ({ page }) => {
-      test.skip(page.viewportSize()?.width !== 1440, 'one project is enough for the fixed sizes');
-      await page.setViewportSize(size);
-      await boot(page);
-      // tall rows (T-113's whole step and its labels, a long ask, a short one): there is little room left for the summary
-      await add(page, { id: 's1', title: TITLE113, node: 'Projects/Learn Vibe Build', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, state: 'waiting', waiting_on: 'aaron' } });
-      await add(page, { id: 's2', title: 'T-114 Placeholder second', node: 'Projects/Learn Vibe Build', asked_at: ASKED, meta: { next: 'Tell Uni who pays the amber sponsorship invoice and how, plus the legal name and address for the invoice and the date it is due' } });
-      await add(page, { id: 's3', title: 'T-115 Placeholder third', node: 'Projects/Learn Vibe Build', asked_at: ASKED, meta: { next: 'Say go on the placeholder number three release after you look at it on your phone' } });
-      await page.evaluate((t) => (window as any).__setStands('p-lvb', t, '2026-10-14T06:00:00.000Z'), SUMMARY);
-      await refresh(page);
-      await openRoom(page, 'Learn Vibe Build');
-      await openCompanion(page);
-      const check = () => page.evaluate(() => {
-        const n = document.querySelector<HTMLElement>('.cp.side.open .cp-stands-note, .cp-sheet .cp-stands-note'); if (!n) return { present: false };
-        const sc = n.closest('.cp-fit, .cp-scroll')!; const own = n.closest('.cp-foot');
-        const foot = own ? null : (n.closest('.cp-fit') ?? n.closest('.cp-sheet'))!.querySelector('.cp-foot');
-        const s = sc.getBoundingClientRect(); const r = n.getBoundingClientRect();
-        const limit = Math.min(s.bottom, foot ? foot.getBoundingClientRect().top : Infinity);
-        return { present: true, folded: n.getAttribute('data-folded') === 'true', inFoot: !!own, cut: r.top < limit - 0.5 && r.bottom > limit + 0.5, asof: n.querySelector('.cp-asof')?.textContent };
-      });
-      // settled: after the panel has been quiet, nothing of the summary is cut by the edge or the footer
-      await page.waitForTimeout(900);
-      const r = await check();
-      expect(r.present).toBe(true);
-      expect(r.cut, JSON.stringify(r)).toBe(false);
-      // r31: folded, it is one line that opens the summary ("Where this stands · Oct 14, #atlas/teach"): no colon with nothing after it, no second heading
-      if (r.folded) { expect(r.asof ?? null).toBeNull(); await expect(page.locator('.cp-stands-note[data-folded] .cp-said summary')).toHaveText('Where this stands · Oct 14, #atlas/teach'); }
-      else { expect(r.asof).toBe('Last written Oct 14 by #atlas/teach:'); await expect(page.locator('.cp-stands-note .cp-stands').first()).toHaveText(SUMMARY); }
-    });
-  }
-});
+// T-335: 'r30 summary' (7, at five sizes: the summary never cut by the side panel's edge or its footer) went with the panel: the room's
+// details scroll, unfitted, and r29/r31 keep the summary's date, room and place below Needs you.

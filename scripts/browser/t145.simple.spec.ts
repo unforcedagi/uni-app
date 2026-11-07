@@ -1,37 +1,31 @@
 // T-145: every ask in Needs you is current at the revision Aaron answers. Its stamp vouches for the words it was written with (`ask_sig`); an ask
 // that changes under an open sheet says so and takes no stale answer; one closed elsewhere drops out; an answer records the revision it answered.
+// T-335 one surface: Needs you is in the room's details, inside its focus over All.
 // Run: SIMPLE_TEST_PORT=5711 npx playwright test --config playwright.simple.config.ts t145
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, leaveFrontDoor, toOldHome } from './areasFixture';
+import { bootAreas, focusSheet, openDetails } from './areasFixture';
 import { askSig } from '../../src/areas/taskCore';
 
-const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
-const treeBeside = (page: Page) => wide(page) && (page.viewportSize()?.height ?? 0) >= 400;
 const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
-/** T-302: the app opens on the front door; a test starts where the old home put it (toOldHome) */
-const boot = async (page: Page) => { await bootAreas(page, 'seed', base); await toOldHome(page); };
-const scope = (page: Page) => (treeBeside(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
-async function unfoldAll(page: Page) {
-  await scope(page).locator('.th-row.d1').first().waitFor();
-  for (let i = 0; i < 12; i++) { const f = scope(page).locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) return; await f.first().click(); }
-}
+const boot = async (page: Page) => { await bootAreas(page, 'seed', base); };
+/** T-335: a room is in focus over All, opened from its door on Uni's home */
 async function openRoom(page: Page, name: string) {
-  if (!wide(page) && await page.locator('.cp-sheet').count()) { await page.keyboard.press('Escape'); await expect(page.locator('.cp-sheet')).toHaveCount(0); }
-  await leaveFrontDoor(page); // T-302: the tree is in a room
-  if (!treeBeside(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
-  await unfoldAll(page);
-  await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();
-  await expect(page.locator('.sr')).toHaveAttribute('data-node', name);
+  await page.locator('[data-place="front-door"][data-view="places"]').locator(`.fd-door[data-path="Areas/${name}"]`).click();
+  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(name);
 }
-/** The room's Needs you, in the side panel (wide) or the panel the phone's strip opens. */
+/** The room's Needs you: in its details, inside the focus (T-335: the old side panel / the phone strip's panel). */
 async function needsYou(page: Page) {
-  const strip = !wide(page) || await page.locator('.cp.strip').count() > 0;
-  if (strip && !await page.locator('.cp-sheet').count()) await page.locator('.cp-line').click();
-  const region = (strip ? page.locator('.cp-sheet .cp-body') : page.locator('.cp.side .cp-body')).getByRole('region', { name: 'Needs you' });
+  await openDetails(page);
+  const region = focusSheet(page).locator('.all-focus-details').getByRole('region', { name: 'Needs you' }).first();
   await expect(region).toBeVisible();
   return region;
 }
-async function closePanel(page: Page) { if (await page.locator('.cp-sheet').count()) { await page.keyboard.press('Escape'); await expect(page.locator('.cp-sheet')).toHaveCount(0); } }
+/** back to the room's conversation (the details close; the next needsYou opens them afresh) */
+async function closePanel(page: Page) {
+  if (!(await focusSheet(page).locator('.all-focus-details').count())) return;
+  await focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click();
+  await expect(focusSheet(page).locator('.all-focus-details')).toHaveCount(0);
+}
 /** how many requests need confirming in this room (0 when the line is not there) */
 const rechecks = async (needs: ReturnType<Page['locator']>) => { const r = needs.locator('.cp-recheck'); return (await r.count()) ? Number(await r.getAttribute('data-count')) : 0; };
 const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });

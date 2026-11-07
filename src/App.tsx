@@ -783,6 +783,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
    */
   function openRoom(room: string, o: { ref?: string | null; root?: string | null; path?: string | null; view?: FocusView; checking?: string | null; keys?: boolean } = {}) {
     setSearchOpen(false); setPanel(null); setRailMore(false);
+    // a room opened before the rooms list has come (a cold launch): the saved place isn't restored over it
+    if (!tabsReady.current) openedEarly.current = true;
     if (activeTab(tabsRef.current)?.kind !== "all") openTarget({ kind: "all", title: "All" }, "focus");
     if (activeTab(tabsRef.current)?.kind !== "all") return; // (a note left unsaved: the person chose to stay)
     if (o.keys !== undefined) focusComposer.current = o.keys;
