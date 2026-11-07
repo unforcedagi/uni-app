@@ -119,7 +119,7 @@ export async function check(page: Page, screen: string) {
 
 const T0 = '2026-10-10T08:00:00.000Z';
 const FOR_YOU = '01M3ZQF7EM4ADC7HEY36D3DC3B';
-export async function boot(page: Page) {
+export async function boot(page: Page, extra: Record<string, unknown> = {}) {
   await page.addInitScript(({ calm, tasks, forYou }) => {
     const w = window as any;
     if (calm) { try { localStorage.setItem('uni.motion', 'calm'); } catch { /* */ } }
@@ -133,7 +133,7 @@ export async function boot(page: Page) {
       return undefined;
     };
   }, { calm: project() === 'daylight', forYou: FOR_YOU, tasks: [{ id: 't-jars', path: 'Tasks/T-41 Find jars for the honey', extension: 'md', tags: ['task'], createdAt: T0, updatedAt: T0, fixtureTask: true, metadata: { node: 'Areas/Bee Garden', state: 'open', owner: 'aaron', priority: 'now', next: 'Ask the neighbours for twenty jars.' } }] });
-  await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, tasks: true, noWait: true, unread: { 'ch-kiln': 1, 'ch-bees': 2 } } as any);
+  await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, tasks: true, noWait: true, unread: { 'ch-kiln': 1, 'ch-bees': 2 }, ...extra } as any);
   await page.locator('[data-place="front-door"]').first().waitFor();
 }
 /** A place on the rail, or behind More on a phone. */

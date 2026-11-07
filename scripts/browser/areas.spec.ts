@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { areaCard, bootAreas, focusSheet, openAreaPage, openAreasHome, openDetails, FOCUS_STEAL, navApp, SUGGEST } from './areasFixture';
+import { areaCard, bootAreas, focusSheet, openAreaPage, openAreasHome, openDetails, openPlaces, FOCUS_STEAL, navApp, SUGGEST } from './areasFixture';
 import { startListener } from './areasListener';
 import { openRailMore, railGo } from './railGo';
 
@@ -21,6 +21,8 @@ test.describe('seed apps and navigation', () => {
 
   test('home is the front door: a door per area room, foreground first; a private area shows its name only', async ({ page }, info) => {
     await openAreas(page);
+    // 0.2 one home: the doors are in the drawer under the home's head
+    await openPlaces(page);
     const names = await page.locator('.fd-door .fd-name').allTextContents();
     expect(names.slice(0, 2)).toEqual(['Techne', 'Unforced Development']);
     expect(names).toEqual(expect.arrayContaining(['Atlas', 'Expression', 'Relationships', 'Sanctum']));
@@ -113,11 +115,13 @@ test.describe('seed apps and navigation', () => {
 
 test('T-302 round 2: what needs you, across the areas, is one line on the front door; a private area is a count there, its words stay inside', async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, privateTasks: true, pinned: true });
-  const needs = page.getByRole('region', { name: 'Needs you' });
-  const line = needs.getByRole('button', { name: /^Needs you · \d+/ });
-  await expect(line).toBeVisible();
+  // 0.2 one home: the head's one sentence says how many things need you; pulling it down shows the list (no "Needs you · N" toggle there)
+  const pull = page.locator('[data-place="front-door"] .fd-pull');
+  await expect(pull).toContainText(/^\w+ things? needs? you\./);
   await expect(page.locator('[data-place="front-door"]')).not.toContainText(/Sit twenty|Find a teacher|T-3[12]/);
-  await line.click();
+  await openPlaces(page);
+  const needs = page.getByRole('region', { name: 'Your places' }).getByRole('region', { name: 'Needs you' });
+  await expect(needs.getByRole('button', { name: /^Needs you · \d+/ })).toHaveCount(0);
   await expect(needs.getByRole('button', { name: /^In Sanctum: \d+ things? for you$/ })).toBeVisible();
   await expect(needs).not.toContainText(/Sit twenty|Find a teacher|T-\d+/);
   // an item names where it sits and opens there
@@ -127,7 +131,7 @@ test('T-302 round 2: what needs you, across the areas, is one line on the front 
   await expect(title(page)).toHaveText('COhere 2026');
   // inside the private area its items are its own rows, with their words
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
-  await page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^Needs you/ }).click();
+  await openPlaces(page);
   await page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^In Sanctum/ }).click();
   await expect(title(page)).toHaveText('Sanctum');
 });
@@ -137,18 +141,26 @@ test.describe('dark theme', () => {
   test('areas home in dark', async ({ page }, info) => {
     await bootAreas(page, 'seed');
     await openAreas(page);
+    await openPlaces(page);
     await expect(card(page, 'Techne')).toBeVisible();
     await mkdir('shots/t74', { recursive: true });
     await page.screenshot({ path: `shots/t74/${info.project.name}-areas-home-dark.png` });
   });
 });
 
-test.describe('rail badge', () => {
+test.describe('For you badge', () => {
+  // 0.2: For you left the rail and More; it opens from the home drawer's "For you" line, which carries its mark
   test('a zero For you count renders no badge', async ({ page }) => {
     await bootAreas(page, 'seed');
     await openRailMore(page);
-    await expect(rail(page).getByRole('button', { name: 'For you' })).toBeVisible();
+    await expect(rail(page).getByRole('button', { name: 'For you' })).toHaveCount(0);
     await expect(page.locator('.rail-count')).toHaveCount(0);
+    if ((page.viewportSize()?.width ?? 0) < 1100) await rail(page).getByRole('button', { name: 'More', exact: true }).click();
+    await openPlaces(page);
+    const line = page.getByRole('region', { name: 'Your places' }).getByRole('button', { name: /^For you/ });
+    await expect(line).toBeVisible();
+    await expect(line).toContainText("Uni's picks");
+    await expect(page.locator('.fd-pull-dot')).toHaveCount(0);
   });
 });
 
@@ -397,6 +409,7 @@ test.describe('listing cache', () => {
   test('Today never lists the vault; the bridge shares one cached listing; the focus reload is debounced', async ({ page }) => {
     await bootAreas(page, 'seed');
     await openAreas(page);
+    await openPlaces(page);
     await expect(card(page, 'Techne')).toBeVisible();
     expect((await calls(page, 'vault_paths')).length, 'the home reads three tags, not the vault').toBe(0);
     const q0 = (await calls(page, 'vault_query')).length;

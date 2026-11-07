@@ -4,7 +4,7 @@
 // Run: TOUR_TEST_PORT=17491 TOUR_SHOTS=/some/dir npx playwright test --config playwright.tour.config.ts
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, focusSheet, openAreaPage, openDetails, type BootOpts } from './areasFixture';
+import { bootAreas, focusSheet, openAreaPage, openDetails, openPlaces, type BootOpts } from './areasFixture';
 import { bootProjects, type Boot } from './projectsFixture';
 import { audit, lookViolations } from './tourAudit';
 import { installNotePaneFixture } from './notePaneFixture';
@@ -115,19 +115,20 @@ const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).
 // ---------------------------------------------------------------------------------------------------------- front door and rooms
 test('01-home-needs-collapsed', async ({ page }) => {
   await projects(page);
-  await expect(page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^Needs you · 1/ })).toBeVisible();
+  await expect(page.locator('.fd-pull')).toHaveText(/One thing needs you\./);
   await snap(page, '01-home-needs-collapsed');
 });
 
 test('02-home-needs-open', async ({ page }) => {
   await projects(page);
-  await page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^Needs you · 1/ }).click();
+  await openPlaces(page);
   await expect(page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /Choose the photo/ })).toBeVisible();
   await snap(page, '02-home-needs-open');
 });
 
 test('03-home-places-glow', async ({ page }) => {
   await glow(page);
+  await openPlaces(page);
   await expect(page.locator('.fd-door')).toHaveCount(7);
   await snap(page, '03-home-places-glow');
 });
@@ -142,14 +143,14 @@ test('08-more-sheet', async ({ page }) => {
 
 test('04-all-view', async ({ page }) => {
   await glow(page);
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'All', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
   await expect(page.locator('article.all-msg').first()).toBeVisible();
   await snap(page, '04-all-view');
 });
 
 test('05-all-route-chips', async ({ page }) => {
   await glow(page);
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'All', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
   const field = page.getByRole('textbox', { name: 'Message for your rooms' });
   await field.fill('Tell Choir and North Field the hall is booked for Tuesday');
   await expect(page.locator('.all-chip.chosen').first()).toBeVisible();
@@ -158,13 +159,15 @@ test('05-all-route-chips', async ({ page }) => {
 
 test('06-usage-card', async ({ page }) => {
   await projects(page);
-  await page.getByRole('button', { name: /^Claude:/ }).click();
-  await expect(page.getByRole('dialog', { name: 'Claude accounts' })).toBeVisible();
+  // 0.2: the Claude accounts card lives in Settings (the home's line went with the old home)
+  await railGo(page, 'Settings');
+  await expect(page.locator('.settings').getByText('Claude accounts').first()).toBeVisible();
   await snap(page, '06-usage-card');
 });
 
 async function kiln(page: Page, o: BootOpts = {}) {
   await glow(page, o);
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
   await roomBox(page).waitFor();
   await expect(focusSheet(page).locator('.message-list article.message').first()).toBeVisible();
@@ -336,7 +339,9 @@ test('43-note-editor-and-created-toast', async ({ page }) => {
 
 test('45-toast-copied', async ({ page }) => {
   await kiln(page);
-  await focusSheet(page).locator('article.message[data-ref="k3"]').getByRole('group', { name: 'Message actions' }).getByRole('button', { name: 'Copy', exact: true }).click();
+  // 0.2: on a touch screen Copy is in the long-press sheet (and says so there); the toast shown is Settings' copied key
+  if (touch()) { await railGo(page, 'Settings'); await page.getByRole('button', { name: 'Copy your public key' }).click(); }
+  else await focusSheet(page).locator('article.message[data-ref="k3"]').getByRole('group', { name: 'Message actions' }).getByRole('button', { name: 'Copy', exact: true }).click();
   await expect(page.locator('.toast')).toBeVisible();
   await snap(page, '45-toast-copied');
 });
@@ -415,6 +420,7 @@ test('51-note-page-over-room', async ({ page }) => {
 /** A room of the tasks world, opened as a person does (T-335): ATLAS is inside Atlas, so the Atlas door, its details, and "Inside Atlas". */
 async function openRoom(page: Page, name: string) {
   await page.locator('[data-place="front-door"]').waitFor();
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Areas/Atlas"]').click();
   await openDetails(page);
   await focusSheet(page).getByRole('region', { name: 'Inside Atlas' }).locator('.fx-place').filter({ has: page.locator('span', { hasText: new RegExp(`^${name}$`) }) }).click();
@@ -477,6 +483,7 @@ test('66-task-sheet-details-open', async ({ page }) => {
 const strip = (page: Page) => focusSheet(page).locator('[data-place="project-strip"]');
 async function workshop(page: Page, o: Boot = {}) {
   await projects(page, o);
+  await openPlaces(page);
   await doorOf(page, 'Workshop').click();
   await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('Workshop');
   // T-335: the area's projects are in the room's details
@@ -764,6 +771,7 @@ const secretReq = () => JSON.parse(/```uni-secret-request\n([^\n]*)\n```/.exec(s
 const arrive = (page: Page, channel: string, body: string, who = 'Uni') => page.evaluate(([c, n, b]) => (window as any).__arrive(c, n, b), [channel, who, body] as const);
 async function kilnWith(page: Page, tour: Tour, body: string) {
   await glow(page, {}, {}, tour);
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
   await roomBox(page).waitFor();
   await arrive(page, 'ch-kiln', body);
@@ -834,6 +842,7 @@ test('115-decision-card-in-chat', async ({ page }) => {
 
 test('116-attachments-in-chat', async ({ page }) => {
   await glow(page, {}, {}, { media: true });
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
   await expect(focusSheet(page).getByRole('button', { name: 'Open Firing log.pdf' })).toBeVisible();
   await snap(page, '116-attachments-in-chat');
@@ -841,6 +850,7 @@ test('116-attachments-in-chat', async ({ page }) => {
 
 test('117-attachment-image-preview', async ({ page }) => {
   await glow(page, {}, {}, { media: true });
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
   await focusSheet(page).getByRole('button', { name: 'Open image tiles.jpg' }).click();
   await expect(page.getByRole('dialog', { name: 'tiles.jpg' })).toBeVisible();
@@ -849,6 +859,7 @@ test('117-attachment-image-preview', async ({ page }) => {
 
 test('118-attachment-saved-status', async ({ page }) => {
   await glow(page, {}, {}, { media: true });
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
   await focusSheet(page).getByRole('button', { name: 'Save Firing log.pdf to Downloads' }).click();
   await expect(focusSheet(page).getByRole('status').filter({ hasText: 'Saved to Downloads/Firing log.pdf' })).toBeVisible();
@@ -862,6 +873,7 @@ test('120-approval-prompt-in-needs-you', async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, strayRoom: true });
   await page.locator('[data-place="front-door"]').waitFor();
   await arrive(page, 'ch-garden', PROMPTS.prompts.two_answers_30min);
+  await openPlaces(page);
   await expect(page.locator('.cp-approval')).toHaveCount(1);
   await snap(page, '120-approval-prompt-in-needs-you');
 });
@@ -871,6 +883,7 @@ test('121-approval-prompt-card-in-room', async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, strayRoom: true });
   await page.locator('[data-place="front-door"]').waitFor();
   await arrive(page, 'ch-garden', PROMPTS.prompts.two_answers_30min);
+  await openPlaces(page);
   await page.locator('.cp-approval').getByRole('button').click();
   await expect(page.locator('.message.approval-waiting')).toBeVisible();
   await snap(page, '121-approval-prompt-card-in-room');
@@ -905,12 +918,14 @@ async function toPost(page: Page) {
 
 test('140-to-post-front-door-count', async ({ page }) => {
   await toPost(page);
+  await openPlaces(page);
   await expect(page.getByRole('button', { name: 'To post · 3' })).toBeVisible();
   await snap(page, '140-to-post-front-door-count');
 });
 
 test('141-to-post-queue', async ({ page }) => {
   await toPost(page);
+  await openPlaces(page);
   await page.getByRole('button', { name: 'To post · 3' }).click();
   await expect(page.getByRole('region', { name: 'To post' }).getByRole('heading', { name: 'To review · 3' })).toBeVisible();
   await snap(page, '141-to-post-queue');
@@ -918,7 +933,8 @@ test('141-to-post-queue', async ({ page }) => {
 
 test('142-for-you', async ({ page }) => {
   await glow(page, {}, {}, { forYou: true });
-  await railGo(page, 'For you');
+  await openPlaces(page);
+  await page.getByRole('button', { name: /^For you/ }).click();
   await expect(page.getByText('Worth a look')).toBeVisible();
   await snap(page, '142-for-you');
 });
@@ -1024,6 +1040,7 @@ test('161-room-uni-working-stop', async ({ page }) => {
 
 test('162-room-quick-replies', async ({ page }) => {
   await glow(page);
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Areas/Bee Garden"]').click();
   await expect(page.getByRole('group', { name: 'Quick replies' })).toBeVisible();
   await snap(page, '162-room-quick-replies');
@@ -1070,14 +1087,16 @@ test('39-settings-calm-screen-on', async ({ page }) => {
 
 test('07-all-view-composer-focus', async ({ page }) => {
   await glow(page);
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'All', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
   await page.getByRole('textbox', { name: 'Message for your rooms' }).click();
   await snap(page, '07-all-view-composer-focus');
 });
 
 test('23-find-scoped-to-a-folder', async ({ page }) => {
   await vaultBrowser(page);
-  await page.getByRole('button', { name: /^Search in / }).first().click();
+  // 0.2: a name that finds nothing offers a search of the notes' words
+  await page.getByRole('searchbox', { name: 'Find a note by name' }).fill('bisque');
+  await page.getByRole('button', { name: /^Search the notes for/ }).click();
   await expect(page.getByRole('searchbox', { name: 'Search conversations and notes' })).toBeVisible();
   await snap(page, '23-find-scoped-to-a-folder');
 });

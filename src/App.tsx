@@ -2619,7 +2619,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const areasOpen = active?.kind === "areas" || active?.kind === "area";
   /** T-335 one surface: every room opens in focus over All; Uni's home (and a vault without rooms, its areas' work) is the other side of it. */
-  const allOpen = active?.kind === "all";
+  // 0.2 one home: Uni's places page, before the saved place is restored (or while a step back to it is turned into All), is drawn as the home
+  const allOpen = active?.kind === "all" || (homeIsAll && active?.kind === "areas" && !active.path);
   const shellOpen = areasOpen || allOpen;
   // another place opened: the focus ended with All (whoever opened it has already moved the room's view on)
   useLayoutEffect(() => { if (!allOpen && allFocusRef.current) { stopLeaving(); setAllFocus(null, true); } }, [allOpen]); // eslint-disable-line react-hooks/exhaustive-deps

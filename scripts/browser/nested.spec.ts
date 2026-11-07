@@ -15,10 +15,19 @@ const shot = async (page: Page, name: string) => {
 };
 const boot = (page: Page, o: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, atlas: true, pinned: true, ...o });
 
-const home = (page: Page) => page.locator('[data-place="front-door"][data-view="places"]');
+// 0.2 one home: All's stream, its places in the drawer under the head
+const home = (page: Page) => page.locator('[data-place="front-door"][data-view="all"]');
 const inside = (page: Page) => focusSheet(page).getByRole('region', { name: 'Inside Atlas' });
 const place = (page: Page, name: string) => inside(page).locator('.fx-place').filter({ has: page.getByText(name, { exact: true }) });
+// pulls the home's drawer down once the rooms are read (before that the places show open, then fold up under the head)
+async function openPlaces(page: Page) {
+  const pull = home(page).locator('.fd-pull');
+  await expect(pull).toBeEnabled();
+  if ((await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
+  await expect(home(page).getByRole('region', { name: 'Your places' })).toBeVisible();
+}
 async function atlasDetails(page: Page) {
+  await openPlaces(page);
   await home(page).locator('.fd-door[data-path="Areas/Atlas"]').click();
   await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('Atlas');
   await openDetails(page);
@@ -43,6 +52,7 @@ test.describe('nested rooms', () => {
     await expect(focusSheet(page).getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #atlas');
     // a project with its own room: its conversation, in focus
     await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
+    await expect(focusSheet(page)).toHaveCount(0); // home again (the drawer folded up), so the doors are opened from it afresh
     await atlasDetails(page);
     await place(page, 'ATLAS').click();
     await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('ATLAS');
@@ -68,6 +78,7 @@ test.describe('nested rooms', () => {
     await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms', exact: true })).toHaveCount(0);
     await expect(page.locator('.rooms nav .room')).toHaveCount(0);
     await expect(home(page)).toBeVisible();
+    await openPlaces(page);
     const others = home(page).locator('.fd-others');
     await others.locator('summary').click();
     await expect(others).toContainText('garden-club');

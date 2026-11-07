@@ -21,11 +21,20 @@ const shot = async (page: Page, name: string) => { await mkdir(SHOTS, { recursiv
 // What is new shows on Uni's home: each door's count (its rooms', the ones inside it too) and the line for the rooms outside the doors.
 const focus = (page: Page) => page.getByRole('region', { name: /in focus$/ });
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
-/** Uni's home; a phone steps out of the focus first (the rail is hidden under it). */
+/** 0.2 one home: the doors, what needs you and the rooms outside the doors are in the drawer under the home's head; this pulls it down
+ * once the rooms are read (before that the places show open, then fold up). */
+async function pullDown(page: Page) {
+  const pull = page.locator('[data-place="front-door"][data-view="all"] .fd-pull');
+  await expect(pull).toBeEnabled();
+  if ((await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
+  await expect(page.getByRole('region', { name: 'Your places' })).toBeVisible();
+}
+/** Uni's home, its drawer down; a phone steps out of the focus first (the rail is hidden under it). */
 async function home(page: Page) {
-  if (!(await rail(page).getByRole('button', { name: 'Uni', exact: true }).isVisible())) await focus(page).getByRole('button', { name: 'Back to All' }).click();
+  if (!(await rail(page).getByRole('button', { name: 'Uni', exact: true }).isVisible())) await focus(page).getByRole('button', { name: 'Back to Uni' }).click();
   await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
-  await page.locator('[data-place="front-door"][data-view="places"]').waitFor();
+  await expect(focus(page)).toHaveCount(0);
+  await pullDown(page);
 }
 /** A place inside another: its door, its details, then its row under "Inside". */
 async function openInside(page: Page, parent: string, name: string) {
@@ -40,7 +49,7 @@ test.describe('unread by room', () => {
   test('the front door shows what is new in each area and in the rooms outside them; opening one clears it', async ({ page }) => {
     n = 0;
     await boot(page);
-    await page.locator('[data-place="front-door"]').waitFor();
+    await pullDown(page);
     // Kiln Studio: its own 2 and Glaze Tests' 1 (which names you); North Field 1; Still Water nothing
     await expect(door(page, 'Kiln Studio')).toHaveAttribute('aria-label', /^Kiln Studio, 3 new, mentions you/);
     await expect(door(page, 'Kiln Studio').locator('.fd-new-n.at')).toHaveText('3 new · @you');
@@ -70,7 +79,7 @@ test.describe('unread by room', () => {
   test('a message elsewhere adds to that room live; reading it clears it; the room on screen never counts', async ({ page }) => {
     n = 10;
     await boot(page);
-    await page.locator('[data-place="front-door"]').waitFor();
+    await pullDown(page);
     await door(page, 'North Field').click();
     await expect.poll(() => marked(page)).toContain('ch-north');
     await home(page);
@@ -119,7 +128,7 @@ test.describe('unread by room', () => {
   test("a door's needs-you count is what its room's Needs you lists: a project's own room's prompt is in the project's details, not the door", async ({ page }) => {
     n = 30;
     await boot(page);
-    await page.locator('[data-place="front-door"]').waitFor();
+    await pullDown(page);
     await prompt(page, 'ch-glaze');
     await expect(page.locator('.cp-approval')).toHaveCount(1);
     await expect(door(page, 'Kiln Studio').locator('.fd-need-n')).toHaveCount(0);

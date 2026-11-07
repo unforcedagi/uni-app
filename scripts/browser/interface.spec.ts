@@ -13,7 +13,7 @@ const appControl = async (page: Page, name: string) => {
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 /** T-335: a place is opened from Uni's home (its door, or its parent's details there): from anywhere else (a room in focus, All), go there first. */
-const fromHome = async (page: Page) => { if (!(await page.locator('[data-place="front-door"][data-view="places"]').isVisible())) await openAreasHome(page); };
+const fromHome = async (page: Page) => { if (!(await page.locator('[data-place="front-door"]').first().isVisible()) || (await focusSheet(page).isVisible())) await openAreasHome(page); };
 // T-335 one surface: the room is in focus over All; its name heads the sheet; its app opens from its details and the name steps back to the chat
 const title = (page: Page) => focusSheet(page).locator('.all-focus-title');
 const backToChat = (page: Page) => focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click();

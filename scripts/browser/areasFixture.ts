@@ -870,6 +870,9 @@ const frontDoor = (page: Page) => page.locator('[data-place="front-door"]:not(.a
 export async function openPlaces(page: Page) {
   const pull = page.locator('[data-place="front-door"] .fd-pull');
   if (!(await pull.first().isVisible().catch(() => false))) return;
+  // while the rooms are still being read the drawer is simply open (and the head can't close it); it folds once the stream comes, so wait
+  // for that first (a world with no area rooms keeps it open for good)
+  await expect(pull.first()).toBeEnabled({ timeout: 4000 }).catch(() => {});
   if ((await pull.first().getAttribute('aria-expanded')) !== 'true' && !(await pull.first().isDisabled())) await pull.first().click();
   await page.locator('.fd-door').first().waitFor();
 }

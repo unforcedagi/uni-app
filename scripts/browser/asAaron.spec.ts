@@ -2,7 +2,7 @@
 // Made-up data only: the fixtures are the tour's.
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, type BootOpts } from './areasFixture';
+import { bootAreas, openPlaces, type BootOpts } from './areasFixture';
 import { installNotePaneFixture } from './notePaneFixture';
 import * as mailMock from './mailMock';
 import * as calMock from './calMock';
@@ -20,6 +20,7 @@ async function glow(page: Page, o: BootOpts = {}, native?: (cmd: string, args: a
 }
 async function kiln(page: Page, o: BootOpts = {}) {
   await glow(page, o);
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
   await focus(page).getByRole('textbox', { name: /^Message / }).waitFor();
   await expect(focus(page).locator('.message-list article.message').first()).toBeVisible();
@@ -27,29 +28,31 @@ async function kiln(page: Page, o: BootOpts = {}) {
 /** T-335 one surface: a room is in focus over All. */
 const focus = (page: Page) => page.getByRole('region', { name: /in focus$/ });
 const TASKS: BootOpts = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true, uniMember: true };
-/** The tour's way into a room of the tasks world: Uni's home, what needs you, its first item: its room in focus, with its details (T-335). */
+/** The tour's way into a room of the tasks world: Uni's home, what needs you (0.2: in the home's drawer, its list open), its first item: its room in focus, with its details (T-335). */
 async function openRoomWithNeeds(page: Page) {
   await page.locator('[data-place="front-door"]').first().waitFor();
-  await page.getByRole('button', { name: /^Needs you/ }).click();
-  await page.locator('.fd-needs-list button').first().click();
+  await openPlaces(page);
+  await page.locator('#fd-drawer').getByRole('region', { name: 'Needs you' }).locator('.fd-needs-list button').first().click();
   await expect(focus(page).locator('.all-focus-details')).toBeVisible();
 }
 
 // ---------------------------------------------------------------- the rail
-test('the phone bar is four places and More; the rest open from a sheet that closes itself', async ({ page }) => {
+test('the phone bar is three places and More; the rest open from a sheet that closes itself', async ({ page }) => {
   onlyPhone();
   await glow(page);
   const rail = railNav(page);
-  for (const name of ['Uni', 'All', 'Journal', 'Mail', 'More']) await expect(rail.getByRole('button', { name, exact: true })).toBeVisible();
-  for (const name of ['For you', 'To post', 'Vault', 'Search', 'Settings']) await expect(rail.getByRole('button', { name, exact: true })).toBeHidden();
+  // 0.2 one home: no All (Uni is All's stream) and no For you on the rail (it opens from the home's drawer)
+  for (const name of ['Uni', 'Journal', 'Mail', 'More']) await expect(rail.getByRole('button', { name, exact: true })).toBeVisible();
+  for (const name of ['All', 'For you']) await expect(rail.getByRole('button', { name, exact: true })).toHaveCount(0);
+  for (const name of ['To post', 'Arcade', 'Vault', 'Search', 'Settings']) await expect(rail.getByRole('button', { name, exact: true })).toBeHidden();
   // every label fits: nothing is cut or squeezed under 60 px wide
   const widths = await rail.locator('> button').evaluateAll((els) => els.filter((e) => (e as HTMLElement).offsetParent).map((e) => e.getBoundingClientRect().width));
-  expect(widths.length).toBe(5);
+  expect(widths.length).toBe(4);
   for (const w of widths) expect(w).toBeGreaterThanOrEqual(60);
   const more = rail.getByRole('button', { name: 'More', exact: true });
   await more.click();
   await expect(more).toHaveAttribute('aria-expanded', 'true');
-  for (const name of ['For you', 'To post', 'Vault', 'Search', 'Settings']) await expect(rail.getByRole('button', { name, exact: true })).toBeVisible();
+  for (const name of ['To post', 'Arcade', 'Vault', 'Search', 'Settings']) await expect(rail.getByRole('button', { name, exact: true })).toBeVisible();
   // a tap on the scrim closes it; Escape closes it; going somewhere closes it and More says you're in there
   await page.getByRole('button', { name: 'Close More' }).click({ position: { x: 20, y: 20 } });
   await expect(rail.getByRole('button', { name: 'Search', exact: true })).toBeHidden();
@@ -113,7 +116,7 @@ test('guard: a wider screen keeps every place on the rail and has no More', asyn
   await glow(page);
   const rail = railNav(page);
   await expect(rail.getByRole('button', { name: 'More', exact: true })).toBeHidden();
-  for (const name of ['Uni', 'All', 'Journal', 'Mail', 'For you', 'To post', 'Vault', 'Search', 'Settings']) await expect(rail.getByRole('button', { name, exact: true })).toBeVisible();
+  for (const name of ['Uni', 'Journal', 'Mail', 'To post', 'Arcade', 'Vault', 'Search', 'Settings']) await expect(rail.getByRole('button', { name, exact: true })).toBeVisible();
   // Settings still sits at the bottom of the rail
   const settings = (await rail.getByRole('button', { name: 'Settings', exact: true }).boundingBox())!;
   expect(settings.y).toBeGreaterThan(page.viewportSize()!.height * 0.7);
@@ -173,16 +176,19 @@ test('the composer ring sits in line with the mic and Send, in the room\'s colou
   expect(ring.shadow).toContain(tintRgb);
 });
 
-test('every room wears one colour: the home, All and the room agree', async ({ page }) => {
+test('every room wears one colour: the home\'s door, All\'s stream and the room agree', async ({ page }) => {
   await glow(page);
+  // 0.2 one home: the doors are in the drawer under the home's head, the stream under it
+  await openPlaces(page);
   const door = page.locator('.fd-door[data-path="Areas/Kiln Studio"]');
   const tint = await door.evaluate((el) => (el as HTMLElement).style.getPropertyValue('--room-tint'));
   expect(tint).toContain('hsl');
-  await railNav(page).getByRole('button', { name: 'All', exact: true }).click();
+  await page.locator('.fd-pull').click();
+  await expect(page.locator('#fd-drawer')).toHaveCount(0);
   const chip = page.locator('.all-place', { hasText: 'Kiln Studio' }).first();
   await expect(chip).toBeVisible();
   expect(await chip.evaluate((el) => (el as HTMLElement).style.getPropertyValue('--room-tint'))).toBe(tint);
-  await railNav(page).getByRole('button', { name: 'Uni', exact: true }).click();
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
   await focus(page).getByRole('textbox', { name: /^Message / }).waitFor();
   expect(await focus(page).evaluate((el) => (el as HTMLElement).style.getPropertyValue('--room-tint'))).toBe(tint);
@@ -262,6 +268,7 @@ test('a waiting approval is from Uni, not from a program\'s name', async ({ page
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, strayRoom: true });
   await page.locator('[data-place="front-door"]').waitFor();
   await page.evaluate(([c, n, b]) => (window as any).__arrive(c, n, b), ['ch-garden', 'Uni', PROMPTS.prompts.two_answers_30min] as const);
+  await openPlaces(page);
   await page.locator('.cp-approval').getByRole('button').click();
   await expect(page.locator('.message.approval-waiting')).toContainText('Uni needs your OK');
   await expect(page.locator('.message.approval-waiting')).not.toContainText('Hermes needs');
@@ -307,7 +314,7 @@ test('Settings says so when the live line has a problem, even with the sync up t
 });
 
 // ---------------------------------------------------------------- the vault
-test('one vault: Vault goes straight in; each open folder has two small marks, not two more buttons of words', async ({ page }) => {
+test('one vault: Vault goes straight in; an open folder has small marks, not buttons of words', async ({ page }) => {
   await glow(page);
   await railGo(page, 'Vault');
   const browser = page.locator('.vault-browser');
@@ -315,7 +322,14 @@ test('one vault: Vault goes straight in; each open folder has two small marks, n
   await expect(page.getByRole('region', { name: 'Vaults' })).toBeHidden();
   await expect(browser.getByRole('button', { name: 'Refresh' }).locator('svg')).toBeVisible();
   await expect(browser.getByRole('button', { name: 'New note here' })).toHaveCount(0);
-  await expect(browser.getByRole('button', { name: 'New note in Areas' })).toBeVisible();
+  // 0.2: a folder's own "+" shows only where there is hover; a phone has the one New note at the top
+  if (phone()) await expect(browser.getByRole('button', { name: 'New note in Areas' })).toBeHidden();
+  else {
+    const plus = browser.getByRole('button', { name: 'New note in Areas' });
+    await browser.locator('.vault-folder', { has: plus }).first().hover();
+    await expect(plus).toBeVisible();
+    await expect(plus.locator('xpath=..')).toHaveCSS('opacity', '1');
+  }
   await expect(browser.getByRole('button', { name: 'New note', exact: true })).toBeVisible();
   await browser.getByRole('button', { name: 'New note', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'New note' });
@@ -360,11 +374,13 @@ test('the home: a quiet day has its own line, the places sit on one thread, and 
   await glow(page);
   const quiet = await page.locator('.fd-statement span').last().textContent();
   expect(['All quiet.', 'The rooms are resting.', 'The mycelium has it.', 'Go look at a tree.', "Nothing's on fire.", 'Breathe out.', 'The garden keeps itself today.']).toContain(quiet);
+  // 0.2 one home: the thread runs under the day's sentence; its knots are the drawer's doors, one each
+  await openPlaces(page);
   await expect(page.locator('.fd-weave .fd-knot')).toHaveCount(await page.locator('.fd-door').count());
   await expect(page.locator('.fd-weave .fd-knot.fresh').first()).toBeVisible();
   await expect(page.locator('.fd-door[data-path="Areas/Kiln Studio"]')).not.toContainText('#kiln-studio');
-  await railNav(page).getByRole('button', { name: 'All', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Message for your rooms' }).fill('Tell Choir and North Field the hall is booked for Tuesday');
+  // All's composer is the home's own, at its foot
+  await page.getByRole('region', { name: 'Talk to Uni' }).getByRole('textbox', { name: 'Message for your rooms' }).fill('Tell Choir and North Field the hall is booked for Tuesday');
   await expect(page.locator('.all-chip.chosen').first()).toBeVisible();
   await expect(page.locator('.all-why')).toHaveCount(0);
 });
@@ -373,7 +389,8 @@ test('the home never says less than the cards beside it: an approval waiting is 
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, strayRoom: true });
   await page.locator('[data-place="front-door"]').waitFor();
   await page.evaluate(([c, n, b]) => (window as any).__arrive(c, n, b), ['ch-garden', 'Uni', PROMPTS.prompts.two_answers_30min] as const);
-  await expect(page.locator('.cp-approval')).toBeVisible();
+  await openPlaces(page);
+  await expect(page.locator('#fd-drawer .cp-approval')).toBeVisible();
   await expect(page.locator('.fd-statement')).not.toContainText('Nothing needs you');
 });
 
@@ -393,7 +410,9 @@ test('a failed read of what needs you says so and offers another try, instead of
   await expect(page.locator('.fd-statement')).toContainText("Couldn't check what needs you.");
   await expect(page.locator('.fd-statement')).not.toContainText('Nothing needs you');
   await page.evaluate(() => { (window as any).__failTasks = false; });
-  await page.getByRole('button', { name: 'Try again' }).click();
+  // 0.2: the other try is in the home's drawer, at its top
+  await openPlaces(page);
+  await page.locator('#fd-drawer').getByRole('button', { name: 'Try again' }).click();
   await expect(page.locator('.fd-statement')).not.toContainText("Couldn't check");
 });
 
@@ -423,8 +442,13 @@ test('a many-pane place\'s header runs the width of its panes on a wide screen',
   await mailMock.boot(page, 'ok');
   await expect(mailMock.mail(page)).toBeVisible();
   const bar = (await page.locator('.mail-bar').boundingBox())!;
-  const back = (await page.locator('.mail-bar').getByRole('button', { name: /^←/ }).boundingBox())!;
-  expect(back.x - bar.x).toBeLessThanOrEqual(20);
+  const panes = (await page.locator('.mail-panes').boundingBox())!;
+  // 0.2: a rail place has no Back of its own; the head starts with the place's name, at the panes' left edge
+  await expect(page.locator('.mail-bar').getByRole('button', { name: /^←/ })).toHaveCount(0);
+  const title = (await page.locator('.mail-bar .mail-title').boundingBox())!;
+  expect(title.x - bar.x).toBeLessThanOrEqual(20);
+  expect(Math.abs(bar.x - panes.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(bar.x + bar.width - (panes.x + panes.width))).toBeLessThanOrEqual(1);
 });
 
 test('Mail\'s and Calendar\'s tags don\'t shout', async ({ page }) => {

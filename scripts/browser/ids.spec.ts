@@ -19,7 +19,7 @@ const shot = async (page: Page, name: string) => {
 };
 const title = (page: Page) => focusSheet(page).locator('.all-focus-title');
 /** T-335: a place is opened from Uni's home (its door, or its parent's details there): from anywhere else (a room in focus, All), go there first. */
-const fromHome = async (page: Page) => { if (!(await page.locator('[data-place="front-door"][data-view="places"]').isVisible())) await openAreasHome(page); };
+const fromHome = async (page: Page) => { if (!(await page.locator('[data-place="front-door"]').first().isVisible()) || (await focusSheet(page).isVisible())) await openAreasHome(page); };
 /** Where a place inside another is reached: its parent's details ("Inside X"). */
 const PARENT: Record<string, string> = { 'COhere 2026': 'Techne', 'Boulder Civic Calendar': 'Boulder' };
 /** Open a node's room (T-335: in focus over All; an area from its door, a place inside it from the area's details). */

@@ -8,7 +8,14 @@ const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).
 // T-335 one surface: a room is in focus over All; its name heads the sheet; its details hold its work, the places inside it and its app
 const title = (page: Page) => focusSheet(page).locator('.all-focus-title');
 /** T-335: a place is opened from Uni's home (its door, or its parent's details there): from anywhere else (a room in focus, All), go there first. */
-const fromHome = async (page: Page) => { if (!(await page.locator('[data-place="front-door"][data-view="places"]').isVisible())) await openAreasHome(page); };
+const fromHome = async (page: Page) => { if (!(await page.locator('[data-place="front-door"]').first().isVisible()) || (await focusSheet(page).isVisible())) await openAreasHome(page); };
+/** 0.2 one home: the doors are in the drawer under the home's head; this pulls it down (without waiting for a door, so an absent one can be checked). */
+async function pullDown(page: Page) {
+  const pull = page.locator('[data-place="front-door"] .fd-pull');
+  await pull.waitFor();
+  if ((await pull.getAttribute('aria-expanded')) !== 'true' && (await pull.isEnabled())) await pull.click();
+  await expect(page.locator('#fd-drawer')).toBeVisible();
+}
 const backToChat = (page: Page) => focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click();
 /** Where a place inside another is reached: its parent's details ("Inside X"). */
 const PARENT: Record<string, string> = { 'COhere 2026': 'Techne' };
@@ -40,6 +47,7 @@ test.describe('device cache', () => {
     await bootAreas(page, 'seed', { briefs: true, queryDelay: 1800, deviceCache: cached });
     await page.evaluate(() => { document.documentElement.dataset.t0 = String(performance.now()); });
     await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
+    await pullDown(page);
     await expect(areaCard(page, 'Techne')).toBeVisible({ timeout: 500 });
     await expect(page.locator('.areas-status')).toContainText('Saved copy · refreshing');
     const timing = await page.evaluate(() => (window as any).__areasTiming);
@@ -58,7 +66,8 @@ test.describe('device cache', () => {
     await expect(areaCard(page, 'Techne')).toBeVisible();
     await expect(page.locator('.areas-status')).toContainText("couldn't refresh");
     await openAreaPage(page, 'Techne', { app: false });
-    await expect(page.locator('.areas-status')).toContainText("couldn't refresh");
+    // the room in focus says it too (the home behind it keeps its own line)
+    await expect(focusSheet(page).locator('.areas-status')).toContainText("couldn't refresh");
   });
 
   for (const tag of ['project', 'area-brief', 'area-today']) test(`failed ${tag} refresh retains savedAt and labels old data`, async ({ page }) => {
@@ -79,6 +88,7 @@ test.describe('device cache', () => {
 
   test('forget then pair account B clears disk and memory before any paint', async ({ page }) => {
     await bootAreas(page, 'seed', { briefs: true });
+    await pullDown(page);
     await expect(areaCard(page, 'Techne')).toBeVisible();
     await expect.poll(() => page.evaluate(() => localStorage.getItem('uni.areas.cache.v2'))).not.toBeNull();
     await page.evaluate(() => {
@@ -107,7 +117,9 @@ test.describe('device cache', () => {
   test('a first load that fails says so', async ({ page }) => {
     await bootAreas(page, 'seed', { queryFails: ['area'] });
     await openAreasHome(page);
-    await expect(page.getByRole('alert')).toContainText("Couldn't load areas");
+    // 0.2: the home is All's stream; with nothing read it says so in place of the stream, with a way to try again
+    await expect(page.locator('[data-place="front-door"] .all-quiet')).toContainText("Couldn't read your places just now.");
+    await expect(page.locator('[data-place="front-door"]').getByRole('button', { name: 'Try again' })).toBeVisible();
   });
 });
 
@@ -188,6 +200,7 @@ test('path brief beats a newer metadata-only note; limit is visible', async ({ p
 // T-335: the tree's rows are the home's doors (areas) and an area's "Inside X" in its details (the places inside it)
 for (const status of ['archived', 'done', 'dormant']) test(`area and project status ${status} controls the doors and the places inside`, async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true, nodeStatuses: { 'a-sad': status, 'p-cohere': status } });
+  await pullDown(page);
   await expect(areaCard(page, 'Techne')).toBeVisible();
   // dormant is not archived or done: background nodes stay in the tree
   if (status === 'dormant') await expect(areaCard(page, 'Sanctum')).toBeVisible();
@@ -212,6 +225,7 @@ test('failed project refresh retains previous projects and stale marker', async 
 
  test('fresh memory stays fresh during a deferred background refresh', async ({ page }) => {
   await bootAreas(page, 'seed');
+  await pullDown(page);
   await expect(areaCard(page, 'Techne')).toBeVisible();
   await page.evaluate(() => {
     const w = window as any, original = w.__TAURI_INTERNALS__.invoke;
@@ -240,9 +254,12 @@ test('failed project refresh retains previous projects and stale marker', async 
 
  test('unresolved identity shows Signing in', async ({ page }) => {
   await bootAreas(page, 'seed', { identityDelay: 3000 });
-  await expect(page.getByText('Signing in…', { exact: true })).toBeVisible();
+  // 0.2: the home is All's stream; before the key is known it says it is reading, and reads nothing yet
+  await expect(page.locator('[data-place="front-door"] .all-quiet')).toHaveText('Reading your rooms…');
   expect(await calls(page, 'vault_query')).toHaveLength(0);
-  await expect(areaCard(page, 'Techne')).toBeVisible({ timeout: 8000 });
+  await expect(page.locator('[data-place="front-door"] .fd-pull')).toBeVisible({ timeout: 8000 });
+  await pullDown(page);
+  await expect(areaCard(page, 'Techne')).toBeVisible();
  });
 
 

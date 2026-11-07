@@ -60,7 +60,7 @@ export default function VaultBrowser({ vault, onOpen, onCreate, onSearch, onBack
   const renderedTree = rows(tree);
   return <section className="vault-browser" aria-label={`Vault ${vault}`}>
     <header className="note-bar page-bar">{onBack && <button className="note-action" onClick={onBack}>← {backTo}</button>}<strong>{vault}</strong><button className="note-action note-refresh" aria-label="Refresh" title="Refresh" disabled={loading} onClick={() => invalidatePaths(vault)}><RefreshIcon /></button></header>
-    <div className="vault-toolbar"><input type="search" aria-label="Filter paths" placeholder="Find a note by name" value={filter} onChange={(e) => setFilter(e.target.value)} />{actions("")}</div>
+    <div className="vault-toolbar"><input type="search" aria-label="Find a note by name" placeholder="Find a note by name" value={filter} onChange={(e) => setFilter(e.target.value)} />{actions("")}</div>
     <div className="vault-scroll">{loading && <p role="status">Loading paths…</p>}{/* r25 (Codex 7): a failure is a plain sentence and Retry, the technical cause under Details (as Search and notes do) */}
       {error && <div className="note-error" role="alert"><p>Couldn't read this vault just now. <button type="button" className="cp-retry" onClick={() => invalidatePaths(vault)}>Retry</button></p>
         <details className="note-error-more"><summary>Details</summary><p className="note-error-detail">{error}</p></details></div>}

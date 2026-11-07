@@ -34,8 +34,11 @@ function countRenders() {
 async function openRoom(page: Page) {
   await page.addInitScript(countRenders);
   await bootAreas(page, 'seed', { world: 'unread', pinned: true, big: 2000, tasks: true, unread: { 'ch-kiln': 2, 'ch-allot': 3 } });
-  await page.locator('[data-place="front-door"]').waitFor();
-  await page.locator('.fd-door[data-path="Areas/North Field"]').click();
+  // 0.2 one home: the doors are in the drawer under the home's head, pulled down once the rooms are read
+  const pull = page.locator('[data-place="front-door"][data-view="all"] .fd-pull');
+  await expect(pull).toBeEnabled({ timeout: 20_000 });
+  if ((await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
+  await page.getByRole('region', { name: 'Your places' }).locator('.fd-door[data-path="Areas/North Field"]').click();
   const box = page.getByRole('textbox', { name: 'Message north-field' });
   await box.waitFor();
   await expect(page.locator('.message-list article.message').first()).toBeVisible();

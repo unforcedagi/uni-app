@@ -1,5 +1,5 @@
 import { ProjectGaps } from "../projects/ProjectStrip";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
 import { useTasks } from "./useTasks";
@@ -73,6 +73,9 @@ export type ShellActions = Omit<AreaActions, "openNote" | "openRoom"> & { openNo
 
 /** What is open over the place (a task sheet, a project): Android Back and Alt+← close it first, and it holds Alt+arrow history while open. */
 export type Overlay = { close: () => void; modal: boolean; history: boolean };
+
+/** 0.2: whether the home's drawer is down, across redraws of the home (this launch only) */
+const pulledMemory = { open: false };
 
 /** r28: the rechecks are logged once per launch (the module lives as long as the app does) */
 const recheckLogged = { done: false };
@@ -181,8 +184,10 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const closeProject = () => setProjectOpen(null);
   /** A vault without rooms: the place's app, shown in its page's place (Back closes it). */
   const [appOpen, setAppOpen] = useState(false);
-  /** 0.2 one home: the head's drawer (what needs you, For you, the places) is pulled down; Back closes it */
-  const [pulled, setPulled] = useState(false);
+  /** 0.2 one home: the head's drawer (what needs you, For you, the places) is pulled down; Back closes it. Kept for the session, so a
+   *  redraw of the home (the key arriving, a place's room coming back) leaves it as the person left it. */
+  const [pulled, setPulledState] = useState(() => pulledMemory.open);
+  const setPulled = useCallback((open: boolean) => { pulledMemory.open = open; setPulledState(open); }, []);
   const focusView: FocusView = focus?.view ?? "chat";
   /** Without rooms, a place's page is its work; with rooms, the focus's "all of its work" step. */
   const workShown = !chat ? !!node : focusView === "work";

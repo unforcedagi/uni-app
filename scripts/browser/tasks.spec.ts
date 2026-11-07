@@ -15,7 +15,7 @@ const openTask = (page: Page, id: string) => page.locator(`.fx-work .cp-need[dat
 const infinite = (page: Page) => page.evaluate(() => document.getAnimations().filter((a) => { const t = a.effect?.getComputedTiming(); return !t || t.iterations === Infinity || !Number.isFinite(t.endTime as number); }).length);
 const title = (page: Page) => focusSheet(page).locator('.all-focus-title');
 /** T-335: a place is opened from Uni's home (its door, or its parent's details there): from anywhere else (a room in focus, All), go there first. */
-const fromHome = async (page: Page) => { if (!(await page.locator('[data-place="front-door"][data-view="places"]').isVisible())) await openAreasHome(page); };
+const fromHome = async (page: Page) => { if (!(await page.locator('[data-place="front-door"]').first().isVisible()) || (await focusSheet(page).isVisible())) await openAreasHome(page); };
 /** Where a place inside another is reached: its parent's details ("Inside X"). */
 const PARENT: Record<string, string> = { 'COhere 2026': 'Techne' };
 /** A node's work page (T-335: its room in focus, its details, "All of X's work"). */

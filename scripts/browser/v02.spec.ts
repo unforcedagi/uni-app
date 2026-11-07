@@ -12,6 +12,8 @@ import * as mailMock from './mailMock';
 
 test.describe('one home', () => {
   test('the rail has one home: Uni opens All\'s stream, with what needs you and the places folded under its head', async ({ page }) => {
+    // the places page is never drawn, not even for a frame while the saved place is restored
+    await page.addInitScript(() => { const w = window as any; w.__placesSeen = 0; new MutationObserver(() => { if (document.querySelector('[data-view="places"]')) w.__placesSeen++; }).observe(document, { subtree: true, childList: true, attributes: true }); });
     await boot(page);
     // no second home: never the places page, no All tab, no For you tab
     await expect(page.locator('[data-view="places"]')).toHaveCount(0);
@@ -20,6 +22,7 @@ test.describe('one home', () => {
     await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible();
     await expect(page.locator('[data-view="places"]')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).__placesSeen), 'the places page drawn at all').toBe(0);
     await expect(rail(page).getByRole('button', { name: 'Uni', exact: true })).toHaveAttribute('aria-current', 'page');
     // one composer, at the foot of the stream
     await expect(page.getByRole('region', { name: 'Talk to Uni' })).toHaveCount(1);
@@ -42,6 +45,16 @@ test.describe('one home', () => {
     else await page.keyboard.press('Escape');
     await expect(focusSheet(page)).toHaveCount(0);
     await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible();
+  });
+
+  test('the drawer stays down when the home is drawn again (the key arriving late redraws it)', async ({ page }) => {
+    await boot(page, { identityDelay: 2500 });
+    await openHead(page);
+    // the key arrives and the home is drawn again: the drawer is as the person left it
+    await page.waitForFunction(() => (window as any).__calls?.some((c: any) => c.cmd === 'get_identity'));
+    await page.waitForTimeout(3500);
+    await expect(page.locator('[data-place="front-door"] .fd-pull')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('.fd-door[data-path="Areas/Kiln Studio"]')).toBeVisible();
   });
 
   test('For you opens from the home and comes back to it', async ({ page }) => {

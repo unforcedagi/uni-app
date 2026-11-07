@@ -119,9 +119,14 @@ test.describe('rooms nav', () => {
   // T-302: "one line by place from above" was Uni's level, which went with the Uni room as home; the home shows a private area's name only
   test('private areas: the home never shows their items; inside the area they are its rows; they are counted', async ({ page }) => {
     await boot(page);
-    const home = page.locator('[data-place="front-door"][data-view="places"]');
-    await expect(home.locator('.fd-door[data-path="Areas/Sanctum"]')).toBeVisible();
-    await home.getByRole('button', { name: /^Needs you/ }).click().catch(() => {});
+    // 0.2 one home: the places and what needs you are in the drawer under the home's head (its Needs you list is always open)
+    const home = page.locator('[data-place="front-door"][data-view="all"]');
+    const pull = home.locator('.fd-pull');
+    await expect(pull).toBeEnabled(); // the rooms are read (before that the places show open, then fold up)
+    await pull.click();
+    const drawer = home.getByRole('region', { name: 'Your places' });
+    await expect(drawer.locator('.fd-door[data-path="Areas/Sanctum"]')).toBeVisible();
+    await expect(drawer.getByRole('region', { name: 'Needs you' })).toBeVisible();
     await expect(home).not.toContainText(/T-3[12]|Sit twenty/);
     // r14: the area itself, opened by Aaron: its items are ordinary rows, with their titles
     await go(page, 'Sanctum');
