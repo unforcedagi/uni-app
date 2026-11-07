@@ -431,7 +431,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const surfaces = tabsRef.current.tabs.filter((t) => (t.kind === "all" && !!t.channel) || t.kind === "journal");
       const previous = [...tabsRef.current.recent].reverse().map((id) => surfaces.find((t) => t.id === id)).find(Boolean);
       // the room in focus, named as its head names it: its place, else the room itself
-      forYouBack.current = previous?.kind === "all" && previous.channel ? nodeOfRoom(previous.channel)?.name || `#${(roomsRef.current.find((r) => r.id === previous.channel)?.name ?? "room").replace(/^#/, "")}` : previous?.title ?? "Uni";
+      forYouBack.current = previous?.kind === "all" && previous.channel ? (previous.path ? previous.path.split("/").pop() : null) || nodeOfRoom(previous.channel)?.name || `#${(roomsRef.current.find((r) => r.id === previous.channel)?.name ?? "room").replace(/^#/, "")}` : previous?.title ?? "Uni";
       forYouReturn.current = previous?.id ?? null;
     }
     openTarget({ kind: "note", note: { hub: null, vault: "uni", ref: FOR_YOU_ID }, title: "For you" }, "new");
@@ -1093,6 +1093,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       // Re-sync after room membership changes: discard tabs for missing rooms.
       const previous = tabsRef.current;
       const next = restoreTabs(serializeTabs(previous), rows.map((r) => r.id));
+      // T-335 one surface: a room gone while it is in focus leaves it (All is All again), and All forgets it
+      const f = allFocusRef.current;
+      if (f && !rows.some((r) => r.id === f.room)) { stopLeaving(); setAllFocus(null, true); if (activeTab(previous)?.kind === "all") navigate(null, null); }
+      if (next.tabs.length === previous.tabs.length && serializeTabs(next) !== serializeTabs(previous)) commitTabs(next);
       if (next.tabs.length !== previous.tabs.length) {
         if (next.active !== previous.active) switchToTabRef.current(activeTab(next));
         for (const old of previous.tabs) if (!next.tabs.some((t) => t.id === old.id)) noteStacks.current.delete(old.id);

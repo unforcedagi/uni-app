@@ -299,6 +299,20 @@ test.describe('review 1', () => {
   });
 });
 
+test('review 2: a room that goes away while in focus leaves it, and All forgets it', async ({ page }) => {
+  await boot(page);
+  await home(page).locator('.fd-door[data-path="Areas/Choir"]').click();
+  await inFocus(page, 'Choir');
+  await page.evaluate(() => {
+    const w = window as any, original = w.__TAURI_INTERNALS__.invoke;
+    w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => { const r = await original(cmd, args); return cmd === 'get_rooms' ? r.filter((x: any) => x.id !== 'ch-choir') : r; };
+    for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'rooms' } });
+  });
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(page.locator('[data-view="all"]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('uni.tabs.v2') ?? '{}').tabs?.some((t: any) => t.channel === 'ch-choir') ?? false)).toBe(false);
+});
+
 test('the old room view is not in the app at all', async () => {
   const dir = new URL('../../dist-onesurface/assets/', import.meta.url);
   const js = readdirSync(dir).filter((f) => f.endsWith('.js')).map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');

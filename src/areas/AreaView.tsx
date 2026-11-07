@@ -66,7 +66,8 @@ export default function AreaView({ area, mode, roomName, actions, room, open, on
   const name = cleanText(area.name);
   // The app note is looked up by its path, in the background: no vault listing, and the room never waits for it.
   useEffect(() => {
-    setApp(null); setDeclined(false); setFound({ state: "loading" });
+    // (one AreaView serves each place in turn in the focus: another place's choices don't carry over)
+    setApp(null); setDeclined(false); setMenu(false); stoppedByUser.current = false; setFound({ state: "loading" });
     if (!live) return;
     let on = true;
     const get = (ref: string) => invoke<{ note: { id: string; extension?: string | null; content?: string; metadata?: unknown } }>("vault_note", { vault: vaultName, noteRef: ref });
