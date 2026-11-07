@@ -3,7 +3,7 @@
 // brought back). A project the vault hasn't given a folder yet is named once, under all of the room's work (ProjectGaps). Folds to one line,
 // remembered on this device.
 import { useState } from "react";
-import { liveSessions, projectsIn } from "./model";
+import { isHome, liveSessions, projectsIn } from "./model";
 import { useWork } from "./store";
 import "./projects.css";
 
@@ -15,7 +15,7 @@ export function ProjectGaps({ areaPath }: { areaPath: string }) {
   const { work } = useWork();
   const gaps = work.gaps.filter((g) => g.areaPath === areaPath);
   if (!work.areas.some((a) => a.path === areaPath)) return null; // the strip says "this area has no room yet"
-  return gaps.length ? <p className="wv-gaps">{gaps.map((g) => g.name).join(", ")}: not set up yet, so sessions there won't show here.</p> : null;
+  return gaps.length ? <p className="wv-gaps">{gaps.map((g) => g.name).join(", ")}: not set up yet, so sessions there show under Other sessions.</p> : null;
 }
 
 export function ProjectStrip({ areaPath, onOpen }: { areaPath: string; onOpen: (project: string) => void }) {
@@ -29,15 +29,17 @@ export function ProjectStrip({ areaPath, onOpen }: { areaPath: string; onOpen: (
   if (!area) return gaps.length ? <section className="ps" aria-label="Projects here" data-place="project-strip"><span className="ps-label">Projects</span>
     <span className="ps-gap">{gaps.map((g) => g.name).join(", ")}: this area has no room yet</span></section> : null;
   const all = projectsIn(work, area.id);
-  const projects = all.filter((p) => p.status !== "archived");
-  const archived = all.filter((p) => p.status === "archived");
-  if (!projects.length && !archived.length) return null; // a project with no folder yet has nothing to open: no strip for it alone
-  const live = projects.reduce((n, p) => n + liveSessions(work, p.id).length, 0);
+  // the area's sessions in no project: their own tab, first (only when there are any)
+  const home = all.find(isHome) ?? null;
+  const projects = all.filter((p) => !isHome(p) && p.status !== "archived");
+  const archived = all.filter((p) => !isHome(p) && p.status === "archived");
+  if (!projects.length && !archived.length && !home) return null; // a project with no folder yet has nothing to open: no strip for it alone
+  const live = [...(home ? [home] : []), ...projects].reduce((n, p) => n + liveSessions(work, p.id).length, 0);
   const tab = (p: (typeof all)[number]) => {
     const n = liveSessions(work, p.id).length;
     return <li key={p.id}><button type="button" className={`ps-tab ${n ? "live" : ""} ${p.status}`} data-project={p.id} onClick={() => onOpen(p.id)}
-      aria-label={`${p.name}${n ? `, ${n} working` : ""}${p.status === "resting" ? ", resting" : p.status === "archived" ? ", archived" : ""}`}>
-      {n > 0 && <i className="ps-dot" aria-hidden="true" />}<span>{p.name}</span>{n > 1 && <small aria-hidden="true">{n}</small>}
+      aria-label={`${isHome(p) ? "Other sessions" : p.name}${n ? `, ${n} working` : ""}${p.status === "resting" ? ", resting" : p.status === "archived" ? ", archived" : ""}`}>
+      {n > 0 && <i className="ps-dot" aria-hidden="true" />}<span>{isHome(p) ? "Other sessions" : p.name}</span>{n > 1 && <small aria-hidden="true">{n}</small>}
     </button></li>;
   };
   return <section className={`ps ${folded ? "folded" : ""}`} aria-label={`${area.name}'s projects`} data-place="project-strip">
@@ -47,6 +49,7 @@ export function ProjectStrip({ areaPath, onOpen }: { areaPath: string; onOpen: (
       <i className="ps-chev" aria-hidden="true" />
     </button>
     {!folded && <ul className="ps-list">
+      {home && tab(home)}
       {projects.map(tab)}
       {archived.length > 0 && <li><button type="button" className="ps-tab ps-more" aria-expanded={showArchived} onClick={() => setShowArchived(!showArchived)}>Archived · {archived.length}</button></li>}
       {showArchived && archived.map(tab)}

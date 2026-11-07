@@ -6,17 +6,24 @@
 //   project the model refuses (no area, no folder) is a gap: named, never shown as if it were whole.
 // - Sessions are the `run` notes mts writes. A run belongs to the project its `project`, its `node`, its task's node or (last) its
 //   repo `folder` names. What it is doing now is `doing_now` (mts writes it while it runs); words, never ids.
+// - No run is dropped. One that names no project sits in its area's home: the area its node, its task's node, a shared folder, its room's
+//   id or its room's name says. One that says no area is in the Unfiled home.
+// - A run touching a private place by any clue (node, task's node, folder, room id or name) is the private place's, whatever public clue it
+//   also carries: it goes to the private area, or (with none) to Unfiled with none of its words. The app's own private-place rules decide.
 import type { RawNote } from "../areas/taskCore.ts";
-import { isPrivateName } from "../areas/treeRooms.ts";
+import { parseArea, parseProject, type Area as TreeNode } from "../areas/areasCore.ts";
+import { buildTree } from "../areas/treeCore.ts";
+import { isPrivateName, isPrivatePath, runIsPrivate } from "../areas/treeRooms.ts";
 import { redactRaw, safeStep } from "./sessionWords.ts";
-import { END_WHYS, isFolder, makeProject, ModelError, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type Work } from "./model.ts";
+import { END_WHYS, isFolder, makeProject, ModelError, UNFILED, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type Work } from "./model.ts";
 
 /** A project the model can't take, named so it is never silently missing. `areaPath`: the area it sits under (even one with no room), so
  *  that area's strip can name it. */
 export type Gap = { name: string; area: string | null; areaPath: string | null; why: "no folder" | "no area" | "area has no room" };
 export type LiveArea = Area & { private: boolean };
 export type LiveWork = Work & { areas: LiveArea[]; gaps: Gap[] };
-export type Sources = { nodes: readonly RawNote[]; runs: readonly RawNote[]; tasks: readonly RawNote[] };
+export type Sources = { nodes: readonly RawNote[]; runs: readonly RawNote[]; tasks: readonly RawNote[];
+  /** The rooms the account has, by id and name: a run note may hold only a room's id, and a node may hold only its name. Left out: not read yet. Empty: it has none. */ rooms?: readonly { id: string; name: string }[] | null };
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 const meta = (n: RawNote): Record<string, unknown> => (n.metadata && typeof n.metadata === "object" ? (n.metadata as Record<string, unknown>) : {});
@@ -147,8 +154,15 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const name = lastName(str(n.path)!);
     if (!room || seenRooms.has(room)) continue;
     seenRooms.add(room);
-    areas.push({ id: keyOf(n), name, path: str(n.path)!, room, private: isPrivateName(name) });
+    areas.push({ id: keyOf(n), name, path: str(n.path)!, room, private: false });
   }
+  // the app's own rules for what is private (treeRooms), over the same notes
+  const tree = buildTree(src.nodes.flatMap((n): TreeNode[] => {
+    if (typeof n.path !== "string" || typeof n.id !== "string") return [];
+    try { const a = parseArea({ ...n, tags: tagsOf(n) } as never) ?? parseProject({ ...n, tags: tagsOf(n) } as never); return a ? [a] : []; } catch { return []; }
+  }));
+  const privatePath = (path: string) => isPrivateName(lastName(path)) || isPrivatePath(tree, path);
+  for (const a of areas) a.private = privatePath(a.path);
   const areaIds = new Set(areas.map((a) => a.id));
   /** Every area note by key, with or without a room (review finding 7: one without is still where its projects sit). */
   const areaPathOf = new Map(areaNotes.map((n) => [keyOf(n), str(n.path)!]));
@@ -212,6 +226,65 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     if (node) taskNode.set(id, node);
     taskTitle.set(id, plainTitle(path.replace(/^Tasks\//, "").replace(/∕/g, "/")));
   }
+  /** The areas by the names their rooms go by: each area's room first (so a shared older name can't take it), then its other and old ones. */
+  const roomKey = (v: unknown) => (str(v) ?? "").replace(/^#/, "").replace(/\s*\(.*$/, "").trim().toLowerCase();
+  const byRoom = new Map<string, string>();
+  const nameRooms = (area: string, names: unknown[]) => { for (const v of names) for (const part of String(v ?? "").split(",")) { const k = roomKey(part); if (k && !byRoom.has(k)) byRoom.set(k, area); } };
+  /** An area a person can reach: an archived one has no door on the home, so a home under it would be seen by no one. */
+  const reachable = (id: string | null | undefined) => { const n = id ? byKey.get(id) : undefined; return !!n && areaIds.has(id!) && statusOf(meta(n).status) !== "archived"; };
+  const areaNote = (a: LiveArea) => meta(areaNotes.find((n) => keyOf(n) === a.id)!);
+  for (const a of areas) nameRooms(a.id, [a.room, areaNote(a).room]);
+  for (const a of areas) nameRooms(a.id, [areaNote(a).rooms, a.name, areaNote(a).room_was, areaNote(a).room_renamed_from]);
+  // a project's own room (older ones have one) says its area too
+  for (const n of src.nodes) { const up = areaUp(n); if (up && areaIds.has(up)) nameRooms(up, [meta(n).channel, meta(n).room, meta(n).rooms, meta(n).room_was, meta(n).room_renamed_from]); }
+  const areaOfNode = (ref: string | null): string | null => {
+    const n = ref ? byKey.get(unlink(ref)) : undefined;
+    const up = n ? areaUp(n) : null;
+    return reachable(up) ? up : null;
+  };
+  const areaOfRoom = (v: unknown): string | null => {
+    const key = roomKey(v);
+    const hit = key ? byRoom.get(key) ?? byRoom.get(roomKey(src.rooms?.find((r) => r.id === str(v))?.name)) ?? null : null;
+    return reachable(hit) ? hit : null;
+  };
+  const projectArea = new Map(projects.map((p) => [p.id, p.area]));
+  /** The area a run with no project belongs to, from the surest clue on it down; null when nothing says. */
+  const areaOfRun = (m: Record<string, unknown>, task: string | null, viaFolder: string[] | undefined): string | null => {
+    const shared = viaFolder?.length && viaFolder.every((p) => projectArea.get(p) === projectArea.get(viaFolder[0])) ? projectArea.get(viaFolder[0]) ?? null : null;
+    return areaOfNode(str(m.project)) ?? areaOfNode(str(m.node)) ?? (task ? areaOfNode(taskNode.get(task) ?? null) : null) ?? (reachable(shared) ? shared : null)
+      ?? areaOfRoom(m.channel) ?? areaOfRoom(m.starter_channel) ?? areaOfRoom(m.room) ?? areaOfRoom(m.starter_room);
+  };
+  const roomRefs = [...(src.rooms ?? []), ...src.nodes.flatMap((n) => { const c = str(meta(n).channel); return c ? c.split(",").map((id) => ({ id: id.trim(), name: (str(meta(n).room) ?? lastName(str(n.path) ?? "")).split(",")[0].trim() })) : []; })];
+  /** Whether any clue on a run touches a private place: the same rule the app's other lists use. A folder counts only when no node says where it belongs. */
+  const touchesPrivate = (m: Record<string, unknown>, task: string | null, byNode: string | null) => {
+    const refs = [str(m.project), str(m.node), task ? taskNode.get(task) ?? null : null];
+    // a note the tree doesn't hold as a place (a part of something) is still under its area
+    const held = refs.map((ref) => (ref ? byKey.get(unlink(ref)) : undefined));
+    if (held.some((n) => { const up = n ? areaUp(n) : null; return !!up && !!areaPathOf.get(up) && privatePath(areaPathOf.get(up)!); })) return true;
+    return runIsPrivate(tree, {
+      rooms: [m.room, m.starter_room, m.channel, m.starter_channel].filter((v) => v !== undefined && v !== null),
+      nodes: [...refs, ...held.map((n) => (n ? str(n.path) : null))],
+      folder: byNode ? null : str(m.folder),
+    }, roomRefs, null);
+  };
+  /** Rooms not read yet: a run with a room clue no note names (an id, in any of its room fields, or a name) can't be told from a private one, so it waits, with no words,
+   *  until they are. A known name beside it says nothing of the rest: a launcher can name one room and hold another's id. */
+  const knownRooms = new Set([...roomRefs.map((r) => r.id), ...roomRefs.map((r) => r.name.toLowerCase()), ...byRoom.keys(),
+    ...src.nodes.flatMap((n) => [meta(n).room, meta(n).rooms].flatMap((v) => String(v ?? "").split(",").map(roomKey)))]);
+  const clueParts = (v: unknown): string[] => (Array.isArray(v) ? v : [v]).filter((x): x is string => typeof x === "string").flatMap((x) => x.split(",")).map((x) => x.trim()).filter(Boolean);
+  const clueKnown = (part: string) => knownRooms.has(part) || knownRooms.has(roomKey(part)) || knownRooms.has(roomKey(part).split("/")[0]);
+  const roomUnread = (m: Record<string, unknown>) => !src.rooms && [m.room, m.starter_room, m.channel, m.starter_channel].some((v) => clueParts(v).some((p) => !clueKnown(p)));
+  /** The private area a private run belongs to: the one its clues name, else the first that can be reached. */
+  const privateHome = (m: Record<string, unknown>, task: string | null): LiveArea | null => {
+    const named = [areaOfNode(str(m.project)), areaOfNode(str(m.node)), task ? areaOfNode(taskNode.get(task) ?? null) : null, ...[m.channel, m.starter_channel, m.room, m.starter_room].flatMap((v) => (Array.isArray(v) ? v : [v])).flatMap((v) => String(v ?? "").split(",")).map(areaOfRoom)];
+    return areas.find((a) => a.private && named.includes(a.id)) ?? areas.find((a) => a.private && reachable(a.id)) ?? null;
+  };
+  const homes = new Map<string, Project>();
+  const homeOf = (area: LiveArea | null): string => {
+    const id = area ? `home:${area.id}` : UNFILED;
+    if (!homes.has(id)) homes.set(id, { id, area: area?.id ?? "", name: area?.name ?? "Unfiled sessions", folder: "", status: "active", about: "", kind: "home" });
+    return id;
+  };
   const sessions: Session[] = [];
   const byAttempt = new Map<string, string>();
   const asked = new Map<string, { kind: "fresh" | "resume"; attempt: string }>();
@@ -222,14 +295,27 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     // through redactRaw first, raw, as the note is read: nothing later (plainWords, plainTitle, a cut) sees it unredacted
     const r = { ...r0, path: typeof r0.path === "string" ? redactRaw(r0.path) : r0.path };
     const m = saidSafe(meta(r0)), id = keyOf(r);
-    const startedAt = time(m.started_at);
+    // a note with no start of its own still has a place: when the note was made
+    const startedAt = time(m.started_at) ?? time(r.createdAt) ?? time(r.updatedAt);
     if (!id || startedAt === null) continue;
-    const task = str(m.task)?.toUpperCase() ?? null;
+    // (a task field may hold words after its number)
+    const task = (/\bT-\d+[a-z]?\b/i.exec(str(m.task) ?? "")?.[0] ?? str(m.task))?.toUpperCase() ?? null;
     const folder = str(m.folder);
     const viaFolder = folder ? byFolder.get(folderKey(folder)) : undefined;
-    const project = projectOfNode(str(m.project)) ?? projectOfNode(str(m.node)) ?? (task ? projectOfNode(taskNode.get(task) ?? null) : null)
-      ?? (viaFolder?.length === 1 ? viaFolder[0] : null);
-    if (!project) continue;
+    const byNode = projectOfNode(str(m.project)) ?? projectOfNode(str(m.node)) ?? (task ? projectOfNode(taskNode.get(task) ?? null) : null);
+    const named = byNode ?? (viaFolder?.length === 1 ? viaFolder[0] : null);
+    // a project under an archived area has no door to be seen through: its run is placed as if it named none
+    const filed = named && reachable(projectArea.get(named)) ? named : null;
+    // a private clue beats any public one; a project of the private place itself keeps its run
+    const secret = touchesPrivate(m, task, byNode);
+    const filedPrivately = !!filed && areas.some((a) => a.private && a.id === projectArea.get(filed));
+    const hiddenArea = secret && !filedPrivately ? privateHome(m, task) : null;
+    // a private place's run with no private area to go to: counted in Unfiled, with none of its words
+    const sealedPrivate = secret && !filedPrivately && !hiddenArea;
+    const waiting = !secret && roomUnread(m);
+    const sealed = waiting || sealedPrivate;
+    const areaId = filed || secret ? null : areaOfRun(m, task, viaFolder);
+    const project = waiting ? homeOf(null) : (filedPrivately || !secret ? filed : null) ?? homeOf(hiddenArea ?? areas.find((a) => a.id === areaId) ?? null);
     // a run stopped by hand closes as failed with the launcher's "stopped" line: it was stopped, not a failure
     // a note marked running stays "running" here with its heartbeat (nowAt); freshen() below decides, from the clock, whether it is
     // still heard from (the same rule re-applied to a saved copy, so a cached session can't stay "working" forever)
@@ -237,17 +323,17 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const live = state === "running";
     const ended = live ? null : time(m.ended_at) ?? time(r.updatedAt) ?? startedAt;
     const title = plainTitle((str(r.path) ?? "").replace(/^Runs\/\d{4}-\d{2}-\d{2}\s*/, ""));
-    const ask = title || (task ? taskTitle.get(task) : null) || "A session";
+    const ask = waiting ? "A session whose room isn't read yet" : sealed ? "A session in a private place" : title || (task ? taskTitle.get(task) : null) || "A session";
     const steps = typeof m.steps === "number" && Number.isFinite(m.steps) ? Math.max(0, Math.floor(m.steps)) : 0;
     sessions.push({
       id, project, state, ask,
-      now: live && str(m.doing_now) ? safeStep(str(m.doing_now)!) : null, nowAt: live ? time(m.doing_at) : null,
+      now: !sealed && live && str(m.doing_now) ? safeStep(str(m.doing_now)!) : null, nowAt: live ? time(m.doing_at) : null,
       startedAt, endedAt: ended, steps,
-      result: live ? null : resultWords(m.summary, state),
-      video: str(m.video) && /^https:\/\//.test(str(m.video)!) ? str(m.video) : null,
+      result: sealed || live ? null : resultWords(m.summary, state),
+      video: !sealed && str(m.video) && /^https:\/\//.test(str(m.video)!) ? str(m.video) : null,
       why: null,
-      end: sessionEnd(m, state),
-      feed: str(m.feed),
+      end: sealed ? null : sessionEnd(m, state),
+      feed: sealed ? null : str(m.feed),
     });
     const att = attemptOf(m);
     if (att) byAttempt.set(att, id);
@@ -262,5 +348,5 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const others = sessions.filter((o) => o !== s && o.project === s.project && o.startedAt < s.startedAt && (o.endedAt ?? Infinity) > s.startedAt).length;
     if (others) s.why = { kind: "alongside", others };
   }
-  return freshen({ areas, projects, sessions, gaps }, now);
+  return freshen({ areas, projects: [...projects, ...homes.values()], sessions, gaps }, now);
 }

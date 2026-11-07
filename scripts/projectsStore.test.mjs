@@ -40,12 +40,28 @@ try {
   const uni = profile.defaultProfile("uni"), other = profile.defaultProfile("other");
   const settle = () => new Promise((r) => setTimeout(r, 30));
 
+  await check("another identity isn't read against the last one's rooms: a run with an unknown id waits for its own", async () => {
+    profile.setActiveProfile(uni);
+    store.setWorkOwner("R1");
+    store.setWorkRooms([{ id: "hub-1", name: "somewhere" }]);
+    const realMeta = window.__TAURI_INTERNALS__.invoke;
+    window.__TAURI_INTERNALS__.invoke = async (cmd, args = {}) => (cmd === "vault_query_meta" && args.metadata?.state ? [{ id: "r-id", path: "Runs/2026-10-20 A walk by the lake", tags: ["run"], metadata: { state: "running", started_at: new Date().toISOString(), channel: "hub-2" } }] : realMeta(cmd, args));
+    store.setWorkOwner("R2");
+    await store.refreshWork();
+    await settle();
+    const s = store.workSnapshot().work.sessions.find((x) => x.id === "r-id");
+    assert.equal(s.ask, "A session whose room isn't read yet");
+    window.__TAURI_INTERNALS__.invoke = realMeta;
+    store.forgetWork();
+    for (const k of keys()) mem.delete(k);
+  });
+
   await check("a read of vault uni finishes and shows its project, kept for identity A on uni", async () => {
     profile.setActiveProfile(uni);
     store.setWorkOwner("A");
     await store.refreshWork();
     assert.deepEqual(store.workSnapshot().work.projects.map((p) => p.name), ["Jam labels"]);
-    assert.deepEqual(keys(), ["uni.work.v3:A:uni"]);
+    assert.deepEqual(keys(), ["uni.work.v4:A:uni"]);
   });
 
   await check("the vault changes while a read of the old one is out: the old vault's work is gone at once, and the late answer is dropped", async () => {
@@ -65,7 +81,7 @@ try {
     hold = false; for (const r of held.splice(0)) r();
     await p; await settle();
     assert.deepEqual(store.workSnapshot().work.projects, [], "the late answer of vault uni is not published under vault other");
-    assert.ok(!keys().includes("uni.work.v3:A:other"), "nor kept under vault other");
+    assert.ok(!keys().includes("uni.work.v4:A:other"), "nor kept under vault other");
   });
 
   const feed = await server.ssrLoadModule("/src/projects/feed.ts");

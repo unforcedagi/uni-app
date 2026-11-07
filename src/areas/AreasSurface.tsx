@@ -22,7 +22,8 @@ import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { rolledNeeds } from "./sidebarState";
 import { useRailHidden, useWide } from "./homeLayout";
-import { isPrivatePath, isPrivateRoom, privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "./treeRooms";
+import { isPrivatePath, isPrivateRoom, privateRoot, privateRootIn, privateRunIds, roomSlug, roomView, treeRows } from "./treeRooms";
+import { setWorkRooms } from "../projects/store";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
 import { approvalsAt, rolledUnread, unreadByPath, unreadByRoom } from "./roomUnread";
 import { useNav } from "../navContext";
@@ -146,7 +147,9 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const mode = useMemo(() => gateMode(PLATFORM, version, stored, USER_AGENT, undefined, runtime), [version, stored, runtime]);
   const uniRoom = useMemo(() => (rooms.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rooms)?.id ?? null), [rooms]);
   const root = useMemo(() => rootNode(uniRoom ? [uniRoom] : []), [uniRoom]);
-  const roomRefs = useMemo(() => rooms.map((r) => ({ id: r.id, name: r.name })), [rooms]);
+  // the rooms list is new, and reordered, with every message; these only change with a room's id or name, so nothing read from them is read again
+  const roomRefsKey = useMemo(() => rooms.map((r) => `${r.id}\0${r.name}`).sort().join("\n"), [rooms]);
+  const roomRefs = useMemo(() => rooms.map((r) => ({ id: r.id, name: r.name })), [roomRefsKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const uniRef = useMemo(() => roomRefs.find((r) => r.id === uniRoom) ?? null, [roomRefs, uniRoom]);
   /** A node that names its room only by `room` (no channel id) still opens that room. */
   const withRoom = (a: Area): Area => { if (!chat) return a.rooms.length ? { ...a, rooms: [] } : a; if (a.rooms.length) return a; const r = ownRoom({ room: typeof a.metadata.room === "string" ? a.metadata.room : null, channels: [] }, roomRefs); return r ? { ...a, rooms: [r.id] } : a; };
@@ -268,7 +271,14 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const navRows = chat ? navRows0.filter((r) => r.kind !== "root") : navRows0;
   /** A row's count is its own node's needs-you items (a parent never counts its children's), by the details' one rule. */
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
-  const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), confirm.of, tasks.runs), [tasks.tasks, tasks.runs, rowPaths, tasks.tree, data?.tree, confirm.of]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the runs that are a private place's by any clue on them (the same rule as the sessions), kept off every other level's lists
+  // (every task read, snoozed ones too: `tasks.tasks` holds only what shows now)
+  const privateRuns = useMemo(() => privateRunIds(chat && roomsPending ? null : data?.tree ?? null, tasks.runs, new Map((tasks.all ?? []).flatMap((t): [string, string][] => { const id = (taskTitle(t.title).id ?? /^T-\d+[a-z]?\b/i.exec(t.title)?.[0])?.toUpperCase(); return id ? [[id, t.node]] : []; })), roomRefs, uniRef, tasks.ready), [chat, roomsPending, data?.tree, tasks.runs, tasks.all, tasks.ready, roomRefs, uniRef]);
+  // the sessions read the rooms' names too, for a run note that holds only a room's id (a profile with no chat has no rooms to wait for)
+  useEffect(() => { setWorkRooms(chat && roomsPending ? null : roomRefs); }, [chat, roomsPending, roomRefs]);
+  // a private run filed on a public row lights no dot there: that row's Needs you doesn't list it
+  const dotRuns = useMemo(() => tasks.runs.filter((r) => !privateRuns.has(r.id) || !!(data ? privateRoot(data.tree, r.node) : tasks.tree ? privateRootIn(tasks.tree, r.node) : null)), [tasks.runs, tasks.tree, privateRuns, data]);
+  const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), confirm.of, dotRuns), [tasks.tasks, dotRuns, rowPaths, tasks.tree, data?.tree, confirm.of]); // eslint-disable-line react-hooks/exhaustive-deps
   // T-335: what is new in each room (the rooms list's counts; opening a room marks it read, which clears them), and the approvals waiting in each
   const newByRoom = useMemo(() => unreadByRoom(rooms), [rooms]);
   const newByPath = useMemo(() => unreadByPath(newByRoom, owned ?? new Map()), [newByRoom, owned]);
@@ -307,7 +317,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const drafted = new Set(tasks.drafts.map((d) => d.task?.toUpperCase()).filter(Boolean));
   const feed0 = needsFeed(levelTasks.map((t) => ({ ...t, stewardRoom: roomOfNode(t.node)?.name ?? null, hasDraft: drafted.has(taskTitle(t.title).id?.toUpperCase()) })), privateOf, selfPrivate, undefined, confirm.of);
   const taskTree = tasks.tree;
-  const runs = taskTree && node ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node)) : [];
+  // a run from a private room may sit on the root or a public node: its room keeps it private too, unless this level is that private place
+  const runs = taskTree && node ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node) && (!!selfPrivate || !privateRuns.has(r.id))) : [];
   // r28 (Codex P2-6): a run waiting on the user's answer is in the same feed, counted once with the asks; T-161: Uni's level holds every room's approval prompts
   const feed = withApprovals(withWaiting(feed0, runs), approvalsAll.list.filter((a) => isRoot || a.channel === target?.id));
   const panel = isRoot ? uniPanel(feed) : { ...feed, rest: 0, privateCount: 0 };
@@ -409,9 +420,10 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const home = <>{status}<ApprovalRows approvals={allPlace ? approvalsAll.list.filter((x) => !privateChannel(x.channel)) : approvalsAll.list} className="cp-list cp-approvals th-approvals" />
       <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={(p) => openPlace(p)} onOpenNeed={(p) => openPlace(p, "details")} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
         otherRooms={allPlace ? [] : others} noAreas={!!data && !error && !doorAreas.length ? (uniRef ? () => actions.openRoom(uniRef.id) : null) : undefined}
-        toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} />
+        toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} onOpenProject={allPlace ? undefined : setProjectOpen} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>;
-    if (!allPlace) return <div className="areas-home tree-home-wrap">{home}</div>;
+    // the home's Unfiled sessions open in place over it
+    if (!allPlace) return <div className="areas-home tree-home-wrap">{home}{projectSheet}</div>;
     // T-335: All with nothing read yet, or no area with a room of its own: it says which (the focus still comes up over it)
     const behind = all ? home : <AllEmpty reading={signingIn || loading || !data || roomsPending} error={error && !data ? retryAreas : null} onBack={allPlace.onBack} />;
     // T-335 one fluid surface: All, and over it the room in focus

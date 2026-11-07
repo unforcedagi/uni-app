@@ -16,6 +16,7 @@ import { activeProfile, onVaultChange } from "../areas/profile";
 import type { RawNote } from "../areas/taskCore";
 import { allPages } from "../areas/vaultTasks";
 import { freshen, workFrom, type LiveWork, type Sources } from "./live";
+import { isHome } from "./model";
 import type { Action } from "./actions";
 import { setFeedOwner } from "./feed";
 
@@ -52,6 +53,9 @@ const listeners = new Set<() => void>();
 const emit = () => { for (const l of listeners) l(); };
 const set = (next: Partial<WorkState>) => { state = { ...state, ...next }; emit(); };
 let tasks: { rows: RawNote[]; whole: boolean; at: number } | null = null;
+/** The account's rooms (the app tells the store), and the notes of the last read: the rooms often arrive just after it. Memory only. */
+let hubRooms: readonly { id: string; name: string }[] | null = null;
+let lastRead: Sources | null = null;
 let inflight: Promise<void> | null = null;
 /** Whose work this is: the identity, set by the app (null: signed out or not known yet, so nothing is read or shown). */
 let identity: string | null = null;
@@ -65,7 +69,7 @@ const currentOwner = () => ownerOf(identity, activeProfile().vault);
 
 const ownerOf = (id: string | null, vault: string) => (id && vault ? `${id}:${vault}` : null);
 const CACHE_PREFIX = "uni.work.";
-const cacheKey = (owner: string) => `${CACHE_PREFIX}v3:${owner}`;
+const cacheKey = (owner: string) => `${CACHE_PREFIX}v4:${owner}`;
 type Saved = { work: LiveWork; at: number | null; partial: string[] };
 function readCache(owner: string): Saved | null {
   try {
@@ -77,7 +81,10 @@ function readCache(owner: string): Saved | null {
 }
 function writeCache(owner: string, s: Saved) {
   const floor = Date.now() - KEEP_MS;
-  const work = { ...s.work, sessions: s.work.sessions.filter((x) => x.state === "running" || (x.endedAt ?? 0) >= floor) };
+  const sessions = s.work.sessions.filter((x) => x.state === "running" || (x.endedAt ?? 0) >= floor);
+  // a home with none of its sessions kept is left out too: no "Unfiled sessions · 0" from a saved copy
+  const kept = new Set(sessions.map((x) => x.project));
+  const work = { ...s.work, sessions, projects: s.work.projects.filter((p) => !isHome(p) || kept.has(p.id)) };
   try { localStorage.setItem(cacheKey(owner), JSON.stringify({ ...s, work })); } catch { /* storage full or off: this session only */ }
 }
 /** Every device copy of the work, of every owner and every version (the vault-only keys before round 3 too). */
@@ -107,12 +114,16 @@ const FILL_MAX = 40;
  *  sessions still without a project because their task couldn't be read (one that doesn't exist at all isn't missing: there is nothing to
  *  read). */
 async function fillTasks(vault: string, runs: readonly RawNote[], nodes: readonly RawNote[], have: readonly RawNote[]): Promise<{ rows: RawNote[]; missing: number }> {
-  const placed = new Set(workFrom({ nodes, runs, tasks: have }).sessions.map((x) => x.id));
+  // a run in a home is on the screen, but its task may still say which project it belongs to
+  const read = workFrom({ nodes, runs, tasks: have, rooms: hubRooms });
+  const homes = new Set(read.projects.filter(isHome).map((p) => p.id));
+  const placed = new Set(read.sessions.filter((x) => !homes.has(x.project)).map((x) => x.id));
   const known = new Set(have.map((t) => taskIdIn(t.path)));
   const want = new Map<string, number>();
   for (const r of runs) {
     const t = (r.metadata as Record<string, unknown> | undefined)?.task;
-    const id = typeof t === "string" ? t.toUpperCase() : null;
+    // (a task field may hold words after its number)
+    const id = typeof t === "string" ? (/\bT-\d+[a-z]?\b/i.exec(t)?.[0] ?? t).toUpperCase() : null;
     if (id && !known.has(id) && !placed.has(r.id as string)) want.set(id, (want.get(id) ?? 0) + 1);
   }
   if (!want.size) return { rows: [], missing: 0 };
@@ -162,7 +173,8 @@ export function refreshWork(): Promise<void> {
       }
       if (fresh || !taskRead.whole) tasks = { rows: taskRows, whole: taskRead.whole, at: fresh ? Date.now() : tasks!.at };
       const src: Sources = { nodes: nodes.rows, runs: runs.rows, tasks: taskRows };
-      const work = workFrom(src);
+      lastRead = src;
+      const work = workFrom({ ...src, rooms: hubRooms });
       const partial = [...(nodes.complete ? [] : ["Some projects aren't loaded"]), ...runs.partial,
         ...(missing ? [`${missing} session${missing === 1 ? "" : "s"} couldn't be placed under a project`] : [])];
       writeCache(owner, { work, at: t0, partial });
@@ -178,7 +190,7 @@ export function refreshWork(): Promise<void> {
 /** The work of a new owner (or none): what this device kept for that owner, never another's. Reads still out are dropped. */
 function adopt(owner: string | null, notify = true) {
   generation++;
-  loadedFor = owner; tasks = null; inflight = null;
+  loadedFor = owner; tasks = null; inflight = null; lastRead = null;
   // T-304: a session's steps are the same owner's, and go with the work
   setFeedOwner(owner, owner ? activeProfile().vault : "");
   for (const t of later) clearTimeout(t);
@@ -200,17 +212,33 @@ onVaultChange(() => {
 /** The app's identity (null when signed out or not read yet). Called on every change; another identity sees none of this one's work. */
 export function setWorkOwner(id: string | null) {
   // the copies kept before round 3 were keyed by the vault alone: no owner can be sure they are theirs
-  try { for (const k of Object.keys(localStorage)) if (/^uni\.work\.v[12]:/.test(k)) localStorage.removeItem(k); } catch { /* private storage */ }
+  try { for (const k of Object.keys(localStorage)) if (/^uni\.work\.v[123]:/.test(k)) localStorage.removeItem(k); } catch { /* private storage */ }
   if (id === identity) return;
+  // another identity's rooms say nothing of this one's: its own arrive from the app (rooms set before the first identity is known are its own)
+  if (identity !== null) hubRooms = null;
   identity = id;
   const owner = ownerOf(id, activeProfile().vault);
   if (owner !== loadedFor) adopt(owner);
   if (owner && users > 0) void refreshWork();
 }
 
+/** The account's rooms, which say what a room's id on a run note is. New rooms place the last read again, at once. */
+export function setWorkRooms(rooms: readonly { id: string; name: string }[] | null) {
+  // the rooms list is new, and in a new order, with every message: only new ids or names place anything again
+  const had = new Map((hubRooms ?? []).map((r) => [r.id, r.name]));
+  const same = rooms === hubRooms || (!!rooms && !!hubRooms && rooms.length === hubRooms.length && rooms.every((r) => had.get(r.id) === r.name));
+  hubRooms = rooms;
+  if (same || !lastRead || !loadedFor || loadedFor !== currentOwner()) return;
+  const work = workFrom({ ...lastRead, rooms });
+  // the device copy too: the next launch paints from it
+  writeCache(loadedFor, { work, at: state.at, partial: state.partial });
+  set({ work });
+}
+
 /** Forget this device key: the device copies (every owner's), the work in memory, the pending asks, and any read still out. */
 export function forgetWork() {
   identity = null;
+  hubRooms = null;
   adopt(null);
   dropCaches();
 }

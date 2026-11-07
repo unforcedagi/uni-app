@@ -14,6 +14,12 @@ const CUES: u32 = 0x1c53_bb6b;
 const TAGS: u32 = 0x1254_c367;
 const CHAPTERS: u32 = 0x1043_a770;
 const ATTACHMENTS: u32 = 0x1941_a469;
+const TIMECODE_SCALE: u32 = 0x2a_d7b1;
+const DURATION: u32 = 0x4489;
+const TIMECODE: u32 = 0xe7;
+const SIMPLE_BLOCK: u32 = 0xa3;
+const BLOCK_GROUP: u32 = 0xa0;
+const BLOCK: u32 = 0xa1;
 /// What a killed recorder can leave unreadable at the end of a file: part of one block or page. More than this that won't
 /// read is damage, and what lies past it would be lost without a word. (recordingJoin.ts allows the same.)
 const CUT_SLACK: usize = 4096;
@@ -172,8 +178,8 @@ fn clean_info(b: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     for e in elements(b) {
         let keep = match e.id {
-            0x2ad7b1 => (1..=8).contains(&e.body.len()),
-            0x4489 => e.body.len() == 4 || e.body.len() == 8,
+            TIMECODE_SCALE => (1..=8).contains(&e.body.len()),
+            DURATION => e.body.len() == 4 || e.body.len() == 8,
             _ => false,
         };
         if keep {
@@ -272,31 +278,31 @@ fn clean_cluster(b: &[u8], unknown: bool) -> Result<(Vec<u8>, usize)> {
             break;
         }
         // A recorder killed partway: the blocks before the cut stand, and half a block would only fail in the decoder.
-        if e.cut && matches!(e.id, 0xa3 | 0xa0) {
+        if e.cut && matches!(e.id, SIMPLE_BLOCK | BLOCK_GROUP) {
             if e.body.len() > CUT_SLACK {
                 return Err(damaged());
             }
             break;
         }
         match e.id {
-            0xe7 if !timecode && (1..=8).contains(&e.body.len()) => {
+            TIMECODE if !timecode && (1..=8).contains(&e.body.len()) => {
                 timecode = true;
-                put(&mut out, 0xe7, e.body);
+                put(&mut out, TIMECODE, e.body);
             }
             // No sound in it, which the relay refuses and nothing misses.
-            0xa3 if e.body.len() <= 4 => {}
-            0xa3 => {
-                put(&mut out, 0xa3, &clean_block(e.body)?);
+            SIMPLE_BLOCK if e.body.len() <= 4 => {}
+            SIMPLE_BLOCK => {
+                put(&mut out, SIMPLE_BLOCK, &clean_block(e.body)?);
                 has_block = true;
             }
-            0xa0 => {
+            BLOCK_GROUP => {
                 let mut group = Vec::new();
                 let mut holds_block = false;
                 for f in elements(e.body) {
                     match f.id {
-                        0xa1 if f.body.len() <= 4 => {}
-                        0xa1 => {
-                            put(&mut group, 0xa1, &clean_block(f.body)?);
+                        BLOCK if f.body.len() <= 4 => {}
+                        BLOCK => {
+                            put(&mut group, BLOCK, &clean_block(f.body)?);
                             holds_block = true;
                         }
                         0x9b | 0xfb | 0x75a2 if (1..=8).contains(&f.body.len()) => {
@@ -306,7 +312,7 @@ fn clean_cluster(b: &[u8], unknown: bool) -> Result<(Vec<u8>, usize)> {
                     }
                 }
                 if holds_block {
-                    put(&mut out, 0xa0, &group);
+                    put(&mut out, BLOCK_GROUP, &group);
                     has_block = true;
                 }
             }
@@ -322,6 +328,74 @@ fn clean_cluster(b: &[u8], unknown: bool) -> Result<(Vec<u8>, usize)> {
         },
         at,
     ))
+}
+
+fn number(b: &[u8]) -> u64 {
+    b.iter().fold(0u64, |v, x| (v << 8) | u64::from(*x))
+}
+
+/// How long a WebM from [`normalize_webm`] runs, as the relay measures it (`audio.rs`): the later of the declared length
+/// and the last block's start, in seconds.
+pub(super) fn webm_seconds(clean: &[u8]) -> f64 {
+    let Some((segment, _)) = element(clean, element(clean, 0).map_or(0, |(_, end)| end)) else {
+        return 0.0;
+    };
+    let mut scale = 1_000_000u64; // one tick is a millisecond unless Info says otherwise
+    let mut end = 0.0f64;
+    for e in elements(segment.body) {
+        match e.id {
+            INFO => {
+                for f in elements(e.body) {
+                    match (f.id, f.body.len()) {
+                        (TIMECODE_SCALE, _) => scale = number(f.body),
+                        (DURATION, 4) => end = end.max(f64::from(f32::from_be_bytes(f.body.try_into().unwrap_or_default()))),
+                        (DURATION, 8) => end = end.max(f64::from_be_bytes(f.body.try_into().unwrap_or_default())),
+                        _ => {}
+                    }
+                }
+            }
+            CLUSTER => {
+                let mut timecode = 0u64;
+                let mut latest: Option<i16> = None;
+                let mut seen = |block: &[u8]| {
+                    if let Some(rel) = block.get(1..3) {
+                        let rel = i16::from_be_bytes([rel[0], rel[1]]);
+                        latest = Some(latest.map_or(rel, |l| l.max(rel)));
+                    }
+                };
+                for f in elements(e.body) {
+                    match f.id {
+                        TIMECODE => timecode = number(f.body),
+                        SIMPLE_BLOCK => seen(f.body),
+                        BLOCK_GROUP => elements(f.body).iter().filter(|g| g.id == BLOCK).for_each(|g| seen(g.body)),
+                        _ => {}
+                    }
+                }
+                if let Some(rel) = latest {
+                    end = end.max((timecode as f64 + f64::from(rel)).max(0.0));
+                }
+            }
+            _ => {}
+        }
+    }
+    end * scale as f64 / 1e9
+}
+
+/// How long an Ogg Opus from [`normalize_ogg`] runs, as the relay measures it: the furthest granule, less the pre-skip,
+/// in 48 kHz samples.
+pub(super) fn ogg_seconds(clean: &[u8]) -> f64 {
+    let (pages, _) = pages(clean);
+    let pre_skip = pages
+        .first()
+        .and_then(|p| p.body.get(10..12))
+        .map_or(0, |b| u64::from(u16::from_le_bytes([b[0], b[1]])));
+    let end = pages
+        .iter()
+        .map(|p| u64::from_le_bytes(p.granule))
+        .filter(|g| *g != u64::MAX)
+        .max()
+        .unwrap_or(0);
+    end.saturating_sub(pre_skip) as f64 / 48_000.0
 }
 
 // ── Ogg ─────────────────────────────────────────────────────────────────

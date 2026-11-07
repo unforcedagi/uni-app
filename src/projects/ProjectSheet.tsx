@@ -8,7 +8,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { openDialog } from "../areas/focusTrap";
 import { actionLabel, actionMessage, postAction, type Action } from "./actions";
-import { ago, archivePlan, areaOf, cannotStart, isLive, sessionsOf, span, stateWords, timeline, timelineWindow, whyWords, type Session } from "./model";
+import { ago, archivePlan, areaOf, cannotStart, isHome, isLive, sessionsOf, span, stateWords, timeline, timelineWindow, whyWords, type Session } from "./model";
 import { asOf, noteAsked, useWork, type Asked } from "./store";
 import { SessionView } from "./SessionView";
 import "./projects.css";
@@ -137,7 +137,8 @@ export function ProjectSheet({ project, talk, room, roomName, onClose, onAnswer 
   const at = asOf(ws, now);
   const area = areaOf(work, p);
   // the area's own room is where its actions go (the room this sheet is over, when it is the area's)
-  const to = area ? (room && room.id === area.room ? room : { id: area.room, name: roomName(area.room) ?? area.name }) : room;
+  // Unfiled has no room of its own, whichever room it may be over: nothing is asked of a room that doesn't hold it
+  const to = area ? (room && room.id === area.room ? room : { id: area.room, name: roomName(area.room) ?? area.name }) : isHome(p) ? null : room;
   const sessions = sessionsOf(work, p.id);
   const liveOnes = sessions.filter(isLive);
   const ended = sessions.filter((s) => !isLive(s));
@@ -151,12 +152,13 @@ export function ProjectSheet({ project, talk, room, roomName, onClose, onAnswer 
       { key: `stop:${s.id}`, label: `Stop “${short(s.ask)}”`, act: "stop", action: { kind: "stop", project: p, session: s } },
       { key: `fresh:${s.id}`, label: `Fresh start of “${short(s.ask)}”`, act: "fresh", action: { kind: "fresh", project: p, session: s } },
     ]),
-    ...(cannotStart(p) || addAsked ? [] : [{ key: "add", label: "Add a session", act: "add" as const, action: null }]),
-    ...(projectAsked ? [] : p.status === "archived"
+    ...(isHome(p) || cannotStart(p) || addAsked ? [] : [{ key: "add", label: "Add a session", act: "add" as const, action: null }]),
+    ...(isHome(p) || projectAsked ? [] : p.status === "archived"
       ? [{ key: "restore", label: "Bring back", act: "restore" as const, action: { kind: "restore" as const, project: p } }]
       : [{ key: "archive", label: liveOnes.length ? "Archive (stops its sessions first)" : "Archive", act: "archive" as const, action: { kind: "archive" as const, project: p, live: archivePlan(work, p.id).stopFirst } }]),
   ];
   const done = () => { setPick(null); setAsk(""); };
+  const home = isHome(p);
   const open = (id: string) => { backTo.current = id; setOpened(id); if (box.current) box.current.scrollTop = 0; };
   const openedSession = opened ? sessions.find((s) => s.id === opened) ?? null : null;
   // a session gone after a read (merged, moved) closes its view: back to the list, nothing left half-open
@@ -172,9 +174,10 @@ export function ProjectSheet({ project, talk, room, roomName, onClose, onAnswer 
     <div ref={box} className="pj" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
       <header className="pj-head">
         <div>
-          <p className="task-kind">{area ? `Project in ${area.name}` : "Project"}{p.status === "resting" ? " · resting" : p.status === "archived" ? " · archived" : ""}</p>
-          <h2 id={titleId}>{p.name}</h2>
+          <p className="task-kind">{home ? (area ? `In ${area.name}, not in a project` : "No area, no project") : area ? `Project in ${area.name}` : "Project"}{p.status === "resting" ? " · resting" : p.status === "archived" ? " · archived" : ""}</p>
+          <h2 id={titleId}>{home ? (area ? "Other sessions" : "Unfiled sessions") : p.name}</h2>
           {p.about && <p className="pj-about">{p.about}</p>}
+          {home && !area && <p className="pj-about">Their notes don't say which area they belong to.{liveOnes.length > 0 && " Ask in a room to stop or restart one."}</p>}
         </div>
         <ActionsMenu picks={picks} onPick={(pk) => { setAsk(""); setPick(pk); }} />
         <button type="button" className="pj-close" aria-label="Close" onClick={onClose}>×</button>
@@ -191,7 +194,7 @@ export function ProjectSheet({ project, talk, room, roomName, onClose, onAnswer 
       {openedSession ? <SessionView s={openedSession} all={sessions} project={p} now={now} roomName={to?.name ?? null}
         asked={asked.get(openedSession.id) ? askedWords(asked.get(openedSession.id)!, now) : null}
         onAnswer={to && onAnswer ? (text) => onAnswer(to.id, text) : null} onBack={() => setOpened(null)} /> : <>
-      <p className="pj-folder"><span>Folder</span><code>{p.folder}</code></p>
+      {!home && <p className="pj-folder"><span>Folder</span><code>{p.folder}</code></p>}
       <Timeline sessions={sessions} talk={talk} now={now} />
       <section className="pj-sessions" aria-label="Sessions">
         <div className="pj-sessions-head">

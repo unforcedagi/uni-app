@@ -107,6 +107,83 @@ export function isPrivateRoom(tree: Tree, channel: string, rooms: readonly RoomR
   return tree.archived.some((a) => isPrivatePath(tree, a.path) && counts(a) && names(a));
 }
 
+/** The ways a note may have written one room: as it is, without a "(…)" note after it, and each "a", "a/b" of a sub-room; also in lower case. */
+function roomForms(part: string): string[] {
+  const bare = part.replace(/\s*\(.*$/, "").trim();
+  const words = bare.split("/");
+  const out = [part, bare, ...words.map((_, i) => words.slice(0, i + 1).join("/").trim())].filter(Boolean);
+  return [...new Set(out.flatMap((f) => [f, f.toLowerCase()]))];
+}
+const namesIn = (v: unknown): string[] => (typeof v === "string" ? v.split(",").map((x) => roomSlug(x).replace(/\s*\(.*$/, "").trim().toLowerCase()).filter(Boolean) : []);
+// not room_fallback: that is a room it only borrows
+const ROOM_NAMES = ["room", "rooms", "room_was", "room_renamed_from"];
+const nodeRoomNames = (n: Area) => ROOM_NAMES.flatMap((k) => namesIn(n.metadata[k]));
+
+/** What a run is checked against, kept per tree: the node resolver, the rooms' other names (old and sub ones) and the folders really under a private place. */
+type RunFacts = { node: (ref: unknown) => string | null; rooms: Set<string>; folders: Set<string>;
+  /** The projects a run's node can name: the ones with a folder, as the sessions hold them. */ projects: Set<string>; clues: WeakMap<readonly RoomRef[], Map<string, boolean>> };
+const runFacts = new WeakMap<Tree, RunFacts>();
+const folderKey = (v: unknown) => (typeof v === "string" ? v.trim().replace(/^\/(?:home|Users)\/[^/]+\//, "~/").replace(/\/+$/, "") : "");
+function factsOf(tree: Tree): RunFacts {
+  const hit = runFacts.get(tree);
+  if (hit) return hit;
+  const known = [...tree.nodes.values(), ...tree.archived];
+  const { under } = privateClosure(tree);
+  // a name a public area also goes by doesn't make a run private: that room is the public area's
+  const open = new Set(known.filter((n) => n.kind === "area" && !isPrivatePath(tree, n.path)).flatMap(nodeRoomNames));
+  const inside = known.filter((n) => under.has(n.path));
+  const facts: RunFacts = { node: pathResolver(known), clues: new WeakMap(),
+    projects: new Set(known.filter((n) => n.kind === "project" && (folderKey(n.metadata.folder) || folderKey(n.metadata.repo))).map((n) => n.path)),
+    rooms: new Set(inside.flatMap(nodeRoomNames).filter((r) => !open.has(r))),
+    folders: new Set(inside.flatMap((n) => [folderKey(n.metadata.folder), folderKey(n.metadata.repo)]).filter(Boolean)) };
+  runFacts.set(tree, facts);
+  return facts;
+}
+
+/**
+ * Does a run's room clue (a room's id or name, however a note wrote it: "#x", "x/build", "x (old)", "x, y", a list) touch a private place? Any one part is enough: a
+ * run launched from a private room stays private even when it also names a public room or sits on a public node. With no tree, only private names can be recognised.
+ */
+export function roomCluePrivate(tree: Tree | null, clue: unknown, rooms: readonly RoomRef[], uni: RoomRef | null): boolean {
+  const facts = tree ? factsOf(tree) : null;
+  // answers hold only for these rooms: the rooms arrive after the tree, and an answer read without them says nothing about them
+  const memo = facts ? facts.clues.get(rooms) ?? new Map<string, boolean>() : null;
+  if (facts && memo) facts.clues.set(rooms, memo);
+  const key = `${uni?.id ?? ""}|${JSON.stringify(clue ?? null)}`;
+  const known = memo?.get(key);
+  if (known !== undefined) return known;
+  const parts = (Array.isArray(clue) ? clue : [clue]).filter((v): v is string => typeof v === "string").flatMap((v) => v.split(",")).map((v) => roomSlug(v)).filter(Boolean);
+  // a room's id is read as the room's name too: a note may hold only the id
+  const named = parts.flatMap((p) => { const r = rooms.find((x) => x.id === p); return r ? [p, roomSlug(r.name)] : [p]; });
+  const out = named.some((p) => p.split("/").some((w) => isPrivateName(w.replace(/\s*\(.*$/, "").trim())) || (!!tree && roomForms(p).some((f) => facts!.rooms.has(f) || isPrivateRoom(tree, f, rooms, uni))));
+  memo?.set(key, out);
+  return out;
+}
+
+/** Every clue a run carries on where it belongs. `folder`: only when no node says, since a folder can be shared. */
+export type RunClues = { rooms: readonly unknown[]; nodes: readonly unknown[]; folder?: unknown };
+/** The one rule for whether a run is a private place's, used everywhere runs are shown: any private clue is enough, whatever public clue it also carries. */
+export function runIsPrivate(tree: Tree, run: RunClues, rooms: readonly RoomRef[], uni: RoomRef | null): boolean {
+  const facts = factsOf(tree);
+  if (run.rooms.some((c) => roomCluePrivate(tree, c, rooms, uni))) return true;
+  if (run.nodes.some((ref) => { const at = facts.node(ref); return (!!at && isPrivatePath(tree, at)) || !!looseRef(ref)?.split("/").some(isPrivateName); })) return true;
+  return facts.folders.has(folderKey(run.folder));
+}
+/** The runs a level other than a private place doesn't list. Before the areas and rooms are read nothing can be told of a run's clues, so every run waits (as tasks do, r21);
+ *  and before the tasks are read, any run naming a task. */
+export function privateRunIds(tree: Tree | null, runs: readonly { id: string; node: string; task: string | null; rooms?: readonly unknown[]; project?: string | null; folder?: string | null }[], nodeOfTask: ReadonlyMap<string, string>, rooms: readonly RoomRef[], uni: RoomRef | null, tasksKnown = true): Set<string> {
+  return new Set(runs.filter((r) => {
+    if (!tasksKnown && r.task) return true;
+    if (!tree) return true;
+    const id = (/\bT-\d+[a-z]?\b/i.exec(r.task ?? "")?.[0] ?? r.task)?.toUpperCase();
+    const nodes = [r.project, r.node, id ? nodeOfTask.get(id) : null];
+    // as the sessions do: a folder counts only when no node says which project the run belongs to
+    const facts = factsOf(tree);
+    const named = nodes.some((ref) => { const at = facts.node(ref); return !!at && facts.projects.has(at); });
+    return runIsPrivate(tree, { rooms: r.rooms ?? [], nodes, folder: named ? null : r.folder }, rooms, uni);
+  }).map((r) => r.id));
+}
+
 /** r21: the same, read from the task tree (its nodes and parents), for while the areas aren't read yet: privacy never waits on them. */
 export function privateRootIn(tasks: { byPath: ReadonlyMap<string, { path: string; name: string }>; parent: ReadonlyMap<string, string> }, path: string): { path: string; name: string } | null {
   let hit: { path: string; name: string } | null = null;

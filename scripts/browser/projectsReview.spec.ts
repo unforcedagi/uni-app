@@ -38,7 +38,7 @@ test('P1: another identity on the same vault never sees the work this device kep
   await expect(focusSheet(page).getByRole('region', { name: 'Workshop details' })).toBeVisible();
   await expect(page.locator('[data-place="project-strip"] .ps-tab')).toHaveCount(0);
   // the copy kept is the first identity's own, by name
-  expect(await workKeys(page)).toEqual([`uni.work.v3:${A}:uni`]);
+  expect(await workKeys(page)).toEqual([`uni.work.v4:${A}:uni`]);
 });
 
 test('P1: Forget drops the kept work, and a read still out when it happened can\'t put it back', async ({ page }) => {

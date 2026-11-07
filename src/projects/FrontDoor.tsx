@@ -6,7 +6,7 @@ import { roomTint } from "../glow/roomTint";
 import { sameWords } from "../areas/sameWords";
 import { useEffect, useRef, useCallback, useMemo, useState, type ReactNode } from "react";
 import { AllComposer, AllFeed, roomWords, useEchoes, useReplyTarget, useRoomsFeed, type AllRoom } from "../all/AllView";
-import { liveInArea, span } from "./model";
+import { liveSessions, liveInArea, sessionsOf, span, UNFILED } from "./model";
 import { asOf, useWork } from "./store";
 import { useRoomTurns } from "./roomTurns";
 import { UsageLine } from "./UsageLine";
@@ -111,7 +111,7 @@ function OtherRooms({ rooms, onOpen }: { rooms: readonly { id: string; name: str
     <ul>{rooms.map((r) => <li key={r.id}><button type="button" data-room={r.id} onClick={() => onOpen(r.id)}>#{r.name.replace(/^#/, "")}</button></li>)}</ul></details>;
 }
 
-export function FrontDoor({ doors, needs, onOpen, onOpenNeed, me = null, newRooms = [], otherRooms = [], noAreas, onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = "known", alsoNeeds = 0, onRetryNeeds }: {
+export function FrontDoor({ onOpenProject, doors, needs, onOpen, onOpenNeed, me = null, newRooms = [], otherRooms = [], noAreas, onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = "known", alsoNeeds = 0, onRetryNeeds }: {
   /** T-335 one surface: what needs you opens its place's room with its details (default: as a place does) */ onOpenNeed?: (path: string) => void;
   /** T-335 one surface: every room no area holds, folded under one line */ otherRooms?: readonly { id: string; name: string }[];
   /** No areas yet (once that is known): the home says so, with the way to Uni's room when there is one */ noAreas?: (() => void) | null; /** T-335 as Aaron: only once the tasks have been read, fresh and whole, may the home say nothing needs you */ needsKnown?: NeedsKnown; /** approvals waiting, which the task feed doesn't count */ alsoNeeds?: number; onRetryNeeds?: () => void; doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
@@ -121,7 +121,8 @@ export function FrontDoor({ doors, needs, onOpen, onOpenNeed, me = null, newRoom
   allPlace?: { backTo: string; onBack: () => void; /** A room in focus over All. */ focusRoom?: string | null } | null; onComposerFocus?: (on: boolean) => void;
   /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
   /** Your key: a turn is the room's Uni at work on your message. */ me?: string | null;
-  /** T-335: the To post queue's one quiet line, under what needs you */ toPost?: ReactNode }) {
+  /** T-335: the To post queue's one quiet line, under what needs you */ toPost?: ReactNode;
+  /** Opens a project or home in place (here: the Unfiled sessions). */ onOpenProject?: (id: string) => void }) {
   const ws = useWork();
   const turns = useRoomTurns(doors.map((d) => ({ room: d.room ?? null, lastTs: d.lastTs })), me);
   const { work } = ws;
@@ -154,7 +155,8 @@ export function FrontDoor({ doors, needs, onOpen, onOpenNeed, me = null, newRoom
     target={target} onTarget={setTarget} echo={echoes.send} onKeyboard={onComposerFocus} />;
   // T-335 glow-up: how many places are moving (a session or the room's Uni at work), for the home's one sentence
   const liveOf = (d: Door) => { const a = areaAt.get(d.path); return (a ? liveInArea(work, a.id).length : 0) + (d.room && turns.has(d.room) ? 1 : 0); };
-  const moving = doors.filter((d) => liveOf(d) > 0).length;
+  // working sessions with no area are somewhere moving too
+  const moving = doors.filter((d) => liveOf(d) > 0).length + (liveSessions(work, UNFILED).length > 0 ? 1 : 0);
   // the sentence never says less than the doors and the cards beside it
   const needN = Math.max((needs ? needs.rows.length + needs.privates.reduce((k, p) => k + p.count, 0) : 0) + alsoNeeds, doors.reduce((k, d) => k + (d.needs ?? 0), 0));
   if (all && view === "all") return <div className="fd fd-all" data-place="front-door" data-view="all">
@@ -200,6 +202,10 @@ export function FrontDoor({ doors, needs, onOpen, onOpenNeed, me = null, newRoom
         </button>
       </li>;
     })}</ul></nav>
+    {onOpenProject && work.projects.some((p) => p.id === UNFILED) && (() => {
+      const n = liveSessions(work, UNFILED).length;
+      return <button type="button" className="fd-unfiled" onClick={() => onOpenProject(UNFILED)}>Unfiled sessions · {sessionsOf(work, UNFILED).length}{n > 0 && <span className="fd-live"><i aria-hidden="true" />{n} working{at ? ` at ${at}` : ""}</span>}</button>;
+    })()}
     {noAreas !== undefined && <p className="fd-none">No areas yet. Tell Uni what you want to look after, and it will set up your first area.{noAreas && <> <button type="button" className="all-link" onClick={noAreas}>Talk to Uni</button></>}</p>}
     {onOpenRoom && <OtherRooms rooms={otherRooms} onOpen={onOpenRoom} />}
     {(at || ws.partial.length > 0) && <p className="fd-status" role="status">{[at && `${ws.error ? "Couldn't refresh · " : ""}As of ${at}`, ...ws.partial].filter(Boolean).join(" · ")}</p>}

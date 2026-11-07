@@ -7,6 +7,8 @@
 //   history; there is no separate "retire".
 // - Archiving is for projects only: an archived project leaves its room's strip, keeps its folder and history, can be brought back,
 //   takes no new sessions, and has no live ones (archiving one with live sessions asks to stop them first).
+// - No session is ever without a place: one with no project sits in its area's home ("Other sessions"), and one with no area either in
+//   the one Unfiled home. A home is held as a Project with `kind: "home"`, but is no project: no folder, no archive, no new sessions.
 
 export type Area = {
   id: string;
@@ -29,7 +31,13 @@ export type Project = {
   status: ProjectStatus;
   /** One line on what the project is. */
   about: string;
+  /** Not a project but a home: the sessions of an area that are in no project, or (UNFILED) the ones with no area either. */
+  kind?: "home";
 };
+
+/** The home of the sessions that say neither their project nor their area. */
+export const UNFILED = "home:unfiled";
+export const isHome = (p: Pick<Project, "kind">) => p.kind === "home";
 
 /** `waiting`: it ended needing you (blocked, or a decision); `failed`: it ended without finishing; `silent`: its note still says running,
  *  but nothing has been heard from it for hours (its end is the last time it was heard from; it is not counted as working). */
@@ -107,6 +115,7 @@ export function problems(w: Work): string[] {
   for (const p of w.projects) {
     if (projectIds.has(p.id)) out.push(`two projects are called ${p.id}`);
     projectIds.add(p.id);
+    if (isHome(p)) { if (p.id !== UNFILED && !areaIds.has(p.area)) out.push(`${p.name} is the home of no known area`); continue; }
     if (Array.isArray(p.area as unknown)) out.push(`${p.name} lives in more than one area`);
     else if (!areaIds.has(p.area)) out.push(`${p.name} is in no known area`);
     if (!isFolder(p.folder)) out.push(`${p.name} has no folder`);
