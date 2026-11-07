@@ -263,9 +263,6 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const room = p === ROOT ? uniRef : n ? stewardOf(p).room ?? (n.channels[0] ? { id: n.channels[0], name: "" } : null) : null;
     if (room) actions.openRoom(room.id, null, null, { path: p, view });
   };
-  // an area saved by an older version without its room (0.1.45's tab strip): with rooms, it opens as its room in focus once the places are known
-  const redirected = useRef(false);
-  useEffect(() => { if (!chat || allPlace || !path || !data || !rooms.length || redirected.current) return; redirected.current = true; openPlace(path); }); // eslint-disable-line react-hooks/exhaustive-deps
   // T-302 round 2: #Uni is archived, so with chat the tree has no Uni row. A profile without chat keeps its root row: Uni's level is its only view of all the work.
   const navRows0 = data ? treeRows(data.tree, roomRefs, uniRef) : [{ key: "~uni", via: null, path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? uniRef.name : null, heldBy: null, heldNode: null, own: !!uniRef, trunk: [], last: true }];
   const navRows = chat ? navRows0.filter((r) => r.kind !== "root") : navRows0;

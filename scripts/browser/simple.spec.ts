@@ -666,7 +666,7 @@ test.describe('simple', () => {
   });
 
 
-  test('r7: the app reopens to the room you were in; an old uni.tabs.v1 set is ignored beyond its active room', async ({ page }) => {
+  test('r7: the app reopens to the room you were in; an old uni.tabs.v1 set is ignored beyond its active place', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await page.reload();
@@ -674,7 +674,8 @@ test.describe('simple', () => {
     expect(await page.evaluate(() => localStorage.getItem('uni.tabs.v2'))).toContain('Projects/ATLAS');
     await page.evaluate(() => { localStorage.removeItem('uni.tabs.v2'); localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'a', kind: 'area', path: 'Areas/Techne', title: 'Techne' }, { id: 'b', kind: 'areas', title: 'Uni' }, { id: 'c', kind: 'journal', title: 'Journal' }], active: 'a', recent: ['b', 'a'] })); });
     await page.reload();
-    await expect(focusTitle(page)).toHaveText('Techne');
+    // T-335: a 0.1.45-era area without its room opens on Uni's home (a room is only ever in focus over All); never a tab strip
+    await expect(page.locator('[data-place="front-door"][data-view="places"]')).toBeVisible();
     await expect(page.locator('.tab-strip')).toHaveCount(0);
   });
 
