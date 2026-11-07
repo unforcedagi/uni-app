@@ -1,6 +1,6 @@
 // T-234: Uni's approval cards waiting for a tap in any room, for Needs you and the room's banner, notified once each. Read
-// from Rust (`sealed_waiting`: checked, unanswered, not expired), again on every live message, after an answer, and when
-// the earliest card's answer-by time passes.
+// from Rust (`sealed_waiting`: checked, unanswered, not expired), again on every live message or edit, after an answer, and
+// when the earliest card's answer-by time passes.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -38,7 +38,8 @@ export function useSealedWaiting(opts: { enabled: boolean; synced: number; rooms
     if (!opts.enabled) return;
     let t: number | undefined;
     const soon = () => { if (t === undefined) t = window.setTimeout(() => { t = undefined; read(); }, 150); };
-    const un = listen<{ kind: string }>("uni://live", (e) => { if (e.payload.kind === "message" || e.payload.kind === "delete") soon(); });
+    // an edit too: Uni edits a card that ended (answered on another device, expired, void) to one line, and Rust no longer lists it
+    const un = listen<{ kind: string }>("uni://live", (e) => { if (e.payload.kind === "message" || e.payload.kind === "edit" || e.payload.kind === "delete") soon(); });
     window.addEventListener(SEALED_CHANGED, soon);
     return () => { window.clearTimeout(t); window.removeEventListener(SEALED_CHANGED, soon); void un.then((f) => f()); };
   }, [opts.enabled, read]);

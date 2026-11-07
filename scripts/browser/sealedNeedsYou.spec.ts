@@ -79,3 +79,43 @@ test('the task list failing to load still shows a waiting card in Needs you', as
     await expect(page.locator('.wv .cp-sealed .cp-approval-cmd')).toHaveText('Morning card · 3 routine credentials');
   }
 });
+
+// 11-07: a card answered on another of the owner's devices. That device's answer never reaches this one; Uni's edit of the card does (the
+// broker edits a card that ended to one line: uni-ops tests/test_sealed_card_sync.py drives it with the app's own Rust). Rust then no
+// longer lists it (`sealed_waiting` reads the edited body, which has no fence), and the app has to read that again when the edit lands,
+// not at the next message.
+const ANSWERED = '❌ Denied at 14:05 · **Uni asks to use dns-zone** (powerful)';
+async function cardArrives(page: Page): Promise<string> {
+  return page.evaluate(([room, body]) => { const w = window as any; const r = w.__arrive(room, 'Uni', body, 0, false, null);
+    w.__waiting = [{ ref: r, channel: room, root: null, ts: Math.floor(Date.now() / 1000), kind: 'single', credential: 'dns-zone', action: 'dns.edit', class: 'powerful', rows: 1, expires: Math.floor(Date.now() / 1000) + 900, fingerprint: '9b13b2ae' }];
+    return r; }, [ROOM, BODY] as const);
+}
+const answeredElsewhere = (page: Page, ref: string) => page.evaluate(([room, r, line]) => { const w = window as any; w.__waiting = []; w.__editMsg(room, r, line); }, [ROOM, ref, ANSWERED] as const);
+
+test('a card answered on another device leaves Needs you as soon as Uni edits it', async ({ page }) => {
+  test.setTimeout(120_000);
+  await boot(page);
+  const ref = await cardArrives(page);
+  if (await strip(page).count()) await strip(page).click();
+  const rows = page.locator('.cp-sealed');
+  await expect(rows).toHaveCount(1);
+  await answeredElsewhere(page, ref);
+  await expect(rows).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__calls.filter((x: any) => x.cmd === 'sealed_answer').length)).toBe(0);
+});
+
+test('a card answered on another device leaves the room it is open in: no buttons, no banner, the line in its place', async ({ page }) => {
+  test.setTimeout(120_000);
+  await boot(page);
+  const ref = await cardArrives(page);
+  if (await strip(page).count()) await strip(page).click();
+  await page.locator('.cp-sealed').first().getByRole('button').click();
+  const c = page.getByRole('region', { name: 'Approve use of dns-zone', exact: true });
+  await expect(c).toBeVisible();
+  await expect(page.locator('.approval-banner')).toContainText('Uni asks for your tap: dns-zone · dns.edit');
+  await answeredElsewhere(page, ref);
+  await expect(c).toHaveCount(0);
+  await expect(page.locator(`article[data-ref="${ref}"]`)).toContainText("Denied at 14:05");
+  await expect(page.locator('.approval-banner')).toHaveCount(0);
+  await expect(page.locator('.message.approval-waiting')).toHaveCount(0);
+});
