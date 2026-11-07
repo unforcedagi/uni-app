@@ -864,13 +864,21 @@ export const focusSheet = (page: Page) => page.getByRole('region', { name: /in f
 /** A vault without rooms has its tree of places as its home. */
 const treeRow = (page: Page, name: string) => page.locator('.th-phone-tree').locator(`.th-go[aria-label^="${name},"]`);
 /** Uni's home (All has a front door of its own, `data-view="all"`). */
-const frontDoor = (page: Page) => page.locator('[data-place="front-door"][data-view="places"]');
+/** The home: with rooms (0.2) All's stream with the places in the drawer under its head; without the Uni glue, the places page. */
+const frontDoor = (page: Page) => page.locator('[data-place="front-door"]:not(.all-empty)');
+/** 0.2 one home: the places are in the drawer under the home's head; this pulls it down (nothing to do on a places page). */
+export async function openPlaces(page: Page) {
+  const pull = page.locator('[data-place="front-door"] .fd-pull');
+  if (!(await pull.first().isVisible().catch(() => false))) return;
+  if ((await pull.first().getAttribute('aria-expanded')) !== 'true' && !(await pull.first().isDisabled())) await pull.first().click();
+  await page.locator('.fd-door').first().waitFor();
+}
 /** A node's way in: its door on the front door, else its row in the tree (a vault without rooms). */
 export const areaCard = (page: Page, name: string) => page.locator(`.fd-door[data-path="Areas/${name}"]`).or(treeRow(page, name));
 /** T-335: from the front door into the first room, in focus over All; elsewhere, nothing. */
 export async function leaveFrontDoor(page: Page) {
   await page.locator('[data-place="front-door"], .th-phone-tree').first().waitFor();
-  if (await frontDoor(page).first().isVisible()) { await page.locator('.fd-door').first().click(); await expect(focusSheet(page)).toBeVisible(); }
+  if (await frontDoor(page).first().isVisible()) { await openPlaces(page); await page.locator('.fd-door').first().click(); await expect(focusSheet(page)).toBeVisible(); }
 }
 /** T-302: where the old home put a test, reached the way a person now does: the first room, in focus over All. */
 export async function toOldHome(page: Page) {
@@ -881,8 +889,9 @@ export async function toOldHome(page: Page) {
 /** T-335: the places: Uni's home (with rooms), or the tree (a vault without rooms). */
 export async function showTree(page: Page) {
   await page.locator('[data-place="front-door"], .th-phone-tree, .wp').first().waitFor();
-  if (await page.locator('.th-phone-tree').isVisible() || await frontDoor(page).first().isVisible()) return;
-  await openAreasHome(page);
+  if (await page.locator('.th-phone-tree').isVisible()) return;
+  if (!(await frontDoor(page).first().isVisible()) || await focusSheet(page).isVisible()) await openAreasHome(page);
+  await openPlaces(page);
 }
 /** Opens a place's details in its focus (with rooms), from its room's head. */
 export async function openDetails(page: Page) {
@@ -907,7 +916,8 @@ export async function openAreaPage(page: Page, name: string, opts: { app?: boole
     if (opts.app === true || (await tab.waitFor({ state: 'visible', timeout: 1500 }).then(() => true, () => false))) await tab.click();
     return;
   }
-  if (!(await frontDoor(page).first().isVisible())) await openAreasHome(page);
+  if (!(await frontDoor(page).first().isVisible()) || await focusSheet(page).isVisible()) await openAreasHome(page);
+  await openPlaces(page);
   const door = page.locator(`.fd-door[data-path="Areas/${name}"]`);
   if (await door.count()) await door.click();
   else {

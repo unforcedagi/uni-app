@@ -110,3 +110,6 @@
 .vault-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .vault-toolbar input { flex: 1; min-width: 0; }
 .vault-toolbar .vault-folder-actions { width: auto; padding: 0; flex: none; }
+/* Messages: Sign out at the foot of the list */
+.msgs-signout { margin: 18px 0 28px; text-align: center; }
+.msgs-signout .note-quiet { min-height: 40px; color: var(--g-ink-2); }

@@ -347,7 +347,6 @@ export default function Messages({ backTo = "Uni", onBack }: { backTo?: string; 
     <header className="note-bar msgs-bar">
       {onBack && <button className="note-action" onClick={onBack}>← {backTo}</button>}
       <span className="msgs-title"><strong>Messages</strong>{signedIn && <small className="msgs-account">{status?.user_id}{status?.state !== "live" && " · "}<span className={`msgs-live st-${status?.state}`} role="status">{status?.state === "live" ? "" : statusWords(status)}</span></small>}</span>
-      {signedIn ? <button className="note-quiet" onClick={() => { if (outArmed) void out(); else setOutArmed(true); }}>{outArmed ? "Sign out?" : "Sign out"}</button> : <span className="msgs-bar-gap" />}
     </header>
     {!status && !problem ? <p className="msgs-loading" role="status">Opening Messages…</p>
     : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={onSignedIn} /></div>
@@ -367,6 +366,8 @@ export default function Messages({ backTo = "Uni", onBack }: { backTo?: string; 
                 : <div className="empty msgs-empty"><p>No conversations yet.</p><p>Bring in your chats from Signal, WhatsApp, Telegram and others.</p><button type="button" className="send" onClick={() => setLinkView(true)}>Link an account</button></div>)
               : rows.length === 0 ? <p className="empty msgs-tab-empty">Nothing from {current?.label ?? "here"} yet. Chats show here as they come in.</p>
                 : <ul className="msgs-rows">{rows.map((r) => <RoomItem key={r.id} r={r} now={now} mark={tab === "all" && tabs.length > 2} selected={thread?.roomId === r.id} onOpen={() => void open(r.id)} />)}</ul>}
+              {/* 0.2: signing out is rare and can't be undone in a tap: a quiet line at the foot of the list, never the head's one action */}
+              <p className="msgs-signout"><button className="note-quiet" onClick={() => { if (outArmed) void out(); else setOutArmed(true); }}>{outArmed ? "Sign out?" : "Sign out"}</button></p>
             </>}
         </div>
       </nav>

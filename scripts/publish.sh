@@ -78,9 +78,14 @@ SIGNERS="$("$HOME/Android/Sdk/build-tools/36.1.0/apksigner" verify --print-certs
 [[ $SIGNERS == "$APK_SIGNER_SHA256" ]] || { echo "APK signed by the wrong key: '$SIGNERS' (expected $APK_SIGNER_SHA256)" >&2; exit 1; }
 python3 scripts/write-release-manifest.py "$STAGE" "$VERSION" "$SHA" "$REPO_SLUG"
 # The tag is created last, so a failed build leaves nothing behind and the next tick retries.
+# A release may carry its own notes in plain words (docs/releases/<version>.md); the build line follows them.
+NOTES="Built from \`${SHA:0:12}\` on main. Mac: download Uni-mac-arm64.zip for a first install; installed apps update themselves. Android: uni.apk (Android versionCode $CODE)."
+if [[ -f "docs/releases/$VERSION.md" ]]; then NOTES="$(cat "docs/releases/$VERSION.md")
+
+$NOTES"; fi
 gh release create "$TAG" --repo "$REPO_SLUG" --target "$SHA" --latest \
   --title "Uni $VERSION" \
-  --notes "Built from \`${SHA:0:12}\` on main. Mac: download Uni-mac-arm64.zip for a first install; installed apps update themselves. Android: uni.apk (Android versionCode $CODE)." \
+  --notes "$NOTES" \
   "$STAGE/Uni-mac-arm64.zip" "$STAGE/Uni.app.tar.gz" "$STAGE/Uni.app.tar.gz.sig" \
   "$STAGE/uni.apk" "$STAGE/latest.json" "$STAGE/android.json"
 git fetch --quiet origin --tags
