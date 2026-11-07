@@ -16,10 +16,12 @@ test.beforeEach(async ({ page }) => {
 const homeForYou = (page: import('@playwright/test').Page) => page.locator('#fd-drawer .fd-foryou');
 async function toHomeDrawer(page: import('@playwright/test').Page) {
   // Uni's own room in focus is Uni already (the rail's Uni leaves it be): its Back steps out to the home
+  // (the home comes back with the room it had in focus, as All did: step out of it)
   const focus = page.getByRole('region', { name: /in focus$/ });
-  if (await focus.isVisible()) await focus.getByRole('button', { name: 'Back to Uni' }).click();
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
+  await page.waitForTimeout(300);
+  if (await focus.isVisible()) { await focus.getByRole('button', { name: 'Back to Uni' }).first().click(); await expect(focus).toHaveCount(0); }
   const pull = page.locator('[data-place="front-door"] .fd-pull');
   if ((await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
   await expect(homeForYou(page)).toBeVisible();

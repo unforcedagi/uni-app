@@ -61,7 +61,8 @@ async function inFocus(page: Page, name: string) {
 }
 /** 0.2: back to where you were on Uni's side: Android's Back (as the plugin delivers it) on a touch screen, Alt+← on a desktop. */
 const toAll = async (page: Page) => {
-  if (test.info().project.name === 'mac') { await page.keyboard.press('Alt+ArrowLeft'); return; }
+  // (0.2: on a Mac the rail's Uni is the way back from a place; it brings back the room you left, kept on the device)
+  if (test.info().project.name === 'mac') { await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click(); return; }
   await page.evaluate(() => { const w = window as any; w.__cbs[w.__backHandler.id]({ message: {}, index: w.__backIndex ?? 0 }); w.__backIndex = (w.__backIndex ?? 0) + 1; });
 };
 

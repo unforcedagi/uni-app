@@ -188,6 +188,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
    *  redraw of the home (the key arriving, a place's room coming back) leaves it as the person left it. */
   const [pulled, setPulledState] = useState(() => pulledMemory.open);
   const setPulled = useCallback((open: boolean) => { pulledMemory.open = open; setPulledState(open); }, []);
+  // leaving the home for another place folds it: the home comes back as a fresh page (a redraw in place keeps it, as above)
+  useEffect(() => () => { if (!document.querySelector('[data-place="front-door"]')) pulledMemory.open = false; }, []);
   const focusView: FocusView = focus?.view ?? "chat";
   /** Without rooms, a place's page is its work; with rooms, the focus's "all of its work" step. */
   const workShown = !chat ? !!node : focusView === "work";
@@ -370,7 +372,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     else actions.openRoom(room.id, message);
   };
   const openRun = (r: Run) => { const room = runRoom(r); if (room) openAt(room, r.message ?? null); };
-  const openApproval = (a: Approval) => { const room = rooms.find((x) => x.id === a.channel); if (room && !a.root) openAt(room, a.ref); else approvalsAll.open(a); };
+  // (one in the room already in focus goes to its prompt there; any other opens as the app opens an approval, its room at the prompt with the keys up)
+  const openApproval = (a: Approval) => { const room = rooms.find((x) => x.id === a.channel); if (room && !a.root && focus && room.id === focus.room) openAt(room, a.ref); else approvalsAll.open(a); };
   const live = sheetId ? tasks.all?.find((t) => t.id === sheetId) ?? null : null;
   if (live) lastSheet.current = live;
   const sheetTask = sheetId ? live ?? (lastSheet.current?.id === sheetId ? lastSheet.current : null) : null;
@@ -439,7 +442,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const approvalRows = <ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" />;
     // 0.2 one home: with rooms, the home is All; what the old home held (what needs you, the approvals, For you, To post, the places, the
     // rooms no area holds, the Unfiled sessions) is in the drawer under its head
-    const home = <>{status}{!allPlace && approvalRows}
+    // (an approval has a deadline: one waiting in a room All shows stays on the home, over its head, as it was over All's; the drawer lists them all)
+    const home = <>{status}{!allPlace ? approvalRows : !pulled && <ApprovalRows approvals={approvalsAll.list.filter((x) => !privateChannel(x.channel))} className="cp-list cp-approvals th-approvals" />}
       <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={(p) => openPlace(p)} onOpenNeed={(p) => openPlace(p, "details")} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
         otherRooms={others} noAreas={!!data && !error && !doorAreas.length ? (uniRef ? () => actions.openRoom(uniRef.id) : null) : undefined}
         toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} onOpenProject={setProjectOpen}

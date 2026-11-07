@@ -510,9 +510,9 @@ test.describe('review 3', () => {
     await page.evaluate((b) => { const w = window as any; w.__arrive('ch-sad', 'Uni', b[0]); w.__arrive('ch-kiln', 'Uni', b[1]); }, [PROMPT('private-thing'), PROMPT('kiln-thing')]);
     await allIn(page);
     // the stream: only the one from a room All shows
-    await expect(feed(page).locator('.cp-approval')).toHaveCount(1);
-    await expect(feed(page)).toContainText('kiln-thing');
-    await expect(feed(page)).not.toContainText('private-thing');
+    await expect(page.locator('.cp-approval')).toHaveCount(1);
+    await expect(page.locator('.areas-home')).toContainText('kiln-thing');
+    await expect(page.locator('.areas-home')).not.toContainText('private-thing');
     await expect(feed(page)).not.toContainText('anctum');
     // the drawer, the owner's own home: both, as the places page had them
     await pullDown(page);

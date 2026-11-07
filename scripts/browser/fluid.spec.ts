@@ -54,6 +54,9 @@ async function boot(page: Page, opts: Record<string, unknown> = {}) {
   }, { long: LONG, sha: SHA });
 }
 async function allIn(page: Page) {
+  // 0.2: the home is already up from the start; the messages this spec adds after boot are read when the home is drawn again, as after a
+  // trip to the Journal and back
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Journal', exact: true }).click();
   await allTab(page).click();
   await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible();
   await expect(row(page, 'long1')).toBeVisible();
@@ -637,8 +640,11 @@ test.describe('a room in focus', () => {
     await boot(page);
     const prompt = JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8')).prompts.two_answers_30min;
     await page.evaluate((b) => (window as any).__arrive('ch-kiln', 'Uni', b), prompt);
-    await expect(page.locator('.cp-approval')).toHaveCount(1);
-    await allIn(page);
+    // the home's drawer holds it, as the places page did; put the drawer away again for the stream
+    await page.locator('.fd-pull').click();
+    await expect(page.locator('#fd-drawer .cp-approval')).toHaveCount(1);
+    await page.locator('.fd-pull').click();
+    // and on the home itself, over its head, as it was over All's
     await expect(page.locator('.cp-approval')).toHaveCount(1);
     await page.locator('.cp-approval').first().getByRole('button').first().click();
     await expect(sheet(page).getByRole('heading', { name: 'Kiln Studio' })).toBeVisible();

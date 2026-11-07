@@ -379,6 +379,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const lifeVault = effectiveLifeVault(useLifeOsVault(), vaults); // PR 6: the For you pin is Uni glue, shown (and fetched) only while the selected vault is uni
   /** 0.2 one home: All is the home wherever the Uni glue is on (a vault of your own without it keeps its places page) */
   const homeIsAll = showUniGlue(lifeVault);
+  const homeIsAllRef = useRef(homeIsAll);
+  homeIsAllRef.current = homeIsAll;
   async function refreshForYou() {
     if (!showUniGlue(lifeVault)) return;
     try {
@@ -799,7 +801,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** `fromHistory`: Back and Forward move through the places visited; they do not add to them. */
   function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false, fromHistory = false, then?: () => void) {
     // 0.2 one home: Uni's places page is All, with its places under the head (an older save, a step back, a place's way up)
-    if (((target.kind === "areas" && !target.path) || (target.kind === "area" && !target.channel && tabsReady.current && roomsRef.current.length > 0)) && homeIsAll) target = { kind: "all", title: "Uni" };
+    if (target.kind === "areas" && !target.path && homeIsAll) target = { kind: "all", title: "Uni" };
     // already in All, with a room in focus: All is what is behind it
     if (target.kind === "all" && allFocusRef.current && activeTab(tabsRef.current)?.kind === "all") {
       // a panel over it goes first; the room stays in focus under it
@@ -1076,7 +1078,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
       let next = openedEarly.current && activeTab(tabsRef.current) ? tabsRef.current : saved ? restoreTabs(saved, ids) : migrateLegacyTabs(legacy, ids);
       // T-335 one surface: an area saved with its room (an older version's room page) reopens as that room in focus over All
       const was = activeTab(next);
-      if (was?.kind === "area" && was.channel) { const tabs = next.tabs.filter((t) => t.kind !== "all" || t.id === was.id).map((t) => (t.id === was.id ? { id: t.id, kind: "all" as const, title: "Uni", channel: was.channel, ...(was.path ? { path: was.path } : {}) } : t)); next = { ...next, tabs, recent: next.recent.filter((id) => tabs.some((t) => t.id === id)) }; }
+      // 0.2 one home: an area an older version saved without its room (0.1.45's tab strip) reopens on the home, All
+      if (was?.kind === "area" && !was.channel && homeIsAllRef.current) next = { ...next, tabs: next.tabs.map((t) => (t.id === was.id ? { id: t.id, kind: "all" as const, title: "Uni" } : t)) };
+      else if (was?.kind === "area" && was.channel) { const tabs = next.tabs.filter((t) => t.kind !== "all" || t.id === was.id).map((t) => (t.id === was.id ? { id: t.id, kind: "all" as const, title: "Uni", channel: was.channel, ...(was.path ? { path: was.path } : {}) } : t)); next = { ...next, tabs, recent: next.recent.filter((id) => tabs.some((t) => t.id === id)) }; }
       // T-294: Uni's side's last place (the way back from Messages, Mail, the Journal), and its spot, which the room comes back to
       let place = null;
       try { place = readUniPlace(localStorage.getItem(UNI_PLACE_KEY), ids); } catch { /* private storage */ }
@@ -2615,14 +2619,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const active = activeTab(tabs);
   useEffect(() => { setRailMore(false); }, [active?.id]);
   // 0.2 one home: a restored Uni places page (an older version's save) is the home, All
-  // (an area saved by an older version without its room is the home too: with rooms, a place is only ever its room in focus)
   useLayoutEffect(() => { if (homeIsAll && tabsReady.current && oldHome(active)) openTarget(uniHome(), "replace"); }, [homeIsAll, active?.id, active?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (active && (active.kind === "areas" || active.kind === "area")) { const { id: _id, ...t } = active; originRef.current = t; } }, [active]);
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const areasOpen = active?.kind === "areas" || active?.kind === "area";
   /** T-335 one surface: every room opens in focus over All; Uni's home (and a vault without rooms, its areas' work) is the other side of it. */
   // 0.2 one home: Uni's places page, before the saved place is restored (or while a step back to it is turned into All), is drawn as the home
-  const oldHome = (t: TabTarget | null | undefined) => !!t && ((t.kind === "areas" && !t.path) || (t.kind === "area" && !t.channel));
+  const oldHome = (t: TabTarget | null | undefined) => !!t && t.kind === "areas" && !t.path;
   const allOpen = active?.kind === "all" || (homeIsAll && oldHome(active));
   const shellOpen = areasOpen || allOpen;
   // another place opened: the focus ended with All (whoever opened it has already moved the room's view on)
@@ -2735,8 +2738,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     journalRecording && journalTab ? { title: "Journal", tabId: journalTab.id, controls: journalRecording.controls, finish: "save" as const } : null;
   return <ApprovalsContext.Provider value={approvalsView}><NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault" || active?.kind === "mail" || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "arcade"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
     <nav ref={railRef} className="rail" aria-label="Main navigation" onClickCapture={(e) => { if (!(e.target as HTMLElement).closest(".rail-more")) setRailMore(false); }}>
-      {/* 0.2 one home: Uni is the home, All's stream with its places under the head; a room is in focus over it */}
-      <button aria-label="Uni" aria-current={uniShown || (!panel && !searchOpen && (!topNote || topNote.ref === FOR_YOU_ID) && allOpen) || (!panel && !searchOpen && topNote?.ref === FOR_YOU_ID && homeIsAll) ? "page" : undefined} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
+      {/* 0.2 one home: Uni is the home, All's stream with its places under the head; a room is in focus over it. From Mail, the Journal or
+          another place it goes back to where you were on Uni's side (the room you left, kept on the device), as their old "← Uni" did */}
+      <button aria-label="Uni" aria-current={uniShown || (!panel && !searchOpen && (!topNote || topNote.ref === FOR_YOU_ID) && allOpen) || (!panel && !searchOpen && topNote?.ref === FOR_YOU_ID && homeIsAll) ? "page" : undefined} onClick={() => openTarget(active && !isUniSide(active) && active.kind !== "note" && !panel && !searchOpen ? origin() : uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
       <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })} aria-describedby={[held > 0 && "rail-mail-held", unreadMail > 0 && "rail-mail-unread"].filter(Boolean).join(" ") || undefined}><i><MailIcon />{held > 0 && <span className="rail-count" aria-hidden="true">{held}</span>}{unreadMail > 0 && <span className="rail-dot" aria-hidden="true" />}</i><span>Mail</span>{held > 0 && <span id="rail-mail-held" hidden>{held} waiting for you</span>}{unreadMail > 0 && <span id="rail-mail-unread" hidden>{unreadMail} unread in your Inbox</span>}</button>
       {/* T-335 as Aaron: on a phone the bar is four places and More; the rest open from a sheet above it. On a wider screen More is hidden and the rest sit on the rail (display: contents) */}
