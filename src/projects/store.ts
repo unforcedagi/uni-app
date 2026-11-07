@@ -115,7 +115,7 @@ const FILL_MAX = 40;
  *  read). */
 async function fillTasks(vault: string, runs: readonly RawNote[], nodes: readonly RawNote[], have: readonly RawNote[]): Promise<{ rows: RawNote[]; missing: number }> {
   // a run in a home is on the screen, but its task may still say which project it belongs to
-  const read = workFrom({ nodes, runs, tasks: have });
+  const read = workFrom({ nodes, runs, tasks: have, rooms: hubRooms });
   const homes = new Set(read.projects.filter(isHome).map((p) => p.id));
   const placed = new Set(read.sessions.filter((x) => !homes.has(x.project)).map((x) => x.id));
   const known = new Set(have.map((t) => taskIdIn(t.path)));
@@ -213,6 +213,8 @@ export function setWorkOwner(id: string | null) {
   // the copies kept before round 3 were keyed by the vault alone: no owner can be sure they are theirs
   try { for (const k of Object.keys(localStorage)) if (/^uni\.work\.v[123]:/.test(k)) localStorage.removeItem(k); } catch { /* private storage */ }
   if (id === identity) return;
+  // another identity's rooms say nothing of this one's: its own arrive from the app (rooms set before the first identity is known are its own)
+  if (identity !== null) hubRooms = [];
   identity = id;
   const owner = ownerOf(id, activeProfile().vault);
   if (owner !== loadedFor) adopt(owner);

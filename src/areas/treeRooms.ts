@@ -170,9 +170,15 @@ export function runIsPrivate(tree: Tree, run: RunClues, rooms: readonly RoomRef[
 /** The runs a level other than a private place doesn't list. Before the areas and rooms are read nothing can be told from a room's id, so any run naming a room waits (as
  *  tasks do, r21); and before the tasks are read, any run naming a task. */
 export function privateRunIds(tree: Tree | null, runs: readonly { id: string; node: string; task: string | null; rooms?: readonly unknown[]; project?: string | null; folder?: string | null }[], nodeOfTask: ReadonlyMap<string, string>, rooms: readonly RoomRef[], uni: RoomRef | null, tasksKnown = true): Set<string> {
-  return new Set(runs.filter((r) => (!tasksKnown && !!r.task) || (tree
-    ? runIsPrivate(tree, { rooms: r.rooms ?? [], nodes: [r.project, r.node, r.task ? nodeOfTask.get(r.task.toUpperCase()) : null], folder: tree.nodes.get(r.node)?.kind === "project" ? null : r.folder }, rooms, uni)
-    : (r.rooms ?? []).length > 0)).map((r) => r.id));
+  return new Set(runs.filter((r) => {
+    if (!tasksKnown && r.task) return true;
+    if (!tree) return (r.rooms ?? []).length > 0 || !!r.project || !!r.folder;
+    const id = /\bT-\d+[a-z]?\b/i.exec(r.task ?? "")?.[0]?.toUpperCase();
+    const nodes = [r.project, r.node, id ? nodeOfTask.get(id) : null];
+    // as the sessions do: a folder counts only when no node says which project the run belongs to
+    const named = nodes.some((ref) => { const at = factsOf(tree).node(ref); return !!at && [...tree.nodes.values(), ...tree.archived].some((n) => n.path === at && n.kind === "project"); });
+    return runIsPrivate(tree, { rooms: r.rooms ?? [], nodes, folder: named ? null : r.folder }, rooms, uni);
+  }).map((r) => r.id));
 }
 
 /** r21: the same, read from the task tree (its nodes and parents), for while the areas aren't read yet: privacy never waits on them. */

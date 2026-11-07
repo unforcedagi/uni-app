@@ -40,6 +40,22 @@ try {
   const uni = profile.defaultProfile("uni"), other = profile.defaultProfile("other");
   const settle = () => new Promise((r) => setTimeout(r, 30));
 
+  await check("another identity isn't read against the last one's rooms: a run with an unknown id waits for its own", async () => {
+    profile.setActiveProfile(uni);
+    store.setWorkOwner("R1");
+    store.setWorkRooms([{ id: "hub-1", name: "somewhere" }]);
+    const realMeta = window.__TAURI_INTERNALS__.invoke;
+    window.__TAURI_INTERNALS__.invoke = async (cmd, args = {}) => (cmd === "vault_query_meta" && args.metadata?.state ? [{ id: "r-id", path: "Runs/2026-10-20 A walk by the lake", tags: ["run"], metadata: { state: "running", started_at: new Date().toISOString(), channel: "hub-2" } }] : realMeta(cmd, args));
+    store.setWorkOwner("R2");
+    await store.refreshWork();
+    await settle();
+    const s = store.workSnapshot().work.sessions.find((x) => x.id === "r-id");
+    assert.equal(s.ask, "A session whose room isn't read yet");
+    window.__TAURI_INTERNALS__.invoke = realMeta;
+    store.forgetWork();
+    for (const k of keys()) mem.delete(k);
+  });
+
   await check("a read of vault uni finishes and shows its project, kept for identity A on uni", async () => {
     profile.setActiveProfile(uni);
     store.setWorkOwner("A");

@@ -267,10 +267,13 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
       folder: byNode ? null : str(m.folder),
     }, roomRefs, null);
   };
-  /** Rooms not read yet: a run holding a room's id that no note names can't be told from a private one, so it waits, with no words, until they are. A room's name beside it
-   *  says nothing of the id: a launcher can name one room and hold another's id. */
-  const roomIds = new Set(roomRefs.map((r) => r.id));
-  const roomUnread = (m: Record<string, unknown>) => !src.rooms?.length && [m.channel, m.starter_channel].some((c) => { const id = str(c); return !!id && !roomIds.has(id); });
+  /** Rooms not read yet: a run with a room clue no note names (an id, in any of its room fields, or a name) can't be told from a private one, so it waits, with no words,
+   *  until they are. A known name beside it says nothing of the rest: a launcher can name one room and hold another's id. */
+  const knownRooms = new Set([...roomRefs.map((r) => r.id), ...roomRefs.map((r) => r.name.toLowerCase()), ...byRoom.keys(),
+    ...src.nodes.flatMap((n) => [meta(n).room, meta(n).rooms].flatMap((v) => String(v ?? "").split(",").map(roomKey)))]);
+  const clueParts = (v: unknown): string[] => (Array.isArray(v) ? v : [v]).filter((x): x is string => typeof x === "string").flatMap((x) => x.split(",")).map((x) => x.trim()).filter(Boolean);
+  const clueKnown = (part: string) => knownRooms.has(part) || knownRooms.has(roomKey(part)) || knownRooms.has(roomKey(part).split("/")[0]);
+  const roomUnread = (m: Record<string, unknown>) => !src.rooms?.length && [m.room, m.starter_room, m.channel, m.starter_channel].some((v) => clueParts(v).some((p) => !clueKnown(p)));
   /** The private area a private run belongs to: the one its clues name, else the first that can be reached. */
   const privateHome = (m: Record<string, unknown>, task: string | null): LiveArea | null => {
     const named = [areaOfNode(str(m.project)), areaOfNode(str(m.node)), task ? areaOfNode(taskNode.get(task) ?? null) : null, ...[m.channel, m.starter_channel, m.room, m.starter_room].flatMap((v) => (Array.isArray(v) ? v : [v])).flatMap((v) => String(v ?? "").split(",")).map(areaOfRoom)];
@@ -295,7 +298,8 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     // a note with no start of its own still has a place: when the note was made
     const startedAt = time(m.started_at) ?? time(r.createdAt) ?? time(r.updatedAt);
     if (!id || startedAt === null) continue;
-    const task = str(m.task)?.toUpperCase() ?? null;
+    // (a task field may hold words after its number)
+    const task = (/\bT-\d+[a-z]?\b/i.exec(str(m.task) ?? "")?.[0] ?? str(m.task))?.toUpperCase() ?? null;
     const folder = str(m.folder);
     const viaFolder = folder ? byFolder.get(folderKey(folder)) : undefined;
     const byNode = projectOfNode(str(m.project)) ?? projectOfNode(str(m.node)) ?? (task ? projectOfNode(taskNode.get(task) ?? null) : null);
@@ -307,8 +311,9 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const filedPrivately = !!filed && areas.some((a) => a.private && a.id === projectArea.get(filed));
     const hiddenArea = secret && !filedPrivately ? privateHome(m, task) : null;
     // a private place's run with no private area to go to: counted in Unfiled, with none of its words
-    const waiting = roomUnread(m);
-    const sealed = waiting || (secret && !filedPrivately && !hiddenArea);
+    const sealedPrivate = secret && !filedPrivately && !hiddenArea;
+    const waiting = !secret && roomUnread(m);
+    const sealed = waiting || sealedPrivate;
     const areaId = filed || secret ? null : areaOfRun(m, task, viaFolder);
     const project = waiting ? homeOf(null) : (filedPrivately || !secret ? filed : null) ?? homeOf(hiddenArea ?? areas.find((a) => a.id === areaId) ?? null);
     // a run stopped by hand closes as failed with the launcher's "stopped" line: it was stopped, not a failure

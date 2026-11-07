@@ -290,7 +290,7 @@ check("no run is ever invisible: its project, else its area (node, task's node, 
     const shaped = (id: string, node: string, m: Record<string, unknown>) => ({ id, node, task: (m.task as string) ?? null, rooms: [m.room].filter(Boolean), project: (m.project as string) ?? null, folder: (m.folder as string) ?? null });
     const rows = [shaped("sub", "Areas/Guild", { room: "stillwater/build" }), shaped("task", "Areas/Guild", { task: "T-960", room: "guild" }), shaped("done", "Projects/Quiet vow", {}), shaped("named", "", { project: "p-vow" }), shaped("pub", "Areas/Guild", { room: "guild" })];
     assert.deepEqual([...privateRunIds(t, rows, new Map([["T-960", "Areas/Sanctum/A note beneath"]]), [], null)].sort(), ["done", "named", "sub", "task"], "the public one stays listed");
-    assert.deepEqual([...privateRunIds(null, rows, new Map(), [], null)].sort(), ["pub", "sub", "task"], "with no tree, any room clue waits");
+    assert.deepEqual([...privateRunIds(null, rows, new Map(), [], null)].sort(), ["named", "pub", "sub", "task"], "with no tree, any room, project or folder clue waits");
   });
   check("a note holding only a room's id: the account's rooms say what it is, for a sub-room, an old name and a room only a private project names", () => {
     const withRoomOnly = [...nodes, note("p-roomonly", "Projects/Room only", ["node", "project"], { parent: "area-sanctum", room: "room-only-vow", folder: "~/quiet/only" })];
@@ -308,6 +308,30 @@ check("no run is ever invisible: its project, else its area (node, task's node, 
     assert.equal(place({ node: "area-guild", channel: "hub-who", room: "guild" }).project, UNFILED, "a name beside it says nothing of the id: a launcher can name one room and hold another's");
     assert.equal(place({ node: "area-guild", channel: "hub-who", room: "guild" }, [{ id: "hub-who", name: "guild" }]).project, "home:area-guild", "the rooms read: placed");
     assert.equal(place({ node: "area-guild", room: "guild" }).project, "home:area-guild", "no id, nothing to wait for");
+  });
+  check("an unknown room clue in any field waits while the rooms are unread: a name, a starter's, a list", () => {
+    const place = (md: Record<string, unknown>, rooms?: { id: string; name: string }[]) => workFrom({ nodes, runs: [run("r-w", md)], tasks, rooms }, NOW).sessions[0];
+    for (const md of [{ node: "area-guild", room: "hub-who" }, { node: "area-guild", starter_room: "hub-who" }, { node: "area-guild", channel: ["hub-who"] }, { node: "area-guild", room: "guild, hub-who" }]) {
+      assert.equal(place(md).ask, "A session whose room isn't read yet", JSON.stringify(md));
+      assert.equal(place(md, [{ id: "hub-who", name: "guild" }]).project, "home:area-guild", "the rooms read: placed");
+    }
+    assert.equal(place({ node: "area-guild", room: "guild", starter_room: "#guild" }).project, "home:area-guild", "known names don't wait");
+  });
+  check("a task field with words after its number still finds the task's node, in the sessions and the lists", () => {
+    const w = workFrom({ nodes, runs: [run("r-words", { node: "area-guild", task: "T-960 words after", room: "guild" })], tasks, rooms: [{ id: "x", name: "y" }] }, NOW);
+    assert.equal(w.projects.find((p) => p.id === w.sessions[0].project)!.area, "area-sanctum");
+    const t = buildTree(nodes.flatMap((n) => { const a = parseArea(n as never) ?? parseProject(n as never); return a ? [a] : []; }));
+    assert.deepEqual([...privateRunIds(t, [{ id: "r", node: "Areas/Guild", task: "T-960 words after", rooms: ["guild"] }], new Map([["T-960", "Areas/Sanctum/A note beneath"]]), [], null)], ["r"]);
+  });
+  check("the folder rule is one rule: a run naming a public project stays public in both, and one naming nothing goes with the folder in both", () => {
+    const t = buildTree(nodes.flatMap((n) => { const a = parseArea(n as never) ?? parseProject(n as never); return a ? [a] : []; }));
+    const onPublic = { project: "p-mail", folder: "~/quiet/vow" };
+    assert.equal(workFrom({ nodes, runs: [run("r-f", { node: "node-uni", ...onPublic })], tasks, rooms: [{ id: "x", name: "y" }] }, NOW).sessions[0].project, "p-mail");
+    assert.deepEqual([...privateRunIds(t, [{ id: "r", node: "", task: null, ...onPublic }], new Map(), [], null)], [], "the lists agree");
+    assert.deepEqual([...privateRunIds(t, [{ id: "r", node: "", task: null, folder: "~/quiet/vow" }], new Map(), [], null)], ["r"], "no project named: the folder says private");
+  });
+  check("before the areas are read, a run with only a project or folder clue waits too", () => {
+    assert.deepEqual([...privateRunIds(null, [{ id: "p", node: "", task: null, project: "p-vow" }, { id: "f", node: "", task: null, folder: "~/quiet/vow" }, { id: "n", node: "Areas/Guild", task: null }], new Map(), [], null)].sort(), ["f", "p"]);
   });
   check("an answer read before the rooms arrived isn't kept once they have", () => {
     const list = nodes.flatMap((n) => { const a = parseArea(n as never) ?? parseProject(n as never); return a ? [a] : []; });
