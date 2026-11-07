@@ -157,7 +157,8 @@ function validTab(x: unknown): Tab | null {
   if (kind === "arcade") return { id: t.id, kind, title: "Arcade" };
   if (kind === "posts") return { id: t.id, kind, title: "To post", ...(typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { path: t.path } : {}) };
   // The areas tab is Uni's home (saved tabs from before were titled "Areas").
-  if (kind === "areas") return { id: t.id, kind, title: "Uni", ...(str(t.channel) ? { channel: t.channel } : {}) };
+  // (T-335: Uni's own level with its room is gone; Uni is its home)
+  if (kind === "areas") return { id: t.id, kind, title: "Uni" };
   if (kind === "area") return typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { id: t.id, kind, path: t.path, title: title || t.path.split("/").pop()!, ...(str(t.channel) ? { channel: t.channel } : {}) } : null;
   if (kind === "vault") return str(t.vault) ? { id: t.id, kind, vault: t.vault, title: title || t.vault } : null;
   if (kind === "note") {
@@ -181,8 +182,11 @@ export function restoreTabs(raw: string | null, roomIds: Iterable<string>): Tabs
   const twin = new Map<string, string>();
   const tabs: Tab[] = [];
   for (const x of d.tabs) {
-    const t = validTab(x);
+    let t = validTab(x);
     if (!t || seen.has(t.id)) continue;
+    // T-335: of an older version's room tabs, only the one that was active is the room All keeps in focus
+    const legacy = !!x && typeof x === "object" && ((x as { kind?: unknown }).kind === "room" || (x as { kind?: unknown }).kind === "thread");
+    if (legacy && t.id !== d.active) t = { id: t.id, kind: "all", title: "All" };
     const same = tabs.find((o) => sameTarget(o, t));
     // T-335: two saved rooms (an older version's tabs) are one All; the one that was active is the room it keeps in focus
     if (same && same.kind === "all" && t.id === d.active && t.channel && rooms.has(t.channel)) tabs[tabs.indexOf(same)] = { ...t, id: same.id };

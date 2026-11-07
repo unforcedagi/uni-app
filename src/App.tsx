@@ -785,14 +785,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setSearchOpen(false); setPanel(null); setRailMore(false);
     // a room opened before the rooms list has come (a cold launch): the saved place isn't restored over it
     if (!tabsReady.current) openedEarly.current = true;
-    if (activeTab(tabsRef.current)?.kind !== "all") openTarget({ kind: "all", title: "All" }, "focus");
-    if (activeTab(tabsRef.current)?.kind !== "all") return; // (a note left unsaved: the person chose to stay)
-    if (o.keys !== undefined) focusComposer.current = o.keys;
-    focusInAll(room, o.ref ?? null, o.root ?? null, { path: o.path, view: o.view ?? "chat", keys: o.keys });
-    setChecking(o.checking ? { channel: room, text: o.checking } : null);
+    const go = () => {
+      if (o.keys !== undefined) focusComposer.current = o.keys;
+      focusInAll(room, o.ref ?? null, o.root ?? null, { path: o.path, view: o.view ?? "chat", keys: o.keys });
+      setChecking(o.checking ? { channel: room, text: o.checking } : null);
+    };
+    // (a note left unsaved asks first: the room comes up once the person leaves it, and not at all if they stay)
+    if (activeTab(tabsRef.current)?.kind !== "all") openTarget({ kind: "all", title: "All" }, "focus", false, false, go); else go();
   }
   /** `fromHistory`: Back and Forward move through the places visited; they do not add to them. */
-  function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false, fromHistory = false) {
+  function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false, fromHistory = false, then?: () => void) {
     // already in All, with a room in focus: All is what is behind it
     if (target.kind === "all" && allFocusRef.current && activeTab(tabsRef.current)?.kind === "all") {
       // a panel over it goes first; the room stays in focus under it
@@ -808,9 +810,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // No tab strip: a place replaces the one you were on (a second tab never shows the same room). The Journal keeps its own tab (its page and any recording stay alive), and a place opened from it goes beside it.
     if (isSurface(target) && target.kind !== "journal" && mode === "new") mode = "focus";
     if (target.kind === "journal") mode = "new";
-    // T-335 one surface: All with a room in focus stays (Mail, Uni's home, a note open beside it), so All and Back bring the room back
-    else if (target.kind !== "all" && isSurface(target) && mode !== "new") { const cur = activeTab(tabsRef.current); if (cur?.kind === "all" && cur.channel) mode = "new"; }
     else if (isSurface(target) && mode === "focus" && activeTab(tabsRef.current)?.kind === "journal") mode = "new";
+    // T-335 one surface: All with a room in focus stays (Mail, Uni's home, a note open beside it), so All and Back bring the room back
+    if (target.kind !== "all" && target.kind !== "journal" && isSurface(target) && mode !== "new") { const cur = activeTab(tabsRef.current); if (cur?.kind === "all" && cur.channel) mode = "new"; }
     // A recording's origin tab must survive the 12-tab eviction cap.
     const originId = recordingOrigin.current?.tabId;
     const pinned = new Set(tabsRef.current.tabs.filter((t) => t.id === originId || (t.kind === "journal" && journalRecordingRef.current)).map((t) => t.id));
@@ -823,7 +825,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setError("Stop the recording before replacing its tab."); return;
     }
     if (!confirmed && removed.some(isTabDirty)) {
-      setConfirmation({ text: UNSAVED_NOTE, go: "Leave note", run: () => openTarget(target, mode, true, fromHistory) }); return;
+      setConfirmation({ text: UNSAVED_NOTE, go: "Leave note", run: () => openTarget(target, mode, true, fromHistory, then) }); return;
     }
     removed.forEach((t) => dirtyNotes.current.delete(t.id));
     const tab = activeTab(next);
@@ -833,6 +835,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setSidebarVisible(false);
     setPanel(null);
     setSearchOpen(false);
+    then?.();
   }
   function closeTabById(id: string, confirmed = false) {
     const closing = tabsRef.current.tabs.find((t) => t.id === id);
@@ -1068,7 +1071,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       let next = openedEarly.current && activeTab(tabsRef.current) ? tabsRef.current : saved ? restoreTabs(saved, ids) : migrateLegacyTabs(legacy, ids);
       // T-335 one surface: an area saved with its room (an older version's room page) reopens as that room in focus over All
       const was = activeTab(next);
-      if (was?.kind === "area" && was.channel) next = { ...next, tabs: next.tabs.filter((t) => t.kind !== "all").map((t) => (t.id === was.id ? { id: t.id, kind: "all" as const, title: "All", channel: was.channel, ...(was.path ? { path: was.path } : {}) } : t)) };
+      if (was?.kind === "area" && was.channel) { const tabs = next.tabs.filter((t) => t.kind !== "all" || t.id === was.id).map((t) => (t.id === was.id ? { id: t.id, kind: "all" as const, title: "All", channel: was.channel, ...(was.path ? { path: was.path } : {}) } : t)); next = { ...next, tabs, recent: next.recent.filter((id) => tabs.some((t) => t.id === id)) }; }
       // T-294: Uni's side's last place (the way back from Messages, Mail, the Journal), and its spot, which the room comes back to
       let place = null;
       try { place = readUniPlace(localStorage.getItem(UNI_PLACE_KEY), ids); } catch { /* private storage */ }
@@ -1976,7 +1979,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   function stepBackInFocus() {
     const f = allFocusRef.current;
     if (!f) return;
-    if (f.leaving) { endAllFocus(); return; }
+    if (f.leaving) { stopLeaving(); finishRef.current(); return; }
     if (f.view === "work" || f.view === "app") { setFocusView("details"); return; }
     if (f.view === "details") { setFocusView("chat"); return; }
     if (f.root) focusInAll(f.room, null, null, { path: f.path ?? null });
@@ -2668,7 +2671,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const openApproval = (a: Approval) => {
     // a Hermes prompt is answered in the composer; Uni's approval card (T-234) on the card itself
     const typed = a.kind !== "sealed";
-    if (channelRef.current === a.channel && root === a.root) { setFocusView("chat"); focusTries.current = 0; setFocusRef(a.ref); if (typed) requestAnimationFrame(() => input.current?.focus()); return; }
+    if (allFocusRef.current && channelRef.current === a.channel && root === a.root) { setFocusView("chat"); focusTries.current = 0; setFocusRef(a.ref); if (typed) requestAnimationFrame(() => input.current?.focus()); return; }
     focusComposer.current = typed;
     // a prompt posted as a reply is in its thread, never the room's timeline: it opens there, as a search hit does
     openRoom(a.channel, { ref: a.ref, root: a.root ?? null, keys: typed, path: null });

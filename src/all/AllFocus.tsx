@@ -42,6 +42,8 @@ export function AllFocusSheet({ id, name, line, root, replies, view = "chat", le
     el.style.transform = dy ? `translateY(${dy}px)` : "";
   };
   const endPull = () => { pull.current = null; setPull(0); };
+  /** a touch that moved (a pull on the head) is not also a tap on the titles */
+  const moved = useRef(false);
   const inChat = view === "chat";
   const back = !inChat ? (view === "details" ? { label: "Chat", aria: `Back to the conversation in ${name}` } : { label: "Details", aria: `Back to ${name}'s details` })
     : root ? { label: name, aria: `Back to ${name}` } : { label: "All", aria: "Back to All" };
@@ -50,8 +52,8 @@ export function AllFocusSheet({ id, name, line, root, replies, view = "chat", le
   const region = view === "details" ? `${name} details` : view === "work" ? `${name}'s work` : `${name}'s app`;
   return <section ref={sheet} className="all-focus" role="region" tabIndex={-1} aria-label={`${name}, in focus`} data-leaving={leaving || undefined} data-view={view} style={{ ["--room-tint" as string]: roomTint(id) }}>
     <header className="all-focus-head"
-      onPointerDown={(e) => { if (e.pointerType === "touch") pull.current = { id: e.pointerId, y: e.clientY }; }}
-      onPointerMove={(e) => { const p = pull.current; if (p && p.id === e.pointerId && !calmScreen()) setPull(Math.max(0, e.clientY - p.y)); }}
+      onPointerDown={(e) => { moved.current = false; if (e.pointerType === "touch") pull.current = { id: e.pointerId, y: e.clientY }; }}
+      onPointerMove={(e) => { const p = pull.current; if (p && p.id === e.pointerId) { if (Math.abs(e.clientY - p.y) > 8) moved.current = true; if (!calmScreen()) setPull(Math.max(0, e.clientY - p.y)); } }}
       onPointerUp={(e) => {
         const p = pull.current;
         if (!p || p.id !== e.pointerId) return;
@@ -62,7 +64,7 @@ export function AllFocusSheet({ id, name, line, root, replies, view = "chat", le
       <button type="button" className="note-action all-focus-back" aria-label={back.aria} onClick={onBack}><span aria-hidden="true">←</span> {back.label}</button>
       {/* the name is the room's heading, and its button is the whole of the titles: the room's details, and from them (or its work) the conversation again */}
       {/* a tap anywhere on the titles (the name, its line, the chevron) is the button's; the button itself is the way for keys and screen readers */}
-      <div className="all-focus-titles" onClick={(e) => { if (!(e.target as Element).closest(".all-focus-open")) onView(inChat ? "details" : "chat"); }}>
+      <div className="all-focus-titles" onClick={(e) => { if (moved.current) { moved.current = false; return; } if (!(e.target as Element).closest(".all-focus-open")) onView(inChat ? "details" : "chat"); }}>
         <h2 className="all-focus-title"><button type="button" className="all-focus-open" aria-expanded={!inChat} aria-label={inChat ? `${name}: room details` : `${name}: back to the conversation`} title={inChat ? "Room details" : "Back to the conversation"}
           onClick={() => onView(inChat ? "details" : "chat")}>{name}</button></h2>
         {sub && <p className="all-focus-line"><span className="all-focus-src">{sub.src}{sub.text ? ":" : ""}</span>{sub.text && <> {sub.text}</>}</p>}

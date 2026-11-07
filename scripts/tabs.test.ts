@@ -138,6 +138,9 @@ assert.deepEqual(persistable(gone).tabs.map((t) => t.kind), ["areas", "journal"]
   const two = restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "r1", kind: "room", channel: "a", title: "a" }, { id: "r2", kind: "room", channel: "b", title: "b" }], active: "r2", recent: ["r1", "r2"] }), ["a", "b"]);
   assert.deepEqual(two.tabs.map((t) => [t.kind, t.channel]), [["all", "b"]]);
   assert.equal(activeTab(two)?.channel, "b");
+  // several old rooms, none of them active (Uni was): All keeps none of them in focus
+  const none = restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "r1", kind: "room", channel: "a", title: "a" }, { id: "r2", kind: "room", channel: "b", title: "b" }, { id: "u", kind: "areas", title: "Uni" }], active: "u", recent: ["r1", "r2", "u"] }), ["a", "b"]);
+  assert.deepEqual(none.tabs.map((t) => [t.kind, t.channel]), [["all", undefined], ["areas", undefined]]);
   // a room gone since: All alone
   assert.deepEqual(activeTab(restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "o3", kind: "room", channel: "gone", title: "x" }], active: "o3" }), ["a"])), { id: "o3", kind: "all", title: "All" });
   // All's place for a room it borrows is a note path, checked like an area's
@@ -207,7 +210,7 @@ assert.equal(activeTab(restoreTabs(serializeTabs(resolvedTab), []))?.note?.ref, 
   const restored = restoreTabs(raw, ["room-uni", "room-cohere"]);
   assert.deepEqual(restored.tabs.map((t) => t.id), ["home", "proj"]);
   assert.equal(restored.tabs[0].title, "Uni", "old saved tabs titled Areas now say Uni");
-  assert.equal(restored.tabs[0].channel, "room-uni");
+  assert.equal(restored.tabs[0].channel, undefined, "T-335: Uni's own level with its room is gone: Uni is its home");
   assert.equal(restored.tabs[1].path, "Projects/COhere/COhere 2026");
   assert.equal(restoreTabs(raw, []).tabs[0].channel, undefined, "a room that is gone is dropped, the tab stays");
   assert.equal(restoreTabs(raw, []).tabs.length, 2);
