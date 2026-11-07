@@ -8,14 +8,17 @@ async function press(page: Page, target: Locator) {
   else await target.click();
 }
 
-/** r12: a room no node owns is under "Other rooms" in the room tree (no rooms drawer); a phone goes back to the tree first. */
+/** T-335 one surface: a room no area holds is under "Other rooms" on Uni's home; it opens in focus over All. */
 async function switchRoom(page: Page, name: string) {
   const phone = test.info().project.name === 'mobile';
-  if (phone && await page.locator('.sr-drawer').count()) await press(page, page.locator('.sr-drawer'));
-  const tree = page.locator(phone ? '.th-phone-tree' : '.th-roomnav');
-  const fold = tree.locator('.th-others .th-fold');
-  if (await fold.getAttribute('aria-expanded') !== 'true') await press(page, fold);
-  await press(page, tree.locator('.th-other .th-go').filter({ hasText: '#' + name }) /* r13: the channel's own name */);
+  // a phone's bar steps aside while the composer has the keys: the keys go first, as a thumb on the bar does
+  if (phone) await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await press(page, page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }));
+  const others = page.locator('.fd-others');
+  if (!(await others.evaluate((d) => (d as HTMLDetailsElement).open))) await press(page, others.locator('summary'));
+  await press(page, others.getByRole('button', { name: '#' + name, exact: true }));
+  await expect(page.getByRole('region', { name: /in focus$/ })).toBeVisible();
+  void phone;
 }
 
 test.beforeEach(async ({ page }) => {
@@ -468,10 +471,10 @@ for (const notify of [true, false]) {
         return invoke(cmd, args);
       };
     });
-    // r12: no "Reply in thread" in the message menu; a thread opens from its replies, inside the room shell
+    // r12: no "Reply in thread" in the message menu; a thread opens from its replies, in the room's focus (its head says so)
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await press(page, page.locator('.thread-summary').first());
-    await expect(page.locator('.sr-thread')).toContainText('Thread');
+    await expect(page.locator('.all-focus-line')).toContainText('Thread');
     if (!notify) await page.getByRole('button', { name: /^Uni is listening/ }).click();
     await page.getByRole('textbox', { name: 'Message Test room' }).fill('@Test member stays in draft');
     await recordClip(page);

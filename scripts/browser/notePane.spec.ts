@@ -55,16 +55,13 @@ async function back(page: Page) {
   else await page.locator('body').press('Alt+ArrowLeft');
 }
 
-/** Another room through the room tree: on a phone it is behind the drawer; beside a note the tree is folded to its icons first. */
+/** T-335 one surface: another room, from Uni's home ("Other rooms"): it opens in focus over All. The keys go first, as a thumb on the bar does. */
 async function switchRoom(page: Page, name: string) {
-  const drawer = page.locator('.sr-drawer');
-  if (await drawer.count()) await tap(drawer);
-  const tree = page.locator(await drawer.count() ? '#th-drawer' : '.th-roomnav');
-  const unfold = tree.getByRole('button', { name: 'Show the sidebar' });
-  if (await unfold.count()) await tap(unfold);
-  const fold = tree.locator('.th-others .th-fold');
-  if (await fold.getAttribute('aria-expanded') !== 'true') await tap(fold);
-  await tap(tree.locator('.th-other .th-go').filter({ hasText: '#' + name }));
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await tap(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }));
+  const others = page.locator('.fd-others');
+  if (!(await others.evaluate((d) => (d as HTMLDetailsElement).open))) await tap(others.locator('summary'));
+  await tap(others.getByRole('button', { name: '#' + name, exact: true }));
 }
 
 test('tap a note link, read it, quote and reply, send, close: same room, same draft, same scroll', async ({ page }) => {
@@ -86,10 +83,7 @@ test('tap a note link, read it, quote and reply, send, close: same room, same dr
   await expect(list).toHaveCount(1);
   expect(await inView(chip)).toBe(true);
   if (beside()) {
-    // beside a note the chat keeps the room: the tree folds to its icons (under 1400 px) and the companion to its tab, rather than
-    // squeezing the chat
-    await expect(page.locator(page.viewportSize()!.width < 1400 ? '.th-roomnav.hidden' : '.th-roomnav:not(.hidden)')).toBeVisible();
-    await expect(page.locator('.cp.side.folded')).toBeVisible();
+    // beside a note the chat keeps the room: the note takes what is left, never squeezing the chat
     expect((await list.boundingBox())!.width).toBeGreaterThan(380);
   } else {
     // the sheet lies over the list: the list itself is not touched
@@ -125,7 +119,6 @@ test('tap a note link, read it, quote and reply, send, close: same room, same dr
   await expect(page.getByRole('textbox', { name: 'Message Orchard' })).toBeVisible();
   expect(await inView(chip)).toBe(true);
   expect(Math.abs((await scrollOf(list)) - at)).toBeLessThanOrEqual(2);
-  if (beside()) await expect(page.locator('.th-roomnav:not(.hidden)')).toBeVisible();
 });
 
 test('T-204: Download .md from the note beside the chat saves the note as stored, named by its title', async ({ page }) => {
@@ -150,9 +143,8 @@ test('the note stays with its room; Back closes it first and Forward brings it b
   await switchRoom(page, 'Workshop');
   await expect(page.getByRole('textbox', { name: 'Message Workshop' })).toBeVisible();
   await expect(pane).toHaveCount(0);
-  // Back is not swallowed by the hidden note: it goes back to Orchard, where the note is open again. (Android's Back leaves a room for
-  // the room tree, not for the last room, so there the way back is the tree.)
-  if (android()) await switchRoom(page, 'Orchard'); else await back(page);
+  // T-335: one room in focus at a time; back in Orchard, its note is open again
+  await switchRoom(page, 'Orchard');
   await expect(page.getByRole('textbox', { name: 'Message Orchard' })).toBeVisible();
   await expect(pane.locator('.note-title')).toHaveText('Spring planting plan');
   // now Back closes the note before it leaves the room
@@ -262,17 +254,6 @@ test('sheet: with the Journal open in its own tab too, the sheet lies over the r
   const list = (await page.locator('.sr-chat .message-list').boundingBox())!, sheet = (await pane.boundingBox())!;
   expect(Math.abs(sheet.width - list.width)).toBeLessThanOrEqual(2);
   expect(Math.abs(sheet.x - list.x)).toBeLessThanOrEqual(2);
-});
-
-test('beside: the folded tree unfolds to its own width, even when the sidebar is kept hidden', async ({ page }) => {
-  test.skip(!beside(), 'the column beside the chat is for wide screens (Android on its side)');
-  await page.addInitScript(() => localStorage.setItem('uni.sidebar.v1', JSON.stringify({ width: 260, hidden: true })));
-  const { chip } = await openRoom(page);
-  await tap(chip);
-  await expect(page.locator('.note-pane .note-title')).toHaveText('Spring planting plan');
-  await tap(page.locator('.th-roomnav').getByRole('button', { name: 'Show the sidebar' }));
-  await expect(page.locator('.th-roomnav:not(.hidden)')).toBeVisible();
-  expect(Math.round((await page.locator('.th-roomnav').boundingBox())!.width)).toBeGreaterThanOrEqual(250);
 });
 
 test('Open as page from far back in a long room comes back to the same spot, older messages and all', async ({ page }) => {

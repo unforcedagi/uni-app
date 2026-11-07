@@ -859,45 +859,66 @@ Two proposals wait on a scope decision.
 const railOf = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 /** Uni (the app opens there; the rail's Uni button comes back to it): the front door of the area rooms (T-302). */
 export const openAreasHome = async (page: Page) => { await railOf(page).getByRole('button', { name: 'Uni', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible(); };
-/** The room tree sits beside the room (r17: on a wide window at least 400px tall); otherwise it is the phone's home or the Places drawer. */
-const isWide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900 && (page.viewportSize()?.height ?? 0) >= 400;
-/** T-302: Uni's home is the front door (a door per area room); the room tree is in a room: beside it on a wide window, in the Places drawer
- *  on a phone. */
+/** T-335 one surface: a room is shown only in focus over All. */
+export const focusSheet = (page: Page) => page.getByRole('region', { name: /in focus$/ });
+/** A vault without rooms has its tree of places as its home. */
+const treeRow = (page: Page, name: string) => page.locator('.th-phone-tree').locator(`.th-go[aria-label^="${name},"]`);
 const frontDoor = (page: Page) => page.locator('[data-place="front-door"]');
-const treeRow = (page: Page, name: string) => page.locator(isWide(page) ? '.th-roomnav' : '.th-drawer .th-phone-tree').locator(`.th-go[aria-label^="${name},"]`);
-/** A node's way in: its door on the front door, else its row in the room tree. */
+/** A node's way in: its door on the front door, else its row in the tree (a vault without rooms). */
 export const areaCard = (page: Page, name: string) => page.locator(`.fd-door[data-path="Areas/${name}"]`).or(treeRow(page, name));
-/** T-302: from the front door into the first room (where the room tree is); elsewhere, nothing. */
+/** T-335: from the front door into the first room, in focus over All; elsewhere, nothing. */
 export async function leaveFrontDoor(page: Page) {
-  await page.locator('[data-place="front-door"], .sr, .th-phone-tree').first().waitFor();
-  if (await frontDoor(page).isVisible()) { await page.locator('.fd-door').first().click(); await expect(page.locator('.sr').first()).toBeVisible(); }
+  await page.locator('[data-place="front-door"], .th-phone-tree').first().waitFor();
+  if (await frontDoor(page).first().isVisible()) { await page.locator('.fd-door').first().click(); await expect(focusSheet(page)).toBeVisible(); }
 }
-/** T-302: where the old home put a test, reached the way a person now does: a room (the first door), with the room tree beside it on a wide
- *  window and in its Places drawer otherwise. (Round 2: Uni's own level is gone with #Uni.) */
+/** T-302: where the old home put a test, reached the way a person now does: the first room, in focus over All. */
 export async function toOldHome(page: Page) {
   // a page that isn't on the front door (no chat, no areas, not signed in) is already where the old home put it
-  if (!(await frontDoor(page).waitFor({ timeout: 3000 }).then(() => true, () => false))) return;
+  if (!(await frontDoor(page).first().waitFor({ timeout: 3000 }).then(() => true, () => false))) return;
   await leaveFrontDoor(page);
 }
-/** Shows the room tree: from the front door through the first room, and on a phone the Places drawer. */
+/** T-335: the places: Uni's home (with rooms), or the tree (a vault without rooms). */
 export async function showTree(page: Page) {
-  await page.locator('[data-place="front-door"], .sr').first().waitFor();
-  if (await frontDoor(page).isVisible()) { await page.locator('.fd-door').first().click(); await expect(page.locator('.sr').first()).toBeVisible(); }
-  if (!isWide(page) && !(await page.locator('.th-drawer').isVisible())) await page.locator('.sr-drawer').first().click();
+  await page.locator('[data-place="front-door"], .th-phone-tree, .wp').first().waitFor();
+  if (await page.locator('.th-phone-tree').isVisible() || await frontDoor(page).first().isVisible()) return;
+  await openAreasHome(page);
+}
+/** Opens a place's details in its focus (with rooms), from its room's head. */
+export async function openDetails(page: Page) {
+  const s = focusSheet(page);
+  if (await s.locator('.all-focus-details').isVisible()) return;
+  await s.getByRole('button', { name: /: room details$/ }).click();
+  await expect(s.locator('.all-focus-details')).toBeVisible();
 }
 /**
- * Opens an area from the front door (or a node from the room tree) and, when it has a sealed app, its app (r14: "App ›" in the room's header).
- * `app: false` stays in the room; `true` requires the app; the default presses it when it shows up.
+ * Opens a place: with rooms, its room in focus (a top-level area from its door, one inside it from the parent's details), and, when it has a
+ * sealed app, its app (in the details: "Open the X app"); without rooms, its work page (and its "App ›"). `app: false` stays in the room;
+ * `true` requires the app; the default opens it when it shows up.
  */
-export async function openAreaPage(page: Page, name: string, opts: { app?: boolean } = {}) {
+export async function openAreaPage(page: Page, name: string, opts: { app?: boolean; parent?: string } = {}) {
+  await page.locator('[data-place="front-door"], .th-phone-tree, .all-focus, .wp').first().waitFor();
+  if (await page.locator('.th-phone-tree, .wp').first().isVisible()) {
+    if (!(await page.locator('.th-phone-tree').isVisible())) await openAreasHome(page);
+    await treeRow(page, name).click();
+    await expect(page.locator('.wp-title')).toHaveText(name);
+    if (opts.app === false) return;
+    const tab = page.locator('.wp-app');
+    if (opts.app === true || (await tab.waitFor({ state: 'visible', timeout: 1500 }).then(() => true, () => false))) await tab.click();
+    return;
+  }
+  if (!(await frontDoor(page).first().isVisible())) await openAreasHome(page);
   const door = page.locator(`.fd-door[data-path="Areas/${name}"]`);
-  await page.locator('[data-place="front-door"], .sr').first().waitFor();
-  if (!(await frontDoor(page).isVisible() && await door.count())) await showTree(page);
-  if (await door.isVisible()) await door.click(); else await treeRow(page, name).click();
-  // r15: a node in a borrowed room is headed by the room; the place opened is the shell's data-node
-  await expect.poll(async () => [await page.locator('.sr').first().getAttribute('data-node').catch(() => null), await page.locator('.sr-title').or(page.locator('.area-bar-title')).first().textContent().catch(() => null)]).toContain(name);
+  if (await door.count()) await door.click();
+  else {
+    await page.locator(`.fd-door[data-path="Areas/${opts.parent ?? ''}"]`).click();
+    await openDetails(page);
+    await focusSheet(page).locator('.fx-place', { hasText: name }).first().click();
+  }
+  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(name);
   if (opts.app === false) return;
-  // r14: the app opens from the room's header ("App ›") as a view inside the room shell
-  const tab = page.locator('.sr-app');
+  await openDetails(page);
+  const tab = focusSheet(page).getByRole('button', { name: `Open the ${name} app ›` });
   if (opts.app === true || (await tab.waitFor({ state: 'visible', timeout: 1500 }).then(() => true, () => false))) await tab.click();
+  else await focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click();
 }
+
