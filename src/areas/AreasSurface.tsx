@@ -337,7 +337,7 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
   // the runs that are a private place's by any clue on them (the same rule as the sessions), kept off every other level's lists
   // (every task read, snoozed ones too: `tasks.tasks` holds only what shows now)
-  const privateRuns = useMemo(() => privateRunIds(roomsPending ? null : data?.tree ?? null, tasks.runs, new Map((tasks.all ?? []).flatMap((t): [string, string][] => { const id = taskTitle(t.title).id?.toUpperCase(); return id ? [[id, t.node]] : []; })), roomRefs, uniRef, tasks.ready), [roomsPending, data?.tree, tasks.runs, tasks.all, tasks.ready, roomRefs, uniRef]);
+  const privateRuns = useMemo(() => privateRunIds(chat && roomsPending ? null : data?.tree ?? null, tasks.runs, new Map((tasks.all ?? []).flatMap((t): [string, string][] => { const id = (taskTitle(t.title).id ?? /^T-\d+[a-z]?\b/i.exec(t.title)?.[0])?.toUpperCase(); return id ? [[id, t.node]] : []; })), roomRefs, uniRef, tasks.ready), [chat, roomsPending, data?.tree, tasks.runs, tasks.all, tasks.ready, roomRefs, uniRef]);
   // the sessions read the rooms' names too, for a run note that holds only a room's id
   // (a profile with no chat has no rooms to wait for)
   useEffect(() => { setWorkRooms(chat && roomsPending ? null : roomRefs); }, [chat, roomsPending, roomRefs]);
