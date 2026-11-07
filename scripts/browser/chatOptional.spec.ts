@@ -1,11 +1,10 @@
 // Life OS profile PR 3: chat.provider null hides every Buzz surface and makes no Buzz calls (fixture-based: a uni vault whose profile note says chat null).
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, focusSheet } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/chat-optional';
-const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
-const panel = (page: Page) => page.locator('.sr-work'); // r13: with no chat a room's view is its work view
+// T-335: with no chat the home is the tree of places (on every size), and a place opens its work page
 const callsOf = (page: Page, ...cmds: string[]) => page.evaluate((c) => (window as any).__calls.filter((x: any) => c.includes(x.cmd)).map((x: any) => x.cmd + ' ' + JSON.stringify(x.args).slice(0, 100)), cmds);
 const shot = async (page: Page, name: string) => { await mkdir(SHOTS, { recursive: true }); const s = page.viewportSize()!; await page.screenshot({ path: `${SHOTS}/${name}-${s.width}x${s.height}.png` }); };
 const base = { briefs: true, tree: true, tasks: true, boulder: true, underBoulder: true, priya: true, pinned: true } as const;
@@ -24,12 +23,12 @@ async function noBuzz(page: Page) {
 test.describe('chat optional (profile.chat.provider null)', () => {
   for (const mode of ['pack', 'note'] as const) test(`tree home (${mode}): no Buzz surface, no Buzz calls, tasks and nodes still work`, async ({ page }) => {
     await boot(page, mode);
-    if (wide(page)) await expect(panel(page)).toBeVisible(); else await expect(page.locator('.th-phone-tree')).toBeVisible();
+    await expect(page.locator('.th-phone-tree')).toBeVisible();
     await noBuzz(page);
     await shot(page, `${mode}-home`);
     await page.getByRole('button', { name: /^Boulder,/ }).first().click();
-    // r13: with no chat the room's view is its work view, in the same shell
-    await expect(page.locator('.sr-title')).toHaveText('Boulder');
+    // r13: with no chat a place's view is its work view (T-335: its own work page)
+    await expect(page.locator('.wp-title')).toHaveText('Boulder');
     await expect(page.locator('.sr-work').getByRole('region', { name: 'Needs you' })).toBeVisible();
     await noBuzz(page);
     await shot(page, `${mode}-level`);
@@ -42,8 +41,8 @@ test.describe('chat optional (profile.chat.provider null)', () => {
 
   test('chat buzz (the uni vault) keeps the room and its composer', async ({ page }) => {
     await boot(page, 'buzz');
-    // T-302: with chat, Uni's home is the front door of the rooms; a room keeps its composer
+    // T-302: with chat, Uni's home is the front door of the rooms; a room keeps its composer (T-335: in focus over All)
     await page.locator('.fd-door').first().click();
-    await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toBeVisible();
+    await expect(focusSheet(page).locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toBeVisible();
   });
 });

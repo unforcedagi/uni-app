@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { areaCard, bootAreas, openAreaPage, openAreasHome, FOCUS_STEAL, navApp, SUGGEST } from './areasFixture';
+import { areaCard, bootAreas, focusSheet, openAreaPage, openAreasHome, openDetails, FOCUS_STEAL, navApp, SUGGEST } from './areasFixture';
 import { startListener } from './areasListener';
 import { openRailMore, railGo } from './railGo';
 
@@ -9,6 +9,12 @@ const openAreas = openAreasHome;
 const card = areaCard;
 const openArea = openAreaPage;
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c), cmd);
+// T-335 one surface: a room is in focus over All; its name heads the sheet, its app opens from its details, and the name steps back to the chat
+const sheet = focusSheet;
+const title = (page: Page) => focusSheet(page).locator('.all-focus-title');
+const backToChat = (page: Page) => focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click();
+/** The details' way into the sealed app (what the room header's "App ›" was). */
+const appLink = (page: Page, name: string) => focusSheet(page).getByRole('button', { name: `Open the ${name} app ›` });
 
 test.describe('seed apps and navigation', () => {
   test.beforeEach(async ({ page }) => bootAreas(page, 'seed'));
@@ -46,14 +52,14 @@ test.describe('seed apps and navigation', () => {
     await expect(bar).toContainText('Pairing on the bridge tonight');
     await mkdir('shots/t74', { recursive: true });
     await page.screenshot({ path: `shots/t74/${info.project.name}-suggestion-bar.png` });
-    // r14: the app is a view in the room shell: the composer is the room's own, back in the chat, and only a tap fills it
-    await expect(page.locator('.sr-chat')).toHaveCount(0);
+    // r14, T-335: the app is a view in the room's focus: the composer is the room's own, back in the chat, and only a tap fills it
+    await expect(sheet(page).locator('.sr-chat')).toBeHidden();
     await bar.getByRole('button', { name: 'Add to draft' }).click();
-    const box = page.getByRole('textbox', { name: 'Message Techne' });
+    const box = sheet(page).getByRole('textbox', { name: 'Message Techne' });
     await expect(box).toHaveValue('Pairing on the bridge tonight');
     expect(await calls(page, 'post_message')).toHaveLength(0);
     await expect(page.locator('.tab-strip')).toHaveCount(0);
-    await expect(page.locator('.sr-title')).toHaveText('Techne');
+    await expect(title(page)).toHaveText('Techne');
   });
 
   test('note.open uses the note sheet; Back returns to the area', async ({ page }) => {
@@ -65,7 +71,8 @@ test.describe('seed apps and navigation', () => {
     await page.locator('.suggestion-bar').getByRole('button', { name: 'Open' }).click();
     await expect(page.locator('.note-sheet')).toContainText('Techne plan body');
     await page.locator('.note-back').click();
-    await expect(page.locator('.sr-title').or(page.locator('.area-bar-title')).first()).toHaveText('Techne');
+    await expect(page.locator('.note-sheet')).toHaveCount(0);
+    await expect(title(page)).toHaveText('Techne');
   });
 
   test('unforced app renders a dashboard', async ({ page }, info) => {
@@ -83,21 +90,21 @@ test.describe('seed apps and navigation', () => {
     await openAreas(page);
     await openArea(page, 'Sanctum');
     await expect(page.locator('iframe')).toHaveCount(0);
-    await expect(page.locator('.sr-app')).toHaveCount(0);
-    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Sanctum'); // r15: a borrowed room's heading is the room
-    await expect(page.locator('.sr-chat')).toContainText('Sat twenty minutes');
-    await expect(page.getByRole('textbox', { name: 'Message Sanctum' })).toBeVisible();
+    await expect(title(page)).toHaveText('Sanctum');
+    await expect(sheet(page).locator('.sr-chat')).toContainText('Sat twenty minutes');
+    await expect(sheet(page).getByRole('textbox', { name: 'Message Sanctum' })).toBeVisible();
+    // its details have no way into an app
+    await openDetails(page);
+    await expect(sheet(page).getByRole('button', { name: /^Open the .* app/ })).toHaveCount(0);
   });
 
   test('area tabs restore after reload and Back goes to Uni', async ({ page }) => {
     await openAreas(page);
     await openArea(page, 'Sanctum');
     await page.reload();
-    // 0.1.46: launch reopens the place you were in.
-    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Sanctum'); // r15: a borrowed room's heading is the room
-    // T-302 round 2: the tree has no Uni row (#Uni is archived); the rail's Uni is the way to the front door
-    if (await page.locator('.sr-drawer').count()) { await page.locator('.sr-drawer').click(); await expect(page.locator('.th-drawer .th-go[aria-label^="Uni,"]')).toHaveCount(0); await page.keyboard.press('Escape'); }
-    else await expect(page.locator('.th-roomnav .th-go[aria-label^="Uni,"]')).toHaveCount(0);
+    // 0.1.46: launch reopens the place you were in (T-335: its room in focus over All)
+    await expect(title(page)).toHaveText('Sanctum');
+    // T-302 round 2: the rail's Uni is the way to the front door
     await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await expect(page.locator('[data-place="front-door"]')).toBeVisible();
@@ -117,12 +124,12 @@ test('T-302 round 2: what needs you, across the areas, is one line on the front 
   const row = needs.getByRole('button').filter({ hasText: 'COhere festival readiness' });
   await expect(row).toContainText('COhere 2026');
   await row.click();
-  await expect(page.locator('.sr').first()).toHaveAttribute('data-node', 'COhere 2026');
+  await expect(title(page)).toHaveText('COhere 2026');
   // inside the private area its items are its own rows, with their words
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
   await page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^Needs you/ }).click();
   await page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^In Sanctum/ }).click();
-  await expect(page.locator('.sr').first()).toHaveAttribute('data-node', 'Sanctum');
+  await expect(title(page)).toHaveText('Sanctum');
 });
 
 test.describe('dark theme', () => {
@@ -206,8 +213,9 @@ test.describe('platform gate', () => {
     await openAreas(page);
     await openArea(page, 'Techne');
     await expect(page.locator('iframe')).toHaveCount(0);
-    await expect(page.locator('.sr-app')).toHaveCount(0);
-    await expect(page.locator('.sr-title')).toHaveText('Techne');
+    await expect(title(page)).toHaveText('Techne');
+    await openDetails(page);
+    await expect(appLink(page, 'Techne')).toHaveCount(0);
     expect(await calls(page, 'vault_note').then((c: any[]) => c.filter((x) => x.args.noteRef === 'app-techne'))).toHaveLength(0);
   });
 });
@@ -291,8 +299,8 @@ test.describe('hostile and benign apps', () => {
     const notes = (await calls(page, 'vault_note')).map((c: any) => c.args.noteRef);
     expect(notes.filter((n: string) => /passwd|\.\./.test(n))).toEqual([]);
     await expect(page.locator('.suggestion-bar .suggestion')).toHaveCount(3);
-    await page.getByRole('button', { name: 'Back to chat' }).click();
-    await expect(page.getByRole('textbox', { name: /Message/ }), 'no suggestion reached the composer').toHaveValue('');
+    await backToChat(page);
+    await expect(sheet(page).getByRole('textbox', { name: /Message/ }), 'no suggestion reached the composer').toHaveValue('');
     expect(await calls(page, 'post_message')).toHaveLength(0);
   });
 });
@@ -377,7 +385,8 @@ test.describe('suggestions: only a tap on host UI acts', () => {
     await openArea(page, 'Steal');
     await page.waitForTimeout(2500);
     expect(await page.locator('.conversation-header').count(), 'the view was not hijacked into a room').toBe(0);
-    await expect(page.locator('.area-bar-title').or(page.locator('.sr-title')).first()).toHaveText('Steal');
+    await expect(title(page)).toHaveText('Steal');
+    await expect(sheet(page).locator('iframe.area-frame'), 'still the app, in the focus').toHaveCount(1);
     await expect(page.locator('.suggestion-bar .suggestion'), 'pending is capped').toHaveCount(3);
     expect(await calls(page, 'post_message')).toHaveLength(0);
     await expect(page.locator('.note-sheet')).toHaveCount(0);
@@ -444,12 +453,15 @@ test.describe('self-test hardening', () => {
     await openAreas(page);
     await openArea(page, 'Techne');
     await expect(page.locator('iframe')).toHaveCount(0);
-    await page.evaluate(() => document.querySelector('.sr')?.setAttribute('data-keep', '1'));
+    // T-335: the way into the app is in the room's details: open them before Settings comes up over the focus
+    await openDetails(page);
+    await expect(appLink(page, 'Techne')).toHaveCount(0);
+    await page.evaluate(() => document.querySelector('.all-focus')?.setAttribute('data-keep', '1'));
     await openSettings(page);
     await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
     await expect(page.locator('.selftest-status.pass')).toContainText('Passed', { timeout: 60000 });
-    // the pass reaches the open area without a remount: the same room now has its App button (the app itself still waits for a tap)
-    await expect(page.locator('.sr[data-keep] .sr-app')).toHaveCount(1);
+    // the pass reaches the open area without a remount: the same room's details now have the way into its app (the app itself still waits for a tap)
+    await expect(page.locator('.all-focus[data-keep]').getByRole('button', { name: 'Open the Techne app ›' })).toHaveCount(1);
     await expect(page.locator('iframe')).toHaveCount(0);
   });
 });
@@ -495,8 +507,13 @@ test.describe('design', () => {
     const bench = await q('[aria-label="Notes on the bench"]'), title = await q('#title'), pulse = await q('[aria-label="Recent pulse"]'), note = await q('[aria-label="Say something"]');
     if (info.project.name === 'desktop') {
       expect(bench!.y, 'bench is up in the hero').toBeLessThan(pulse!.y);
-      expect(bench!.y).toBeLessThan(title!.y + title!.height);
-      expect(bench!.x).toBeGreaterThan(title!.x + 300);
+      // T-335: the app shows in the room's focus, at most 760px wide on a desktop: techne's own one-column layout (its max-width: 760px
+      // rule). The bench sits beside the title only in a frame wider than that.
+      const frameW = (await page.locator('iframe.area-frame').boundingBox())!.width;
+      if (frameW > 760) {
+        expect(bench!.y).toBeLessThan(title!.y + title!.height);
+        expect(bench!.x).toBeGreaterThan(title!.x + 300);
+      } else expect(bench!.y, 'one column: the bench follows the title').toBeGreaterThanOrEqual(title!.y + title!.height);
     }
     expect(note!.height, 'the note card does not stretch to the pulse column').toBeLessThan(pulse!.height - 100);
     // Rule under the first text line: the rule's offset inside the textarea equals the baseline of line one.

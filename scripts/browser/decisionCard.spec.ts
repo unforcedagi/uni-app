@@ -3,13 +3,12 @@
 // Run: DECISIONS_TEST_PORT=5731 npx playwright test --config playwright.decisions.config.ts
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, leaveFrontDoor } from './areasFixture';
+import { bootAreas, focusSheet, openDetails } from './areasFixture';
 import { railGo } from './railGo';
 
 const BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb';
 const D1 = '01M5D0000000000000000000A1';
 const SHOTS = 'scripts/browser/__shots__/decisions';
-const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900 && (page.viewportSize()?.height ?? 0) >= 400;
 
 /** A decision note as `tasks.py decide new` writes it (made-up question), on the ATLAS project, whose room is #atlas/build. */
 const seed = (page: Page, extra: Record<string, unknown> = {}) => page.addInitScript(([d1, more]) => {
@@ -19,15 +18,15 @@ const seed = (page: Page, extra: Record<string, unknown> = {}) => page.addInitSc
     metadata: { node: 'Projects/ATLAS', state: 'open', options: ['A', 'B', 'C'], default: 'B', owner: 'aaron', asked: '2026-10-09', task: 'T-07', ...more } }];
 }, [D1, extra] as const);
 
+/** T-335: ATLAS is a project inside Atlas with a room of its own (#atlas/build): the Atlas door, its details, "Inside Atlas", then ATLAS in focus. */
 async function openAtlas(page: Page) {
   await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true });
-  const nav = wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
-  await leaveFrontDoor(page); // T-302: the tree is in a room
-  if (!wide(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
-  await nav.locator('.th-row.d1').first().waitFor();
-  for (let i = 0; i < 12; i++) { const f = nav.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
-  await nav.locator('.th-go[aria-label^="ATLAS,"]').click();
-  await expect(page.locator('.sr')).toHaveAttribute('data-node', 'ATLAS');
+  await page.locator('[data-place="front-door"]').first().waitFor();
+  await page.locator('.fd-door[data-path="Areas/Atlas"]').click();
+  await openDetails(page);
+  await focusSheet(page).getByRole('region', { name: 'Inside Atlas' }).locator('.fx-place').filter({ has: page.locator('span', { hasText: /^ATLAS$/ }) }).click();
+  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('ATLAS');
+  await expect(focusSheet(page).getByRole('textbox', { name: /^Message atlas\/build/ })).toBeVisible();
 }
 const arrive = (page: Page, body: string, who = 'Uni') => page.evaluate(([b, n, t]) => (window as any).__arrive(b, n, t), [BUILD, who, body] as const);
 const posts = (page: Page) => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => c.args));
@@ -194,11 +193,12 @@ test.describe('decision cards in the chat', () => {
     const card = page.locator('.sr-chat .message .decision-card').first();
     await expect(card.getByRole('button', { name: 'A', exact: true })).toBeVisible();
     // the sheet (Needs you) answers the fixture's other decision; the garden one is answered from the card
-    const companionText = () => page.locator('.cp').first().innerText();
-    if (wide(page)) await expect.poll(companionText).toContain('Which layout for the garden page?');
+    // T-335: what needs you is in the room's details, inside the focus (every screen); its name steps back to the conversation
+    const needsText = async () => { await openDetails(page); const t = await focusSheet(page).locator('.all-focus-details .cp').first().innerText(); await focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click(); return t; };
+    await expect.poll(needsText).toContain('Which layout for the garden page?');
     await card.getByRole('button', { name: 'A', exact: true }).click();
     await expect(card.locator('.decision-result')).toHaveText('Decided: A · by you');
-    if (wide(page)) await expect.poll(companionText).not.toContain('Which layout for the garden page?');
+    await expect.poll(needsText).not.toContain('Which layout for the garden page?');
     // the other way round: a room's message names the hosting decision by its marker; it is answered in its sheet (or by the room)
     await page.evaluate(() => (window as any).__setTask('dq2', { task: 'T-140' }));
     await page.clock.setFixedTime(Date.parse('2026-10-09T10:01:00.000Z'));

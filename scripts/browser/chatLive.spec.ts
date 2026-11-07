@@ -133,7 +133,7 @@ test('following the newest message, the list stays at it when it gets shorter (a
 });
 
 // T-294 (option A, replacing T-124 r2 here): away to another screen (the Journal) and back with Uni, the room comes back where it was being
-// read, with Jump to latest; read to the end first, and it comes back at its newest, with no Jump to latest
+// read, with Jump to latest; read to the end first (T-335: the room is in focus over All, and All brings it back), and it comes back at its newest, with no Jump to latest
 test('scrolled up, then away and back: the room comes back at the same spot; at its newest, at its newest', async ({ page }) => {
   await boot(page, { history: 60, eyes: false });
   const list = page.getByRole('log', { name: 'Messages' });
@@ -149,7 +149,7 @@ test('scrolled up, then away and back: the room comes back at the same spot; at 
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
   await nav.getByRole('button', { name: 'Journal' }).click();
   await expect(list).toHaveCount(0);
-  await nav.getByRole('button', { name: 'Uni' }).click();
+  await nav.getByRole('button', { name: 'All', exact: true }).click();
   await expect.poll(async () => (await reading()).ref).toBe(was.ref);
   expect(Math.abs((await reading()).offset - was.offset)).toBeLessThan(8);
   await expect(newest).not.toBeInViewport();
@@ -159,7 +159,7 @@ test('scrolled up, then away and back: the room comes back at the same spot; at 
   await expect(newest).toBeInViewport();
   await nav.getByRole('button', { name: 'Journal' }).click();
   await expect(list).toHaveCount(0);
-  await nav.getByRole('button', { name: 'Uni' }).click();
+  await nav.getByRole('button', { name: 'All', exact: true }).click();
   await expect(newest).toBeInViewport();
   await page.waitForTimeout(2000);
   await expect(jump).toHaveCount(0);

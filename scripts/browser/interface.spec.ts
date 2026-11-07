@@ -1,7 +1,7 @@
 // T-74: the interface contract end to end (grant prompt, manifests, kits, WebRTC per webview).
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { areaCard, bootAreas, openAreaPage, openAreasHome } from './areasFixture';
+import { areaCard, bootAreas, focusSheet, openAreaPage, openAreasHome, openDetails } from './areasFixture';
 import { startListener } from './areasListener';
 import { railGo } from './railGo';
 // On a narrow phone Stop / Revoke live in the bar's menu.
@@ -12,8 +12,15 @@ const appControl = async (page: Page, name: string) => {
 };
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
+/** T-335: a place is opened from Uni's home (its door, or its parent's details there): from anywhere else (a room in focus, All), go there first. */
+const fromHome = async (page: Page) => { if (!(await page.locator('[data-place="front-door"][data-view="places"]').isVisible())) await openAreasHome(page); };
+// T-335 one surface: the room is in focus over All; its name heads the sheet; its app opens from its details and the name steps back to the chat
+const title = (page: Page) => focusSheet(page).locator('.all-focus-title');
+const backToChat = (page: Page) => focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click();
+const appLink = (page: Page, name: string) => focusSheet(page).getByRole('button', { name: `Open the ${name} app ›` });
+const openApp = async (page: Page, name: string) => { await openDetails(page); await appLink(page, name).click(); };
 const openAreas = openAreasHome;
-const openArea = openAreaPage;
+const openArea: typeof openAreaPage = async (page, name, opts) => { await fromHome(page); await openAreaPage(page, name, opts); };
 // r13: the self-test sits under Settings → Developer
 const openSettings = async (page: Page) => { await railGo(page, 'Settings'); await page.locator('.settings-dev > summary').click(); await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeVisible(); };
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c), cmd);
@@ -57,7 +64,7 @@ test.describe('grant prompt', () => {
     await expect(page.locator('.area-default')).toBeVisible();
     expect(await grants(page)).toEqual({});
     // Not now is not remembered
-    await page.getByRole('button', { name: /^Back to (chat|the room)$/ }).click();
+    await backToChat(page);
     await openArea(page, 'Techne');
     await expect(prompt).toBeVisible();
     await prompt.getByRole('button', { name: 'Allow' }).click();
@@ -66,11 +73,11 @@ test.describe('grant prompt', () => {
     expect(Object.keys(await grants(page))).toEqual(['app-techne']);
     // and it stays allowed after a reload
     await page.reload();
-    // 0.1.46: the reload reopens the area itself, on its room
-    await expect(page.locator('.sr-title')).toHaveText('Techne');
-    // a restored tab never starts the app by itself (it opens on the Room); one tap on App does
+    // 0.1.46: the reload reopens the area itself, on its room (T-335: in focus over All)
+    await expect(title(page)).toHaveText('Techne');
+    // a restored tab never starts the app by itself (it opens on the Room); one tap on its way in does
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
-    await page.locator('.sr-app').click();
+    await openApp(page, 'Techne');
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.getByRole('region', { name: /asking for access/ })).toHaveCount(0);
   });
@@ -85,7 +92,7 @@ test.describe('grant prompt', () => {
     await expect(prompt).toContainText('Read notes in Areas/Narrow/');
     await expect(prompt).not.toContainText('recent messages');
     await expect(page.locator('iframe')).toHaveCount(0);
-    await page.getByRole('button', { name: /^Back to (chat|the room)$/ }).click();
+    await backToChat(page);
     await openArea(page, 'Broken');
     await expect(page.locator('iframe')).toHaveCount(0);
     await expect(page.getByRole('region', { name: /asking for access/ })).toHaveCount(0);
@@ -153,7 +160,7 @@ test.describe('kits', () => {
       const f = page.frameLocator('iframe.area-frame');
       await expect(f.locator(key === 'techne' ? '#notes button' : '#feed li').first()).toBeVisible();
       await page.screenshot({ path: `shots/t74/${info.project.name}-seed-${key}.png` });
-      await page.getByRole('button', { name: /^Back to (chat|the room)$/ }).click();
+      await backToChat(page);
     }
   });
 });
@@ -222,7 +229,7 @@ const text = 'Quick question about the build plan, can you check the status of t
 uni.chat.draft(text);
 </script></body></html>`;
 const QUIET = '<!doctype html><html><body><p id="x">hi</p></body></html>';
-const composerBox = (page: Page) => page.getByRole('textbox', { name: /Message/ });
+const composerBox = (page: Page) => focusSheet(page).getByRole('textbox', { name: /Message/ });
 
 test.describe('P2-B the bar shows what Add to draft inserts', () => {
   test('whole text in a scrollable block; blank-line runs collapsed; bidi stripped; composer gets exactly the shown text', async ({ page }) => {
@@ -297,10 +304,12 @@ test.describe('P2-C stop, revoke, and no auto-start of a restored app', () => {
     await openAreas(page); await openArea(page, 'Quiet');
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await page.reload();
-    await expect(page.locator('.sr-title')).toHaveText('Quiet');
-    await expect(page.locator('.sr-app')).toBeVisible();
+    await expect(title(page)).toHaveText('Quiet');
     await expect(page.locator('iframe')).toHaveCount(0);
-    await page.locator('.sr-app').click();
+    await openDetails(page);
+    await expect(appLink(page, 'Quiet')).toBeVisible();
+    await expect(page.locator('iframe')).toHaveCount(0);
+    await appLink(page, 'Quiet').click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
   });
 });
@@ -375,13 +384,13 @@ test.describe('P3-N3 the "updated" notice stays until Accept', () => {
     await expect(page.locator('.area-updated')).toBeVisible();
     await appControl(page, 'Stop app');
     await page.reload();
-    await page.locator('.sr-app').click();
+    await openApp(page, 'Quiet');
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.locator('.area-updated'), 'not consumed by the earlier view or the restart').toBeVisible();
     await page.locator('.area-updated').getByRole('button', { name: 'Accept' }).click();
     await expect(page.locator('.area-updated')).toHaveCount(0);
     await page.reload();
-    await page.locator('.sr-app').click();
+    await openApp(page, 'Quiet');
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.locator('.area-updated')).toHaveCount(0);
   });

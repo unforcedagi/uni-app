@@ -863,7 +863,8 @@ export const openAreasHome = async (page: Page) => { await railOf(page).getByRol
 export const focusSheet = (page: Page) => page.getByRole('region', { name: /in focus$/ });
 /** A vault without rooms has its tree of places as its home. */
 const treeRow = (page: Page, name: string) => page.locator('.th-phone-tree').locator(`.th-go[aria-label^="${name},"]`);
-const frontDoor = (page: Page) => page.locator('[data-place="front-door"]');
+/** Uni's home (All has a front door of its own, `data-view="all"`). */
+const frontDoor = (page: Page) => page.locator('[data-place="front-door"][data-view="places"]');
 /** A node's way in: its door on the front door, else its row in the tree (a vault without rooms). */
 export const areaCard = (page: Page, name: string) => page.locator(`.fd-door[data-path="Areas/${name}"]`).or(treeRow(page, name));
 /** T-335: from the front door into the first room, in focus over All; elsewhere, nothing. */

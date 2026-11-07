@@ -1,17 +1,16 @@
-// T-294: Uni's rooms and Messages are two sides of one app, and each keeps its last place. In a room, over to Messages,
-// and the rail's Uni button back: the same room, at the same spot in the conversation, with the half-typed draft. The
+// T-294: Uni's rooms and Messages are two sides of one app, and each keeps its last place. In a room (T-335: in focus over All), over to
+// Messages, and the rail's All back: the same room, at the same spot in the conversation, with the half-typed draft. The
 // same after the app is put away and comes back (a hidden page shown again), and after the system closed it (a reload:
 // the webview starts over from what the device kept). Messages keeps its own: the conversation open, and its draft.
 // The rooms are the areas fixture's made-up ones; Messages' Rust door is faked (`messages_*`), with made-up people.
 // Run: npx playwright test --config playwright.roomrestore.config.ts
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, leaveFrontDoor } from './areasFixture';
+import { bootAreas, focusSheet, openDetails } from './areasFixture';
 import { railGo } from './railGo';
 
-const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900 && (page.viewportSize()?.height ?? 0) >= 400;
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
-const chat = (page: Page) => page.locator('.sr-chat');
-const list = (page: Page) => page.locator('.sr-chat .message-list');
+const chat = (page: Page) => focusSheet(page).locator('.sr-chat');
+const list = (page: Page) => chat(page).locator('.message-list');
 const composer = (page: Page) => chat(page).getByRole('textbox', { name: /^Message / });
 const DRAFT = 'Half a thought about the map labels';
 
@@ -42,17 +41,23 @@ async function boot(page: Page) {
   await expect(rail(page).getByRole('button', { name: 'Messages', includeHidden: true })).toHaveCount(1, { timeout: 10_000 });
 }
 
-/** Open a room from the room tree (a phone opens the tree first, from the room's header). */
+/** Open a room as a person does (T-335: in focus over All): ATLAS is inside Atlas, so the Atlas door, its details, and "Inside Atlas". */
 async function openRoom(page: Page, name: string) {
-  await leaveFrontDoor(page); // T-302: the tree is in a room
-  if (!wide(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
-  const tree = page.locator(wide(page) ? '.th-roomnav' : '.th-phone-tree, .th-drawer').first();
-  await tree.locator('.th-row.d1').first().waitFor();
-  for (let i = 0; i < 12; i++) { const f = tree.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
-  await tree.locator(`.th-go[aria-label^="${name},"]`).click();
-  await expect(page.locator('.sr')).toHaveAttribute('data-node', name);
+  await page.locator('[data-place="front-door"]').waitFor();
+  await page.locator('.fd-door[data-path="Areas/Atlas"]').click();
+  await openDetails(page);
+  await focusSheet(page).getByRole('region', { name: 'Inside Atlas' }).locator('.fx-place').filter({ has: page.locator('span', { hasText: new RegExp(`^${name}$`) }) }).click();
+  await inFocus(page, name);
   await expect(chat(page)).toContainText('The newest line of this room.');
 }
+/** The room is in focus over All: All is the place, the room's sheet is in front. */
+async function inFocus(page: Page, name: string) {
+  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(name);
+  await expect(page.locator('.all-surface[data-focus="open"]')).toBeVisible();
+  if ((page.viewportSize()?.width ?? 0) >= 600) await expect(rail(page).getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-current', 'page');
+}
+/** The rail's All (on a phone too: it is on the bar). */
+const toAll = (page: Page) => rail(page).getByRole('button', { name: 'All', exact: true }).click();
 
 /** Where the reader is: the first message in sight and how far below the list's top edge it starts. */
 const spot = (page: Page) => list(page).evaluate((el) => {
@@ -74,7 +79,7 @@ async function readBack(page: Page) {
 
 /** The same room, the same message first in sight (within a few pixels), the draft as it was. */
 async function expectSamePlace(page: Page, was: { ref: string; offset: number }) {
-  await expect(page.locator('.sr')).toHaveAttribute('data-node', 'ATLAS');
+  await inFocus(page, 'ATLAS');
   await expect(composer(page)).toHaveValue(DRAFT);
   await expect.poll(async () => (await spot(page))?.ref).toBe(was.ref);
   expect(Math.abs((await spot(page))!.offset - was.offset)).toBeLessThan(8);
@@ -97,29 +102,29 @@ async function inRoomWithDraft(page: Page) {
 const messagesView = (page: Page) => page.locator('section.msgs');
 
 test.describe('T-294 back to the room you were in', () => {
-  test('a room, Messages, then the rail\'s Uni: the same room, at the same spot, with the draft', async ({ page }) => {
+  test('a room in focus, Messages, then the rail\'s All: the same room, at the same spot, with the draft', async ({ page }) => {
     await boot(page);
     const was = await inRoomWithDraft(page);
     await railGo(page, 'Messages');
     await expect(page.getByRole('navigation', { name: 'Conversations' })).toBeVisible();
-    await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
+    await toAll(page);
     await expectSamePlace(page, was);
   });
 
-  test('Messages\' own Back says where it goes, and goes there: the room, at its spot', async ({ page }) => {
+  test('Messages\' own Back says where it goes (All), and goes there: the room in focus, at its spot', async ({ page }) => {
     await boot(page);
     const was = await inRoomWithDraft(page);
     await railGo(page, 'Messages');
-    await messagesView(page).getByRole('button', { name: '← ATLAS' }).click();
+    await messagesView(page).getByRole('button', { name: '← All' }).click();
     await expectSamePlace(page, was);
   });
 
-  test('at Uni already, the Uni button still goes home to Uni', async ({ page }) => {
+  test('with a room in focus, the Uni button still goes home to Uni', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
-    await expect(page.locator('.sr[data-node="ATLAS"]')).toHaveCount(0);
+    await expect(focusSheet(page)).toHaveCount(0);
   });
 
   test('put away and brought back (hidden, then shown): still the room, its spot and the draft', async ({ page }) => {
@@ -140,7 +145,7 @@ test.describe('T-294 back to the room you were in', () => {
     await expectSamePlace(page, was);
   });
 
-  test('closed by the system in Messages (a reload): Messages reopens, and Uni goes back to the room, at the spot, with the draft', async ({ page }) => {
+  test('closed by the system in Messages (a reload): Messages reopens, and All goes back to the room, at the spot, with the draft', async ({ page }) => {
     await boot(page);
     const was = await inRoomWithDraft(page);
     await railGo(page, 'Messages');
@@ -149,11 +154,11 @@ test.describe('T-294 back to the room you were in', () => {
     await page.reload();
     await expect(messagesView(page)).toBeVisible();
     await expect(rail(page).getByRole('button', { name: 'Messages', includeHidden: true })).toHaveCount(1, { timeout: 10_000 });
-    await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
+    await toAll(page);
     await expectSamePlace(page, was);
   });
 
-  test('Messages keeps its own place: the conversation open, its draft and how far back it was read, across a trip to Uni', async ({ page }) => {
+  test('Messages keeps its own place: the conversation open, its draft and how far back it was read, across a trip to All', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await railGo(page, 'Messages');
@@ -172,8 +177,8 @@ test.describe('T-294 back to the room you were in', () => {
     await expect.poll(fromEnd).toBeGreaterThan(300);
     await page.waitForTimeout(200);
     const left = await reading();
-    await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
-    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'ATLAS');
+    await toAll(page);
+    await inFocus(page, 'ATLAS');
     await railGo(page, 'Messages');
     await expect(page.getByRole('region', { name: 'Conversation: Kit Sample' })).toBeVisible();
     await expect(box).toHaveValue('Running ten minutes late');

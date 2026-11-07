@@ -1,30 +1,32 @@
 // T-86, after r13: tasks are Parachute objects. The lists come from indexed vault queries, every write is a compare-and-set
-// `state_transition`, Undo is the reverse. These run in a node's work view ("All of X's work", inside its room's shell) and its task sheet.
+// `state_transition`, Undo is the reverse. These run in a node's work view ("All of X's work", T-335: inside its room's focus, from its
+// details) and its task sheet.
 // (The octopus node view, its task groups and its talk bar were deleted with the old layouts; roomsnav and simple cover the rest.)
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { areaCard, bootAreas, showTree } from './areasFixture';
+import { bootAreas, focusSheet, openAreaPage, openAreasHome, openDetails } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/t86';
-const isDesktop = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
-const row = (page: Page, id: string) => page.locator('.sr-work .cp-item').filter({ has: page.locator(`.cp-need[data-id="${id}"]`) });
+const row = (page: Page, id: string) => page.locator('.fx-work .cp-item').filter({ has: page.locator(`.cp-need[data-id="${id}"]`) });
 /** Open a row's task sheet. */
-const openTask = (page: Page, id: string) => page.locator(`.sr-work .cp-need[data-id="${id}"]`).click();
+const openTask = (page: Page, id: string) => page.locator(`.fx-work .cp-need[data-id="${id}"]`).click();
 const infinite = (page: Page) => page.evaluate(() => document.getAnimations().filter((a) => { const t = a.effect?.getComputedTiming(); return !t || t.iterations === Infinity || !Number.isFinite(t.endTime as number); }).length);
-const tree = (page: Page) => page.locator(isDesktop(page) ? '.th-roomnav' : '.th-drawer .th-phone-tree');
-/** A node's work page, from its room in the tree. */
+const title = (page: Page) => focusSheet(page).locator('.all-focus-title');
+/** T-335: a place is opened from Uni's home (its door, or its parent's details there): from anywhere else (a room in focus, All), go there first. */
+const fromHome = async (page: Page) => { if (!(await page.locator('[data-place="front-door"][data-view="places"]').isVisible())) await openAreasHome(page); };
+/** Where a place inside another is reached: its parent's details ("Inside X"). */
+const PARENT: Record<string, string> = { 'COhere 2026': 'Techne' };
+/** A node's work page (T-335: its room in focus, its details, "All of X's work"). */
 async function workPage(page: Page, name: string) {
-  // T-302: the tree is in a room (beside it, or in a phone's Places drawer), not Uni's home
-  await showTree(page);
-  await tree(page).locator('.th-row.d1').first().waitFor();
-  for (let i = 0; i < 12; i++) { const f = tree(page).locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
-  await areaCard(page, name).click();
-  if (!isDesktop(page) && await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
-  await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-  await expect(page.locator('.sr-work')).toBeVisible();
-  await expect.poll(async () => [await page.locator('.sr').first().getAttribute('data-node').catch(() => null), await page.locator('.sr-title').first().textContent().catch(() => null)]).toContain(name); /* r15: a borrowed room's heading is the room; the place is data-node */
+  await fromHome(page);
+  await openAreaPage(page, name, { app: false, parent: PARENT[name] });
+  await openDetails(page);
+  await focusSheet(page).getByRole('button', { name: /^All of .*'s work/ }).click();
+  await expect(focusSheet(page).getByRole('region', { name: `${name}'s work` })).toBeVisible();
+  await expect(page.locator('.fx-work')).toBeVisible();
+  await expect(title(page)).toHaveText(name);
 }
 const shot = async (page: Page, name: string) => {
   await mkdir(SHOTS, { recursive: true });
@@ -74,8 +76,8 @@ test.describe('tasks in the work view', () => {
     await workPage(page, 'Techne'); // a project's task, seen from its area's work view, opens the project's own room
     await openTask(page, 'T-65');
     await page.getByRole('button', { name: 'Open in #Cohere' }).click();
-    await expect(page.locator('.sr-title')).toHaveText('COhere 2026');
-    await expect(page.getByRole('textbox', { name: 'Message Cohere' })).toBeVisible();
+    await expect(title(page)).toHaveText('COhere 2026');
+    await expect(focusSheet(page).getByRole('textbox', { name: 'Message Cohere' })).toBeVisible();
   });
 
   test('409: changed elsewhere → says so, re-reads, never retries; 422 and other errors roll back with a message', async ({ page }) => {
@@ -105,18 +107,22 @@ test.describe('tasks in the work view', () => {
     expect(await calls(page, 'vault_transition')).toHaveLength(3);
   });
 
-  test('Android Back closes the task sheet first, then the work view, back to the room', async ({ page }) => {
+  test('Android Back closes the task sheet first, then the work view, then the details, back to the room', async ({ page }) => {
     await workPage(page, 'COhere 2026');
     await openTask(page, 'T-65');
     await expect(page.getByRole('dialog')).toBeVisible();
     const back = () => page.evaluate(() => { const w = window as any; w.__cbs[w.__backHandler.id]({ message: {}, index: w.__backIndex ?? 0 }); w.__backIndex = (w.__backIndex ?? 0) + 1; });
     await back();
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page.locator('.sr-work')).toBeVisible();
+    await expect(page.locator('.fx-work')).toBeVisible();
     await back();
-    await expect(page.locator('.sr-work')).toHaveCount(0);
-    await expect(page.locator('.sr-chat')).toBeVisible();
-    await expect(page.locator('.sr-title')).toHaveText('COhere 2026');
+    await expect(page.locator('.fx-work')).toHaveCount(0);
+    // T-335: the work view opened from the room's details, so Back passes through them
+    await expect(focusSheet(page).getByRole('region', { name: 'COhere 2026 details' })).toBeVisible();
+    await back();
+    await expect(page.locator('.all-focus-details')).toHaveCount(0);
+    await expect(focusSheet(page).locator('.sr-chat')).toBeVisible();
+    await expect(title(page)).toHaveText('COhere 2026');
   });
 
   test('calm: nothing loops, no overflow at three sizes', async ({ page }, info) => {
@@ -141,7 +147,7 @@ test('a task title is text, never markup', async ({ page }) => {
   await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true });
   await page.evaluate(() => { (window as any).__tasks.push({ id: 'x1', path: 'Tasks/<img src=x onerror=window.__pwn=1> bold', extension: 'md', tags: ['task'], updatedAt: 'T', metadata: { node: 'Areas/Techne', state: 'open', owner: 'aaron', next: '<b>hi</b>' } }); });
   await workPage(page, 'Techne'); // T-302: Uni's own level went with the Uni room as home; an area's work view reads the same rows
-  await expect(page.locator('.sr-work .cp-title', { hasText: '<img src=x' })).toBeVisible();
+  await expect(page.locator('.fx-work .cp-title', { hasText: '<img src=x' })).toBeVisible();
   expect(await page.evaluate(() => (window as any).__pwn)).toBeUndefined();
-  expect(await page.locator('.sr-work img, .cp-item img').count()).toBe(0);
+  expect(await page.locator('.fx-work img, .cp-item img').count()).toBe(0);
 });

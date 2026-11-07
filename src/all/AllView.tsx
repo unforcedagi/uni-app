@@ -8,6 +8,7 @@
 // match at once and the small model's route if it answers in time (modelRoute.ts).
 // T-335 one fluid surface: a long message opens where it is, whole, with its markdown, media and links; a room's label puts that room in focus over
 // this feed (AllFocus.tsx), and the feed keeps its place behind it. Nothing here makes you leave All to read.
+import { keepSame } from "../keepSame";
 import { roomTint as tint } from "../glow/roomTint";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -64,7 +65,9 @@ export function useRoomsFeed(rooms: readonly AllRoom[], on: boolean) {
     // a room no longer in the list (made private, gone) leaves the feed at once
     setByRoom((m) => ([...m.keys()].every((k) => want.includes(k)) ? m : new Map([...m].filter(([k]) => want.includes(k)))));
     const read = (id: string) => invoke<Message[]>("get_messages", { channel: id, root: null, limit: PER_ROOM })
-      .then((list) => { if (live) { setByRoom((m) => new Map(m).set(id, list)); setFailed((f) => f.filter((x) => x !== id)); } })
+      // T-335 one surface: All stays drawn behind a room in focus, so a re-read keeps every unchanged message as the object already drawn
+      // (and the whole map when nothing changed): only what changed redraws, never all of All's rows on each live event
+      .then((list) => { if (live) { setByRoom((m) => { const was = m.get(id); const kept = was ? keepSame(was, list, (x) => x.ref) : list; return kept === was ? m : new Map(m).set(id, kept); }); setFailed((f) => (f.includes(id) ? f.filter((x) => x !== id) : f)); } })
       .catch(() => { if (live) setFailed((f) => (f.includes(id) ? f : [...f, id])); });
     readRef.current = (id) => { if (want.includes(id)) void read(id); };
     void Promise.all(want.map(read)).then(() => { if (live) setLoaded(true); });

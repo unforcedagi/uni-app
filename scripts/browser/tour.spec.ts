@@ -4,7 +4,7 @@
 // Run: TOUR_TEST_PORT=17491 TOUR_SHOTS=/some/dir npx playwright test --config playwright.tour.config.ts
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, leaveFrontDoor, openAreaPage, type BootOpts } from './areasFixture';
+import { bootAreas, focusSheet, openAreaPage, openDetails, type BootOpts } from './areasFixture';
 import { bootProjects, type Boot } from './projectsFixture';
 import { audit, lookViolations } from './tourAudit';
 import { installNotePaneFixture } from './notePaneFixture';
@@ -133,7 +133,7 @@ test('03-home-places-glow', async ({ page }) => {
 });
 
 test('08-more-sheet', async ({ page }) => {
-  test.skip(wide(page), 'the phone bar');
+  test.skip((page.viewportSize()?.width ?? 0) >= 600, 'the phone bar (600px and up has every place on the rail)');
   await glow(page);
   await rail(page).getByRole('button', { name: 'More', exact: true }).click();
   await expect(rail(page).getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
@@ -166,9 +166,11 @@ test('06-usage-card', async ({ page }) => {
 async function kiln(page: Page, o: BootOpts = {}) {
   await glow(page, o);
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-  await page.getByRole('textbox', { name: /^Message / }).first().waitFor();
-  await expect(page.locator('.message-list article.message').first()).toBeVisible();
+  await roomBox(page).waitFor();
+  await expect(focusSheet(page).locator('.message-list article.message').first()).toBeVisible();
 }
+/** T-335: a room is shown in focus over All (All, behind it, has a composer and messages of its own). */
+const roomBox = (page: Page) => focusSheet(page).getByRole('textbox', { name: /^Message / });
 
 test('10-room', async ({ page }) => {
   await kiln(page);
@@ -177,14 +179,14 @@ test('10-room', async ({ page }) => {
 
 test('11-room-composer-typing', async ({ page }) => {
   await kiln(page);
-  await page.getByRole('textbox', { name: /^Message / }).first().fill('Can we move the glaze test to Thursday? Also check the shelf by the window.');
+  await roomBox(page).fill('Can we move the glaze test to Thursday? Also check the shelf by the window.');
   await snap(page, '11-room-composer-typing');
 });
 
 test('14-room-actions-desktop-hover', async ({ page }) => {
   test.skip(touch(), 'hover row is mouse-only; the phone has the long-press sheet (15)');
   await kiln(page);
-  const older = page.locator('.message-list article.message[data-ref="k1"]');
+  const older = focusSheet(page).locator('.message-list article.message[data-ref="k1"]');
   await older.hover();
   await expect(older.getByRole('group', { name: 'Message actions' })).toHaveCSS('opacity', '1');
   await snap(page, '14-room-actions-desktop-hover');
@@ -193,7 +195,7 @@ test('14-room-actions-desktop-hover', async ({ page }) => {
 test('15-room-actions-phone-sheet', async ({ page }) => {
   test.skip(!touch(), 'the long-press sheet is touch-only');
   await kiln(page);
-  const older = page.locator('.message-list article.message[data-ref="k1"]');
+  const older = focusSheet(page).locator('.message-list article.message[data-ref="k1"]');
   await older.scrollIntoViewIfNeeded();
   const b = (await older.locator('p').first().boundingBox())!;
   await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })), { x: b.x + 20, y: b.y + 8 });
@@ -205,7 +207,7 @@ test('15-room-actions-phone-sheet', async ({ page }) => {
 
 test('16-room-latest-actions-row', async ({ page }) => {
   await kiln(page);
-  await expect(page.locator('article.message[data-ref="k3"]').getByRole('group', { name: 'Message actions' })).toBeVisible();
+  await expect(focusSheet(page).locator('article.message[data-ref="k3"]').getByRole('group', { name: 'Message actions' })).toBeVisible();
   await page.mouse.move(1, 1);
   await snap(page, '16-room-latest-actions-row');
 });
@@ -334,7 +336,7 @@ test('43-note-editor-and-created-toast', async ({ page }) => {
 
 test('45-toast-copied', async ({ page }) => {
   await kiln(page);
-  await page.locator('article.message[data-ref="k3"]').getByRole('group', { name: 'Message actions' }).getByRole('button', { name: 'Copy', exact: true }).click();
+  await focusSheet(page).locator('article.message[data-ref="k3"]').getByRole('group', { name: 'Message actions' }).getByRole('button', { name: 'Copy', exact: true }).click();
   await expect(page.locator('.toast')).toBeVisible();
   await snap(page, '45-toast-copied');
 });
@@ -410,44 +412,23 @@ test('51-note-page-over-room', async ({ page }) => {
 });
 
 // ---------------------------------------------------------------------------------------------------------- the tasks world: work view, tasks, drawer
-const treeBeside = (page: Page) => wide(page) && (page.viewportSize()?.height ?? 0) >= 400;
-const scope = (page: Page) => (treeBeside(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
-async function unfoldAll(page: Page) {
-  await scope(page).locator('.th-row.d1').first().waitFor();
-  for (let i = 0; i < 12; i++) {
-    const f = scope(page).locator('.th-fold[aria-expanded="false"]');
-    if (!await f.count()) return;
-    await f.first().click();
-  }
-}
-/** A room of the tasks world, opened as a person does: the front door, a first room, then the tree (beside it, or the Places drawer) to the named one. */
+/** A room of the tasks world, opened as a person does (T-335): ATLAS is inside Atlas, so the Atlas door, its details, and "Inside Atlas". */
 async function openRoom(page: Page, name: string) {
-  await leaveFrontDoor(page);
-  if (!treeBeside(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
-  await unfoldAll(page);
-  await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();
-  await expect(page.locator('.sr')).toHaveAttribute('data-node', name);
-  await expect(page.locator('.sr-chat .message').first()).toBeVisible();
+  await page.locator('[data-place="front-door"]').waitFor();
+  await page.locator('.fd-door[data-path="Areas/Atlas"]').click();
+  await openDetails(page);
+  await focusSheet(page).getByRole('region', { name: 'Inside Atlas' }).locator('.fx-place').filter({ has: page.locator('span', { hasText: new RegExp(`^${name}$`) }) }).click();
+  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(name);
+  await expect(focusSheet(page).locator('.sr-chat .message').first()).toBeVisible();
 }
 const atlas = async (page: Page, o: BootOpts = {}) => { await tasksWorld(page, o); await openRoom(page, 'ATLAS'); };
-async function openCompanion(page: Page) {
-  const strip = !wide(page) || await page.locator('.cp.strip').count() > 0;
-  if (strip && await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
-  await expect(page.locator('.cp-body').first()).toBeVisible();
-}
+/** What needs you in the room: its details, in the focus. */
+const needsYou = (page: Page) => focusSheet(page).locator('.all-focus-details').getByRole('region', { name: 'Needs you' });
 async function openWorkView(page: Page) {
-  await openCompanion(page);
-  await page.getByRole('button', { name: /^All of .*'s work/ }).first().click();
-  await expect(page.locator('.sr-work')).toBeVisible();
+  await openDetails(page);
+  await focusSheet(page).getByRole('button', { name: /^All of .*'s work/ }).first().click();
+  await expect(focusSheet(page).getByRole('region', { name: /'s work$/ })).toBeVisible();
 }
-
-test('60-places-drawer-or-room-tree', async ({ page }) => {
-  await tasksWorld(page);
-  await leaveFrontDoor(page);
-  if (!treeBeside(page)) { await page.locator('.sr-drawer').click(); await expect(page.locator('.th-drawer')).toBeVisible(); }
-  await unfoldAll(page);
-  await snap(page, '60-places-drawer-or-room-tree');
-});
 
 test('61-room-with-needs-you-line', async ({ page }) => {
   await atlas(page);
@@ -456,8 +437,8 @@ test('61-room-with-needs-you-line', async ({ page }) => {
 
 test('62-room-needs-you-open', async ({ page }) => {
   await atlas(page);
-  await openCompanion(page);
-  await expect(page.getByRole('region', { name: 'Needs you' }).locator('.cp-need').first()).toBeVisible();
+  await openDetails(page);
+  await expect(needsYou(page).locator('.cp-need').first()).toBeVisible();
   await snap(page, '62-room-needs-you-open');
 });
 
@@ -469,35 +450,37 @@ test('63-work-view-area-page', async ({ page }) => {
 
 test('64-task-sheet', async ({ page }) => {
   await atlas(page);
-  await openCompanion(page);
-  await page.getByRole('region', { name: 'Needs you' }).locator('.cp-need[data-id="T-07"]').click();
+  await openDetails(page);
+  await needsYou(page).locator('.cp-need[data-id="T-07"]').click();
   await expect(page.getByRole('dialog').filter({ has: page.locator('.task-kind') }).first()).toBeVisible();
   await snap(page, '64-task-sheet');
 });
 
 test('65-decision-sheet', async ({ page }) => {
   await atlas(page);
-  await openCompanion(page);
-  await page.getByRole('region', { name: 'Needs you' }).locator('.cp-need').filter({ hasText: 'Decide the ATLAS hosting' }).click();
+  await openDetails(page);
+  await needsYou(page).locator('.cp-need').filter({ hasText: 'Decide the ATLAS hosting' }).click();
   await expect(page.getByRole('group', { name: /^Decide:/ })).toBeVisible();
   await snap(page, '65-decision-sheet');
 });
 
 test('66-task-sheet-details-open', async ({ page }) => {
   await atlas(page);
-  await openCompanion(page);
-  await page.getByRole('region', { name: 'Needs you' }).locator('.cp-need[data-id="T-07"]').click();
+  await openDetails(page);
+  await needsYou(page).locator('.cp-need[data-id="T-07"]').click();
   const d = page.getByRole('dialog').filter({ has: page.locator('.task-kind') }).first();
   await d.locator('details.task-details > summary').click();
   await snap(page, '66-task-sheet-details-open');
 });
 
 // ---------------------------------------------------------------------------------------------------------- projects and sessions
-const strip = (page: Page) => page.locator('[data-place="project-strip"]');
+const strip = (page: Page) => focusSheet(page).locator('[data-place="project-strip"]');
 async function workshop(page: Page, o: Boot = {}) {
   await projects(page, o);
   await doorOf(page, 'Workshop').click();
-  await expect(page.locator('.sr-title')).toHaveText('Workshop');
+  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('Workshop');
+  // T-335: the area's projects are in the room's details
+  await openDetails(page);
 }
 async function openProject(page: Page, name: RegExp) {
   await workshop(page);
@@ -782,7 +765,7 @@ const arrive = (page: Page, channel: string, body: string, who = 'Uni') => page.
 async function kilnWith(page: Page, tour: Tour, body: string) {
   await glow(page, {}, {}, tour);
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-  await page.getByRole('textbox', { name: /^Message / }).first().waitFor();
+  await roomBox(page).waitFor();
   await arrive(page, 'ch-kiln', body);
 }
 
@@ -843,7 +826,7 @@ test('115-decision-card-in-chat', async ({ page }) => {
   await bootAreas(page, 'seed', TASKS);
   await openRoom(page, 'ATLAS');
   await arrive(page, '7dcea809-25cd-4160-ba99-f0a56386adcb', `Your call on the garden page layout. Tap your pick: uni:${D1}`);
-  const card = page.getByRole('region', { name: 'Decision: Which layout for the garden page?' });
+  const card = focusSheet(page).getByRole('region', { name: 'Decision: Which layout for the garden page?' });
   await card.scrollIntoViewIfNeeded();
   await expect(card).toBeVisible();
   await snap(page, '115-decision-card-in-chat');
@@ -852,14 +835,14 @@ test('115-decision-card-in-chat', async ({ page }) => {
 test('116-attachments-in-chat', async ({ page }) => {
   await glow(page, {}, {}, { media: true });
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-  await expect(page.getByRole('button', { name: 'Open Firing log.pdf' })).toBeVisible();
+  await expect(focusSheet(page).getByRole('button', { name: 'Open Firing log.pdf' })).toBeVisible();
   await snap(page, '116-attachments-in-chat');
 });
 
 test('117-attachment-image-preview', async ({ page }) => {
   await glow(page, {}, {}, { media: true });
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-  await page.getByRole('button', { name: 'Open image tiles.jpg' }).click();
+  await focusSheet(page).getByRole('button', { name: 'Open image tiles.jpg' }).click();
   await expect(page.getByRole('dialog', { name: 'tiles.jpg' })).toBeVisible();
   await snap(page, '117-attachment-image-preview');
 });
@@ -867,8 +850,8 @@ test('117-attachment-image-preview', async ({ page }) => {
 test('118-attachment-saved-status', async ({ page }) => {
   await glow(page, {}, {}, { media: true });
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-  await page.getByRole('button', { name: 'Save Firing log.pdf to Downloads' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Saved to Downloads/Firing log.pdf' })).toBeVisible();
+  await focusSheet(page).getByRole('button', { name: 'Save Firing log.pdf to Downloads' }).click();
+  await expect(focusSheet(page).getByRole('status').filter({ hasText: 'Saved to Downloads/Firing log.pdf' })).toBeVisible();
   await snap(page, '118-attachment-saved-status');
 });
 
@@ -896,9 +879,9 @@ test('121-approval-prompt-card-in-room', async ({ page }) => {
 // ---------------------------------------------------------------------------------------------------------- thread, To post, For you, Journal, app, composer
 test('130-thread-view', async ({ page }) => {
   await atlas(page, { thread: true });
-  await page.locator('.sr-chat .thread-summary').first().click();
-  await expect(page.locator('[data-view="thread"]')).toBeVisible();
-  await expect(page.locator('.sr-thread')).toContainText('Thread · 2 replies');
+  await focusSheet(page).locator('.sr-chat .thread-summary').first().click();
+  await expect(focusSheet(page).getByRole('button', { name: 'Back to ATLAS' })).toBeVisible();
+  await expect(focusSheet(page).locator('.all-focus-line')).toHaveText('Thread · 2 replies');
   await snap(page, '130-thread-view');
 });
 
@@ -1014,7 +997,7 @@ test('153-area-app-grant-prompt', async ({ page }) => {
 
 test('160-composer-menu-open', async ({ page }) => {
   await kiln(page);
-  await page.getByRole('button', { name: 'More message options' }).click();
+  await focusSheet(page).getByRole('button', { name: 'More message options' }).click();
   await expect(page.getByRole('menuitem').first()).toBeVisible();
   await snap(page, '160-composer-menu-open');
 });
@@ -1032,10 +1015,10 @@ test('38-settings-approvals-confirm', async ({ page }) => {
 test('161-room-uni-working-stop', async ({ page }) => {
   await kiln(page);
   await page.evaluate(() => { (window as any).__postDelay = 60_000; });
-  const box = page.getByRole('textbox', { name: /^Message / }).first();
+  const box = roomBox(page);
   await box.fill('Can you draft the firing plan for the week?');
-  if (touch()) await page.locator('.composer button.send').click(); else await box.press('Enter');
-  await expect(page.locator('.composer button[aria-label="Stop Uni"]')).toBeVisible();
+  if (touch()) await focusSheet(page).locator('.composer button.send').click(); else await box.press('Enter');
+  await expect(focusSheet(page).locator('.composer button[aria-label="Stop Uni"]')).toBeVisible();
   await snap(page, '161-room-uni-working-stop');
 });
 
@@ -1048,7 +1031,7 @@ test('162-room-quick-replies', async ({ page }) => {
 
 test('163-room-mention-picker', async ({ page }) => {
   await kiln(page);
-  await page.getByRole('textbox', { name: /^Message / }).first().pressSequentially('@');
+  await roomBox(page).pressSequentially('@');
   await page.waitForTimeout(300);
   await snap(page, '163-room-mention-picker');
 });

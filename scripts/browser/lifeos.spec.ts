@@ -1,26 +1,32 @@
 // T-80: Areas as a life OS view, after r12: the device cache and one-query loading, node statuses, the App tab beside the room, and Back
 // through the levels. (Today, the Brief page, the map and the room switcher were deleted with the Map, Octopus and Classic layouts.)
 import { test, expect, type Page } from '@playwright/test';
-import { areaCard, bootAreas, openAreaPage, openAreasHome, showTree } from './areasFixture';
+import { areaCard, bootAreas, focusSheet, openAreaPage, openAreasHome, openDetails } from './areasFixture';
 import { railGo } from './railGo';
 
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c), cmd);
-const isDesktop = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
-const tree = (page: Page) => page.locator(isDesktop(page) ? '.th-roomnav' : '.th-drawer .th-phone-tree');
-/** Unfold every area of the room tree, so a project's row can be clicked. */
-async function unfold(page: Page) {
-  await showTree(page); // T-302: the tree is in a room (beside it, or in a phone's Places drawer)
-  await tree(page).locator('.th-row.d1').first().waitFor();
-  for (let i = 0; i < 12; i++) { const f = tree(page).locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
+// T-335 one surface: a room is in focus over All; its name heads the sheet; its details hold its work, the places inside it and its app
+const title = (page: Page) => focusSheet(page).locator('.all-focus-title');
+/** T-335: a place is opened from Uni's home (its door, or its parent's details there): from anywhere else (a room in focus, All), go there first. */
+const fromHome = async (page: Page) => { if (!(await page.locator('[data-place="front-door"][data-view="places"]').isVisible())) await openAreasHome(page); };
+const backToChat = (page: Page) => focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click();
+/** Where a place inside another is reached: its parent's details ("Inside X"). */
+const PARENT: Record<string, string> = { 'COhere 2026': 'Techne' };
+/** The places inside an area, as its details list them (what the tree's unfolded rows were). */
+async function inside(page: Page, area: string) {
+  await fromHome(page);
+  await openAreaPage(page, area, { app: false });
+  await openDetails(page);
+  return focusSheet(page).locator('.fx-places');
 }
-/** A node's whole work page ("All of X's work"), from its room. */
+/** A node's whole work page ("All of X's work"), from its room's details. */
 async function workPage(page: Page, name: string) {
-  await unfold(page);
-  await areaCard(page, name).click();
-  if (!isDesktop(page) && await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
-  await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-  await expect(page.locator('.sr-work')).toBeVisible();
-  await expect.poll(async () => [await page.locator('.sr').first().getAttribute('data-node').catch(() => null), await page.locator('.sr-title').first().textContent().catch(() => null)]).toContain(name); /* r15: a borrowed room's heading is the room; the place is data-node */
+  await fromHome(page);
+  await openAreaPage(page, name, { app: false, parent: PARENT[name] });
+  await openDetails(page);
+  await focusSheet(page).getByRole('button', { name: /^All of .*'s work/ }).click();
+  await expect(page.locator('.fx-work')).toBeVisible();
+  await expect(title(page)).toHaveText(name);
 }
 
 test.describe('device cache', () => {
@@ -106,22 +112,23 @@ test.describe('device cache', () => {
 });
 
 test.describe('App tab', () => {
-  test('an area with a sealed app opens to its room; "App ›" in the header shows the app inside the room shell, and Back to chat returns', async ({ page }) => {
+  test('an area with a sealed app opens to its room; "Open the app" in its details shows the app inside the focus, and its name returns to the chat', async ({ page }) => {
     await bootAreas(page, 'seed', { briefs: true });
     await openAreasHome(page);
     await openAreaPage(page, 'Techne', { app: false });
-    await expect(page.locator('.sr-chat')).toBeVisible();
+    await expect(focusSheet(page).locator('.sr-chat')).toBeVisible();
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
-    await page.locator('.sr-app').click();
-    await expect(page.locator('.sr-work iframe.area-frame')).toHaveCount(1);
+    await openDetails(page);
+    await focusSheet(page).getByRole('button', { name: 'Open the Techne app ›' }).click();
+    await expect(focusSheet(page).locator('.fx-app iframe.area-frame')).toHaveCount(1);
     await expect(page.frameLocator('iframe.area-frame').locator('#title')).toHaveText('Techne');
-    // r14: the same shell: its header and the tree stay; no tabs, no second chat
-    await expect(page.locator('.sr-title')).toHaveText('Techne');
+    // r14, T-335: the same focus, under the room's name; no tabs, no second chat
+    await expect(title(page)).toHaveText('Techne');
     await expect(page.locator('.area-tabs, .area-chat, .area-bar')).toHaveCount(0);
     await expect(page.locator('.sr-appbar')).toContainText('Techne app');
-    await page.getByRole('button', { name: 'Back to chat' }).click();
+    await backToChat(page);
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
-    await expect(page.locator('.sr-chat')).toBeVisible();
+    await expect(focusSheet(page).locator('.sr-chat')).toBeVisible();
   });
 
   test('an area without an app has no tabs', async ({ page }) => {
@@ -152,7 +159,7 @@ test('path brief beats a newer metadata-only note; limit is visible', async ({ p
   await workPage(page, 'Techne');
   await expect(page.locator('.th-lede')).toContainText('coop paperwork');
   await expect(page.locator('.th-lede')).not.toContainText('STRAY BRIEF');
-  await expect(page.locator('.areas-status')).toContainText('showing first 200');
+  await expect(page.getByRole('region', { name: /in focus$/ }).locator('.areas-status')).toContainText('showing first 200');
 });
 
  test('cached home paints before room loading resolves', async ({ page }) => {
@@ -164,43 +171,43 @@ test('path brief beats a newer metadata-only note; limit is visible', async ({ p
   // T-302: the home is the front door (no Uni room beside it)
   await expect(page.locator('[data-place="front-door"]')).toBeVisible();
  });
- test('system Back follows parent levels and the project body is read once', async ({ page }) => {
+ test('system Back steps out of a project\'s work, through its room, to All, and the project body is read once', async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true, briefs: true });
   await workPage(page, 'COhere 2026');
   await page.locator('.th-note summary').click();
   await expect(page.locator('.th-note')).toContainText('The festival: venue, crew and the schedule.');
   const back = () => page.evaluate(() => { const w = window as any; w.__cbs[w.__backHandler.id]({ message: {}, index: w.__backIndex ?? 0 }); w.__backIndex = (w.__backIndex ?? 0) + 1; });
-  // each Back closes what is over the place, then goes up a level: the work page, the project's room, its area, Uni's front door
-  // (T-302: the way in passes through the front door and a room first, so the presses are counted by what they reach, not one by one)
+  // each Back closes what is over the place: the work page, its details, then the project's room comes out of focus, back to All
+  // (T-335: a room is in focus over All; there are no parent levels to climb: the way in was through the area's details)
   const backTo = async (seen: () => Promise<boolean>) => { for (let i = 0; i < 4 && !(await seen()); i++) { await back(); await page.waitForTimeout(250); } expect(await seen()).toBe(true); };
-  await backTo(async () => !(await page.locator('.sr-work').isVisible()) && (await page.locator('.sr-title').textContent()) === 'COhere 2026');
+  await backTo(async () => !(await page.locator('.fx-work').isVisible()) && (await focusSheet(page).locator('.sr-chat').isVisible()) && (await title(page).textContent()) === 'COhere 2026');
   expect((await calls(page, 'vault_note')).filter((c: any) => c.args.noteRef === 'p-cohere')).toHaveLength(1);
-  if (isDesktop(page)) await backTo(async () => (await page.locator('.sr-title').textContent().catch(() => null)) === 'Techne');
-  await backTo(() => page.locator('[data-place="front-door"]').isVisible());
+  await backTo(async () => (await focusSheet(page).count()) === 0 && (await page.locator('[data-place="front-door"]').first().isVisible()));
  });
 
-for (const status of ['archived', 'done', 'dormant']) test(`area and project status ${status} controls the tree's rows`, async ({ page }) => {
+// T-335: the tree's rows are the home's doors (areas) and an area's "Inside X" in its details (the places inside it)
+for (const status of ['archived', 'done', 'dormant']) test(`area and project status ${status} controls the doors and the places inside`, async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true, nodeStatuses: { 'a-sad': status, 'p-cohere': status } });
   await expect(areaCard(page, 'Techne')).toBeVisible();
   // dormant is not archived or done: background nodes stay in the tree
   if (status === 'dormant') await expect(areaCard(page, 'Sanctum')).toBeVisible();
   else await expect(areaCard(page, 'Sanctum')).toHaveCount(0);
-  await unfold(page);
-  if (status === 'dormant') await expect(areaCard(page, 'COhere 2026')).toBeVisible();
-  else await expect(areaCard(page, 'COhere 2026')).toHaveCount(0);
+  const places = await inside(page, 'Techne');
+  if (status === 'dormant') await expect(places.getByRole('button', { name: /COhere 2026/ })).toBeVisible();
+  else await expect(focusSheet(page).locator('.fx-place', { hasText: 'COhere 2026' })).toHaveCount(0);
 });
 test('failed project refresh retains previous projects and stale marker', async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true });
-  await unfold(page);
-  await expect(areaCard(page, 'COhere 2026')).toBeVisible();
+  const places = await inside(page, 'Techne');
+  await expect(places.getByRole('button', { name: /COhere 2026/ })).toBeVisible();
   await page.evaluate(() => {
     const w = window as any; const original = w.__TAURI_INTERNALS__.invoke;
     w.__TAURI_INTERNALS__.invoke = (cmd: string, args: any) => cmd === 'vault_query' && args.tag === 'project' ? Promise.reject('projects unavailable') : original(cmd, args);
   });
   await page.clock.install(); await page.clock.fastForward(31000);
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-  await expect(page.locator('.areas-status')).toContainText("couldn't refresh: project");
-  await expect(areaCard(page, 'COhere 2026')).toBeVisible();
+  await expect(page.getByRole('region', { name: /in focus$/ }).locator('.areas-status')).toContainText("couldn't refresh: project");
+  await expect(places.getByRole('button', { name: /COhere 2026/ })).toBeVisible();
 });
 
  test('fresh memory stays fresh during a deferred background refresh', async ({ page }) => {
@@ -223,8 +230,8 @@ test('failed project refresh retains previous projects and stale marker', async 
 
  test('forgetAreas discards an in-flight result while the hook remains mounted', async ({ page }) => {
   await bootAreas(page, 'seed', { queryDelay: 3000 });
-  // the four area queries (the task tree's node, run and draft reads are the task list's)
-  await expect.poll(async () => (await calls(page, 'vault_query')).filter((c: any) => !['node', 'run', 'draft'].includes(c.args.tag)).length).toBe(4);
+  // the four area queries (the task list's and the home's own reads, tasks and posts, are theirs)
+  await expect.poll(async () => (await calls(page, 'vault_query')).filter((c: any) => ['area', 'project', 'area-brief', 'area-today'].includes(c.args.tag)).length).toBe(4);
   await page.evaluate(() => (window as any).__forgetAreas());
   await page.waitForTimeout(3500);
   expect(await page.evaluate(() => localStorage.getItem('uni.areas.cache.v2'))).toBeNull();

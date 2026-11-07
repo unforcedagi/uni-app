@@ -5,6 +5,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { bootProjects, type Boot } from './projectsFixture.ts';
 import { longShown } from './projectsWorld.ts';
+import { focusSheet, openDetails } from './areasFixture.ts';
 
 const shot = (page: Page, name: string) => page.screenshot({ path: `__shots__/t304/${test.info().project.name}-${name}.png` });
 const door = (page: Page, name: string) => page.getByRole('navigation', { name: 'Rooms' }).getByRole('button', { name: new RegExp(`^${name}\\b`) });
@@ -16,8 +17,10 @@ const NO_IDS = /\bT-\d+|\brun-|\bfeed-|\bmts\b|\bp-coop|\bresume\b|zzzzzzzz/;
 async function openProject(page: Page, room: string, project: RegExp, boot: Boot = {}) {
   await bootProjects(page, boot);
   await page.goto('/');
+  // T-335: the door opens its room in focus over All; its projects strip is in the room's details, inside the focus
   await door(page, room).click();
-  await expect(page.locator('.sr-title')).toHaveText(room);
+  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(room);
+  await openDetails(page);
   await strip(page).getByRole('button', { name: project }).first().click();
   const sheet = page.getByRole('dialog', { name: project });
   await expect(sheet).toBeVisible();
@@ -144,7 +147,9 @@ test('a session that needs you shows the exact ask, and Answer puts it in the ro
   await shot(page, '03-needs-you');
   await needs.getByRole('button', { name: 'Answer in #workshop' }).click();
   await expect(page.getByRole('dialog', { name: /Seed library catalogue/ })).toHaveCount(0);
-  await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveValue(
+  // the room's conversation, in its focus, with the answer started in its composer
+  await expect(focusSheet(page).locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toBeVisible();
+  await expect(focusSheet(page).locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveValue(
     'About the session on “Estimate a catalogue from the spreadsheet” (Seed library catalogue), which asks: “Should a variety with two names be one entry or two? I need that before I can count them.” — ');
   await shot(page, '04-answer');
   expect(await posted(page)).toEqual([]);

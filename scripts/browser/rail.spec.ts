@@ -18,9 +18,10 @@ test('a saved Uni room opens as Uni\'s room at every width; on a phone it is the
   }
 });
 
-test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms drawer)', async ({ page }, info) => {
+test('Rail surfaces, overlay panels, focus; a room no area holds is on Uni\'s home, under Other rooms (r12: no Rooms drawer)', async ({ page }, info) => {
   const phone = info.project.name === 'phone';
   const rail = page.getByRole('navigation', { name: 'Main navigation' });
+  const focus = page.getByRole('region', { name: /in focus$/ });
   const shot = async (name: string) => {
     if (!phone) {
       const dir = '/home/uni/Code/uni-sketches/t21/built';
@@ -81,14 +82,13 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
     await expect(fy.locator('.rail-dot')).toHaveCount(0);
     await rail.getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
-    // a room no node owns is under "Other rooms" in the tree, and opens in the room shell
-    const narrow = page.viewportSize()!.width < 900;
-    if (narrow && await page.locator('.sr-drawer').count()) await page.locator('.sr-drawer').click();
-    const tree = page.locator(narrow ? '.th-phone-tree' : '.th-roomnav');
-    await tree.locator('.th-others .th-fold').click();
-    await tree.locator('.th-other .th-go').filter({ hasText: '#garden' }).click();
-    await expect(page.getByRole('textbox', { name: 'Message Garden' })).toBeVisible();
-    await expect(page.locator('.sr-title')).toHaveText('#Garden'); // r13: the channel's own name
+    // T-335: a room no node owns is under "Other rooms" on Uni's home, folded, and opens in focus over All
+    const others = page.locator('details.fd-others');
+    await others.locator('summary').click();
+    await others.getByRole('button', { name: '#Garden', exact: true }).click();
+    await expect(focus).toBeVisible();
+    await expect(focus.getByRole('textbox', { name: 'Message Garden' })).toBeVisible();
+    await expect(focus.locator('.all-focus-title')).toHaveText('#Garden'); // r13: the channel's own name
     await shot('other-room');
     await railGo(page, 'Vault');
     await expect(rail.locator('[aria-current="page"]:visible, [aria-expanded="true"]:visible')).toHaveCount(1);
@@ -96,9 +96,9 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
     await rail.getByRole('button', { name: 'Journal', exact: true }).click();
     await page.reload();
     await expect(writing).toHaveValue('A little room to think.');
-    // T-294: from the Journal, Uni goes back to the room you were in; Uni again, at Uni, goes home
-    await rail.getByRole('button', { name: 'Uni', exact: true }).click();
-    await expect(page.locator('.sr-title')).toHaveText('#Garden');
+    // T-294 / T-335: from the Journal, All goes back to the room you were in (still in focus over it); Uni goes home
+    await rail.getByRole('button', { name: 'All', exact: true }).click();
+    await expect(focus.locator('.all-focus-title')).toHaveText('#Garden');
     await rail.getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await page.reload();
@@ -179,8 +179,12 @@ test('For you opened after an old tab set (a note was active) returns to the rea
   await page.reload();
   // 0.1.46: only places are restored, so the old set opens on its last place, not on the note
   await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
+  // T-335: the room is in focus over All; For you's Back names it as its head does
+  const head = page.getByRole('region', { name: /in focus$/ }).locator('.all-focus-title');
+  const name = (await head.textContent())!;
+  expect(name).toMatch(/^#?Uni$/);
   await railGo(page, 'For you');
-  await expect(page.locator('.note-back-label')).toHaveText('Uni');
+  await expect(page.locator('.note-back-label')).toHaveText(name);
   await page.locator('.note-back').click();
   await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
 });

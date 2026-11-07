@@ -42,8 +42,10 @@ test('the update line is at the top, in the flow, and never over the composer or
   expect(await notice.evaluate((el) => getComputedStyle(el).position)).toBe('static');
 
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-  await expect(page.locator('.sr-title').first()).toHaveText('Kiln Studio');
-  const composer = page.locator('.sr-chat .composer').first();
+  // T-335 one surface: the room is in focus over All
+  const focus = page.getByRole('region', { name: /in focus$/ });
+  await expect(focus.locator('.all-focus-title')).toHaveText('Kiln Studio');
+  const composer = focus.locator('.sr-chat .composer');
   const send = composer.getByRole('button', { name: 'Send message' });
   await composer.locator('textarea').fill('Unload it after lunch.');
   await expect(send).toBeEnabled();
@@ -51,9 +53,9 @@ test('the update line is at the top, in the flow, and never over the composer or
   const vp = page.viewportSize()!;
   expect(overlap(n, c)).toBe(false);
   expect(overlap(n, s)).toBe(false);
-  // at the top of the window, above the room's header; the composer and Send wholly on screen
+  // at the top of the window, above the room's head; the composer and Send wholly on screen
   expect(n.y).toBeLessThan(40);
-  expect(n.y + n.height).toBeLessThanOrEqual((await page.locator('.sr-head').first().boundingBox())!.y + 1);
+  expect(n.y + n.height).toBeLessThanOrEqual((await focus.locator('.all-focus-head').boundingBox())!.y + 1);
   expect(s.y + s.height).toBeLessThanOrEqual(vp.height);
   expect(s.x + s.width).toBeLessThanOrEqual(vp.width);
   // what is at Send's centre is Send itself, not the notice

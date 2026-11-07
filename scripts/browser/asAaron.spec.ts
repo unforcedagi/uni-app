@@ -2,7 +2,7 @@
 // Made-up data only: the fixtures are the tour's.
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, leaveFrontDoor, type BootOpts } from './areasFixture';
+import { bootAreas, type BootOpts } from './areasFixture';
 import { installNotePaneFixture } from './notePaneFixture';
 import * as mailMock from './mailMock';
 import * as calMock from './calMock';
@@ -21,19 +21,18 @@ async function glow(page: Page, o: BootOpts = {}, native?: (cmd: string, args: a
 async function kiln(page: Page, o: BootOpts = {}) {
   await glow(page, o);
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-  await page.getByRole('textbox', { name: /^Message / }).first().waitFor();
-  await expect(page.locator('.message-list article.message').first()).toBeVisible();
+  await focus(page).getByRole('textbox', { name: /^Message / }).waitFor();
+  await expect(focus(page).locator('.message-list article.message').first()).toBeVisible();
 }
+/** T-335 one surface: a room is in focus over All. */
+const focus = (page: Page) => page.getByRole('region', { name: /in focus$/ });
 const TASKS: BootOpts = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true, uniMember: true };
-/** The tour's way into a room of the tasks world: the front door, a first room, then the tree (beside it, or the Places drawer). */
+/** The tour's way into a room of the tasks world: Uni's home, what needs you, its first item: its room in focus, with its details (T-335). */
 async function openRoomWithNeeds(page: Page) {
-  await leaveFrontDoor(page);
-  const beside = (page.viewportSize()?.width ?? 0) >= 900;
-  if (!beside) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
-  const scope = beside ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
-  await scope.locator('.th-row.d1').first().waitFor();
-  for (let i = 0; i < 12; i++) { const f = scope.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
-  await scope.locator('.th-go').filter({ has: page.locator('.th-dot:not(.inside)') }).nth(2).click();
+  await page.locator('[data-place="front-door"]').first().waitFor();
+  await page.getByRole('button', { name: /^Needs you/ }).click();
+  await page.locator('.fd-needs-list button').first().click();
+  await expect(focus(page).locator('.all-focus-details')).toBeVisible();
 }
 
 // ---------------------------------------------------------------- the rail
@@ -130,22 +129,24 @@ test('the rail draws every place with one hand: no text glyphs', async ({ page }
 // ---------------------------------------------------------------- a room
 test('a room says what it is once: no "Last written by", no "no folder yet", no channel over the name on a phone', async ({ page }) => {
   await kiln(page);
-  const body = page.locator('.sr').first();
+  const body = focus(page);
+  await expect(body).toBeVisible();
   await expect(body).not.toContainText('no folder yet');
   if (phone()) {
-    // r29: still a dated account: the date first, or with no date the room that wrote it
-    await expect(page.locator('.cp.strip .cp-line')).toContainText(/^(Today|Yesterday|[A-Z][a-z]{2} \d+|#kiln-studio): Glaze tests are out/);
-    await expect(page.locator('.cp.strip .cp-line')).not.toContainText('Last written');
-    await expect(page.locator('.sr-door')).toBeHidden();
-    // the chat gets the room: the header and strip take at most 130 px
-    const list = (await page.locator('.message-list').boundingBox())!;
+    // r29 / T-335: the head's one line says whose account it is (the room that wrote it), never "Last written"
+    await expect(body.locator('.all-focus-line')).toContainText(/^#kiln-studio's summary: Glaze tests are out/);
+    await expect(body.locator('.all-focus-line')).not.toContainText('Last written');
+    await expect(body.locator('.all-focus-line')).toHaveCount(1);
+    // the chat gets the room: the head and its line take at most 130 px
+    const list = (await body.locator('.message-list').boundingBox())!;
     expect(list.y).toBeLessThanOrEqual(130);
   }
 });
 
 test('a long room name ends in an ellipsis', async ({ page }) => {
   await kiln(page);
-  const t = await page.locator('.sr-title').evaluate((el) => { el.textContent = 'A very long room name that goes on and on and on and on past any window, however wide, whatever the screen, and on again'; const s = getComputedStyle(el); return { display: s.display, overflow: s.textOverflow, cut: el.scrollWidth > el.clientWidth }; });
+  // T-335: the name in the focus head (its button, a flex item of the heading, is the box that cuts)
+  const t = await focus(page).locator('.all-focus-title .all-focus-open').evaluate((el) => { el.textContent = 'A very long room name that goes on and on and on and on past any window, however wide, whatever the screen, and on again'; const s = getComputedStyle(el); return { display: s.display, overflow: s.textOverflow, cut: el.scrollWidth > el.clientWidth }; });
   expect(t.display).toBe('block');
   expect(t.overflow).toBe('ellipsis');
   expect(t.cut).toBe(true);
@@ -153,21 +154,22 @@ test('a long room name ends in an ellipsis', async ({ page }) => {
 
 test('a project that isn\'t set up is said once, under all of the room\'s work', async ({ page }) => {
   await kiln(page);
-  await expect(page.locator('[data-place="project-strip"]')).toHaveCount(0);
-  if (phone()) await page.locator('.cp.strip .cp-line').click();
-  await page.getByRole('button', { name: /^All of Kiln Studio/ }).click();
+  await expect(focus(page).locator('[data-place="project-strip"]')).toHaveCount(0);
+  // T-335: all of its work is in the room's details
+  await focus(page).getByRole('button', { name: /: room details$/ }).click();
+  await focus(page).getByRole('button', { name: /^All of Kiln Studio/ }).click();
   await expect(page.locator('.wv-gaps')).toContainText('Glaze Tests: not set up yet');
 });
 
 test('the composer ring sits in line with the mic and Send, in the room\'s colour', async ({ page }) => {
   onlyPhone();
   await kiln(page);
-  const center = async (sel: string) => { const b = (await page.locator(sel).first().boundingBox())!; return b.y + b.height / 2; };
+  const center = async (sel: string) => { const b = (await focus(page).locator(sel).first().boundingBox())!; return b.y + b.height / 2; };
   expect(Math.abs(await center('.compose-uni') - await center('.compose-row .send'))).toBeLessThanOrEqual(2);
-  const ring = await page.locator('.compose-uni').evaluate((el) => { const s = getComputedStyle(el), b = getComputedStyle(el, '::before'); return { display: s.display, shadow: b.boxShadow, tint: getComputedStyle(el.closest('.sr')!).getPropertyValue('--room-tint') }; });
+  const ring = await focus(page).locator('.compose-uni').evaluate((el) => { const s = getComputedStyle(el), b = getComputedStyle(el, '::before'); return { display: s.display, shadow: b.boxShadow, tint: getComputedStyle(el.closest('.all-focus')!).getPropertyValue('--room-tint') }; });
   expect(ring.display).toBe('flex');
   expect(ring.tint).toContain('hsl');
-  const tintRgb = await page.locator('.compose-uni').evaluate((el) => { const p = document.createElement('i'); p.style.color = 'var(--room-tint)'; el.append(p); const c = getComputedStyle(p).color; p.remove(); return c; });
+  const tintRgb = await focus(page).locator('.compose-uni').evaluate((el) => { const p = document.createElement('i'); p.style.color = 'var(--room-tint)'; el.append(p); const c = getComputedStyle(p).color; p.remove(); return c; });
   expect(ring.shadow).toContain(tintRgb);
 });
 
@@ -182,16 +184,16 @@ test('every room wears one colour: the home, All and the room agree', async ({ p
   expect(await chip.evaluate((el) => (el as HTMLElement).style.getPropertyValue('--room-tint'))).toBe(tint);
   await railNav(page).getByRole('button', { name: 'Uni', exact: true }).click();
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-  await page.getByRole('textbox', { name: /^Message / }).first().waitFor();
-  expect(await page.locator('.sr').first().evaluate((el) => (el as HTMLElement).style.getPropertyValue('--room-tint'))).toBe(tint);
+  await focus(page).getByRole('textbox', { name: /^Message / }).waitFor();
+  expect(await focus(page).evaluate((el) => (el as HTMLElement).style.getPropertyValue('--room-tint'))).toBe(tint);
 });
 
 test('a toast never sits on the composer', async ({ page }) => {
   onlyPhone();
   await kiln(page);
-  await page.locator('.message-list article.message').last().getByRole('group', { name: 'Message actions' }).getByRole('button', { name: 'Copy', exact: true }).click();
+  await focus(page).locator('.message-list article.message').last().getByRole('group', { name: 'Message actions' }).getByRole('button', { name: 'Copy', exact: true }).click();
   const toast = (await page.locator('.toast').boundingBox())!;
-  const composer = (await page.locator('.compose-row').first().boundingBox())!;
+  const composer = (await focus(page).locator('.compose-row').boundingBox())!;
   expect(toast.y + toast.height).toBeLessThanOrEqual(composer.y);
 });
 
@@ -247,9 +249,7 @@ test('a note on a phone keeps its tools on one row, and Quote only shows when th
 test('a task sheet speaks plainly: no "due due", no task number', async ({ page }) => {
   await bootAreas(page, 'seed', TASKS);
   await openRoomWithNeeds(page);
-  await page.getByRole('textbox', { name: /^Message / }).first().waitFor();
-  if (phone()) await page.locator('.cp.strip .cp-line').click();
-  await page.getByRole('region', { name: 'Needs you' }).locator('.cp-need[data-id]').first().click();
+  await focus(page).getByRole('region', { name: 'Needs you' }).locator('.cp-need[data-id]').first().click();
   const sheet = page.locator('.task-sheet').first();
   await expect(sheet).toBeVisible();
   await expect(sheet).not.toContainText(/due due/i);

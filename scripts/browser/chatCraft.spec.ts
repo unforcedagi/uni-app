@@ -108,15 +108,15 @@ async function identityRead(page: Page) {
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 
-/** A room no node owns is under "Other rooms" in the room tree; a phone goes back to the tree first. */
+/** T-335: a room no area holds is under "Other rooms" on Uni's home; it opens in focus over All. A phone steps out of the focus to reach the rail. */
 async function switchRoom(page: Page, name: string) {
-  const drawer = page.locator('.sr-drawer');
-  if (await drawer.count()) await press(drawer);
-  const tree = page.locator('.th-phone-tree, .th-roomnav').filter({ visible: true }).first();
-  const fold = tree.locator('.th-others .th-fold');
-  if (await fold.getAttribute('aria-expanded') !== 'true') await press(fold);
-  await press(tree.locator('.th-other .th-go').filter({ hasText: '#' + name }));
-  await expect(page.getByRole('textbox', { name: `Message ${name}` })).toBeVisible();
+  const focus = page.getByRole('region', { name: /in focus$/ });
+  if (await focus.isVisible()) await press(focus.getByRole('button', { name: 'Back to All' }));
+  await press(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }));
+  const others = page.locator('.fd-others');
+  if (!(await others.evaluate((d) => (d as HTMLDetailsElement).open))) await press(others.locator('summary'));
+  await press(others.getByRole('button', { name: '#' + name, exact: true }));
+  await expect(page.getByRole('region', { name: /in focus$/ }).getByRole('textbox', { name: `Message ${name}` })).toBeVisible();
 }
 
 test.describe('code blocks', () => {

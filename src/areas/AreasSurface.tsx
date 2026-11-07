@@ -128,7 +128,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   /** A note named by path or id in this vault (a brief's link, the area app's), opened in this vault, never in another. */
   const openHere = (ref: string) => actions.openNote({ vault: profile.vault, id: ref });
   // T-335: the To post queue's quiet count, on Uni's vault only (posts are Uni glue): the home, and each area's work
-  const postsLine = (node: string | null) => actions.openPosts && showUniGlue(profile.vault)
+  // (only once signed in: the queue is read with the account's key)
+  const postsLine = (node: string | null) => actions.openPosts && showUniGlue(profile.vault) && identity
     ? <ToPostLine vault={profile.vault} node={node} onOpen={() => actions.openPosts!(node)} /> : null;
   const appActions: AreaActions = { ...actions, openNote: openHere, openRoom: (id: string) => actions.openRoom(id) };
   const rooms = useMemo<RoomInfo[]>(() => (chat ? hostRooms : []), [chat, hostRooms]);
@@ -444,6 +445,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
       return <>
         <button type="button" className="all-focus-scrim" aria-label="Back to All" tabIndex={-1} onClick={allPlace.onUnfocus} />
         <AllFocusSheet key={focus!.room} id={focus!.room} name={focusName} line={line} root={focus!.root} replies={focusReplies} view={focusView} leaving={focus!.leaving} onBack={allPlace.onFocusBack} onView={allPlace.onView} details={details}>
+          {/* the places' health (signing in, a saved copy that couldn't refresh) is said in the room too: All behind it is out of sight */}
+          {status}
           <ApprovalElsewhere approvals={approvalsAll.list.filter((x) => !privateChannel(x.channel) || x.channel === focus!.room)} here={focus!.room} />
           <div className="sr-chat" data-chat={focusChat ? "open" : "waiting"}>{focusChat ? focusChat.render(null, placeholder, focusName) : <ChatWait placeholder={placeholder} retry={actions.retryRooms ?? null} />}</div>
         </AllFocusSheet>

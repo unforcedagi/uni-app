@@ -3,6 +3,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { bootProjects } from './projectsFixture.ts';
 import { railGo } from './railGo';
+import { focusSheet, openDetails } from './areasFixture.ts';
 
 const A = 'a'.repeat(64), B = 'b'.repeat(64);
 const MIN = 60_000;
@@ -15,6 +16,12 @@ async function home(page: Page) {
   await expect(page.locator('[data-place="front-door"]')).toBeVisible();
 }
 /** The first read has landed and been kept on the device for identity A. */
+/** T-335: a door opens its room in focus over All, and its details (the projects strip) inside the focus. */
+async function openRoomDetails(page: Page, name: string) {
+  await door(page, name).click();
+  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(name);
+  await openDetails(page);
+}
 const kept = async (page: Page) => expect.poll(async () => (await workKeys(page)).length).toBeGreaterThan(0);
 
 test('P1: another identity on the same vault never sees the work this device kept for the first', async ({ page }) => {
@@ -27,8 +34,8 @@ test('P1: another identity on the same vault never sees the work this device kep
   await page.reload();
   await expect(door(page, 'Workshop')).toBeVisible();
   await expect(page.locator('.fd-live')).toHaveCount(0);
-  await door(page, 'Workshop').click();
-  await expect(page.locator('.sr-title')).toHaveText('Workshop');
+  await openRoomDetails(page, 'Workshop');
+  await expect(focusSheet(page).getByRole('region', { name: 'Workshop details' })).toBeVisible();
   await expect(page.locator('[data-place="project-strip"] .ps-tab')).toHaveCount(0);
   // the copy kept is the first identity's own, by name
   expect(await workKeys(page)).toEqual([`uni.work.v3:${A}:uni`]);
@@ -58,7 +65,7 @@ test('P2: a ledger longer than the pages read keeps the recent sessions whole, a
   await home(page);
   await expect(page.locator('.fd-status')).toHaveText("Some older sessions aren't loaded");
   await expect(door(page, 'Workshop').locator('.fd-live')).toHaveText('2 working');
-  await door(page, 'Workshop').click();
+  await openRoomDetails(page, 'Workshop');
   await page.locator('[data-place="project-strip"] .ps-tab[data-project="p-coop"]').click();
   const sheet = page.getByRole('dialog', { name: 'Riverbend co-op site' });
   await expect(sheet.locator('.pj-session').filter({ hasText: 'Rebuild the about page' })).toBeVisible();
@@ -169,7 +176,7 @@ test('T-319: the usage line says how old its reading is, says plainly when it is
 test('review f97fx1ji P3: a task list longer than the pages read still places a session found only through its task', async ({ page }) => {
   await bootProjects(page, { bigTasks: 2100 });
   await home(page);
-  await door(page, 'Engine Room').click();
+  await openRoomDetails(page, 'Engine Room');
   await page.locator('[data-place="project-strip"] .ps-tab[data-project="p-backups"]').click();
   const sheet = page.getByRole('dialog', { name: 'Nightly backups' });
   await expect(sheet.locator('.pj-session')).toContainText('Left a commit.');
@@ -187,7 +194,7 @@ test('review f97fx1ji P3: a task read that fails is not taken as the whole list:
   await page.addInitScript(() => sessionStorage.setItem('t.tasksfail', '1'));
   await bootProjects(page);
   await home(page);
-  await door(page, 'Engine Room').click();
+  await openRoomDetails(page, 'Engine Room');
   await page.locator('[data-place="project-strip"] .ps-tab[data-project="p-backups"]').click();
   await expect(page.getByRole('dialog', { name: 'Nightly backups' }).locator('.pj-session')).toContainText('Left a commit.');
 });

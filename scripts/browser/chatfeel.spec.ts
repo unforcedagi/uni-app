@@ -25,11 +25,12 @@ async function boot(page: Page, unread: Record<string, number> = {}, view: 'plac
 }
 async function openRoom(page: Page, name: string) {
   await page.locator(`.fd-door[data-path="Areas/${name}"]`).click();
-  await page.getByRole('textbox', { name: /^Message / }).first().waitFor();
+  await page.locator('.all-focus').getByRole('textbox', { name: /^Message / }).waitFor();
   await page.waitForTimeout(300);
 }
-const box = (page: Page) => page.getByRole('textbox', { name: /^Message / }).first();
-const list = (page: Page) => page.locator('.message-list').first();
+// T-335: the room is in focus over All, whose own composer ("Message for your rooms") stays behind it: the room's chat is the focus's
+const box = (page: Page) => page.locator('.all-focus').getByRole('textbox', { name: /^Message / });
+const list = (page: Page) => page.locator('.all-focus .message-list').first();
 const posts = (page: Page) => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => ({ channel: c.args.channel, body: c.args.body, recipients: c.args.recipients })));
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const status = (page: Page) => page.locator('[data-status-line]');
@@ -41,21 +42,21 @@ const LONG = ['## Firing plan for the week', ...Array.from({ length: 14 }, (_, i
 async function sendAndLook(page: Page, text: string) {
   await box(page).fill(text);
   return page.evaluate(async ({ text, touch }) => {
-    const ta = [...document.querySelectorAll<HTMLTextAreaElement>('textarea')].find((t) => t.getAttribute('aria-label')?.startsWith('Message '))!;
-    const listEl = document.querySelector('.message-list')!;
+    const ta = [...document.querySelectorAll<HTMLTextAreaElement>('.all-focus textarea')].find((t) => t.getAttribute('aria-label')?.startsWith('Message '))!;
+    const listEl = document.querySelector('.all-focus .message-list')!;
     const inList = () => (listEl.textContent ?? '').includes(text);
     // when the message enters the list, timed by the DOM change itself (a frame's length on a busy machine is not the app's delay)
     let seenAt: number | null = null;
     const mo = new MutationObserver(() => { if (seenAt === null && inList()) seenAt = performance.now() - t0; });
     mo.observe(listEl, { childList: true, subtree: true, characterData: true });
     const t0 = performance.now();
-    if (touch) document.querySelector<HTMLButtonElement>('.composer button.send')!.click();
+    if (touch) document.querySelector<HTMLButtonElement>('.all-focus .composer button.send')!.click();
     else ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
     if (seenAt === null && inList()) seenAt = performance.now() - t0;
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     mo.disconnect();
     const value = ta.value;
-    const stop = !!document.querySelector('.composer button[aria-label="Stop Uni"]');
+    const stop = !!document.querySelector('.all-focus .composer button[aria-label="Stop Uni"]');
     return { value, stop, seenAt };
   }, { text, touch: touch() });
 }
@@ -74,13 +75,13 @@ test('the send moment: the composer clears in the same frame, Send becomes Stop,
   // within half a second a line says, in words, what is happening; no machine words
   await expect(status(page)).toBeVisible({ timeout: 500 });
   // the receipt under the question: Sending, then Sent
-  const mine = page.locator('.message-list article.message.mine').filter({ hasText: q }).last();
+  const mine = page.locator('.all-focus .message-list article.message.mine').filter({ hasText: q }).last();
   await expect(mine.locator('.msg-receipt')).toHaveText('Sending');
   await page.waitForTimeout(400);
   // the question sits just under the top of the chat
   const gap = await page.evaluate((q) => {
-    const l = document.querySelector('.message-list')!.getBoundingClientRect();
-    const m = [...document.querySelectorAll('.message-list article.message.mine')].filter((a) => a.textContent!.includes(q)).pop()!.getBoundingClientRect();
+    const l = document.querySelector('.all-focus .message-list')!.getBoundingClientRect();
+    const m = [...document.querySelectorAll('.all-focus .message-list article.message.mine')].filter((a) => a.textContent!.includes(q)).pop()!.getBoundingClientRect();
     return m.top - l.top;
   }, q);
   expect(gap).toBeGreaterThanOrEqual(0);
@@ -119,7 +120,7 @@ test('a long answer anchors under its question: the view does not follow it down
   await expect(reply).toBeVisible();
   await page.waitForTimeout(700);
   const where = await page.evaluate((q) => {
-    const l = document.querySelector('.message-list') as HTMLElement;
+    const l = document.querySelector('.all-focus .message-list') as HTMLElement;
     const lr = l.getBoundingClientRect();
     const mine = [...l.querySelectorAll('article.message.mine')].filter((a) => a.textContent!.includes(q)).pop()!.getBoundingClientRect();
     const first = [...l.querySelectorAll('article.message:not(.mine)')].filter((a) => a.textContent!.includes('Firing plan for the week')).pop()!.querySelector('p')!.getBoundingClientRect();
@@ -274,7 +275,7 @@ test('reading: a long answer has a book page\'s rhythm; tables keep their words 
     // field box is 240 px at 390, its text 202 px (measured on 0.1.90: 194 and 190)
     await box(page).click();
     expect((await box(page).boundingBox())!.width).toBeGreaterThanOrEqual(236);
-    for (const b of await page.locator('.composer .compose-row button:visible').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    for (const b of await page.locator('.all-focus .composer .compose-row button:visible').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   }
 });
 
@@ -286,9 +287,9 @@ test('the New line: a room opened on unread lands on the first unread message, u
   const line = list(page).locator('.new-line');
   await expect(line).toHaveText(/^New · since \d{1,2}:\d{2}/);
   const pos = await page.evaluate(() => {
-    const l = document.querySelector('.message-list')!.getBoundingClientRect();
-    const n = document.querySelector('.message-list .new-line')!.getBoundingClientRect();
-    const next = document.querySelector('.message-list .new-line + article.message')?.textContent ?? '';
+    const l = document.querySelector('.all-focus .message-list')!.getBoundingClientRect();
+    const n = document.querySelector('.all-focus .message-list .new-line')!.getBoundingClientRect();
+    const next = document.querySelector('.all-focus .message-list .new-line + article.message')?.textContent ?? '';
     return { top: n.top - l.top, next };
   });
   expect(pos.top).toBeGreaterThanOrEqual(0);
@@ -367,7 +368,7 @@ test('review: a failed send puts the text back and the room follows new messages
   const q = 'This one will not go';
   const look = await sendAndLook(page, q);
   expect(look.value).toBe('');
-  await expect(page.locator('.composer .error')).toContainText('relay unreachable');
+  await expect(page.locator('.all-focus .composer .error')).toContainText('relay unreachable');
   await expect(box(page)).toHaveValue(q);
   await expect(status(page)).toHaveCount(0);
   // a message from Uni now: the room follows it to the end, as before the send
@@ -386,7 +387,7 @@ test('review: Stop waits for the question to be posted, and two taps post one st
   await expect(stop).toBeEnabled({ timeout: 5000 });
   await page.evaluate(() => (window as any).__react('ch-kiln', '👀'));
   const before = (await posts(page)).length;
-  await page.evaluate(() => { const b = document.querySelector<HTMLButtonElement>('.composer button[aria-label="Stop Uni"]')!; b.click(); b.click(); });
+  await page.evaluate(() => { const b = document.querySelector<HTMLButtonElement>('.all-focus .composer button[aria-label="Stop Uni"]')!; b.click(); b.click(); });
   await expect(list(page).locator('.uni-stopped')).toBeVisible();
   await page.waitForTimeout(1200);
   expect((await posts(page)).slice(before).filter((p) => p.body === '/stop')).toHaveLength(1);
@@ -423,7 +424,7 @@ test('review: a send the relay accepted is sent; a ping in someone else\'s turn 
   await sendAndLook(page, 'Already on the relay');
   await page.waitForTimeout(600);
   await expect(box(page)).toHaveValue('');
-  await expect(page.locator('.composer .error')).toHaveCount(0);
+  await expect(page.locator('.all-focus .composer .error')).toHaveCount(0);
   // someone else's turn: Rowan asked, Uni pings
   await page.evaluate(() => { (window as any).__arrive('ch-kiln', 'Rowan', 'Uni, can you weigh the clay?'); (window as any).__arrive('ch-kiln', 'Uni', '⏳ Working — 2 min — iteration 3/90, terminal'); });
   await expect(status(page)).toContainText('Running a command');

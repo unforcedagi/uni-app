@@ -6,7 +6,8 @@ import { bootAnyVault, resetSeed, scratchEnv } from './lifeosAnyVault';
 
 const SHOTS = process.env.SHOTS_DIR ?? 'scripts/browser/__shots__/lifeos-any-vault';
 const shot = async (page: Page, name: string, tasks = false) => { await mkdir(SHOTS, { recursive: true }); if (tasks) { await page.getByRole('region', { name: 'What needs doing here' }).scrollIntoViewIfNeeded(); await page.evaluate(() => document.querySelector('[aria-label="What needs doing here"]')?.scrollIntoView({ block: 'start' })); await page.waitForTimeout(150); } const s = page.viewportSize()!; await page.screenshot({ path: `${SHOTS}/${name}-${s.width}x${s.height}.png` }); };
-const card = (page: Page, name: string) => page.locator(`.node-arm[data-name="${name}"]`);
+// T-335: a vault without rooms has the tree of places as its home; a place opens its work page
+const card = (page: Page, name: string) => page.locator('.th-phone-tree').getByRole('button', { name, exact: true });
 const titles = (page: Page) => page.locator('.task-row .task-title');
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 

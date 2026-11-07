@@ -1,6 +1,7 @@
 import { mark } from "./startupTrace";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "./chatCache";
 import { keepSame } from "./keepSame";
+import { nodeOfRoom } from "./areas/roomLabels";
 import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
@@ -429,7 +430,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (topNote?.ref !== FOR_YOU_ID) {
       const surfaces = tabsRef.current.tabs.filter((t) => (t.kind === "all" && !!t.channel) || t.kind === "journal");
       const previous = [...tabsRef.current.recent].reverse().map((id) => surfaces.find((t) => t.id === id)).find(Boolean);
-      forYouBack.current = previous?.kind === "all" && previous.channel ? `#${(roomsRef.current.find((r) => r.id === previous.channel)?.name ?? "room").replace(/^#/, "")}` : previous?.title ?? "Uni";
+      // the room in focus, named as its head names it: its place, else the room itself
+      forYouBack.current = previous?.kind === "all" && previous.channel ? nodeOfRoom(previous.channel)?.name || `#${(roomsRef.current.find((r) => r.id === previous.channel)?.name ?? "room").replace(/^#/, "")}` : previous?.title ?? "Uni";
       forYouReturn.current = previous?.id ?? null;
     }
     openTarget({ kind: "note", note: { hub: null, vault: "uni", ref: FOR_YOU_ID }, title: "For you" }, "new");
@@ -961,7 +963,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** T-200: how many messages the applied fetch asked for (a spot to return to waits for the window it was taken in). */
   const appliedLimit = useRef(0);
   const [listEl, setListEl] = useState<HTMLDivElement | null>(null);
+  /** T-335 one surface: the reader's spot as a list went away, for a list of the same room drawn again at once (the surface around a room in
+   *  focus can be drawn anew as the app signs in): it comes back where it was, not at the newest. */
+  const remountSpot = useRef<{ view: string; ref: string; offset: number; at: number } | null>(null);
   const setList = useCallback((el: HTMLDivElement | null) => {
+    if (!el && listRef.current) { const s = spotNowRef.current(); remountSpot.current = s ? { view: s.view, ref: s.ref, offset: s.offset, at: Date.now() } : null; }
     listRef.current = el;
     restoredView.current = null;
     setListEl(el);
@@ -977,6 +983,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const first = [...el.querySelectorAll<HTMLElement>("[data-ref]")].find((m) => m.getBoundingClientRect().bottom > top);
     return first ? { view, ref: first.dataset.ref!, offset: first.getBoundingClientRect().top - top, limit, seq: appliedSeq.current } : null;
   }
+  const spotNowRef = useRef(spotNow);
+  spotNowRef.current = spotNow;
   /** A place's spot: read from its conversation when that is on screen, else the one still waiting to be applied to it (a restart's). */
   function spotOf(t: Tab): (ReturnSpot & { seq: number }) | null {
     const view = viewOf(t), now = restoredView.current === view ? spotNow() : undefined;
@@ -1246,7 +1254,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const spot = returnSpot.current?.view === currentView ? returnSpot.current : null;
     // the device's kept copy holds only the newest messages: a spot further back waits for the fetched window (below)
     if (!spot || (appliedSeq.current > spot.seq && appliedLimit.current >= spot.limit)) returnSpot.current = null;
-    if (spot && pinTo(el, spot)) {
+    const again = !spot && remountSpot.current?.view === currentView && Date.now() - remountSpot.current.at < 2000 ? remountSpot.current : null;
+    remountSpot.current = null;
+    if (again && pinTo(el, again)) {
+      stickToEnd.current = false;
+      settleUntil.current = 0;
+      pinned.current = { ref: again.ref, offset: again.offset, until: Date.now() + SETTLE_MS };
+    } else if (spot && pinTo(el, spot)) {
       returnSpot.current = null;
       stickToEnd.current = false;
       settleUntil.current = 0;

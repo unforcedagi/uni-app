@@ -445,7 +445,7 @@ test.describe('a room in focus', () => {
     await expect.poll(() => sheet(page).locator('.message-list').evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(30);
   });
 
-  test('on a room\'s own page: the approval banner\'s Show on the newest message, and the room goes on following', async ({ page }) => {
+  test('a room opened from the home: the approval banner\'s Show on the newest message, and the room goes on following', async ({ page }) => {
     await boot(page);
     const prompt = JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8')).prompts.two_answers_30min;
     await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
@@ -547,30 +547,41 @@ test.describe('a room in focus', () => {
     await expect(feed(page)).toBeVisible();
   });
 
-  test('the room\'s page (where it stands, its work) is one tap from the focus head; All comes back where it was', async ({ page }) => {
+  test('the room\'s details (where it stands, its work) are one tap from the focus head; Back steps out to All where it was', async ({ page }) => {
     await boot(page);
     await allIn(page);
     const was = await middleOn(page, 'k3');
     await row(page, 'k3').locator('.all-place').click();
     await expect(sheet(page)).toContainText('Glaze tests are out of the kiln');
-    await sheet(page).getByRole('button', { name: "Open Kiln Studio's page" }).click();
-    await expect(sheet(page)).toHaveCount(0);
-    await expect(page.locator('section.sr[data-node="Kiln Studio"]')).toBeVisible();
+    await sheet(page).getByRole('button', { name: 'Kiln Studio: room details' }).click();
+    const details = sheet(page).getByRole('region', { name: 'Kiln Studio details' });
+    await expect(details).toBeVisible();
+    await expect(details).toContainText('Glaze tests are out of the kiln');
+    await expect(details.getByRole('button', { name: /All of Kiln Studio's work/ })).toBeVisible();
+    // the conversation (and its composer) is put aside, not gone; All stays behind
+    await expect(roomBox(page, 'kiln-studio')).toBeHidden();
+    await expect(rail(page).getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-current', 'page');
+    await sheet(page).getByRole('button', { name: 'Back to the conversation in Kiln Studio' }).click();
+    await expect(details).toHaveCount(0);
     await expect(roomBox(page, 'kiln-studio')).toBeVisible();
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await backToAll(page).click();
+    await expect(sheet(page)).toHaveCount(0);
     await expect(row(page, 'k3')).toBeVisible();
     await expect.poll(async () => Math.abs(await feed(page).evaluate((el) => el.scrollTop) - was)).toBeLessThan(2);
-    await expect(sheet(page)).toHaveCount(0);
   });
 
-  test('Back from the room\'s page, opened from its focus, is All again, where it was', async ({ page }) => {
+  test('Android Back from the room\'s details, opened from its focus: the conversation, then All again, where it was', async ({ page }) => {
     await boot(page);
     await allIn(page);
     const was = await middleOn(page, 'k3');
     await row(page, 'k3').locator('.all-place').click();
-    await sheet(page).getByRole('button', { name: "Open Kiln Studio's page" }).click();
-    await expect(page.locator('section.sr[data-node="Kiln Studio"]')).toBeVisible();
+    await sheet(page).getByRole('button', { name: 'Kiln Studio: room details' }).click();
+    await expect(sheet(page).getByRole('region', { name: 'Kiln Studio details' })).toBeVisible();
     await androidBack(page);
+    await expect(sheet(page).getByRole('region', { name: 'Kiln Studio details' })).toHaveCount(0);
+    await expect(roomBox(page, 'kiln-studio')).toBeVisible();
+    await androidBack(page);
+    await expect(sheet(page)).toHaveCount(0);
     await expect(row(page, 'k3')).toBeVisible();
     await expect.poll(async () => Math.abs(await feed(page).evaluate((el) => el.scrollTop) - was)).toBeLessThan(2);
   });
@@ -588,19 +599,6 @@ test.describe('a room in focus', () => {
     await page.waitForTimeout(350);
     const top = await target.evaluate((el) => el.getBoundingClientRect().top - el.closest('.message-list')!.getBoundingClientRect().top);
     expect(Math.abs(top)).toBeLessThan(40);
-  });
-
-  test('leaving for another place from focus ends it: nothing of the room comes back over All', async ({ page }) => {
-    await boot(page);
-    await allIn(page);
-    await row(page, 'k3').locator('.all-place').click();
-    await expect(sheet(page)).toBeVisible();
-    await rail(page).getByRole('button', { name: 'Journal', exact: true }).click();
-    await expect(sheet(page)).toHaveCount(0);
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
-    await expect(feed(page)).toBeVisible();
-    await expect(sheet(page)).toHaveCount(0);
-    await expect(page.locator('.composer')).toHaveCount(0);
   });
 
   test('both drafts wait: what you typed for All and what you typed in the room', async ({ page }) => {
@@ -659,14 +657,15 @@ test.describe('a room in focus', () => {
     await expect(page.getByRole('button', { name: /Pause recording/ })).toBeVisible();
   });
 
-  test('recording in focus, gone to the room\'s page: the pill still brings the focus back, with its thread and composer', async ({ page }) => {
+  test('recording in focus, gone to the room\'s details: the pill brings the conversation back, with its thread and composer', async ({ page }) => {
     await boot(page);
     await allIn(page);
     await feed(page).locator('article.all-msg[data-room="ch-kiln"] .all-place').last().click();
     await sheet(page).getByRole('button', { name: 'Record a voice message' }).click();
     const jump = page.getByRole('button', { name: 'Jump to recording in kiln-studio' });
     await expect(jump).toBeVisible();
-    await sheet(page).getByRole('button', { name: "Open Kiln Studio's page" }).click();
+    await sheet(page).getByRole('button', { name: 'Kiln Studio: room details' }).click();
+    await expect(sheet(page).getByRole('region', { name: 'Kiln Studio details' })).toBeVisible();
     await page.waitForTimeout(400);
     await jump.click();
     await expect(sheet(page).locator('[data-chat="open"]')).toBeVisible();
@@ -674,7 +673,7 @@ test.describe('a room in focus', () => {
     await expect(roomBox(page, 'kiln-studio')).toBeVisible();
   });
 
-  test('the room\'s name is the way to its page, not only the small arrow', async ({ page }) => {
+  test('the room\'s name is the way to its details, not only the small arrow', async ({ page }) => {
     await boot(page);
     await allIn(page);
     await row(page, 'k3').locator('.all-place').click();
@@ -683,7 +682,7 @@ test.describe('a room in focus', () => {
     const box = (await sheet(page).getByRole('heading', { name: 'Kiln Studio' }).boundingBox())!;
     if (touch()) await page.touchscreen.tap(box.x + 30, box.y + box.height / 2);
     else await page.mouse.click(box.x + 30, box.y + box.height / 2);
-    await expect(page.locator('section.sr[data-node="Kiln Studio"]')).toBeVisible();
+    await expect(sheet(page).getByRole('region', { name: 'Kiln Studio details' })).toBeVisible();
   });
 
   test('Escape with a panel over the focus closes the panel only; the room stays', async ({ page }) => {
@@ -790,17 +789,25 @@ test.describe('a room in focus', () => {
     await expect(roomBox(page, 'kiln-studio')).toBeInViewport();
   });
 
-  test('a room that turns out to be private leaves focus at once, and its name goes with it', async ({ page }) => {
+  test('a room that turns out to be private, while in focus: it may stay there, opened by you, but All behind it lets go of it', async ({ page }) => {
     await boot(page);
     await allIn(page);
+    await expect(page.locator('.all-behind article.all-msg[data-room="ch-kiln"]').first()).toBeAttached();
     await row(page, 'k3').locator('.all-place').click();
     await expect(sheet(page).getByRole('heading', { name: 'Kiln Studio' })).toBeVisible();
     // the room is renamed to a private name while it is open (the fixture's rooms list, as the store would answer)
     await page.evaluate(() => { const w = window as any; const next = w.__extraInvoke; let reading = false; w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'get_rooms' && !reading) { reading = true; const rooms = await w.__TAURI_INTERNALS__.invoke('get_rooms'); reading = false; return rooms.map((r: any) => (r.id === 'ch-kiln' ? { ...r, name: 'sanctum' } : r)); } return next(cmd, a); }; });
     await page.evaluate(() => (window as any).__arrive('ch-kiln', 'Uni', 'One more line.'));
-    await expect(sheet(page)).toHaveCount(0, { timeout: 15000 });
+    // All, behind, never lists a private room: its messages and its label go
+    await expect(page.locator('.all-behind article.all-msg[data-room="ch-kiln"]')).toHaveCount(0, { timeout: 15000 });
+    await expect(page.locator('.all-behind')).not.toContainText('One more line.');
+    // and back in All, nothing of it shows
+    await backToAll(page).click();
+    await expect(sheet(page)).toHaveCount(0);
     await expect(feed(page)).toBeVisible();
     expect(await feed(page).evaluate((el) => !!el.closest('[inert]'))).toBe(false);
+    await expect(page.locator('article.all-msg[data-room="ch-kiln"]')).toHaveCount(0);
+    await expect(feed(page)).not.toContainText('One more line.');
   });
 
   test('a private room never gets a label to focus in All', async ({ page }) => {

@@ -313,3 +313,12 @@ body { font-family: var(--g-font-ui); text-rendering: optimizeLegibility; }
 .enso { flex: none; overflow: visible; }
 .enso path { fill: none; stroke: var(--g-accent); stroke-width: 3.4; stroke-linecap: round; }
 .fd-door[data-sign="new"] .fd-sign i { width: 8px; height: 8px; background: var(--g-ink-2); }
+
+/* T-335 one surface: the rooms no area holds, folded under one line on the home (the tree beside a room used to list them) */
+.fd-others { max-width: 720px; width: 100%; margin: 6px auto 0; }
+.fd-others > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font: 500 14px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
+.fd-others ul { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.fd-others button { min-height: 44px; padding: 0 16px; border: var(--g-hair) solid var(--g-line-strong); border-radius: 999px; background: var(--g-paper); color: var(--g-ink); font: 500 13.5px var(--g-font-ui); cursor: pointer; }
+.fd-others button:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+.fd-none { max-width: 720px; font: 400 15px/1.5 var(--g-font-uni); color: var(--g-ink-2); }
+:root[data-screen="ink"] .fd-others button { border: 1px solid #000; color: #000; background: #fff; }

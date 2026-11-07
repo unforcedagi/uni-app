@@ -3,6 +3,7 @@
 // the room's Uni acts on. The native side is projectsFixture.ts (a made-up vault and rooms in the page; nothing leaves it).
 import { expect, test, type Page } from '@playwright/test';
 import { bootProjects } from './projectsFixture.ts';
+import { focusSheet, openDetails } from './areasFixture.ts';
 
 const shot = (page: Page, name: string) => page.screenshot({ path: `__shots__/t302/${test.info().project.name}-${name}.png` });
 const door = (page: Page, name: string) => page.getByRole('navigation', { name: 'Rooms' }).getByRole('button', { name: new RegExp(`^${name}\\b`) });
@@ -11,12 +12,20 @@ const sheet = (page: Page) => page.getByRole('dialog', { name: /co-op site|Mail 
 const posted = (page: Page) => page.evaluate(() => (window as any).__posted as { channel: string; body: string; recipients: string[] }[]);
 const NO_IDS = /\bT-\d+|\brun-|\bmts\b|\bp-coop|\bresume\b|zzzzzzzz/;
 
-async function openRoom(page: Page, name = 'Workshop') {
+/** T-335: a door opens its room in focus over All; the room's projects strip is in its details, inside the focus. */
+const title = (page: Page) => focusSheet(page).locator('.all-focus-title');
+async function enter(page: Page, name: string) {
+  await door(page, name).click();
+  await expect(title(page)).toHaveText(name);
+}
+/** Back from the details to the room's conversation, in the same focus. */
+const toChat = (page: Page) => focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click();
+async function openRoom(page: Page, name = 'Workshop', details = true) {
   await bootProjects(page);
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
-  await door(page, name).click();
-  await expect(page.locator('.sr-title')).toHaveText(name);
+  await enter(page, name);
+  if (details) await openDetails(page);
 }
 async function openProject(page: Page, name: RegExp | string) {
   await strip(page).getByRole('button', { name }).first().click();
@@ -47,9 +56,12 @@ test('the front door is Uni: the seven rooms, where each stands, a mark where se
   await expect(card).toHaveCount(0);
 });
 
-test('round 2: what needs you is one quiet line above the rooms, which opens in place; the room tree has no Uni row', async ({ page }) => {
+test('round 2: what needs you is one quiet line above the rooms, which opens in place; the archived Uni room is no place', async ({ page }) => {
   await bootProjects(page);
   await page.goto('/');
+  // the archived Uni room is no place of the home (T-335: the room tree beside a room is gone; the home's doors are the places)
+  await expect(door(page, 'Workshop')).toBeVisible();
+  await expect(door(page, 'Uni')).toHaveCount(0);
   const line = page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^Needs you · 1/ });
   await expect(line).toBeVisible();
   await expect(page.getByText('Choose the photo for the about page')).toHaveCount(0);
@@ -59,15 +71,15 @@ test('round 2: what needs you is one quiet line above the rooms, which opens in 
   await expect(page.getByRole('region', { name: 'Needs you' })).not.toContainText(NO_IDS);
   await shot(page, '01b-needs-you');
   await item.click();
-  await expect(page.locator('.sr-title')).toHaveText('Riverbend co-op site');
-  // the archived Uni room is no place of the tree
-  if ((page.viewportSize()?.width ?? 0) >= 900) await expect(page.locator('.th-roomnav .th-go[aria-label^="Uni,"]')).toHaveCount(0);
-  else { await page.getByRole('button', { name: 'Places' }).click(); await expect(page.locator('.th-drawer .th-go[aria-label^="Uni,"]')).toHaveCount(0); }
+  // T-335: its place's room, in focus, with its details (what needs you) up
+  await expect(title(page)).toHaveText('Riverbend co-op site');
+  await expect(focusSheet(page).getByRole('region', { name: 'Riverbend co-op site details' })).toContainText('Choose the photo for the about page');
 });
 
 test('a room keeps its chat at the heart, with one strip of its projects: archived behind one tab, a missing folder named', async ({ page }) => {
-  await openRoom(page);
-  await expect(page.getByText('Keep their own words on the cards, please. No rewriting.')).toBeVisible();
+  await openRoom(page, 'Workshop', false);
+  await expect(focusSheet(page).getByText('Keep their own words on the cards, please. No rewriting.')).toBeVisible();
+  await openDetails(page);
   await expect(strip(page).locator('.ps-tab:not(.ps-more)')).toHaveText(['Riverbend co-op site2', 'Seed library catalogue', 'Co-op kiosk']);
   await expect(strip(page).locator('.ps-tab[data-project="p-coop"] .ps-dot')).toBeVisible();
   await expect(strip(page).locator('.ps-tab[data-project="p-seeds"] .ps-dot')).toHaveCount(0);
@@ -78,7 +90,8 @@ test('a room keeps its chat at the heart, with one strip of its projects: archiv
   await shot(page, '03-room');
   // a project filed in another area never shows here, even with a link to it; the rail's Uni is the way back to the front door
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
-  await door(page, 'Town Hall').click();
+  await enter(page, 'Town Hall');
+  await openDetails(page);
   await expect(strip(page).locator('.ps-tab')).toHaveText(['Bike lane map']);
 });
 
@@ -86,7 +99,7 @@ test('a project opens in place: its folder, its live sessions first with what ea
   await openRoom(page);
   const s = await openProject(page, /Riverbend co-op site/);
   await expect(s.locator('.pj-folder code')).toHaveText('~/work/riverbend-site');
-  await expect(page.locator('.sr-title')).toHaveText('Workshop');
+  await expect(title(page)).toHaveText('Workshop');
   const cards = s.locator('.pj-session');
   await expect(cards.nth(0)).toHaveAttribute('data-state', 'running');
   await expect(cards.nth(1)).toHaveAttribute('data-state', 'running');
@@ -148,7 +161,10 @@ test('Stop asks the room in plain words, shown before it is posted; the room sto
   await expect(s.getByRole('heading', { name: 'Sessions · 1 working' })).toBeVisible();
   await shot(page, '06-stopped');
   await page.keyboard.press('Escape');
-  await expect(page.getByText('Stopped it.')).toBeVisible();
+  await expect(s).toHaveCount(0);
+  // the room's Uni says so in the room's conversation
+  await toChat(page);
+  await expect(focusSheet(page).getByText('Stopped it.')).toBeVisible();
 });
 
 test('Add a session runs alongside the ones working, and Fresh start ends one and starts the next with a handoff', async ({ page }) => {

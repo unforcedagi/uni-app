@@ -28,20 +28,28 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
     await page.screenshot({ path: `${dir}/${info.project.name}-${view}.png` });
   };
   // The rail holds Uni, Journal, For you, Vault, Search and Settings at every width it shows. A short landscape screen hides the rail (r13):
-  // a room's header opens the drawer with the app's places, the tree home shows them itself, and Journal goes back to Uni.
+  // Uni's home shows the app's places itself (T-335: a room is in focus over All; its Back goes to All, All's Back to the home).
+  const home = page.locator('[data-place="front-door"][data-view="places"]');
+  const toHome = async () => {
+    for (let i = 0; i < 4 && !(await home.isVisible()); i++) {
+      const focusBack = page.getByRole('region', { name: /in focus$/ }).getByRole('button', { name: 'Back to All' });
+      if (await focusBack.isVisible()) { await focusBack.click(); continue; }
+      const back = page.getByRole('button', { name: /^(← Back|Back to )/ }).filter({ visible: true }).first();
+      if (await back.count()) await back.click(); else break;
+    }
+    await expect(home).toBeVisible();
+  };
   const place = async (name: 'Uni' | 'Journal' | 'For you' | 'Settings' | 'Search') => {
     if (!short) { await railGo(page, name); return; }
     await expect(rail).toBeHidden();
-    if (name === 'Uni') { const back = page.getByRole('button', { name: /^Back to / }); if (await back.isVisible()) await back.click(); return; }
-    // from the Journal (not a room), Uni first
-    if (!await page.locator('.sr-drawer, .th-places-short').first().isVisible()) { await page.getByRole('button', { name: /^Back to / }).click(); await page.locator('.sr-drawer, .th-places-short').first().waitFor(); }
-    if (await page.locator('.sr-drawer').isVisible() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click();
-    await page.locator('.th-places:visible').getByRole('button', { name, exact: true }).click();
+    await toHome();
+    if (name === 'Uni') return;
+    await page.locator('.th-places-short:visible').getByRole('button', { name, exact: true }).click();
   };
   const openPanel = (name: 'Settings' | 'Search') => place(name);
-  // T-302 round 2: the seeded Uni-room tab stays a room (the archived Uni room is no level of the tree any more): measure once it is saved
-  await expect(page.locator('.sr-title')).toHaveText('#Uni');
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('uni.tabs.v2') ?? '{"tabs":[]}').tabs[0]?.kind)).toBe('room');
+  // T-302 round 2 / T-335: the seeded Uni-room tab is the Uni room, in focus over All: measure once it is saved
+  await expect(page.getByRole('region', { name: /in focus$/ }).locator('.all-focus-title')).toHaveText('Uni');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('uni.tabs.v2'))).not.toBeNull();
   await page.waitForTimeout(300);
   for (const control of [page.getByRole('textbox', { name: 'Message Uni' }), page.getByRole('button', { name: 'Record a voice message' }), page.getByRole('button', { name: 'Send message', exact: true })]) await fits(control, true);
   expect((await page.locator('.message-list').boundingBox())!.height).toBeGreaterThan(100);
@@ -69,17 +77,13 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
   await shot('for-you');
   await page.locator('.note-back').click();
   await place('Uni');
-  // the rooms are the tree's: its last row ("Other rooms", then a room no node owns) fits and is a touch target on a phone
-  const narrow = size.width < 900;
-  if (narrow && await page.locator('.sr-drawer').count()) await page.locator('.sr-drawer').click();
-  const tree = page.locator(narrow ? '.th-phone-tree' : '.th-roomnav');
-  await tree.locator('.th-others .th-fold').click();
-  const lastRoom = tree.locator('.th-other .th-go').last();
+  await toHome();
+  // the rooms no area holds are folded on Uni's home: its last one fits and is a touch target on a phone
+  await home.locator('.fd-others summary').click();
+  const lastRoom = home.locator('.fd-others button').last();
   await lastRoom.scrollIntoViewIfNeeded();
   await fits(lastRoom, phone);
   await shot('rooms');
-  // the drawer (below 900px) closes before the rail is used again
-  if (await page.locator('.th-drawer').count()) { await page.keyboard.press('Escape'); await expect(page.locator('.th-drawer')).toHaveCount(0); }
   await openPanel('Settings');
   await expect(page.locator('.settings')).toBeVisible();
   await expect(page.locator('.identity')).toContainText('Signed in as Aaron');

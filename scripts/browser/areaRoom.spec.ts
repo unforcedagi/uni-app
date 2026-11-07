@@ -1,8 +1,9 @@
 // T-75, r14: an area includes its room. Its app is a view inside the room shell (r14: the side-by-side chat and the phone's pull-up sheet are
-// gone): the same header and tree, "‹ Back to chat"; live messages reach the app; a suggestion's draft goes into the room's own composer.
+// gone; T-335: the room is in focus over All, the app opens from its details): live messages reach the app; a suggestion's draft goes into the
+// room's own composer.
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, openAreaPage, openAreasHome } from './areasFixture';
+import { bootAreas, focusSheet, openAreaPage, openAreasHome, openDetails } from './areasFixture';
 
 const openArea = async (page: Page, name: string) => { await openAreasHome(page); await openAreaPage(page, name); };
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c), cmd);
@@ -10,6 +11,11 @@ const arrive = (page: Page, channel: string, name: string, body: string) => page
 const isDesktop = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 const composer = (page: Page, room: string) => page.getByRole('textbox', { name: `Message ${room}` });
 const frame = (page: Page) => page.frameLocator('iframe.area-frame');
+// T-335 one surface: the room is in focus over All; its name heads the sheet; its app opens from its details and the name steps back to the chat
+const sheet = focusSheet;
+const title = (page: Page) => focusSheet(page).locator('.all-focus-title');
+const backToChat = (page: Page) => focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click();
+const openApp = async (page: Page, name: string) => { await openDetails(page); await focusSheet(page).getByRole('button', { name: `Open the ${name} app ›` }).click(); };
 
 // Reports every chat.message the frame hears (and how many) so a test can tell "nothing" from "not yet".
 const LISTENER = `<!doctype html><html><body><pre id="out">none</pre><script>
@@ -20,19 +26,18 @@ uni.chat.recent(1).then(function () { document.getElementById('out').dataset.rec
 const iface = (needs: object[], chat?: string) => ({ contract: 1, needs, ...(chat ? { layout: { chat } } : {}) });
 const ALL = [{ 'vault.read': 'area' }, { 'chat.read': 'area' }, { 'chat.draft': 'area' }];
 
-test.describe('the app is a view in the room shell', () => {
-  test('the room comes first; "App ›" shows the app in the chat\'s place, with the same header and tree; Back to chat returns', async ({ page }) => {
+test.describe('the app is a view in the room\'s focus', () => {
+  test('the room comes first; "Open the app" in its details shows the app in the chat\'s place, under the same name; the name returns to the chat', async ({ page }) => {
     await bootAreas(page, 'seed');
     await openAreasHome(page);
     await openAreaPage(page, 'Techne', { app: false });
-    await expect(page.locator('.sr-chat')).toBeVisible();
-    await page.getByRole('button', { name: 'Open the Techne app' }).click();
-    await expect(page.locator('.sr-work iframe.area-frame')).toHaveCount(1);
-    await expect(page.locator('.sr-title')).toHaveText('Techne');
-    if (isDesktop(page)) await expect(page.locator('.th-roomnav')).toBeVisible();
+    await expect(sheet(page).locator('.sr-chat')).toBeVisible();
+    await openApp(page, 'Techne');
+    await expect(sheet(page).locator('.fx-app iframe.area-frame')).toHaveCount(1);
+    await expect(title(page)).toHaveText('Techne');
     await expect(page.locator('.area-chat, .area-tabs, .area-bar, .room-chips, .area-divider')).toHaveCount(0);
-    await expect(page.locator('.sr-chat')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Back to chat' }).click();
+    await expect(sheet(page).locator('.sr-chat')).toBeHidden();
+    await backToChat(page);
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
     await expect(composer(page, 'Techne')).toBeVisible();
   });
@@ -48,20 +53,27 @@ test.describe('the app is a view in the room shell', () => {
   test('Escape and Alt+← close the app view before they change places', async ({ page }) => {
     await bootAreas(page, 'seed');
     await openArea(page, 'Techne');
-    await expect(page.locator('.sr-work iframe.area-frame')).toHaveCount(1);
+    await expect(sheet(page).locator('.fx-app iframe.area-frame')).toHaveCount(1);
     await page.locator('.sr-appbar').click({ position: { x: 5, y: 5 } });
     await page.keyboard.press('Alt+ArrowLeft');
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
-    await expect(page.locator('.sr-title')).toHaveText('Techne');
+    await expect(title(page)).toHaveText('Techne');
+    // Escape too: the app first, then its details, then the conversation, still in focus
+    await openApp(page, 'Techne');
+    await expect(sheet(page).locator('.fx-app iframe.area-frame')).toHaveCount(1);
+    await page.locator('.sr-appbar').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('Escape');
+    await expect(page.locator('iframe.area-frame')).toHaveCount(0);
+    await expect(title(page)).toHaveText('Techne');
   });
 
   test('an area with no room of its own talks in the room that holds it, and says so', async ({ page }) => {
     await bootAreas(page, 'seed');
     await openArea(page, 'Relationships');
-    // r15: the real room is the heading; the area is a line under it
-    await expect(page.locator('.sr-title')).toHaveText('Relationships'); // r20 (Codex 6): the node stays the heading
-    await expect(page.locator('.sr-context')).toHaveText('Chat in #Uni · no room of its own yet');
-    await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #Uni'); // r13: the channel's own name
+    // r20 (Codex 6): the node stays the heading; T-335: the room it talks in is the head's one line
+    await expect(title(page)).toHaveText('Relationships');
+    await expect(sheet(page).locator('.all-focus-line')).toHaveText('Talks in #Uni · no room of its own yet');
+    await expect(sheet(page).locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #Uni'); // r13: the channel's own name
   });
 });
 
@@ -81,9 +93,9 @@ test.describe('the room is the real room', () => {
     await bootAreas(page, 'seed');
     await openArea(page, 'Techne');
     await page.reload();
-    await expect(page.locator('.sr-title')).toHaveText('Techne');
+    await expect(title(page)).toHaveText('Techne');
     await expect(composer(page, 'Techne')).toBeVisible();
-    await expect(page.locator('.sr-chat .message-list')).toContainText('Run it on the laptop first.');
+    await expect(sheet(page).locator('.sr-chat .message-list')).toContainText('Run it on the laptop first.');
   });
 });
 
@@ -99,8 +111,8 @@ test.describe('live messages', () => {
     await expect(f.locator('#latest-body')).toContainText('Uni');
     await expect(f.locator('#pulse li').first()).toContainText('the sheet works');
     // the room's own conversation has it too
-    await page.getByRole('button', { name: 'Back to chat' }).click();
-    await expect(page.locator('.sr-chat .message-list')).toContainText('the sheet works');
+    await backToChat(page);
+    await expect(sheet(page).locator('.sr-chat .message-list')).toContainText('the sheet works');
     await mkdir('shots/t75', { recursive: true });
     await page.screenshot({ path: `shots/t75/${info.project.name}-live-techne.png` });
   });
@@ -180,7 +192,7 @@ test.describe('suggestions', () => {
     await expect(composer(page, 'Techne')).toHaveValue('Pairing on the bridge tonight');
     expect(await calls(page, 'post_message')).toHaveLength(0);
     // a second suggestion goes after the draft
-    await page.getByRole('button', { name: 'Open the Techne app' }).click();
+    await openApp(page, 'Techne');
     await f.locator('#t').fill('second thought'); await f.locator('#go').click();
     await page.locator('.area-app .suggestion-bar').getByRole('button', { name: 'Add to draft' }).click();
     await expect(composer(page, 'Techne')).toHaveValue('Pairing on the bridge tonight\n\nsecond thought');
@@ -206,13 +218,13 @@ test.describe('screenshots', () => {
         await openArea(page, 'Techne');
         await expect(frame(page).locator('#latest-body')).toContainText('Ship Techne first');
         await page.screenshot({ path: `shots/t75/${info.project.name}-${scheme}-techne.png` });
-        await page.getByRole('button', { name: 'Back to chat' }).click();
+        await backToChat(page);
         await openArea(page, 'Unforced Development');
         await expect(frame(page).locator('#s-msgs')).toContainText('2');
         await page.screenshot({ path: `shots/t75/${info.project.name}-${scheme}-unforced.png` });
-        await page.getByRole('button', { name: 'Back to chat' }).click();
+        await backToChat(page);
         await openArea(page, 'Sanctum');
-        await expect(page.locator('.sr-chat')).toContainText('Sat twenty minutes');
+        await expect(sheet(page).locator('.sr-chat')).toContainText('Sat twenty minutes');
         await page.screenshot({ path: `shots/t75/${info.project.name}-${scheme}-default.png` });
       });
     });
@@ -234,8 +246,9 @@ test.describe('the app never hears the chat', () => {
     await openArea(page, 'Thief');
     await page.getByRole('button', { name: 'Allow' }).click();
     await expect(frame(page).locator('#i')).toBeAttached();
-    await expect(page.locator('.sr-chat textarea')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Back to chat' }).click();
+    // T-335: the conversation keeps its place (and its draft) hidden under the app: its composer is not on screen and can't take a key
+    await expect(sheet(page).locator('.sr-chat textarea')).toBeHidden();
+    await backToChat(page);
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
     const box = composer(page, 'Techne');
     await box.click();

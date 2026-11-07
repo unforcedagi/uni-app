@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { bootAreas, leaveFrontDoor } from './areasFixture';
+import { bootAreas, openDetails } from './areasFixture';
 
 /** The fixture's made-up Garden project's room (areasFixture `garden`). */
 const GARDEN = '5b0c4e8a-2f3d-4c1e-9a7b-6d8e0f1a2b3c';
@@ -79,21 +79,19 @@ async function open(page: Page, publish = true) {
   await bootAreas(page, 'seed', { tree: true, tasks: true, garden: true, pinned: true });
   await toGarden(page);
 }
-/** The made-up Garden project's room, from the tree (the phone's drawer, or the rooms nav beside the chat). */
+/** The made-up Garden project's room: its door on Uni's home, in focus over All (T-335 one surface). */
 async function toGarden(page: Page) {
-  const nav = wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
-  await leaveFrontDoor(page); // T-302: the tree is in a room
-  if (!wide(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
-  await nav.locator('.th-row.d1').first().waitFor();
-  for (let i = 0; i < 12; i++) { const f = nav.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
-  await nav.locator('.th-go[data-path="Projects/Garden"]').click();
-  await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Garden');
+  await page.locator('[data-place="front-door"]').first().waitFor();
+  await page.locator('.fd-door[data-path="Projects/Garden"]').click();
+  await expect(focus(page).locator('.all-focus-title')).toHaveText('Garden');
+  await expect(focus(page).locator('.sr-chat')).toBeVisible();
 }
+const focus = (page: Page) => page.getByRole('region', { name: /in focus$/ });
 const arrive = (page: Page, body: string) => page.evaluate(([b, t]) => (window as any).__arrive(b, 'Uni', t), [GARDEN, body] as const);
 /** Opens a note from a room message's chip: beside the chat (wide) or over it (phone). */
 async function openNote(page: Page, id: string, words: string): Promise<Locator> {
   await arrive(page, `${words} uni:${id}`);
-  await page.locator('.sr-chat .message').filter({ hasText: words }).locator('a.note-chip').first().click();
+  await focus(page).locator('.sr-chat .message').filter({ hasText: words }).locator('a.note-chip').first().click();
   const view = page.locator('.note-view').last();
   await expect(view.locator('.note-body')).toBeVisible();
   return view;
@@ -190,7 +188,7 @@ test.describe('published media in notes and decisions', () => {
   test('a decision card shows the clip its note links, playable in the card; the page stays a link; its Context plays the same clip', async ({ page }) => {
     await open(page);
     await arrive(page, `Your call on the garden walk cut. uni:${DEC}`);
-    const card = page.locator('.sr-chat .message').filter({ hasText: 'Your call on the garden walk cut' }).getByRole('region', { name: 'Decision: Which cut of the garden walk?' });
+    const card = focus(page).locator('.sr-chat .message').filter({ hasText: 'Your call on the garden walk cut' }).getByRole('region', { name: 'Decision: Which cut of the garden walk?' });
     await expect(card).toBeVisible();
     await expect(card.locator('video')).toHaveCount(1);
     await expect(card.locator('figure.pub-video')).toHaveAttribute('data-url', VIDEO);
@@ -217,9 +215,10 @@ test.describe('published media in notes and decisions', () => {
   });
 
   test('the decision\'s sheet (Needs you) plays the clip too', async ({ page }) => {
-    test.skip(!wide(page), 'the sheet opens from the companion, beside the chat');
     await open(page);
-    const row = page.locator('.cp').getByText('Which cut of the garden walk?').first();
+    // T-335: what needs you is in the room's details, inside the focus (the companion beside the chat is gone)
+    await openDetails(page);
+    const row = focus(page).locator('.all-focus-details').getByText('Which cut of the garden walk?').first();
     await row.click();
     const sheet = page.locator('.task-sheet[role="dialog"]');
     await expect(sheet.getByRole('heading', { name: 'Which cut of the garden walk?' })).toBeVisible();
