@@ -304,7 +304,8 @@ function ThreadRow({ t, who, note, selected, onOpen }: { t: ThreadSummary; who: 
   </button></li>;
 }
 
-export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; backTo?: string }) {
+/** 0.2: Mail is a place on the rail, so it has no Back of its own (the rail and the system Back are the way out); `onBack` is for a host that has none. */
+export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; backTo?: string }) {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [boxesProblem, setBoxesProblem] = useState<MailProblem | null>(null);
   const [scope, setScope] = useState<Scope>(remembered.scope);
@@ -620,7 +621,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const composing = !!compose && !compose.hidden;
   return <section className="mail mail-a" aria-label="Mail" data-pane={pane} data-composing={composing && pane === "thread" ? "true" : undefined}>
     <header className="note-bar mail-bar">
-      <button className="note-action" onClick={onBack}>← {backTo}</button>
+      {onBack && <button className="note-action" onClick={onBack}>← {backTo}</button>}
       <span className="mail-title"><strong>Mail</strong>{overview && <small className="mail-account" title="The address this device reads as">{overview.login}{writesOffered(overview) ? "" : " · reading only"}</small>}</span>
       <button className="note-action note-refresh" aria-label="Refresh" title="Refresh" onClick={() => void refresh()} disabled={listLoading}><RefreshIcon /></button>
     </header>

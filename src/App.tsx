@@ -8,7 +8,7 @@ import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { forgetComposer } from "./all/AllView";
 import { FOCUS_OUT_MS, type AllFocusState, type FocusView } from "./all/AllFocus";
 import { saidIn } from "./all/allCore";
-import { MoreIcon, SearchIcon, ToPostIcon, VaultIcon, SettingsIcon, UniIcon, JournalIcon, StarIcon, MailIcon, CalendarIcon, MessagesIcon, AllIcon } from "./Icons";
+import { MoreIcon, SearchIcon, ToPostIcon, VaultIcon, SettingsIcon, UniIcon, JournalIcon, MailIcon, CalendarIcon, MessagesIcon } from "./Icons";
 import Mail from "./Mail";
 import Calendar from "./calendar/Calendar";
 import { calShown, forgetCalendar, onCalShown, probeCalendar } from "./calendar/calDoor";
@@ -58,7 +58,7 @@ import { checkHeld, forgetHeld, heldCount, mailUnread, onHeldCount, onMailUnread
 import { decisionRefsIn, unreferenced } from "./decisionView";
 import { findUniMember, findUniRoom, searchHandoffText } from "./uniActions";
 import Search from "./Search";
-import Journal from "./Journal";
+import Journal, { JournalVaultSetting } from "./Journal";
 import { AREA_ASK, areaRooms, shareText, type JournalNote } from "./journalCore";
 import { useRecorder, voiceFileName, type RecorderControls } from "./recorder";
 import RecordingPill from "./RecordingPill";
@@ -377,6 +377,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const renderedForYou = useRef<string | null>(null);
   const [forYouReload, setForYouReload] = useState(0);
   const lifeVault = effectiveLifeVault(useLifeOsVault(), vaults); // PR 6: the For you pin is Uni glue, shown (and fetched) only while the selected vault is uni
+  /** 0.2 one home: All is the home wherever the Uni glue is on (a vault of your own without it keeps its places page) */
+  const homeIsAll = showUniGlue(lifeVault);
   async function refreshForYou() {
     if (!showUniGlue(lifeVault)) return;
     try {
@@ -791,10 +793,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setChecking(o.checking ? { channel: room, text: o.checking } : null);
     };
     // (a note left unsaved asks first: the room comes up once the person leaves it, and not at all if they stay)
-    if (activeTab(tabsRef.current)?.kind !== "all") openTarget({ kind: "all", title: "All" }, "focus", false, false, go); else go();
+    if (activeTab(tabsRef.current)?.kind !== "all") openTarget({ kind: "all", title: "Uni" }, "focus", false, false, go); else go();
   }
   /** `fromHistory`: Back and Forward move through the places visited; they do not add to them. */
   function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false, fromHistory = false, then?: () => void) {
+    // 0.2 one home: Uni's places page is All, with its places under the head (an older save, a step back, a place's way up)
+    if (target.kind === "areas" && !target.path && homeIsAll) target = { kind: "all", title: "Uni" };
     // already in All, with a room in focus: All is what is behind it
     if (target.kind === "all" && allFocusRef.current && activeTab(tabsRef.current)?.kind === "all") {
       // a panel over it goes first; the room stays in focus under it
@@ -1071,7 +1075,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       let next = openedEarly.current && activeTab(tabsRef.current) ? tabsRef.current : saved ? restoreTabs(saved, ids) : migrateLegacyTabs(legacy, ids);
       // T-335 one surface: an area saved with its room (an older version's room page) reopens as that room in focus over All
       const was = activeTab(next);
-      if (was?.kind === "area" && was.channel) { const tabs = next.tabs.filter((t) => t.kind !== "all" || t.id === was.id).map((t) => (t.id === was.id ? { id: t.id, kind: "all" as const, title: "All", channel: was.channel, ...(was.path ? { path: was.path } : {}) } : t)); next = { ...next, tabs, recent: next.recent.filter((id) => tabs.some((t) => t.id === id)) }; }
+      if (was?.kind === "area" && was.channel) { const tabs = next.tabs.filter((t) => t.kind !== "all" || t.id === was.id).map((t) => (t.id === was.id ? { id: t.id, kind: "all" as const, title: "Uni", channel: was.channel, ...(was.path ? { path: was.path } : {}) } : t)); next = { ...next, tabs, recent: next.recent.filter((id) => tabs.some((t) => t.id === id)) }; }
       // T-294: Uni's side's last place (the way back from Messages, Mail, the Journal), and its spot, which the room comes back to
       let place = null;
       try { place = readUniPlace(localStorage.getItem(UNI_PLACE_KEY), ids); } catch { /* private storage */ }
@@ -1081,7 +1085,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         // The app opens to Uni: the front door of the area rooms (T-302: the archived Uni room is no longer the home, so none is attached).
         // Without a Uni room (an account that has none) it opens the first room.
         const target: TabTarget = readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" }
-          : uni || !rows[0] ? { kind: "areas", title: "Uni" } : { kind: "all", title: "All", channel: rows[0].id };
+          : uni || !rows[0] ? { kind: "areas", title: "Uni" } : { kind: "all", title: "Uni", channel: rows[0].id };
         next = openTab(next, target, "new", () => crypto.randomUUID());
       }
       // T-302: a restored Uni place is Uni's own level when it carries its room, else the front door (as resolveTarget decides for an open)
@@ -2518,7 +2522,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // the system default runs (the app goes to the background, as usual).
   // T-302: Uni's home is the front door of the area rooms (Uni's own level, with its room, is a row of the tree); asking for the home
   // closes that level wherever it is open.
-  const uniHome = (): TabTarget => { setRootOpenMemory(false); return { kind: "areas", title: "Uni" }; };
+  // 0.2 one home: with the Uni glue (rooms and areas in the uni vault) the home is All's stream, its places folded under its head
+  /** At the home: Uni's places page, or (0.2, with the Uni glue) All with no room in focus. The system's own Back runs there. */
+  const atHome = (t: TabTarget | null | undefined) => !!t && (t.kind === "areas" ? !t.path : t.kind === "all" && homeIsAll && !allFocusRef.current);
+  const uniHome = (): TabTarget => { setRootOpenMemory(false); return homeIsAll ? { kind: "all", title: "Uni" } : { kind: "areas", title: "Uni" }; };
   /** r22 (Codex 2): the last Uni or area opened, which a room's own Back (a phone's) goes up to. Kept for this session only. */
   const originRef = useRef<TabTarget | null>(null);
   /** T-294: the place on Uni's side a utility was opened from (Uni, an area, a room, a thread; kept on the device): the Back of the Journal, the
@@ -2542,12 +2549,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // A level goes up, a room on a phone goes back to the room tree (Uni's own level, opened from the tree, too); anything else goes to Uni.
     if (areaBack.current) { areaBack.current(); return; }
     const cur = activeTab(tabsRef.current);
-    if (cur?.kind !== "areas") openTarget(cur && isUniSide(cur) ? originRef.current ?? uniHome() : origin(), "replace");
+    // 0.2 one home: All with nothing in focus is the home, as Uni's places page was
+    if (atHome(cur)) return;
+    openTarget(cur && isUniSide(cur) && cur.kind !== "all" ? originRef.current ?? uniHome() : origin(), "replace");
   };
   // At Uni's room tree (nothing open over it) the system's own Back runs: the app goes to the background.
   const [modalOpen, setModalOpenState] = useState(false);
   useEffect(() => { const on = (e: Event) => setModalOpenState(((e as CustomEvent<number>).detail ?? 0) > 0); window.addEventListener("uni-modal", on); return () => window.removeEventListener("uni-modal", on); }, []);
-  const canGoBack = railMore || modalOpen || !!sheetFor || !!panel || journalFocus || notes.length > 0 || asideShown || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
+  const canGoBack = railMore || modalOpen || !!sheetFor || !!panel || journalFocus || notes.length > 0 || asideShown || searchOpen || !!root || hasAreaBack || !!allFocus || (!!activeTab(tabs) && !atHome(activeTab(tabs)));
   // Ctrl+W (Linux, Windows) closes what is open over the place. r22 (Codex 6): on macOS the native menu's "Close Window" owns Cmd+W.
   const closeActiveRef = useRef(() => {});
   const goHistoryRef = useRef<(by: -1 | 1) => void>(() => {});
@@ -2604,8 +2613,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [canGoBack]);
   const active = activeTab(tabs);
   useEffect(() => { setRailMore(false); }, [active?.id]);
+  // 0.2 one home: a restored Uni places page (an older version's save) is the home, All
+  useLayoutEffect(() => { if (homeIsAll && tabsReady.current && active?.kind === "areas" && !active.path) openTarget(uniHome(), "replace"); }, [homeIsAll, active?.id, active?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (active && (active.kind === "areas" || active.kind === "area")) { const { id: _id, ...t } = active; originRef.current = t; } }, [active]);
-  const originTitle = uniPlace.current?.title || "Uni";
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const areasOpen = active?.kind === "areas" || active?.kind === "area";
   /** T-335 one surface: every room opens in focus over All; Uni's home (and a vault without rooms, its areas' work) is the other side of it. */
@@ -2706,7 +2716,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       { label: "Mail", go: () => openTarget({ kind: "mail", title: "Mail" }) },
       ...(calOn ? [{ label: "Calendar", go: () => openTarget({ kind: "calendar", title: "Calendar" }) }] : []),
       ...(msgsOn ? [{ label: "Messages", go: () => openTarget({ kind: "messages", title: "Messages" }) }] : []),
-      ...(showUniGlue(lifeVault) ? [{ label: "All", go: () => openTarget({ kind: "all", title: "All" }) }, { label: "For you", go: openForYou }, { label: "To post", go: () => openTarget({ kind: "posts", title: "To post" }) }, { label: "Arcade", go: () => openTarget({ kind: "arcade", title: "Arcade" }) }] : []),
+      ...(showUniGlue(lifeVault) ? [{ label: "For you", go: openForYou }, { label: "To post", go: () => openTarget({ kind: "posts", title: "To post" }) }, { label: "Arcade", go: () => openTarget({ kind: "arcade", title: "Arcade" }) }] : []),
       { label: "Vault", go: () => openVaultPlace(false) },
       { label: "Search", go: openFind },
       { label: "Settings", go: () => { setSearchOpen(false); setPanel("settings"); setForgetArmed(false); } },
@@ -2721,18 +2731,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
     journalRecording && journalTab ? { title: "Journal", tabId: journalTab.id, controls: journalRecording.controls, finish: "save" as const } : null;
   return <ApprovalsContext.Provider value={approvalsView}><NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault" || active?.kind === "mail" || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "arcade"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
     <nav ref={railRef} className="rail" aria-label="Main navigation" onClickCapture={(e) => { if (!(e.target as HTMLElement).closest(".rail-more")) setRailMore(false); }}>
-      {/* T-335 one surface: Uni is always its home; the room you were in is All's (All keeps it in focus) */}
-      <button aria-label="Uni" aria-current={uniShown ? "page" : undefined} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
-      {/* T-335: All is a place of its own, one tap from any room; rooms stay the main way in, and the app never opens on it */}
-      {showUniGlue(lifeVault) && <button aria-label="All" aria-current={!panel && !searchOpen && !topNote && allOpen ? "page" : undefined} onClick={() => openTarget({ kind: "all", title: "All" })}><i><AllIcon /></i><span>All</span></button>}
+      {/* 0.2 one home: Uni is the home, All's stream with its places under the head; a room is in focus over it */}
+      <button aria-label="Uni" aria-current={uniShown || (!panel && !searchOpen && !topNote && allOpen) ? "page" : undefined} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
       <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })} aria-describedby={[held > 0 && "rail-mail-held", unreadMail > 0 && "rail-mail-unread"].filter(Boolean).join(" ") || undefined}><i><MailIcon />{held > 0 && <span className="rail-count" aria-hidden="true">{held}</span>}{unreadMail > 0 && <span className="rail-dot" aria-hidden="true" />}</i><span>Mail</span>{held > 0 && <span id="rail-mail-held" hidden>{held} waiting for you</span>}{unreadMail > 0 && <span id="rail-mail-unread" hidden>{unreadMail} unread in your Inbox</span>}</button>
       {/* T-335 as Aaron: on a phone the bar is four places and More; the rest open from a sheet above it. On a wider screen More is hidden and the rest sit on the rail (display: contents) */}
-      <button className="rail-more" aria-label="More" aria-describedby={forYou.fresh && showUniGlue(lifeVault) ? "rail-more-fresh" : undefined} aria-expanded={railMore} aria-controls="rail-extras" aria-current={!railMore && (panel || searchOpen || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "arcade" || active?.kind === "vault" || topNote) ? "page" : undefined} onClick={() => { setPanel(null); setSearchOpen(false); setRailMore((o) => !o); }}><i><MoreIcon />{(forYou.fresh && showUniGlue(lifeVault)) && <span className="rail-dot" aria-hidden="true" />}</i><span>More</span>{(forYou.fresh && showUniGlue(lifeVault)) && <span hidden id="rail-more-fresh">Something new in For you</span>}</button>
+      <button className="rail-more" aria-label="More" aria-expanded={railMore} aria-controls="rail-extras" aria-current={!railMore && (panel || searchOpen || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "arcade" || active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID)) ? "page" : undefined} onClick={() => { setPanel(null); setSearchOpen(false); setRailMore((o) => !o); }}><i><MoreIcon /></i><span>More</span></button>
       <div id="rail-extras" className={`rail-extras${railMore ? " open" : ""}`}>
       {calOn && <button aria-label="Calendar" aria-current={!panel && !searchOpen && (active?.kind === "calendar" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "calendar", title: "Calendar" })}><i><CalendarIcon /></i><span>Calendar</span></button>}
       {msgsOn && <button aria-label="Messages" aria-current={!panel && !searchOpen && (active?.kind === "messages" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "messages", title: "Messages" })}><i><MessagesIcon /></i><span>Messages</span></button>}
-      {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>}
       {showUniGlue(lifeVault) && <button aria-label="To post" aria-current={!panel && !searchOpen && (active?.kind === "posts" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "posts", title: "To post" })}><i aria-hidden="true"><ToPostIcon /></i><span>To post</span></button>}
       {/* T-335 Taste Arcade: small games that teach Uni your taste */}
       {showUniGlue(lifeVault) && <button aria-label="Arcade" aria-current={!panel && !searchOpen && (active?.kind === "arcade" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "arcade", title: "Arcade" })}><i><ArcadeIcon /></i><span>Arcade</span></button>}
@@ -2753,7 +2760,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         <UpdateSettings /><ClaudeUsage /><MotionSetting /><LifeOsVaultSetting vaults={vaults} /><SealedApprovals />
         <section className="settings-device" aria-label="This device"><h2>This device</h2><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary settings-forget" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget. You'll need to pair again." : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep it</button>}</section>
         {/* r13: the machinery (the app sandbox's self-test, where the app connects) is for whoever builds Uni, not part of ordinary Settings */}
-        <details className="settings-dev"><summary>Developer</summary>{hub && <p className="settings-dev-line">Notes hub: <code>{hub}</code></p>}{syncDetail && <p className="settings-dev-line">Last sync: {syncDetail}</p>}<AreaSelfTest /></details></div>}
+        <details className="settings-dev"><summary>Developer</summary>{hub && <p className="settings-dev-line">Notes hub: <code>{hub}</code></p>}{syncDetail && <p className="settings-dev-line">Last sync: {syncDetail}</p>}<JournalVaultSetting /><AreaSelfTest /></details></div>}
       {searchOpen && <Search initialQuery={searchQuery} onQuery={(q) => { lastSearch.current = q; }} recent={navControls.recent} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
@@ -2772,15 +2779,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
     <section className="conversation" aria-label={journalOpen ? "Journal" : active?.kind === "mail" ? "Mail" : active?.kind === "calendar" ? "Calendar" : active?.kind === "messages" ? "Messages" : active?.kind === "posts" ? "To post" : active?.kind === "arcade" ? "Arcade" : shellOpen ? "Uni" : active?.kind === "note" ? "Note" : "Conversation"}>
       {/* T-335: an update is a line at the top, in the flow: never over the composer */}
       <UpdateBanner />
-      {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} backTo={originTitle} onBack={() => openTarget(origin())} onRecordingChange={(on, controls) => { journalRecordingRef.current = on; setJournalRecording(on && controls ? { controls } : null); }} /></div>}
-      {active?.kind === "mail" ? <Mail backTo={originTitle} onBack={() => openTarget(origin())} />
-      : active?.kind === "calendar" ? <Calendar backTo={originTitle} onBack={() => openTarget(origin())} />
-      : active?.kind === "messages" ? <Messages backTo={originTitle} onBack={() => openTarget(origin())} />
+      {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onRecordingChange={(on, controls) => { journalRecordingRef.current = on; setJournalRecording(on && controls ? { controls } : null); }} /></div>}
+      {/* 0.2: the rail's places have no Back pill of their own: the rail (and the system Back, to where you came from) is the way out */}
+      {active?.kind === "mail" ? <Mail />
+      : active?.kind === "calendar" ? <Calendar />
+      : active?.kind === "messages" ? <Messages />
       : active?.kind === "arcade" ? <ArcadeView ownerName={myName ?? null} onBack={() => openTarget(origin())} onOpenNote={openArcadeNote} />
-      : active?.kind === "posts" ? <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} backTo={originTitle} onBack={() => openTarget(origin())} />
-      : active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} backTo={originTitle} onBack={() => openTarget(origin())} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
+      : active?.kind === "posts" ? <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} />
+      : active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : shellOpen && active ? <AreasSurface allPlace={allOpen ? { backTo: "Uni", from: null, onBack: () => openTarget(uniHome()), focus: allFocus, onFocus: (room, ref, threadRoot, place) => focusInAll(room, ref ?? null, threadRoot ?? null, place), onUnfocus: endAllFocus, onFocusBack: stepBackInFocus, onView: setFocusView } : null} noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} rooms={rooms} actions={areaActions} roomFor={areaRoomFor}
+      : shellOpen && active ? <AreasSurface allPlace={allOpen ? { backTo: "Uni", from: null, onBack: () => openTarget(uniHome()), forYou: homeIsAll ? { fresh: forYou.fresh, open: openForYou } : null, focus: allFocus, onFocus: (room, ref, threadRoot, place) => focusInAll(room, ref ?? null, threadRoot ?? null, place), onUnfocus: endAllFocus, onFocusBack: stepBackInFocus, onView: setFocusView } : null} noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} rooms={rooms} actions={areaActions} roomFor={areaRoomFor}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>

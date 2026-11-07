@@ -1,4 +1,4 @@
-import { SettingsIcon, MicIcon } from "./Icons";
+import { MicIcon, RefreshIcon } from "./Icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useRecorder, type RecorderControls } from "./recorder";
@@ -22,7 +22,7 @@ function when(iso: string) {
 /** The vault's limit on a journal entry's audio (MAX_AUDIO_BYTES in uni-core). */
 const JOURNAL_AUDIO_LIMIT = 50 * 1024 * 1024;
 
-export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "Uni", onRecordingChange, focus, onFocus }: { focus: boolean; onFocus: () => void; rooms: Room[]; uniRoomId: string | null; onShare: ShareFn; onBack: () => void; /** r22: the place Back returns to */ backTo?: string; onRecordingChange?: (recording: boolean, controls?: RecorderControls) => void }) {
+export default function Journal({ rooms, uniRoomId, onShare, onRecordingChange, focus, onFocus }: { focus: boolean; onFocus: () => void; rooms: Room[]; uniRoomId: string | null; onShare: ShareFn; /** 0.2: no Back of its own (a place on the rail) */ onBack?: () => void; backTo?: string; onRecordingChange?: (recording: boolean, controls?: RecorderControls) => void }) {
   const [cfg, setCfg] = useState<VaultConfig | null>(null);
   const [entries, setEntries] = useState<JournalNote[]>([]);
   const [queued, setQueued] = useState<QueuedEntry[]>([]);
@@ -64,7 +64,6 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   const inFlight = useRef(new Set<string>());
   // without a hub there is no link, and a room must never get the entry's words instead
   const areas = cfg?.hub ? areaRooms(rooms, uniRoomId) : [];
-  const [settings, setSettings] = useState(false);
   /** The entry the same words were already saved as (a duplicate save shows it instead of adding one). */
   const [again, setAgain] = useState<string | null>(null);
   /** The new words match this entry: nothing is saved until "Save another" or "Keep one". */
@@ -155,7 +154,10 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
     invoke<FlushReport>("journal_flush").then((r) => { if (r.sent.length) void afterFlush(r, "Queued journal entries"); }).catch(() => {});
     const online = () => invoke<FlushReport>("journal_flush").then((r) => afterFlush(r, "Queued journal entries")).catch(() => {});
     window.addEventListener("online", online);
-    return () => window.removeEventListener("online", online);
+    // 0.2: the Journal's vault, changed in Settings, is read again here
+    const moved = (e: Event) => { setCfg((e as CustomEvent<VaultConfig>).detail); void load(false); };
+    window.addEventListener("uni-journal-config", moved);
+    return () => { window.removeEventListener("online", online); window.removeEventListener("uni-journal-config", moved); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -262,13 +264,11 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   const queuedOnly = queued.filter((q) => !q.note_id || !entries.some((e) => e.id === q.note_id));
 
   return <>
-    <header className="conversation-header">
-      <button className="back icon-button" onClick={onBack} aria-label={`Back to ${backTo}`} title={`Back to ${backTo}`}>‹</button>
+    {/* 0.2: the Journal is a place on the rail: no Back of its own, and where it is kept is set in Settings (Developer) */}
+    <header className="conversation-header page-bar journal-bar">
       <div><strong>Journal</strong><small>{cfg ? `Private · in your vault, ${cfg.vault}` : "Private · your vault"}</small></div>
-      <button className="icon-button" onClick={() => setSettings(!settings)} aria-label="Journal settings" aria-expanded={settings}><SettingsIcon /></button>
-      <button className="icon-button" onClick={() => { void load(false); void invoke<FlushReport>("journal_flush").then((r) => afterFlush(r, "Synced")).catch((e) => setError(String(e))); }} disabled={loading} aria-label="Refresh journal">↻</button>
+      <button className="note-action note-refresh" onClick={() => { void load(false); void invoke<FlushReport>("journal_flush").then((r) => afterFlush(r, "Synced")).catch((e) => setError(String(e))); }} disabled={loading} aria-label="Refresh journal" title="Refresh"><RefreshIcon /></button>
     </header>
-    {settings && cfg && <JournalSettings cfg={cfg} onSaved={(c) => { setCfg(c); setSettings(false); void load(false); }} />}
     <div className="journal-compose">
       <div className="journal-writing-heading"><p className="journal-prompt">{greeting(new Date())}</p><button className="note-action" aria-pressed={focus} onClick={onFocus}>Focus</button></div>
       <textarea value={text} onChange={(e) => { edit(e.target.value); if (same) { setSame(null); setStatus(""); } }} placeholder="What's here right now…" rows={4} maxLength={65536} aria-label="Journal entry"
@@ -319,6 +319,15 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
       {more && entries.length > 0 && <div className="older"><button onClick={() => void load(true)} disabled={loading}>{loading ? "Loading…" : "Older journal entries"}</button></div>}
     </div>
   </>;
+}
+
+/** 0.2: where the Journal is kept (its hub and vault), in Settings → Developer. A save tells the open Journal, which reads again. */
+export function JournalVaultSetting() {
+  const [cfg, setCfg] = useState<VaultConfig | null>(null);
+  useEffect(() => { invoke<VaultConfig>("journal_config").then(setCfg).catch(() => {}); }, []);
+  if (!cfg) return null;
+  return <section className="settings-journal" aria-label="Journal's vault"><p className="settings-dev-line">Journal is kept in</p>
+    <JournalSettings cfg={cfg} onSaved={(c) => { setCfg(c); window.dispatchEvent(new CustomEvent("uni-journal-config", { detail: c })); }} /></section>;
 }
 
 function JournalSettings({ cfg, onSaved }: { cfg: VaultConfig; onSaved: (c: VaultConfig) => void }) {

@@ -11,6 +11,8 @@ import "./glow/glow.css";
 import "./chatFeel.css";
 // T-335 as Aaron: the finishing pass over every screen, last so it reads as the final word
 import "./glow/finish.css";
+// Uni 0.2: one home and one calm language across the screens, the last word
+import "./v02.css";
 
 /** A render error in remote content must not blank the whole app. */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {

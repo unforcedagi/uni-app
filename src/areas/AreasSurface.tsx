@@ -102,7 +102,7 @@ const viaMemory: { path: string | null; via: string | null } = { path: null, via
  */
 export default function AreasSurface({ allPlace = null, identity, path, rooms: hostRooms, roomsPending = false, actions, roomFor, onOpenArea, onBackChange, onOverlayChange }: {
   /** T-335: this surface is the All place: every area's room at once, the room in focus over it, and the way back to Uni. */
-  allPlace?: { backTo: string; from?: { path?: string; channel?: string } | null; onBack: () => void;
+  allPlace?: { backTo: string; from?: { path?: string; channel?: string } | null; onBack: () => void; /** 0.2: For you, opened from the home's drawer */ forYou?: { fresh: boolean; open: () => void } | null;
     /** The room in focus over All, and how to put one there (at a message, in a thread, for a place); how it ends; its steps. */
     focus: AllFocusState | null; onFocus: (room: string, ref?: string | null, root?: string | null, place?: { path?: string | null; view?: FocusView }) => void;
     /** Ends the focus (a tap on All behind it). */ onUnfocus: () => void; /** One step back inside the focus, the last one to All. */ onFocusBack: () => void;
@@ -181,6 +181,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const closeProject = () => setProjectOpen(null);
   /** A vault without rooms: the place's app, shown in its page's place (Back closes it). */
   const [appOpen, setAppOpen] = useState(false);
+  /** 0.2 one home: the head's drawer (what needs you, For you, the places) is pulled down; Back closes it */
+  const [pulled, setPulled] = useState(false);
   const focusView: FocusView = focus?.view ?? "chat";
   /** Without rooms, a place's page is its work; with rooms, the focus's "all of its work" step. */
   const workShown = !chat ? !!node : focusView === "work";
@@ -190,10 +192,10 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   } : rootOpen ? () => setRootOpen(false) : null;
   const overlay: Overlay | null = projectOpen ? { close: closeProject, modal: true, history: false } : sheetId ? { close: closeSheet, modal: true, history: false }
     : appOpen && !chat ? { close: () => setAppOpen(false), modal: false, history: true } : null;
-  const overlayKey = `${projectOpen ? "project" : ""}${sheetId ? "sheet" : ""}${appOpen && !chat ? "app" : ""}`;
+  const overlayKey = `${projectOpen ? "project" : ""}${sheetId ? "sheet" : ""}${appOpen && !chat ? "app" : ""}${pulled && chat && allPlace ? "pulled" : ""}`;
   // (layout effects: what is over the place is known to the host's Back before the first key can reach it)
   useLayoutEffect(() => {
-    onBackChange(projectOpen ? closeProject : sheetId ? closeSheet : appOpen && !chat ? () => setAppOpen(false) : back);
+    onBackChange(projectOpen ? closeProject : sheetId ? closeSheet : appOpen && !chat ? () => setAppOpen(false) : pulled && chat && allPlace ? () => setPulled(false) : back);
     return () => onBackChange(null);
   }, [path, data, onBackChange, overlayKey, rootOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => { onOverlayChange?.(overlay); }, [overlayKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -414,15 +416,20 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const all = allRooms.length ? { rooms: allRooms, onOpenAt: openRoomAt } : null;
     const needsKnown = tasks.error || tasks.truncated || tasks.treeTruncated || (allNeeds.pending ?? []).some((t) => t.askFailed || t.check?.kind === "unavailable") ? "failed" as const : !tasks.ready || tasks.savedAt || (allNeeds.pending?.length ?? 0) > 0 ? "reading" as const : "known" as const;
     const focusRoomOpen = focus && !focus.leaving ? focus.room : null;
-    const home = <>{status}<ApprovalRows approvals={allPlace ? approvalsAll.list.filter((x) => !privateChannel(x.channel)) : approvalsAll.list} className="cp-list cp-approvals th-approvals" />
+    const approvalRows = <ApprovalRows approvals={allPlace ? approvalsAll.list.filter((x) => !privateChannel(x.channel)) : approvalsAll.list} className="cp-list cp-approvals th-approvals" />;
+    // 0.2 one home: with rooms, the home is All; what the old home held (what needs you, the approvals, For you, To post, the places, the
+    // rooms no area holds, the Unfiled sessions) is in the drawer under its head
+    const home = <>{status}{!allPlace && approvalRows}
       <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={(p) => openPlace(p)} onOpenNeed={(p) => openPlace(p, "details")} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
-        otherRooms={allPlace ? [] : others} noAreas={!!data && !error && !doorAreas.length ? (uniRef ? () => actions.openRoom(uniRef.id) : null) : undefined}
-        toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} onOpenProject={allPlace ? undefined : setProjectOpen} />
+        otherRooms={others} noAreas={!!data && !error && !doorAreas.length ? (uniRef ? () => actions.openRoom(uniRef.id) : null) : undefined}
+        toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} onOpenProject={setProjectOpen}
+        pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.some((x) => !privateChannel(x.channel)) ? approvalRows : null} forYou={allPlace?.forYou ?? null} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>;
     // the home's Unfiled sessions open in place over it
     if (!allPlace) return <div className="areas-home tree-home-wrap">{home}{projectSheet}</div>;
     // T-335: All with nothing read yet, or no area with a room of its own: it says which (the focus still comes up over it)
-    const behind = all ? home : <AllEmpty reading={signingIn || loading || !data || roomsPending} error={error && !data ? retryAreas : null} onBack={allPlace.onBack} />;
+    // 0.2: once the places are read, the home is there even with no area room yet (its places, open)
+    const behind = all || (data && !roomsPending && !loading) ? home : <AllEmpty reading={signingIn || loading || !data || roomsPending} error={error && !data ? retryAreas : null} />;
     // T-335 one fluid surface: All, and over it the room in focus
     const focusChat = focus ? roomFor(focus.room, focus.root) : null;
     const focusInfo = focus ? hostRooms.find((r) => r.id === focus.room) ?? null : null;
@@ -455,7 +462,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
           </section>}
         </div>;
       return <>
-        <button type="button" className="all-focus-scrim" aria-label="Back to All" tabIndex={-1} onClick={allPlace.onUnfocus} />
+        <button type="button" className="all-focus-scrim" aria-label="Back to Uni" tabIndex={-1} onClick={allPlace.onUnfocus} />
         <AllFocusSheet key={focus!.room} id={focus!.room} name={focusName} line={line} root={focus!.root} replies={focusReplies} view={focusView} leaving={focus!.leaving} onBack={allPlace.onFocusBack} onView={allPlace.onView} details={details}>
           {/* the places' health (signing in, a saved copy that couldn't refresh) is said in the room too: All behind it is out of sight */}
           {status}
@@ -472,7 +479,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
       <AreaView area={appArea} mode={node && !isRoot ? mode : "closed"} roomName={roomName} actions={appActions} room={roomFor(nodeRoom)} open={focusView === "app"} onOpen={(v) => allPlace.onView(v ? "app" : "chat")} render={inner} />;
     return <ApprovalsContext.Provider value={{ ...approvalsAll, open: openApproval }}><div className="areas-home tree-home-wrap all-surface" data-focus={focus ? (focus.leaving ? "leaving" : "open") : undefined}>
       <div className="all-behind" inert={!!focus && !focus.leaving}>{behind}</div>
-      {focus && withApp(sheet)}
+      {focus ? withApp(sheet) : <>{sheetView}{projectSheet}</>}
     </div></ApprovalsContext.Provider>;
   }
 

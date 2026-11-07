@@ -115,7 +115,7 @@ function Card({ p, vault, busy, setBusy, onDone }: { p: PostCard; vault: string;
   </article>;
 }
 
-export default function ToPost({ vault, node, backTo, onBack }: { vault: string; node?: string | null; backTo: string; onBack: () => void }) {
+export default function ToPost({ vault, node, backTo = "Uni", onBack }: { vault: string; node?: string | null; backTo?: string; onBack?: () => void }) {
   const [posts, setPosts] = useState<PostCard[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
@@ -134,7 +134,7 @@ export default function ToPost({ vault, node, backTo, onBack }: { vault: string;
   const card = (p: PostCard) => <Card key={p.id} p={p} vault={vault} busy={busy} setBusy={setBusy} onDone={(m) => { setSaid(m); void load(); }} />;
   return <section className="tp-page" aria-label="To post">
     <header className="note-bar tp-bar">
-      <button className="note-action" onClick={onBack}>← {backTo}</button>
+      {onBack && <button className="note-action" onClick={onBack}>← {backTo}</button>}
       <span className="tp-title"><strong>To post</strong>{node && <small> · {node.split("/").pop()}</small>}</span>
       <button className="note-action note-refresh" aria-label="Refresh" title="Refresh" onClick={() => void load()}><RefreshIcon /></button>
     </header>

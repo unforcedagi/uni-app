@@ -385,7 +385,7 @@ function Conflicts({ list, tz, onOpen, onClose }: { list: Conflict[]; tz: string
 
 // ── the place ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export default function Calendar({ backTo, onBack }: { backTo: string; onBack: () => void }) {
+export default function Calendar({ backTo = "Uni", onBack }: { backTo?: string; onBack?: () => void }) {
   const phone = useMedia("(max-width: 599px)");
   // a slow screen (the Daylight: Settings → Calm screen): no shadows either. Its stillness is the root's (App.css), reduced motion's too
   const still = useCalmScreen();
@@ -554,7 +554,7 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
 
   return <section className={`cal ${still ? "cal-still" : ""}`} aria-label="Calendar" aria-busy={busy || undefined}>
     <header className="note-bar cal-bar">
-      <button className="note-action" onClick={onBack}>← {backTo}</button>
+      {onBack && <button className="note-action" onClick={onBack}>← {backTo}</button>}
       <span className="cal-title"><strong>Calendar</strong>{offline && <span className="cal-offline" role="status">Offline{savedWords ? ` · saved ${savedWords}` : ""}</span>}{sess?.role === "uni" && <small> · as Uni</small>}</span>
       {offline ? <button className="note-action" onClick={() => void load(true)}>Retry</button> : <button className="note-action note-refresh" aria-label="Refresh" title="Refresh" onClick={() => void load(true)}><RefreshIcon /></button>}
     </header>

@@ -149,9 +149,11 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
       </button>
       {note && !tools && <button className="note-action quiet" onClick={() => setAsNote(true)}>Open as a note</button>}
       {note && tools && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
-      {note && tools && !compact && <button className="note-action" aria-label="New note" onClick={() => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "")}><span className="only-wide">New note</span><span className="only-narrow">New</span></button>}
-      {note && tools && !editing && !compact && <button className="note-action" aria-label="Copy markdown" onClick={() => void copyText(note.content ?? "", "Copied markdown")}><span className="only-wide">Copy markdown</span><span className="only-narrow">Copy</span></button>}
-      {note && tools && !editing && isMarkdownNote(note.extension) && <NoteDownload note={note} title={heading} compact={compact} />}
+      {/* 0.2: Back, Edit and one More: a new note, Copy and Download live in it (the note beside a chat keeps its own short bar) */}
+      {note && tools && !compact && !editing && <NoteDownload note={note} title={heading} markdown={isMarkdownNote(note.extension)} extra={[
+        { label: "New note", run: () => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "") },
+        { label: "Copy markdown", run: () => void copyText(note.content ?? "", "Copied markdown") }]} />}
+      {note && tools && compact && !editing && isMarkdownNote(note.extension) && <NoteDownload note={note} title={heading} compact={compact} />}
       {actions}
     </header>
     {note && editing ? <NoteEditor vault={data!.vault} note={note} onDirty={onDirty} onCancel={() => setEditing(false)} onSaved={(updated) => { setData({ ...data!, note: { ...data!.note, ...updated } }); setEditing(false); }} /> : <div className="note-scroll">

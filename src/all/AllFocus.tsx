@@ -46,7 +46,7 @@ export function AllFocusSheet({ id, name, line, root, replies, view = "chat", le
   const moved = useRef(false);
   const inChat = view === "chat";
   const back = !inChat ? (view === "details" ? { label: "Chat", aria: `Back to the conversation in ${name}` } : { label: "Details", aria: `Back to ${name}'s details` })
-    : root ? { label: name, aria: `Back to ${name}` } : { label: "All", aria: "Back to All" };
+    : root ? { label: name, aria: `Back to ${name}` } : { label: "Uni", aria: "Back to Uni" };
   const sub: FocusLine | null = view === "details" ? { src: "Room details", text: "" } : view === "work" ? { src: "All of its work", text: "" } : view === "app" ? { src: "Its app", text: "" }
     : root ? { src: `Thread${replies !== null ? ` · ${replies} ${replies === 1 ? "reply" : "replies"}` : ""}`, text: "" } : line;
   const region = view === "details" ? `${name} details` : view === "work" ? `${name}'s work` : `${name}'s app`;

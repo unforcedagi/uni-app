@@ -53,3 +53,7 @@ dist-tour/
 dist-fluid/
 /dist-onesurface/
 /dist-one/
+/dist-v02/
+/dist-v02/
+*.local.config.ts
+*.local.spec.ts
