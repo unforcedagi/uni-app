@@ -169,8 +169,8 @@ test.describe('the focus head and the room\'s details', () => {
     await expect(line).toHaveCount(1);
     await expect(line.locator('.all-focus-src')).toHaveText(/^#choir's summary/);
     await expect(line).toContainText('The hall is held on Tuesdays');
-    // a tap on the head: the room's details, in the same sheet, over the same All
-    await sheet(page).getByRole('button', { name: /Choir.*details/ }).click();
+    // a tap on the head, its line too: the room's details, in the same sheet, over the same All
+    if (touch()) await line.tap(); else await line.click();
     await expect(details(page)).toBeVisible();
     await inFocus(page, 'Choir');
     await expect(details(page)).toContainText('The hall is held on Tuesdays; the winter set is printed.');

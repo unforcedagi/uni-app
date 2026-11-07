@@ -27,8 +27,6 @@
 /* the head's titles are one button: the room's details (and back to the conversation from them) */
 .all-focus-titles { box-sizing: border-box; position: relative; flex: 1; min-width: 0; padding: 4px 30px 4px 0; cursor: pointer; display: flex; flex-direction: column; -webkit-tap-highlight-color: transparent; }
 .all-focus-open { all: unset; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-/* the button covers the whole of the titles (name, line and chevron): one target */
-.all-focus-open::after { content: ""; position: absolute; inset: 0; }
 .all-focus-open:focus-visible { outline: none; }
 .all-focus-titles:has(.all-focus-open:focus-visible) { outline: 2px solid var(--g-focus); outline-offset: 2px; border-radius: 8px; }
 .all-focus-title { margin: 0; display: flex; align-items: center; gap: 8px; font: 520 19px/1.2 var(--g-font-display); font-variation-settings: "SOFT" 60, "opsz" 72; color: var(--g-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

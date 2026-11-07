@@ -61,7 +61,8 @@ export function AllFocusSheet({ id, name, line, root, replies, view = "chat", le
       onPointerCancel={endPull}>
       <button type="button" className="note-action all-focus-back" aria-label={back.aria} onClick={onBack}><span aria-hidden="true">←</span> {back.label}</button>
       {/* the name is the room's heading, and its button is the whole of the titles: the room's details, and from them (or its work) the conversation again */}
-      <div className="all-focus-titles">
+      {/* a tap anywhere on the titles (the name, its line, the chevron) is the button's; the button itself is the way for keys and screen readers */}
+      <div className="all-focus-titles" onClick={(e) => { if (!(e.target as Element).closest(".all-focus-open")) onView(inChat ? "details" : "chat"); }}>
         <h2 className="all-focus-title"><button type="button" className="all-focus-open" aria-expanded={!inChat} aria-label={inChat ? `${name}: room details` : `${name}: back to the conversation`} title={inChat ? "Room details" : "Back to the conversation"}
           onClick={() => onView(inChat ? "details" : "chat")}>{name}</button></h2>
         {sub && <p className="all-focus-line"><span className="all-focus-src">{sub.src}{sub.text ? ":" : ""}</span>{sub.text && <> {sub.text}</>}</p>}
