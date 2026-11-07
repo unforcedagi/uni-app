@@ -96,7 +96,7 @@ test('a card answered on another device leaves Needs you as soon as Uni edits it
   test.setTimeout(120_000);
   await boot(page);
   const ref = await cardArrives(page);
-  if (await strip(page).count()) await strip(page).click();
+  await places(page);
   const rows = page.locator('.cp-sealed');
   await expect(rows).toHaveCount(1);
   await answeredElsewhere(page, ref);
@@ -108,7 +108,7 @@ test('a card answered on another device leaves the room it is open in: no button
   test.setTimeout(120_000);
   await boot(page);
   const ref = await cardArrives(page);
-  if (await strip(page).count()) await strip(page).click();
+  await places(page);
   await page.locator('.cp-sealed').first().getByRole('button').click();
   const c = page.getByRole('region', { name: 'Approve use of dns-zone', exact: true });
   await expect(c).toBeVisible();
