@@ -59,6 +59,10 @@ async function back(page: Page) {
 async function switchRoom(page: Page, name: string) {
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await tap(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }));
+  // 0.2: the rooms no area holds are in the home's drawer, under its head
+  const pull = page.locator('[data-place="front-door"] .fd-pull');
+  await pull.waitFor();
+  if ((await pull.getAttribute('aria-expanded')) !== 'true' && await pull.isEnabled()) await tap(pull);
   const others = page.locator('.fd-others');
   if (!(await others.evaluate((d) => (d as HTMLDetailsElement).open))) await tap(others.locator('summary'));
   await tap(others.getByRole('button', { name: '#' + name, exact: true }));
@@ -165,7 +169,10 @@ test('Open as page shows today\'s full note, and its Back comes back to the chat
   await tap(pane.getByRole('button', { name: 'Open as page' }));
   const pageView = page.locator('.note-sheet');
   await expect(pageView.locator('.note-title')).toHaveText('Spring planting plan');
-  await expect(pageView.getByRole('button', { name: 'Copy markdown' })).toBeVisible(); // the full page, with its own tools
+  // the full page, with its own tools (0.2: under its one More)
+  await pageView.getByRole('button', { name: 'More for this note' }).click();
+  await expect(pageView.getByRole('button', { name: 'Copy markdown' })).toBeVisible();
+  await pageView.getByRole('button', { name: 'More for this note' }).click();
   await expect(pane).toHaveCount(0);
   await back(page);
   await expect(pageView).toHaveCount(0);

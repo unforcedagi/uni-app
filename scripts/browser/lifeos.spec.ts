@@ -55,7 +55,9 @@ test.describe('device cache', () => {
     const timing = await page.evaluate(() => (window as any).__areasTiming);
     expect(timing.fromCache).toBe(true);
     expect(timing.cacheMs).toBeLessThan(500);
-    // the network answers later and replaces it
+    // the network answers later and replaces it (once the rooms come the stream takes the home and the drawer folds: pull it down again)
+    await expect(page.locator('[data-place="front-door"] .fd-pull')).toBeEnabled({ timeout: 6000 });
+    await pullDown(page);
     await expect(areaCard(page, 'Unforced Development')).toBeVisible({ timeout: 6000 });
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('uni.areas.cache.v2') || 'null'));
     expect(saved.areas.map((a: any) => a.name)).toContain('Unforced Development');
@@ -113,16 +115,15 @@ test.describe('device cache', () => {
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await page.getByRole('button', { name: 'Codes match', exact: true }).click();
     // 0.2: the home is All's stream; account B's places can't be read, and it says so in place of the stream
-    await expect(page.locator('[data-place="front-door"] .all-quiet')).toContainText("Couldn't read your places just now.");
+    await expect(page.getByRole('alert')).toContainText("Couldn't load areas");
     await expect(areaCard(page, 'Techne')).toHaveCount(0);
   });
 
   test('a first load that fails says so', async ({ page }) => {
     await bootAreas(page, 'seed', { queryFails: ['area'] });
     await openAreasHome(page);
-    // 0.2: the home is All's stream; with nothing read it says so in place of the stream, with a way to try again
-    await expect(page.locator('[data-place="front-door"] .all-quiet')).toContainText("Couldn't read your places just now.");
-    await expect(page.locator('[data-place="front-door"]').getByRole('button', { name: 'Try again' })).toBeVisible();
+    // 0.2: the home is still drawn (its drawer keeps the rooms no area holds), and it says so, as the places page did
+    await expect(page.getByRole('alert')).toContainText("Couldn't load areas");
   });
 });
 

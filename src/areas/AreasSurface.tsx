@@ -454,7 +454,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     // T-335: All with nothing read yet, or no area with a room of its own: it says which (the focus still comes up over it)
     // 0.2: once the places are read, the home is there even with no area room yet (its places, open)
     // (while the rooms list is still coming, the home is there with its places open: a door can be tapped on a slow cold launch)
-    const behind = all || data ? home : <AllEmpty reading={signingIn || loading || !data || roomsPending} error={error && !data ? retryAreas : null} />;
+    // (and when the places can't be read, the home still: its drawer keeps the rooms no area holds, For you and the error with its retry)
+    const behind = all || data || (error && !signingIn) ? home : <AllEmpty reading={signingIn || loading || !data || roomsPending} error={error && !data ? retryAreas : null} />;
     // T-335 one fluid surface: All, and over it the room in focus
     const focusChat = focus ? roomFor(focus.room, focus.root) : null;
     const focusInfo = focus ? hostRooms.find((r) => r.id === focus.room) ?? null : null;

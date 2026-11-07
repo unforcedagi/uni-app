@@ -14,6 +14,10 @@ async function switchRoom(page: Page, name: string) {
   // a phone's bar steps aside while the composer has the keys: the keys go first, as a thumb on the bar does
   if (phone) await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await press(page, page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }));
+  // 0.2: the rooms no area holds are in the home's drawer, under its head
+  const pull = page.locator('[data-place="front-door"] .fd-pull');
+  await pull.waitFor();
+  if ((await pull.getAttribute('aria-expanded')) !== 'true' && await pull.isEnabled()) await press(page, pull);
   const others = page.locator('.fd-others');
   if (!(await others.evaluate((d) => (d as HTMLDetailsElement).open))) await press(page, others.locator('summary'));
   await press(page, others.getByRole('button', { name: '#' + name, exact: true }));
