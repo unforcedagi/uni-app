@@ -70,3 +70,43 @@
   :root[data-screen="ink"] .rail-extras.open { box-shadow: none; border: 1.5px solid #000; animation: none; }
   :root[data-screen="ink"] .rail-more-scrim { background: rgba(255, 255, 255, .7); animation: none; }
 }
+
+/* ── one page head for every place on the rail: the place's name on the left in the display serif, a small line under it, one quiet
+   action on the right (a panel's is its ×). No Back pill on a place the rail opens; a page opened over one (a note, a thread) keeps its Back. ── */
+.mail-bar, .cal-bar, .tp-bar, .msgs-bar, .page-bar { display: flex !important; flex-wrap: nowrap !important; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding-top: 10px; padding-bottom: 8px; border-bottom: var(--g-hair) solid var(--g-line); background: var(--g-ground); }
+.mail-bar > :first-child, .cal-bar > :first-child, .tp-bar > :first-child, .msgs-bar > :first-child, .page-bar > :first-child { margin-right: auto; }
+.mail-title, .cal-title, .tp-title, .msgs-title, .journal-bar > div { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; text-align: left; }
+.mail-title strong, .cal-title strong, .tp-title strong, .msgs-title strong, .journal-bar strong, .vault-browser > .page-bar > strong, .panel-head h1 {
+  font: 560 24px/1.1 var(--g-font-display) !important; font-variation-settings: "SOFT" 60, "opsz" 72; letter-spacing: -.01em; color: var(--g-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mail-title small, .cal-title small, .tp-title small, .msgs-title small, .journal-bar small { font: 400 12.5px/1.3 var(--g-font-ui) !important; color: var(--g-ink-2) !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.cal-title { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 6px; }
+.journal-bar { min-height: 64px; }
+.journal-bar > div { flex: 1; }
+.panel-head { padding: 14px 12px 8px 22px; min-height: 52px; }
+.page-bar .note-refresh, .mail-bar .note-refresh, .cal-bar .note-refresh, .tp-bar .note-refresh { width: 40px; height: 40px; min-height: 40px; padding: 0; display: grid; place-items: center; border: 0; background: none; border-radius: 50%; color: var(--g-ink-2); }
+.page-bar .note-refresh:hover, .mail-bar .note-refresh:hover, .cal-bar .note-refresh:hover, .tp-bar .note-refresh:hover { background: var(--g-sunk); color: var(--g-ink); }
+:root[data-screen="ink"] .mail-bar, :root[data-screen="ink"] .cal-bar, :root[data-screen="ink"] .tp-bar, :root[data-screen="ink"] .msgs-bar, :root[data-screen="ink"] .page-bar { border-bottom: 1.5px solid #000; }
+
+/* ── the vault: a folder's + only under a pointer, on hover ── */
+@media (hover: none) { .vault-folder-actions.marks { display: none; } }
+@media (hover: hover) { .vault-folder .vault-folder-actions.marks { opacity: 0; transition: opacity var(--g-t-quick) var(--g-ease); } .vault-folder:hover .vault-folder-actions.marks, .vault-folder:focus-within .vault-folder-actions.marks { opacity: 1; } }
+.vault-browser .empty .all-link { display: inline-block; margin-top: 6px; }
+
+/* ── papercuts the sweep found ── */
+/* a room's name is a real target (it opens the details) */
+.all-focus-open { min-height: 32px; display: inline-flex; align-items: center; }
+/* Settings: the key reads, and its copy mark is a target */
+.identity { opacity: 1; color: var(--g-ink-2); }
+.identity-copy { opacity: 1; min-width: 32px; min-height: 32px; color: var(--g-ink-2); border-radius: 8px; }
+.identity-copy:hover { background: var(--g-sunk); }
+/* a journal entry's ⋯ reads in greyscale */
+.journal-list .message-more-go { opacity: 1 !important; color: var(--g-ink-2); }
+/* a room's latest reply on a touch screen: Try again, 👍 and Reply; Copy and Save as note are in the long-press sheet with the rest */
+@media (hover: none) { .msg-actions.always .act-copy, .msg-actions.always .act-save { display: none; } }
+/* the Arcade's greyscale switch, held on by an ink screen, still reads */
+.arcade-place .ta-grey-switch:disabled { opacity: 1; color: var(--g-ink-2); }
+.arcade-place .ta-grey-switch:disabled > span:not(.ta-grey-knob), .arcade-place .ta-grey-switch:disabled b { color: var(--g-ink-2); opacity: 1; }
+/* the vault: the name field and New note on one line */
+.vault-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.vault-toolbar input { flex: 1; min-width: 0; }
+.vault-toolbar .vault-folder-actions { width: auto; padding: 0; flex: none; }

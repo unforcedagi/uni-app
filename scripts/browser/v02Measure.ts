@@ -63,7 +63,9 @@ export async function measure(page: Page): Promise<Measure> {
       if (Math.min(full.width, full.height) < 24 && !el.matches('input[type=checkbox], input[type=radio]')) small.push(`${name(el)} ${Math.round(full.width)}×${Math.round(full.height)}`);
       for (let j = i + 1; j < controls.length; j++) {
         const q = rs[j], ix = Math.min(r.right, q.right) - Math.max(r.left, q.left), iy = Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top);
-        if (ix > 4 && iy > 4 && !el.contains(controls[j]) && !controls[j].contains(el)) overlap.push(`${name(el)} / ${name(controls[j])}`);
+        // (a field may hold a mark inside its own padding, as the composer's "Uni listening" ring does: r12)
+        const field = (x: Element) => x.matches('textarea, input[type=text], input[type=search]');
+        if (ix > 4 && iy > 4 && !el.contains(controls[j]) && !controls[j].contains(el) && !field(el) && !field(controls[j])) overlap.push(`${name(el)} / ${name(controls[j])}`);
       }
     });
     // contrast after the Daylight's greyscale (CSS grayscale matrix on sRGB), WCAG luminance

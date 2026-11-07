@@ -1,4 +1,4 @@
-import { RefreshIcon, SearchIcon } from "./Icons";
+import { RefreshIcon } from "./Icons";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { buildVaultTree, restoreExpanded, type NotePath, type VaultTree } from "./vaultTree";
@@ -7,7 +7,7 @@ import { cachedPaths, loadPaths, invalidatePaths, watchPaths } from "./vaultPath
 
 export default function VaultBrowser({ vault, onOpen, onCreate, onSearch, onBack, backTo = "Uni" }: {
   vault: string; onOpen: (note: NotePath) => void; onCreate: (folder: string) => void;
-  onSearch: (prefix: string) => void; onBack?: () => void; /** r22 (Codex 2): the place Back returns to, named on the button */ backTo?: string;
+  /** Search, scoped to a folder (`prefix`), on `query` when there is one */ onSearch: (prefix: string, query?: string) => void; onBack?: () => void; /** r22 (Codex 2): the place Back returns to, named on the button */ backTo?: string;
 }) {
   const [paths, setPaths] = useState<NotePath[]>(() => cachedPaths(vault) ?? []);
   const [filter, setFilter] = useState("");
@@ -33,9 +33,11 @@ export default function VaultBrowser({ vault, onOpen, onCreate, onSearch, onBack
   const deferredFilter = useDeferredValue(filter);
   const expandMatches = deferredFilter.trim().length >= 2;
   const tree = useMemo(() => buildVaultTree(paths, deferredFilter), [paths, deferredFilter]);
+  // 0.2: one New note at the top; a folder's own + shows on a pointer's hover only (the name field takes folders too), and a search of the
+  // notes' words is offered under a name that finds nothing, not as a standing button
   const actions = (folder: string) => folder
-    ? <span className="vault-folder-actions marks"><button aria-label={`New note in ${folder}`} title="New note here" onClick={() => onCreate(folder)}>+</button><button aria-label={`Search in ${folder}`} title="Search in this folder" onClick={() => onSearch(`${folder}/`)}><SearchIcon /></button></span>
-    : <span className="vault-folder-actions"><button onClick={() => onCreate("")}>New note</button><button onClick={() => onSearch("")}>Search notes</button></span>;
+    ? <span className="vault-folder-actions marks"><button aria-label={`New note in ${folder}`} title="New note here" onClick={() => onCreate(folder)}>+</button></span>
+    : <span className="vault-folder-actions"><button onClick={() => onCreate("")}>New note</button></span>;
   let rendered = 0;
   let capped = false;
   const noteRows = (node: VaultTree) => node.notes.map((note) => {
@@ -62,7 +64,7 @@ export default function VaultBrowser({ vault, onOpen, onCreate, onSearch, onBack
     <div className="vault-scroll">{loading && <p role="status">Loading paths…</p>}{/* r25 (Codex 7): a failure is a plain sentence and Retry, the technical cause under Details (as Search and notes do) */}
       {error && <div className="note-error" role="alert"><p>Couldn't read this vault just now. <button type="button" className="cp-retry" onClick={() => invalidatePaths(vault)}>Retry</button></p>
         <details className="note-error-more"><summary>Details</summary><p className="note-error-detail">{error}</p></details></div>}
-      {paths.length >= 20_000 && <p>Showing the first 20,000 notes. Use folder search for more.</p>}
-      {!loading && !error && tree.length === 0 && <p className="empty">{filter ? "No matching paths." : "This vault is empty."}</p>}{renderedTree}{capped && <p>Showing up to 2,000 rows; refine your filter to see more.</p>}</div>
+      {paths.length >= 20_000 && <p>Showing the first 20,000 notes. Use Search for more.</p>}
+      {!loading && !error && tree.length === 0 && <p className="empty">{filter ? <>No note is called that. <button type="button" className="all-link" onClick={() => onSearch("", filter.trim())}>Search the notes for “{filter.trim()}”</button></> : "This vault is empty."}</p>}{renderedTree}{capped && <p>Showing up to 2,000 rows; refine your filter to see more.</p>}</div>
   </section>;
 }

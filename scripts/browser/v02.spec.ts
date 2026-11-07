@@ -92,7 +92,7 @@ test.describe('every screen, measured', () => {
     await check(page, 'vault');
     await page.locator('.vault-browser').getByRole('button', { name: /^\W*Areas$/ }).first().click();
   await page.locator('.vault-browser').getByRole('button', { name: /Bee Garden/ }).first().click();
-    await expect(page.getByRole('button', { name: 'Copy markdown' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'More for this note' })).toBeVisible();
     await check(page, 'note');
   });
 

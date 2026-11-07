@@ -71,7 +71,7 @@ async function saveVoiceEntry(blob: Blob, mime: string): Promise<string> {
   return journalRef(r, draft.path);
 }
 
-export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: string | null; onBack: () => void; onOpenNote: (vault: string, path: string) => void }) {
+export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: string | null; onBack?: () => void; onOpenNote: (vault: string, path: string) => void }) {
   const urls = useRef(new Map<string, Promise<string | null>>());
   useEffect(() => () => {
     for (const p of urls.current.values()) void p.then((u) => { if (u) URL.revokeObjectURL(u); });
@@ -143,5 +143,6 @@ export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: strin
   }, [ownerName, onOpenNote]);
   // the browser tests' build may shorten This or That's minute (VITE_AREAS_TESTHOOKS); a shipped build never reads it
   const burst = import.meta.env.VITE_AREAS_TESTHOOKS === "1" ? Number((window as { __arcadeBurst?: number }).__arcadeBurst) || undefined : undefined;
+  // 0.2: the Arcade is a place on the rail: no Back of its own (a host without a rail can still pass one)
   return <div className="arcade-place"><Arcade host={host} onExit={onBack} burstSeconds={burst} /></div>;
 }
