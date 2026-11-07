@@ -9,7 +9,7 @@ use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use super::{
-    audio_too_long, clock, damaged, io_failed, limit_words, megabytes, refuse, MAX_AUDIO_SECONDS,
+    audio_too_long, damaged, io_failed, megabytes, refuse, video_too_long, MAX_AUDIO_SECONDS,
     MAX_VIDEO_BYTES, MAX_VIDEO_HEIGHT, MAX_VIDEO_SECONDS,
     MAX_VIDEO_WIDTH,
 };
@@ -1408,24 +1408,19 @@ pub(super) fn rewrite(input: &Path, size: u64, out: &Path) -> Result<Option<Rewr
         let millis = u128::from(t.duration) * 1000 / u128::from(t.timescale);
         Ok(millis as f64 / 1000.0)
     };
-    if let Some(p) = picture.or(sound) {
-        if secs_of(p)? <= 0.0 {
+    // Picture first, so the first length is the one that must be above zero.
+    let secs: Vec<f64> = [picture, sound].into_iter().flatten().map(secs_of).collect::<Result<_>>()?;
+    if let Some(first) = secs.first() {
+        if *first <= 0.0 {
             return Err(damaged());
         }
-        let longest = match (picture.map(secs_of).transpose()?, sound.map(secs_of).transpose()?) {
-            (Some(a), Some(b)) => a.max(b),
-            (a, b) => a.or(b).unwrap_or(0.0),
-        };
+        let longest = secs.iter().copied().fold(0.0, f64::max);
         let is_audio = sound.is_some() && picture.is_none_or(|p| p.tables.samples == 1);
         if is_audio && longest > MAX_AUDIO_SECONDS {
             return Err(audio_too_long(longest));
         }
         if !is_audio && longest > MAX_VIDEO_SECONDS {
-            return Err(refuse(format!(
-                "This video is {} long; Buzz takes video up to {}. Trim it, then attach it again.",
-                clock(longest),
-                limit_words(MAX_VIDEO_SECONDS)
-            )));
+            return Err(video_too_long(longest));
         }
     }
     if let Some(p) = picture {

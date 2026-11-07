@@ -321,13 +321,15 @@ fn relay_refusal(status: u16, body: &str) -> String {
     } else if has("too long") {
         // "audio too long: duration exceeds 10800 seconds". Older relays said only video, at 600.
         let audio = has("audio too long");
+        // Only a whole number of seconds is a limit; anything else gets ours.
         let limit = said
             .split("exceeds ")
             .nth(1)
             .and_then(|r| r.split(' ').next())
-            .and_then(|n| n.parse::<f64>().ok())
-            .unwrap_or(if audio { normalize::MAX_AUDIO_SECONDS } else { normalize::MAX_VIDEO_SECONDS });
-        let what = if audio { "audio" } else { "videos" };
+            .and_then(|n| n.parse::<u32>().ok())
+            .filter(|n| *n > 0)
+            .map_or(if audio { normalize::MAX_AUDIO_SECONDS } else { normalize::MAX_VIDEO_SECONDS }, f64::from);
+        let what = if audio { "audio" } else { "video" };
         format!("Buzz takes {what} up to {}, and this one is longer.", normalize::limit_words(limit))
     } else if has("resolution") {
         "Buzz takes videos up to 3840x2160, and this one is larger.".into()
@@ -1936,9 +1938,10 @@ mod tests {
             (415, r#"{"error":"unsupported media codec: only H.264 video and AAC audio are accepted"}"#, "H.264"),
             (415, r#"{"error":"disallowed content type: audio/mpeg"}"#, "audio/mpeg"),
             (422, r#"{"error":"audio too long: duration exceeds 10800 seconds"}"#, "Buzz takes audio up to 3 hours, and this one is longer."),
-            (422, r#"{"error":"video too long: duration exceeds 3600 seconds"}"#, "Buzz takes videos up to 60 minutes, and this one is longer."),
+            (422, r#"{"error":"video too long: duration exceeds 3600 seconds"}"#, "Buzz takes video up to 60 minutes, and this one is longer."),
             // A relay still on the old rule says its own limit, not ours.
-            (422, r#"{"error":"video too long: duration exceeds 600 seconds"}"#, "Buzz takes videos up to 10 minutes, and this one is longer."),
+            (422, r#"{"error":"video too long: duration exceeds 600 seconds"}"#, "Buzz takes video up to 10 minutes, and this one is longer."),
+            (422, r#"{"error":"audio too long: duration exceeds NaN seconds"}"#, "Buzz takes audio up to 3 hours, and this one is longer."),
             (401, r#"{"error":"authentication failed"}"#, "sign-in"),
             (500, r#"{"error":"internal error"}"#, "Retry"),
             (502, "<html>bad gateway</html>", "Retry"),

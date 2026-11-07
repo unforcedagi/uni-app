@@ -98,6 +98,15 @@ pub(crate) fn audio_too_long(seconds: f64) -> Error {
     ))
 }
 
+/// Moving pictures past the relay's limit for video, in one line.
+pub(crate) fn video_too_long(seconds: f64) -> Error {
+    refuse(format!(
+        "This video is {} long; Buzz takes video up to {}. Trim it, then attach it again.",
+        clock(seconds),
+        limit_words(MAX_VIDEO_SECONDS)
+    ))
+}
+
 /// "612 MB", for messages.
 pub(crate) fn megabytes(bytes: u64) -> String {
     format!("{} MB", bytes.div_ceil(1024 * 1024))

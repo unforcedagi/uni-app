@@ -726,6 +726,52 @@ fn opus_up_to_3_hours_is_sent_and_one_second_more_is_refused() {
     }
 }
 
+/// One EBML element with an 8-byte size.
+fn ebml(id: &[u8], body: &[u8]) -> Vec<u8> {
+    let mut e = id.to_vec();
+    e.push(0x01);
+    e.extend_from_slice(&(body.len() as u64).to_be_bytes()[1..]);
+    e.extend_from_slice(body);
+    e
+}
+/// A one-block Opus WebM whose cluster starts at `cluster_ms`, with an optional declared length in ms.
+fn webm_at(cluster_ms: u32, declared_ms: Option<f64>) -> Vec<u8> {
+    let mut info = ebml(&[0x2a, 0xd7, 0xb1], &[0x0f, 0x42, 0x40]); // 1 ms ticks
+    if let Some(d) = declared_ms {
+        info.extend_from_slice(&ebml(&[0x44, 0x89], &d.to_be_bytes()));
+    }
+    let mut entry = ebml(&[0xd7], &[1]);
+    entry.extend_from_slice(&ebml(&[0x83], &[2]));
+    entry.extend_from_slice(&ebml(&[0x86], b"A_OPUS"));
+    entry.extend_from_slice(&ebml(&[0x63, 0xa2], b"OpusHead\x01\x01\x38\x01\x80\xbb\0\0\0\0\0"));
+    let mut cluster = ebml(&[0xe7], &cluster_ms.to_be_bytes());
+    cluster.extend_from_slice(&ebml(&[0xa3], &[0x81, 0x00, 0x14, 0x80, 0xfc, 0xfc, 0xfc]));
+    let mut segment = ebml(&[0x15, 0x49, 0xa9, 0x66], &info);
+    segment.extend_from_slice(&ebml(&[0x16, 0x54, 0xae, 0x6b], &ebml(&[0xae], &entry)));
+    segment.extend_from_slice(&ebml(&[0x1f, 0x43, 0xb6, 0x75], &cluster));
+    let mut f = ebml(&[0x1a, 0x45, 0xdf, 0xa3], &ebml(&[0x42, 0x82], b"webm"));
+    f.extend_from_slice(&ebml(&[0x18, 0x53, 0x80, 0x67], &segment));
+    f
+}
+#[test]
+fn webm_length_is_where_its_last_block_starts_or_what_it_declares() {
+    let d = tempfile::tempdir().unwrap();
+    let write = |name: &str, bytes: Vec<u8>| {
+        let p = d.path().join(name);
+        std::fs::write(&p, bytes).unwrap();
+        p
+    };
+    // The block sits 20 ms into its cluster.
+    run(d.path(), &write("talk.webm", webm_at(2_105_000, None)), "talk.webm");
+    run(d.path(), &write("three.webm", webm_at(10_799_980, None)), "three.webm");
+    assert_eq!(
+        refused(d.path(), &write("late.webm", webm_at(10_800_980, None)), "late.webm"),
+        "This audio is 3:00:01 long; Buzz takes audio up to 3 hours. Trim it, then attach it again."
+    );
+    // A short recording declaring more than three hours is measured by its declaration, as the relay does.
+    assert!(refused(d.path(), &write("says.webm", webm_at(0, Some(10_801_000.0))), "says.webm").contains("up to 3 hours"));
+}
+
 // ── Large files go through disk, not memory ─────────────────────────────
 #[test]
 fn a_file_over_50_mb_is_rewritten() {
