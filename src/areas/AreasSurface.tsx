@@ -6,7 +6,7 @@ import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder, type Run } from "./steerCore";
 import { CompanionBody, Stands, type CompanionProps, type TaskLoad } from "./Companion";
 import { chatPlaceholder, confirmationOf, type Resolved, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, withApprovals, standsHeading, standsLine, asOfDate, daysSince, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
-import { ownRoom, roomByName, type Steward } from "./talkCore";
+import { askRoom as askRoomOf, ownRoom, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
 import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
 import type { RoomInfo } from "./TodayView";
@@ -177,7 +177,9 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const [sheetId, setSheetId] = useState<string | null>(null);
   const lastSheet = useRef<Task | null>(null);
   const openSheet = (t: Task) => { lastSheet.current = t; setSheetId(t.id); };
-  const closeSheet = () => { setSheetId(null); };
+  /** 0.2.2: an ask opened from the home's drawer: its sheet comes up over its own room once that room is in focus. */
+  const pendingSheet = useRef<{ id: string; room: string } | null>(null);
+  const closeSheet = () => { pendingSheet.current = null; setSheetId(null); };
   const via = viaMemory.path === path ? viaMemory.via : null;
   /** T-301/T-302: a project (or the Unfiled sessions) opened in place, over the room or the home. */
   const [projectOpen, setProjectOpen] = useState<string | null>(null);
@@ -240,7 +242,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   // `room`, else its node's), where an open decision no message on screen names is listed under the chat
   useEffect(() => {
     const tree = data?.tree;
-    const roomOf = (t: { room?: string | null; node: string }) => roomByName(roomRefs, t.room)?.id ?? (tree ? roomView(tree, t.node, roomRefs, uniRef).target?.id : null) ?? null;
+    const roomOf = (t: { room?: string | null; node: string }) => askRoomOf(t, roomRefs, (n) => (tree ? roomView(tree, n, roomRefs, uniRef).target : null))?.id ?? null;
     publishDecisions((tasks.all ?? []).filter((t) => t.kind === "decision" && t.state === "open" && !(tree && privateRoot(tree, t.node))).map((t) => ({ id: t.id, tid: taskTitle(t.title).id, forTask: t.forTask ?? null, channel: roomOf(t) })));
   }, [tasks.all, data?.tree, roomRefs, uniRef]);
   useEffect(() => { setDecisionOpener((id) => { setSheetId(id); }); return () => setDecisionOpener(null); }, []);
@@ -252,13 +254,20 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const others = useMemo(() => (owned ? roomRefs.filter((r) => !owned.has(r.id) && r.id !== uniRoom).sort((a, b) => a.name.localeCompare(b.name)) : []), [owned, roomRefs, uniRoom]);
   // Opening a room re-reads the tasks if the copy is more than a few seconds old (the needs-you feed must not show what is already done).
   useEffect(() => { tasks.refreshIfStale(); }, [node?.path, focus?.room]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setSheetId(null); setProjectOpen(null); setAppOpen(false); }, [node?.path, focus?.room]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // (an ask opened from the drawer waits for its room: the sheet opens over it, and any other room drops it)
+    const p = pendingSheet.current;
+    if (p && focus?.room && p.room !== focus.room) pendingSheet.current = null;
+    setSheetId(p && p.room === focus?.room ? p.id : null); setProjectOpen(null); setAppOpen(false);
+  }, [node?.path, focus?.room]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Who stewards a node: its own room, else the nearest ancestor's (an archived room's `room_fallback` stands in), else #Uni. */
   const stewardOf = (p: string): Steward => {
     const v = data ? roomView(data.tree, p, roomRefs, uniRef) : { target: uniRef, own: false, heldBy: uniRef };
     return { room: v.target, via: v.own ? "own" : v.heldBy && v.heldBy.id !== uniRef?.id ? "inherited" : "uni", from: null };
   };
   const roomOfNode = (p: string) => stewardOf(p).room;
+  /** 0.2.2: an ask's own room (its `room`, else its node's): where every action from it is said, wherever it is shown. */
+  const roomOfAsk = (t: { room?: string | null; node: string }) => askRoomOf(t, roomRefs, roomOfNode);
   // r31: an ask is current because its task note says so (`asked_at` / `confirmed_at` within 3 days), resolved here before any row, count or dot shows it.
   const confirmNow = useMemo(() => Date.now(), [tasks.tasks, tasks.lastOk]); // eslint-disable-line react-hooks/exhaustive-deps
   const confirm = useMemo(() => ({ of: (t: Task): Resolved => confirmationOf(t, confirmNow) }), [confirmNow]);
@@ -335,7 +344,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const hidden = (p: string) => { const r = privateOf(p); return !!r && r.path !== selfPrivate?.path; };
   // r23: each row knows the room that stewards it, as its sheet does ("Ask #techne for the message")
   const drafted = new Set(tasks.drafts.map((d) => d.task?.toUpperCase()).filter(Boolean));
-  const feed0 = needsFeed(levelTasks.map((t) => ({ ...t, stewardRoom: roomOfNode(t.node)?.name ?? null, hasDraft: drafted.has(taskTitle(t.title).id?.toUpperCase()) })), privateOf, selfPrivate, undefined, confirm.of);
+  const feed0 = needsFeed(levelTasks.map((t) => ({ ...t, stewardRoom: roomOfAsk(t)?.name ?? null, hasDraft: drafted.has(taskTitle(t.title).id?.toUpperCase()) })), privateOf, selfPrivate, undefined, confirm.of);
   const taskTree = tasks.tree;
   // a run from a private room may sit on the root or a public node: its room keeps it private too, unless this level is that private place
   const runs = taskTree && node ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node) && (!!selfPrivate || !privateRuns.has(r.id))) : [];
@@ -343,6 +352,19 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const feed = withApprovals(withWaiting(feed0, runs), approvalsAll.list.filter((a) => isRoot || a.channel === target?.id));
   const panel = isRoot ? uniPanel(feed) : { ...feed, rest: 0, privateCount: 0 };
   const drafts = taskTree && node ? draftsUnder(taskTree, here, tasks.drafts).filter((d) => !hidden(d.node)) : [];
+  /**
+   * 0.2.2: an ask from the home's drawer opens in its own room (its `room`, else its node's), in focus, with its sheet over it: its action is
+   * said there. One with no room anywhere opens its sheet over the home, never a room picked for it.
+   */
+  const openAsk = (row: { id: string; room: string | null }) => {
+    closeProject();
+    const t = tasks.all?.find((x) => x.id === row.id); if (t) lastSheet.current = t;
+    if (!row.room) { pendingSheet.current = null; setSheetId(row.id); return; }
+    pendingSheet.current = { id: row.id, room: row.room };
+    if (focus && focus.room === row.room) { allPlace?.onView("chat"); setSheetId(row.id); return; }
+    setSheetId(null);
+    actions.openRoom(row.room);
+  };
   const openPrivate = (o: PrivateNeed["open"]) => { closeSheet(); openPlace(o.path, "details"); };
   // r18: one summary for the details and the work: the node's `stands`, else its brief's "Now" (with the brief's own time), else the newest change it names
   const brief = node && !isRoot ? data?.briefs[node.path] ?? null : null;
@@ -380,7 +402,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const sheetGone = !!sheetId && (!live || !(live.state === "open" || live.state === "doing" || live.state === "waiting") || (tasks.ready && !tasks.tasks.some((t) => t.id === sheetId) && !tasks.leaving.has(sheetId)));
   /** r18: a draft note written for the task (its `task` field names it): its text is the message the sheet copies. */
   const draftOf = (t: Task) => { const tid = taskTitle(t.title).id?.toUpperCase(); const d = tid ? tasks.drafts.find((x) => x.task?.toUpperCase() === tid) : null; return d ? { vault: t.vault ?? profile.vault, id: d.id } : null; };
-  const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} roomNamed={(n) => rooms.find((r) => r.name.replace(/^#/, "").toLowerCase() === n.replace(/^#/, "").toLowerCase()) ?? null} inRoom={focus?.room ?? target?.id} onClose={closeSheet}
+  const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfAsk(sheetTask)} roomNamed={(n) => rooms.find((r) => r.name.replace(/^#/, "").toLowerCase() === n.replace(/^#/, "").toLowerCase()) ?? null} inRoom={focus?.room ?? target?.id} onClose={closeSheet}
     draft={draftOf(sheetTask)} confirmation={confirm.of(sheetTask)}
     onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={(t, o) => tasks.decide(t, o)} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
   /** r20: a row's area when it is shown outside it (Uni's list holds every area's): its subtitle names it when its title can't say where it is. */
@@ -428,7 +450,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const privAt = (p: string) => (data ? privateRoot(data.tree, p) : null) ?? (tasks.tree ? privateRootIn(tasks.tree, p) : null);
     const allNeeds = needsFeed(tasks.tasks, privAt, null, undefined, confirm.of);
     const needs: Needs = {
-      rows: allNeeds.rows.map((t) => ({ id: t.id, title: taskTitle(t.title).rest || t.title, where: data?.tree.nodes.get(t.node)?.name ?? null, path: t.node })),
+      rows: allNeeds.rows.map((t) => ({ id: t.id, title: taskTitle(t.title).rest || t.title, where: data?.tree.nodes.get(t.node)?.name ?? null, path: t.node, room: roomOfAsk(t)?.id ?? null })),
       privates: allNeeds.privates.map((g) => ({ place: g.place, count: g.count, path: g.open.path })),
     };
     // T-335 All view: every area's own room, interleaved, with a composer that routes; a private area stays out of it
@@ -444,13 +466,13 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     // rooms no area holds, the Unfiled sessions) is in the drawer under its head
     // (an approval has a deadline: one waiting in a room All shows stays on the home, over its head, as it was over All's; the drawer lists them all)
     const home = <>{status}{!allPlace ? approvalRows : !pulled && all && <ApprovalRows approvals={approvalsAll.list.filter((x) => !privateChannel(x.channel))} className="cp-list cp-approvals th-approvals" />}
-      <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={(p) => openPlace(p)} onOpenNeed={(p) => openPlace(p, "details")} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
+      <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={(p) => openPlace(p)} onOpenNeed={(p) => openPlace(p, "details")} onOpenAsk={openAsk} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
         otherRooms={others} noAreas={!!data && !error && !doorAreas.length ? (uniRef ? () => actions.openRoom(uniRef.id) : null) : undefined}
         toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} onOpenProject={setProjectOpen}
         pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.length > 0 ? approvalRows : null} forYou={allPlace?.forYou ?? null} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>;
     // the home's Unfiled sessions open in place over it
-    if (!allPlace) return <div className="areas-home tree-home-wrap">{home}{projectSheet}</div>;
+    if (!allPlace) return <div className="areas-home tree-home-wrap">{home}{sheetView}{projectSheet}</div>;
     // T-335: All with nothing read yet, or no area with a room of its own: it says which (the focus still comes up over it)
     // 0.2: once the places are read, the home is there even with no area room yet (its places, open)
     // (while the rooms list is still coming, the home is there with its places open: a door can be tapped on a slow cold launch)

@@ -290,7 +290,9 @@ export function stepAudience(next: string | null | undefined, room: string | nul
   if (m && (roomWord || !/\bto\s+\p{Lu}[\p{L}'’.-]*(?:\s|$|[,.])/u.test(m[1].replace(/\bto\s+(?:uni|the room)\b/gi, "")))) {
     const rest = m[1].replace(/^(?:with\s+|to\s+(?:the\s+)?room\s+)/i, "");
     // r20: the words to say are the step's first clause ("Go on prod deploy of #38 + #58"), never the notes after it ("; Harper signs off…")
-    return { kind: "room", text: QUESTION_WORD.test(rest) ? "" : capFirst(unquote(firstClause(rest))) };
+    // 0.2.2: words in quotes are the words ('Say "approve cards" in #systems' says approve cards), never the quote and what follows it
+    const said = /^["“'‘]([^"”'’]{1,120})["”'’]/.exec(rest)?.[1];
+    return { kind: "room", text: QUESTION_WORD.test(rest) ? "" : said ? said.trim() : capFirst(unquote(firstClause(rest))) };
   }
   // "Tell Uni …", "Tell the room …", "Ask Uni to …", "Reply to Uni …"
   m = /^(?:tell|ask|reply to|answer|message|ping)\s+(uni|main|the room|this room|the channel|everyone here)\b[\s:,-]*(?:to\s+|that\s+)?(.*)$/i.exec(step);

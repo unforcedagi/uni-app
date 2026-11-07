@@ -1088,9 +1088,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (!activeTab(next)) {
         const uni = rows.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rows)?.id;
         // The app opens to Uni: the front door of the area rooms (T-302: the archived Uni room is no longer the home, so none is attached).
-        // Without a Uni room (an account that has none) it opens the first room.
+        // 0.2.2: #Uni is archived (10-26), so the relay lists no Uni room: with the Uni glue the home is All, whatever the rooms are. Only an
+        // account without the glue and without a Uni room opens its first room.
         const target: TabTarget = readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" }
-          : uni || !rows[0] ? { kind: "areas", title: "Uni" } : { kind: "all", title: "Uni", channel: rows[0].id };
+          : uni || homeIsAllRef.current || !rows[0] ? { kind: "areas", title: "Uni" } : { kind: "all", title: "Uni", channel: rows[0].id };
         next = openTab(next, target, "new", () => crypto.randomUUID());
       }
       // T-302: a restored Uni place is Uni's own level when it carries its room, else the front door (as resolveTarget decides for an open)

@@ -17,6 +17,17 @@ export function ownRoom(n: Pick<RoomNode, "room" | "channels">, rooms: readonly 
   return (id ? rooms.find((r) => r.id === id)! : null) ?? roomByName(rooms, n.room);
 }
 
+/**
+ * 0.2.2: the room an ask belongs to. An ask (a task or decision) acts in its own room: its `room` (a channel id, or a room's name) when that
+ * room exists, else the room that stewards its node (`nodeRoom`). Never the room that happens to be open, never a picker: an ask with no room
+ * here has none, and says so.
+ */
+export function askRoom(t: { room?: string | null; node: string }, rooms: readonly RoomRef[], nodeRoom: (node: string) => RoomRef | null): RoomRef | null {
+  const r = t.room?.trim() ?? "";
+  const own = r ? rooms.find((x) => x.id === r) ?? roomByName(rooms, r) : null;
+  return own ?? nodeRoom(t.node);
+}
+
 /** `own`: the node's room; `inherited`: an ancestor's (`from` is that ancestor); `uni`: nothing on the way, so #Uni. */
 export type Steward = { room: RoomRef | null; via: "own" | "inherited" | "uni"; from: RoomNode | null };
 
