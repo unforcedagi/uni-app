@@ -184,6 +184,8 @@ export function restoreTabs(raw: string | null, roomIds: Iterable<string>): Tabs
     const t = validTab(x);
     if (!t || seen.has(t.id)) continue;
     const same = tabs.find((o) => sameTarget(o, t));
+    // T-335: two saved rooms (an older version's tabs) are one All; the one that was active is the room it keeps in focus
+    if (same && same.kind === "all" && t.id === d.active && t.channel && rooms.has(t.channel)) tabs[tabs.indexOf(same)] = { ...t, id: same.id };
     if (same) { twin.set(t.id, same.id); continue; }
     seen.add(t.id);
     // A place whose room has gone keeps its tab; only the room is dropped (All with a room gone from focus is All).

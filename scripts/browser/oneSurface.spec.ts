@@ -216,6 +216,89 @@ test.describe('the focus head and the room\'s details', () => {
   });
 });
 
+test.describe('review 1', () => {
+  test('to Mail and back: the room is still in focus, by the rail\'s All and by Mail\'s own Back', async ({ page }) => {
+    await boot(page);
+    await home(page).locator('.fd-door[data-path="Areas/Choir"]').click();
+    await inFocus(page, 'Choir');
+    const go = async (name: string) => {
+      if (touch() && (page.viewportSize()?.width ?? 0) < 600 && !['Uni', 'All', 'Journal', 'Mail'].includes(name)) await rail(page).getByRole('button', { name: 'More' }).click();
+      await rail(page).getByRole('button', { name, exact: true }).click();
+    };
+    await go('Mail');
+    await expect(sheet(page)).toHaveCount(0);
+    await go('All');
+    await inFocus(page, 'Choir', /^Message choir/);
+    await go('Mail');
+    await page.getByRole('button', { name: /^← / }).first().click();
+    await inFocus(page, 'Choir', /^Message choir/);
+    // Uni's home and back by All: the room is still there
+    await go('Uni');
+    await expect(home(page)).toBeVisible();
+    await go('All');
+    await inFocus(page, 'Choir');
+  });
+
+  test('a place inside another that talks in its room is in the details, and opens named for itself', async ({ page }) => {
+    await page.addInitScript(() => { const w = window as any; w.__extraInvoke = async (cmd: string) => { if (cmd === 'route_suggest') throw 'x'; if (cmd === 'route_outcome') return {}; return undefined; }; });
+    await bootAreas(page, 'seed', { tree: true, atlas: true, tasks: true, uniMember: true, noWait: true } as any);
+    await page.locator('[data-place="front-door"]').first().waitFor();
+    await home(page).locator('.fd-door[data-path="Areas/Atlas"]').click();
+    await sheet(page).getByRole('button', { name: /Atlas.*details/ }).click();
+    const inside = details(page).getByRole('region', { name: 'Inside Atlas' });
+    await expect(inside.getByRole('button', { name: /Atlas Institute/ })).toContainText('talks in #atlas');
+    await inside.getByRole('button', { name: /Atlas Institute/ }).click();
+    await inFocus(page, 'Atlas Institute');
+    await expect(sheet(page).locator('.all-focus-line')).toHaveText(/^Talks in #atlas · no room of its own yet$/);
+  });
+
+  test('a search hit in a room a place borrows is that room, not the place last in focus', async ({ page }) => {
+    await boot(page, {}, () => {
+      const w = window as any, now = Math.floor(Date.now() / 1000);
+      w.__hits = [{ channel_name: 'Uni', snippet: 'A word for the uni room', message: { ref: 'u1', channel: 'uni-room', author: 'b'.repeat(64), author_name: 'Uni', ts: now - 3000, body: 'A word for the uni room', mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [], media: [] } }];
+      w.__msgsSeed = true;
+    });
+    await home(page).locator('.fd-door[data-path="Areas/Still Water"]').click();
+    await inFocus(page, 'Still Water');
+    await page.keyboard.press('Control+k');
+    await page.getByRole('searchbox').fill('uni room');
+    await page.locator('.search-hit').first().click();
+    await inFocus(page, 'Uni');
+    await expect(sheet(page).locator('.all-focus-line')).toHaveCount(0);
+  });
+
+  test('the focus is not rebuilt when the places arrive late: the composer keeps its keys', async ({ page }) => {
+    test.skip(touch(), 'the keys go to the composer on a desktop');
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem('test.savedOnce')) return;
+      sessionStorage.setItem('test.savedOnce', '1');
+      localStorage.setItem('uni.tabs.v2', JSON.stringify({ v: 1, tabs: [{ id: 't1', kind: 'all', title: 'All', channel: 'ch-kiln' }], active: 't1', recent: ['t1'] }));
+    });
+    await boot(page, { queryDelay: 2500 });
+    const box = sheet(page).getByRole('textbox', { name: /^Message kiln-studio/ });
+    await box.click();
+    await box.pressSequentially('half a thought');
+    await box.evaluate((el) => { (el as any).__same = true; });
+    await expect(sheet(page).locator('.all-focus-title')).toHaveText('Kiln Studio', { timeout: 15_000 });
+    expect(await box.evaluate((el) => (el as any).__same === true && document.activeElement === el)).toBe(true);
+    await expect(box).toHaveValue('half a thought');
+  });
+
+  test('a vault without rooms: its tree, Uni\'s own level with all of the work, and each place\'s work', async ({ page }) => {
+    await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, boulder: true, underBoulder: true, priya: true, pinned: true, lifeVault: 'pack' } as any);
+    await expect(page.locator('.th-phone-tree')).toBeVisible();
+    await page.locator('.th-go[data-path=""]').click();
+    await expect(page.getByRole('region', { name: /'s work$/ }).locator('.wp-title')).toBeVisible();
+    await expect(page.locator('.sr-work').getByRole('region', { name: 'Needs you' })).toBeVisible();
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(page.locator('.th-phone-tree')).toBeVisible();
+    await page.getByRole('button', { name: /^Boulder,/ }).first().click();
+    await expect(page.locator('.wp-title')).toHaveText('Boulder');
+    await noOldView(page);
+    expect(await page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').length)).toBe(0);
+  });
+});
+
 test('the old room view is not in the app at all', async () => {
   const dir = new URL('../../dist-onesurface/assets/', import.meta.url);
   const js = readdirSync(dir).filter((f) => f.endsWith('.js')).map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');

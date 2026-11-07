@@ -60,13 +60,13 @@ export function AllFocusSheet({ id, name, line, root, replies, view = "chat", le
       }}
       onPointerCancel={endPull}>
       <button type="button" className="note-action all-focus-back" aria-label={back.aria} onClick={onBack}><span aria-hidden="true">←</span> {back.label}</button>
-      {/* the whole head is one button: the room's details, and from them (or its work) the conversation again */}
-      <button type="button" className="all-focus-titles" aria-expanded={!inChat} aria-label={inChat ? `${name}: room details` : `${name}: back to the conversation`} title={inChat ? "Room details" : "Back to the conversation"}
-        onClick={() => onView(inChat ? "details" : "chat")}>
-        <span className="all-focus-title">{name}</span>
-        {sub && <span className="all-focus-line"><span className="all-focus-src">{sub.src}{sub.text ? ":" : ""}</span>{sub.text && <> {sub.text}</>}</span>}
+      {/* the name is the room's heading, and its button is the whole of the titles: the room's details, and from them (or its work) the conversation again */}
+      <div className="all-focus-titles">
+        <h2 className="all-focus-title"><button type="button" className="all-focus-open" aria-expanded={!inChat} aria-label={inChat ? `${name}: room details` : `${name}: back to the conversation`} title={inChat ? "Room details" : "Back to the conversation"}
+          onClick={() => onView(inChat ? "details" : "chat")}>{name}</button></h2>
+        {sub && <p className="all-focus-line"><span className="all-focus-src">{sub.src}{sub.text ? ":" : ""}</span>{sub.text && <> {sub.text}</>}</p>}
         <span className="all-focus-more" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{inChat ? <path d="M4 6l4 4 4-4" /> : <path d="M4 10l4-4 4 4" />}</svg></span>
-      </button>
+      </div>
     </header>
     {/* the conversation stays as it was (its place, its draft) while the details are up */}
     <div className="all-focus-chat" hidden={!inChat}>{children}</div>

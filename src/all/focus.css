@@ -25,8 +25,12 @@
 .all-focus-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 8px max(14px, calc((100% - 720px) / 2)) 8px; touch-action: none; }
 .all-focus-back { flex: none; min-height: 40px; padding: 0 14px 0 11px; font: 500 14px/1 var(--g-font-ui); white-space: nowrap; max-width: 44vw; overflow: hidden; text-overflow: ellipsis; }
 /* the head's titles are one button: the room's details (and back to the conversation from them) */
-.all-focus-titles { all: unset; box-sizing: border-box; position: relative; flex: 1; min-width: 0; padding: 4px 30px 4px 0; cursor: pointer; display: flex; flex-direction: column; -webkit-tap-highlight-color: transparent; }
-.all-focus-titles:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; border-radius: 8px; }
+.all-focus-titles { box-sizing: border-box; position: relative; flex: 1; min-width: 0; padding: 4px 30px 4px 0; cursor: pointer; display: flex; flex-direction: column; -webkit-tap-highlight-color: transparent; }
+.all-focus-open { all: unset; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+/* the button covers the whole of the titles (name, line and chevron): one target */
+.all-focus-open::after { content: ""; position: absolute; inset: 0; }
+.all-focus-open:focus-visible { outline: none; }
+.all-focus-titles:has(.all-focus-open:focus-visible) { outline: 2px solid var(--g-focus); outline-offset: 2px; border-radius: 8px; }
 .all-focus-title { margin: 0; display: flex; align-items: center; gap: 8px; font: 520 19px/1.2 var(--g-font-display); font-variation-settings: "SOFT" 60, "opsz" 72; color: var(--g-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .all-focus-title::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--room-tint, var(--g-accent)); }
 /* its one line says where it comes from first ("#choir's summary:"), then the words */

@@ -429,7 +429,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (topNote?.ref !== FOR_YOU_ID) {
       const surfaces = tabsRef.current.tabs.filter((t) => (t.kind === "all" && !!t.channel) || t.kind === "journal");
       const previous = [...tabsRef.current.recent].reverse().map((id) => surfaces.find((t) => t.id === id)).find(Boolean);
-      forYouBack.current = previous?.title ?? "Uni";
+      forYouBack.current = previous?.kind === "all" && previous.channel ? `#${(roomsRef.current.find((r) => r.id === previous.channel)?.name ?? "room").replace(/^#/, "")}` : previous?.title ?? "Uni";
       forYouReturn.current = previous?.id ?? null;
     }
     openTarget({ kind: "note", note: { hub: null, vault: "uni", ref: FOR_YOU_ID }, title: "For you" }, "new");
@@ -784,7 +784,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (activeTab(tabsRef.current)?.kind !== "all") openTarget({ kind: "all", title: "All" }, "focus");
     if (activeTab(tabsRef.current)?.kind !== "all") return; // (a note left unsaved: the person chose to stay)
     if (o.keys !== undefined) focusComposer.current = o.keys;
-    focusInAll(room, o.ref ?? null, o.root ?? null, { path: o.path ?? null, view: o.view ?? "chat", keys: o.keys });
+    focusInAll(room, o.ref ?? null, o.root ?? null, { path: o.path, view: o.view ?? "chat", keys: o.keys });
     setChecking(o.checking ? { channel: room, text: o.checking } : null);
   }
   /** `fromHistory`: Back and Forward move through the places visited; they do not add to them. */
@@ -804,6 +804,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // No tab strip: a place replaces the one you were on (a second tab never shows the same room). The Journal keeps its own tab (its page and any recording stay alive), and a place opened from it goes beside it.
     if (isSurface(target) && target.kind !== "journal" && mode === "new") mode = "focus";
     if (target.kind === "journal") mode = "new";
+    // T-335 one surface: All with a room in focus stays (Mail, Uni's home, a note open beside it), so All and Back bring the room back
+    else if (target.kind !== "all" && isSurface(target) && mode !== "new") { const cur = activeTab(tabsRef.current); if (cur?.kind === "all" && cur.channel) mode = "new"; }
     else if (isSurface(target) && mode === "focus" && activeTab(tabsRef.current)?.kind === "journal") mode = "new";
     // A recording's origin tab must survive the 12-tab eviction cap.
     const originId = recordingOrigin.current?.tabId;
@@ -1482,7 +1484,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   function openHit(t: { channel: string; root: string | null; focus: string }) {
     setSearchOpen(false);
-    openRoom(t.channel, { ref: t.focus, root: t.root });
+    openRoom(t.channel, { ref: t.focus, root: t.root, path: null });
   }
 
   // Fallback when the hub is unreachable: Uni searches the vault and replies in #Uni.
@@ -1925,7 +1927,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     stopLeaving();
     const was = allFocusRef.current;
     const view = o.view ?? "chat";
-    setAllFocus({ room, root: threadRoot, path: o.path ?? (was?.room === room ? was.path ?? null : null), view, leaving: false });
+    // `path` unsaid (a step inside the focus: a thread, a draft): the place stays as it was; said (null too): it is that
+    setAllFocus({ room, root: threadRoot, path: o.path !== undefined ? o.path : was?.room === room ? was.path ?? null : null, view, leaving: false });
     // a pointer that doesn't bring up a keyboard goes on typing; a touch keeps the thread on screen (an approval to answer in words asks for the keys itself)
     if (o.keys === undefined && !matchMedia("(pointer: coarse)").matches && view === "chat") focusComposer.current = true;
     setChecking(null);
@@ -2630,7 +2633,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   setFocusViewRef.current = setFocusView;
   const areaActions = useMemo(() => ({
     /** `focus`: a message of that room to scroll to and mark (the request sheet's "Check in #room first" goes to the first message about it) */
-    openRoom: (id: string, focus?: string | null, checking?: string | null, place?: { path?: string | null; view?: FocusView }) => openRoomRef.current(id, { ref: focus ?? null, checking: checking ?? null, path: place?.path ?? null, view: place?.view }),
+    openRoom: (id: string, focus?: string | null, checking?: string | null, place?: { path?: string | null; view?: FocusView }) => openRoomRef.current(id, { ref: focus ?? null, checking: checking ?? null, path: place ? place.path ?? null : undefined, view: place?.view }),
     /** T-335 one surface: inside the focus, the conversation, the room's details, its work or its app */
     focusView: (view: FocusView) => setFocusViewRef.current(view),
     // r15: a note opens in the vault its reference names (the task's, the area's), the same vault its title was read from
@@ -2645,10 +2648,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const openApproval = (a: Approval) => {
     // a Hermes prompt is answered in the composer; Uni's approval card (T-234) on the card itself
     const typed = a.kind !== "sealed";
-    if (channelRef.current === a.channel && root === a.root) { focusTries.current = 0; setFocusRef(a.ref); if (typed) input.current?.focus(); return; }
+    if (channelRef.current === a.channel && root === a.root) { setFocusView("chat"); focusTries.current = 0; setFocusRef(a.ref); if (typed) requestAnimationFrame(() => input.current?.focus()); return; }
     focusComposer.current = typed;
     // a prompt posted as a reply is in its thread, never the room's timeline: it opens there, as a search hit does
-    openRoom(a.channel, { ref: a.ref, root: a.root ?? null, keys: typed });
+    openRoom(a.channel, { ref: a.ref, root: a.root ?? null, keys: typed, path: null });
   };
   const approvalsView = { list: approvals, open: openApproval, roomName: (id: string) => rooms.find((r) => r.id === id)?.name ?? null };
   const primaryVault = vaults.includes(lifeVault) ? lifeVault : vaults.includes("uni") ? "uni" : vaults.length === 1 ? vaults[0] : null;
@@ -2695,7 +2698,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     journalRecording && journalTab ? { title: "Journal", tabId: journalTab.id, controls: journalRecording.controls, finish: "save" as const } : null;
   return <ApprovalsContext.Provider value={approvalsView}><NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault" || active?.kind === "mail" || active?.kind === "calendar" || active?.kind === "messages" || active?.kind === "posts" || active?.kind === "arcade"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
     <nav ref={railRef} className="rail" aria-label="Main navigation" onClickCapture={(e) => { if (!(e.target as HTMLElement).closest(".rail-more")) setRailMore(false); }}>
-      {/* T-294: from another side (Messages, Mail…) Uni goes back to where you were on its side; at Uni already, home to Uni */}
+      {/* T-335 one surface: Uni is always its home; the room you were in is All's (All keeps it in focus) */}
       <button aria-label="Uni" aria-current={uniShown ? "page" : undefined} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       {/* T-335: All is a place of its own, one tap from any room; rooms stay the main way in, and the app never opens on it */}
       {showUniGlue(lifeVault) && <button aria-label="All" aria-current={!panel && !searchOpen && !topNote && allOpen ? "page" : undefined} onClick={() => openTarget({ kind: "all", title: "All" })}><i><AllIcon /></i><span>All</span></button>}

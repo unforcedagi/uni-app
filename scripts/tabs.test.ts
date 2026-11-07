@@ -134,6 +134,10 @@ assert.deepEqual(persistable(gone).tabs.map((t) => t.kind), ["areas", "journal"]
   assert.deepEqual(activeTab(old), { id: "o1", kind: "all", title: "All", channel: "a" });
   const oldThread = restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "o2", kind: "thread", channel: "a", root: "r9", title: "Thread" }], active: "o2" }), ["a"]);
   assert.deepEqual(activeTab(oldThread), { id: "o2", kind: "all", title: "All", channel: "a", root: "r9" });
+  // two saved rooms (the old tab strip): one All, with the room that was active in focus
+  const two = restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "r1", kind: "room", channel: "a", title: "a" }, { id: "r2", kind: "room", channel: "b", title: "b" }], active: "r2", recent: ["r1", "r2"] }), ["a", "b"]);
+  assert.deepEqual(two.tabs.map((t) => [t.kind, t.channel]), [["all", "b"]]);
+  assert.equal(activeTab(two)?.channel, "b");
   // a room gone since: All alone
   assert.deepEqual(activeTab(restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "o3", kind: "room", channel: "gone", title: "x" }], active: "o3" }), ["a"])), { id: "o3", kind: "all", title: "All" });
   // All's place for a room it borrows is a note path, checked like an area's

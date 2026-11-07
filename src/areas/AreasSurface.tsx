@@ -250,7 +250,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const openPlace = (p: string, view: FocusView = "chat", through?: string | null) => {
     viaMemory.path = p; viaMemory.via = through ?? null;
     if (!chat) {
-      if (p === ROOT) { setRootOpen(true); onOpenArea(null, "Uni", null); return; }
+      // (the host's open of Uni's home says "the home"; Uni's own level is said after it)
+      if (p === ROOT) { onOpenArea(null, "Uni", null); setRootOpen(true); return; }
       const n = data?.tree.nodes.get(p); if (n) { setRootOpen(false); onOpenArea(n.path, n.name, null); }
       return;
     }
@@ -332,7 +333,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   /** r30: a run waiting on the user's answer, or an approval prompt, opens its room at that message with the composer ready, writing nothing */
   const openAt = (room: { id: string; name: string }, message: string | null) => {
     closeSheet(); closeProject();
-    if (focus && room.id === focus.room) { allPlace?.onView("chat"); roomFor(room.id)?.compose(""); if (message) actions.focusMessage?.(message, room.id, null); }
+    if (focus && room.id === focus.room && !focus.root) { allPlace?.onView("chat"); roomFor(room.id)?.compose(""); if (message) actions.focusMessage?.(message, room.id, null); }
     else actions.openRoom(room.id, message);
   };
   const openRun = (r: Run) => { const room = runRoom(r); if (room) openAt(room, r.message ?? null); };
@@ -417,12 +418,14 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const focusReplies = focus?.root && focusChat?.loaded ? focusChat.messages.filter((m) => m.ref !== focus.root).length : null;
     // the head's one line: where a place that borrows a room talks, else its summary, saying whose; never a private place's words
     const focusPrivate = !!focus && (privateChannel(focus.room) || (!!node && !!tree && isPrivatePath(tree, node.path)));
-    const summary = rawStands && firstSentence(rawStands.text) ? plainWords(rawStands.text) : null;
+    // only the summary the room keeps on its place's note (`stands`), never a brief's or the app's own line: the label says whose it is
+    const written0 = node ? tasks.tree?.stands.get(node.path)?.text ?? (typeof node.metadata.stands === "string" ? node.metadata.stands : null) : null;
+    const summary = written0 && firstSentence(written0) ? plainWords(written0) : null;
     const line: FocusLine | null = borrowed ? { src: `Talks in ${borrowed} · no room of its own yet`, text: "" }
       : !focusPrivate && summary && node && !isRoot ? { src: focusSlug ? `#${focusSlug}'s summary` : "Summary", text: summary } : null;
     const placeholder = node && nodeView ? chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? nodeView.heldBy.name : null }) : focusSlug ? `Message #${focusSlug}` : "Message";
     /** The places inside this one, each one tap into its own room (a project with no room of its own is in the projects above). */
-    const inside = node && tree && !isRoot ? childrenOf(tree, node.path).filter((c) => !hidden(c.path) || c.path === selfPrivate?.path).map((c) => ({ c, v: roomView(tree, c.path, roomRefs, uniRef) })).filter(({ v }) => v.own && v.target) : [];
+    const inside = node && tree && !isRoot ? childrenOf(tree, node.path).filter((c) => !hidden(c.path)).map((c) => ({ c, v: roomView(tree, c.path, roomRefs, uniRef) })).filter(({ v }) => !!v.target) : [];
     const sheet = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => {
       const details = focusView === "work" ? <div className="fx-work">{workMain}</div>
         : focusView === "app" ? (app ? <div className="fx-app">{app.bar}{app.main}</div> : <p className="cp-none">This place has no app.</p>)
@@ -431,7 +434,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
           {borrowed && <p className="fx-context">{node!.name} has no room of its own yet: it talks in {borrowed}.</p>}
           {strip && <div className="fx-strip">{strip}</div>}
           {inside.length > 0 && <section className="fx-sec" aria-label={`Inside ${node!.name}`}><h3 className="cp-h">Inside {node!.name}</h3>
-            <ul className="fx-places">{inside.map(({ c, v }) => <li key={c.path}><button type="button" className="fx-place" onClick={() => actions.openRoom(v.target!.id, null, null, { path: c.path })}><span>{c.name}</span><small>#{roomSlug(v.target!.name)}</small></button></li>)}</ul></section>}
+            <ul className="fx-places">{inside.map(({ c, v }) => <li key={c.path}><button type="button" className="fx-place" onClick={() => actions.openRoom(v.target!.id, null, null, { path: c.path })}><span>{c.name}</span><small>{v.own ? "" : "talks in "}#{roomSlug(v.target!.name)}</small></button></li>)}</ul></section>}
           {(openApp || (node && !isRoot && postsLine(node.path)) || askRoom) && <section className="fx-sec fx-more" aria-label="More">
             {openApp && <button type="button" className="fx-link" onClick={(e) => openApp(e)}>Open the {node!.name} app ›</button>}
             {node && !isRoot && !focusPrivate && postsLine(node.path)}
@@ -448,9 +451,10 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
         {sheetView}{projectSheet}
       </>;
     };
-    const withApp = (inner: (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => ReactNode) => node && !isRoot
-      ? <AreaView key={node.id} area={body !== null ? { ...node, body } : node} mode={mode} roomName={roomName} actions={appActions} room={roomFor(nodeRoom)} open={focusView === "app"} onOpen={(v) => allPlace.onView(v ? "app" : "details")} render={inner} />
-      : <>{inner(null, null)}</>;
+    // one AreaView always (Uni's level, or no place yet, has no app): the sheet, its composer and its keys stay as they are when the place's data arrives
+    const appArea = node && !isRoot ? (body !== null ? { ...node, body } : node) : root;
+    const withApp = (inner: (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => ReactNode) =>
+      <AreaView area={appArea} mode={node && !isRoot ? mode : "closed"} roomName={roomName} actions={appActions} room={roomFor(nodeRoom)} open={focusView === "app"} onOpen={(v) => allPlace.onView(v ? "app" : "chat")} render={inner} />;
     return <ApprovalsContext.Provider value={{ ...approvalsAll, open: openApproval }}><div className="areas-home tree-home-wrap all-surface" data-focus={focus ? (focus.leaving ? "leaving" : "open") : undefined}>
       <div className="all-behind" inert={!!focus && !focus.leaving}>{behind}</div>
       {focus && withApp(sheet)}

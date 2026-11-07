@@ -152,29 +152,6 @@ test.describe('inline reply', () => {
 });
 
 test.describe('All from everywhere', () => {
-  test('from a room to All and back, by the rail and by the place it came from; a private room stays out', async ({ page }) => {
-    await boot(page);
-    await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-    const box = page.getByRole('textbox', { name: /^Message kiln-studio/ });
-    await box.waitFor();
-    const all = rail(page).getByRole('button', { name: 'All', exact: true });
-    await expect(all).toBeVisible();
-    await all.click();
-    await expect(page.locator('[data-view="all"]')).toBeVisible();
-    await expect(all).toHaveAttribute('aria-current', 'page');
-    await expect(rail(page).getByRole('button', { name: 'Uni', exact: true })).not.toHaveAttribute('aria-current', 'page');
-    await expect(feed(page).locator('article[data-ref="k3"]')).toBeVisible();
-    await expect(feed(page)).not.toContainText('Restless but stayed');
-    // back to the room it came from, by its name
-    await page.getByRole('button', { name: /^← Kiln Studio/ }).click();
-    await expect(box).toBeVisible();
-    // and the rail's Uni comes back the same way
-    await all.click();
-    await expect(page.locator('[data-view="all"]')).toBeVisible();
-    await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
-    await expect(box).toBeVisible();
-  });
-
   test('All is never where the app opens: a reload from All opens on rooms; home opens on Places even with an old saved choice', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('uni.home.view', 'all'));
     await boot(page);
@@ -439,18 +416,6 @@ test.describe('review', () => {
     expect((await calls(page, 'route_suggest')).length).toBe(n);
   });
 
-  test('from a private room, All\'s way back doesn\'t name it', async ({ page }) => {
-    await boot(page);
-    await page.locator('.fd-door[data-path="Areas/Sanctum"]').click();
-    await page.getByRole('textbox', { name: /^Message sanctum/ }).waitFor();
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
-    await expect(page.locator('[data-view="all"]')).toBeVisible();
-    await expect(page.locator('.all-back')).toHaveText('← Back');
-    await expect(page.locator('[data-view="all"]')).not.toContainText('Sanctum');
-    await page.locator('.all-back').click();
-    await expect(page.getByRole('textbox', { name: /^Message sanctum/ })).toBeVisible();
-  });
-
   test('a link in a message is a link, not a reply; selecting words isn\'t a tap', async ({ page }) => {
     await boot(page);
     await allIn(page);
@@ -490,18 +455,6 @@ test.describe('review', () => {
     await page.getByRole('button', { name: /Tap again to forget/ }).click();
     await expect.poll(() => page.evaluate(() => (window as any).__allHeld.text)).toBe('');
     expect(await page.evaluate(() => (window as any).__allHeld.target)).toBeNull();
-  });
-
-  test('from a thread of a private room too, All\'s way back doesn\'t name it', async ({ page }) => {
-    await boot(page);
-    await page.evaluate(() => { const w = window as any; w.__arrive('ch-sad', 'Uni', 'A reply in a private thread.', 0, false, 's1'); });
-    await page.locator('.fd-door[data-path="Areas/Sanctum"]').click();
-    await page.getByRole('textbox', { name: /^Message sanctum/ }).waitFor();
-    await page.locator('.thread-summary').first().click();
-    await page.locator('.thread-divider').waitFor();
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
-    await expect(page.locator('.all-back')).toHaveText('← Back');
   });
 
   test('a Send pressed just as the route moves says so; and the next one goes', async ({ page }) => {
