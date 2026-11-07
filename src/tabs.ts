@@ -181,12 +181,16 @@ export function restoreTabs(raw: string | null, roomIds: Iterable<string>): Tabs
   /** A tab dropped as the twin of an earlier one stands for that one (it may be the active tab). */
   const twin = new Map<string, string>();
   const tabs: Tab[] = [];
+  const isLegacy = (x: unknown) => !!x && typeof x === "object" && ((x as { kind?: unknown }).kind === "room" || (x as { kind?: unknown }).kind === "thread");
+  const rawTab = (id: unknown) => d.tabs.find((x) => !!x && typeof x === "object" && (x as { id?: unknown }).id === id);
+  const activeRaw = rawTab(d.active) as { kind?: unknown } | undefined;
+  const recentIds = Array.isArray(d.recent) ? d.recent.filter((x): x is string => typeof x === "string") : [];
+  const keepLegacy = isLegacy(activeRaw) ? d.active : !activeRaw || activeRaw.kind === "note" || activeRaw.kind === "vault" ? [...recentIds].reverse().find((id) => isLegacy(rawTab(id))) : undefined;
   for (const x of d.tabs) {
     let t = validTab(x);
     if (!t || seen.has(t.id)) continue;
-    // T-335: of an older version's room tabs, only the one that was active is the room All keeps in focus
-    const legacy = !!x && typeof x === "object" && ((x as { kind?: unknown }).kind === "room" || (x as { kind?: unknown }).kind === "thread");
-    if (legacy && t.id !== d.active) t = { id: t.id, kind: "all", title: "All" };
+    // T-335: of an older version's room tabs, only the place's own is the room All keeps in focus: the active one, or under a note the latest
+    if (isLegacy(x) && t.id !== keepLegacy) t = { id: t.id, kind: "all", title: "All" };
     const same = tabs.find((o) => sameTarget(o, t));
     // T-335: two saved rooms (an older version's tabs) are one All; the one that was active is the room it keeps in focus
     if (same && same.kind === "all" && t.id === d.active && t.channel && rooms.has(t.channel)) tabs[tabs.indexOf(same)] = { ...t, id: same.id };
