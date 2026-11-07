@@ -54,7 +54,7 @@ const emit = () => { for (const l of listeners) l(); };
 const set = (next: Partial<WorkState>) => { state = { ...state, ...next }; emit(); };
 let tasks: { rows: RawNote[]; whole: boolean; at: number } | null = null;
 /** The account's rooms (the app tells the store), and the notes of the last read: the rooms often arrive just after it. Memory only. */
-let hubRooms: readonly { id: string; name: string }[] = [];
+let hubRooms: readonly { id: string; name: string }[] | null = null;
 let lastRead: Sources | null = null;
 let inflight: Promise<void> | null = null;
 /** Whose work this is: the identity, set by the app (null: signed out or not known yet, so nothing is read or shown). */
@@ -122,7 +122,8 @@ async function fillTasks(vault: string, runs: readonly RawNote[], nodes: readonl
   const want = new Map<string, number>();
   for (const r of runs) {
     const t = (r.metadata as Record<string, unknown> | undefined)?.task;
-    const id = typeof t === "string" ? t.toUpperCase() : null;
+    // (a task field may hold words after its number)
+    const id = typeof t === "string" ? (/\bT-\d+[a-z]?\b/i.exec(t)?.[0] ?? t).toUpperCase() : null;
     if (id && !known.has(id) && !placed.has(r.id as string)) want.set(id, (want.get(id) ?? 0) + 1);
   }
   if (!want.size) return { rows: [], missing: 0 };
@@ -214,7 +215,7 @@ export function setWorkOwner(id: string | null) {
   try { for (const k of Object.keys(localStorage)) if (/^uni\.work\.v[123]:/.test(k)) localStorage.removeItem(k); } catch { /* private storage */ }
   if (id === identity) return;
   // another identity's rooms say nothing of this one's: its own arrive from the app (rooms set before the first identity is known are its own)
-  if (identity !== null) hubRooms = [];
+  if (identity !== null) hubRooms = null;
   identity = id;
   const owner = ownerOf(id, activeProfile().vault);
   if (owner !== loadedFor) adopt(owner);
@@ -222,10 +223,10 @@ export function setWorkOwner(id: string | null) {
 }
 
 /** The account's rooms, which say what a room's id on a run note is. New rooms place the last read again, at once. */
-export function setWorkRooms(rooms: readonly { id: string; name: string }[]) {
+export function setWorkRooms(rooms: readonly { id: string; name: string }[] | null) {
   // the rooms list is new, and in a new order, with every message: only new ids or names place anything again
-  const had = new Map(hubRooms.map((r) => [r.id, r.name]));
-  const same = rooms.length === hubRooms.length && rooms.every((r) => had.get(r.id) === r.name);
+  const had = new Map((hubRooms ?? []).map((r) => [r.id, r.name]));
+  const same = rooms === hubRooms || (!!rooms && !!hubRooms && rooms.length === hubRooms.length && rooms.every((r) => had.get(r.id) === r.name));
   hubRooms = rooms;
   if (same || !lastRead || !loadedFor || loadedFor !== currentOwner()) return;
   const work = workFrom({ ...lastRead, rooms });
@@ -237,7 +238,7 @@ export function setWorkRooms(rooms: readonly { id: string; name: string }[]) {
 /** Forget this device key: the device copies (every owner's), the work in memory, the pending asks, and any read still out. */
 export function forgetWork() {
   identity = null;
-  hubRooms = [];
+  hubRooms = null;
   adopt(null);
   dropCaches();
 }

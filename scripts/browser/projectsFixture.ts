@@ -137,7 +137,7 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
           case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
           case 'journal_list': case 'journal_pending': case 'search_messages': case 'search': case 'vault_search': return [];
           case 'journal_flush': return { sent: [], remaining: 0, error: null };
-          case 'refresh': return { pubkey: ME, total_items: 0, channel_errors: {}, truncated_channels: [] };
+          case 'refresh': if (d.holdRooms && !w.__roomsOpen) await new Promise(() => {}); return { pubkey: ME, total_items: 0, channel_errors: {}, truncated_channels: [] };
           case 'pair_source_available': return false;
           default: return null;
         }

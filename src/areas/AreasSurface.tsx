@@ -179,7 +179,7 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
   const uniRoom = useMemo(() => (rooms.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rooms)?.id ?? null), [rooms]);
   const root = useMemo(() => rootNode(uniRoom ? [uniRoom] : []), [uniRoom]);
   // the rooms list is new, and reordered, with every message; these only change with a room's id or name, so nothing read from them is read again
-  const roomRefsKey = rooms.map((r) => `${r.id}\0${r.name}`).sort().join("\n");
+  const roomRefsKey = useMemo(() => rooms.map((r) => `${r.id}\0${r.name}`).sort().join("\n"), [rooms]);
   const roomRefs = useMemo(() => rooms.map((r) => ({ id: r.id, name: r.name })), [roomRefsKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const uniRef = useMemo(() => roomRefs.find((r) => r.id === uniRoom) ?? null, [roomRefs, uniRoom]);
   /** A node that names its room only by `room` (no channel id) still opens that room. */
@@ -339,9 +339,10 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
   // (every task read, snoozed ones too: `tasks.tasks` holds only what shows now)
   const privateRuns = useMemo(() => privateRunIds(roomsPending ? null : data?.tree ?? null, tasks.runs, new Map((tasks.all ?? []).flatMap((t): [string, string][] => { const id = taskTitle(t.title).id?.toUpperCase(); return id ? [[id, t.node]] : []; })), roomRefs, uniRef, tasks.ready), [roomsPending, data?.tree, tasks.runs, tasks.all, tasks.ready, roomRefs, uniRef]);
   // the sessions read the rooms' names too, for a run note that holds only a room's id
-  useEffect(() => { setWorkRooms(roomRefs); }, [roomRefs]);
+  // (a profile with no chat has no rooms to wait for)
+  useEffect(() => { setWorkRooms(chat && roomsPending ? null : roomRefs); }, [chat, roomsPending, roomRefs]);
   // a private run filed on a public row lights no dot there: that row's Needs you doesn't list it
-  const dotRuns = useMemo(() => tasks.runs.filter((r) => !privateRuns.has(r.id) || (!!data && !!privateRoot(data.tree, r.node))), [tasks.runs, privateRuns, data]);
+  const dotRuns = useMemo(() => tasks.runs.filter((r) => !privateRuns.has(r.id) || !!(data ? privateRoot(data.tree, r.node) : tasks.tree ? privateRootIn(tasks.tree, r.node) : null)), [tasks.runs, tasks.tree, privateRuns, data]);
   const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), confirm.of, dotRuns), [tasks.tasks, dotRuns, rowPaths, tasks.tree, data?.tree, confirm.of]); // eslint-disable-line react-hooks/exhaustive-deps
   // T-335: what is new in each room (the rooms list's counts; opening a room marks it read, which clears them), and the approvals waiting
   // in each room (the key badge, apart from the tasks' dot): on the owning node's row, or on the room itself when no node owns it

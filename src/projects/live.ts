@@ -23,7 +23,7 @@ export type Gap = { name: string; area: string | null; areaPath: string | null; 
 export type LiveArea = Area & { private: boolean };
 export type LiveWork = Work & { areas: LiveArea[]; gaps: Gap[] };
 export type Sources = { nodes: readonly RawNote[]; runs: readonly RawNote[]; tasks: readonly RawNote[];
-  /** The rooms the account has, by id and name: a run note may hold only a room's id, and a node may hold only its name. */ rooms?: readonly { id: string; name: string }[] };
+  /** The rooms the account has, by id and name: a run note may hold only a room's id, and a node may hold only its name. Left out: not read yet. Empty: it has none. */ rooms?: readonly { id: string; name: string }[] | null };
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 const meta = (n: RawNote): Record<string, unknown> => (n.metadata && typeof n.metadata === "object" ? (n.metadata as Record<string, unknown>) : {});
@@ -273,7 +273,7 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     ...src.nodes.flatMap((n) => [meta(n).room, meta(n).rooms].flatMap((v) => String(v ?? "").split(",").map(roomKey)))]);
   const clueParts = (v: unknown): string[] => (Array.isArray(v) ? v : [v]).filter((x): x is string => typeof x === "string").flatMap((x) => x.split(",")).map((x) => x.trim()).filter(Boolean);
   const clueKnown = (part: string) => knownRooms.has(part) || knownRooms.has(roomKey(part)) || knownRooms.has(roomKey(part).split("/")[0]);
-  const roomUnread = (m: Record<string, unknown>) => !src.rooms?.length && [m.room, m.starter_room, m.channel, m.starter_channel].some((v) => clueParts(v).some((p) => !clueKnown(p)));
+  const roomUnread = (m: Record<string, unknown>) => !src.rooms && [m.room, m.starter_room, m.channel, m.starter_channel].some((v) => clueParts(v).some((p) => !clueKnown(p)));
   /** The private area a private run belongs to: the one its clues name, else the first that can be reached. */
   const privateHome = (m: Record<string, unknown>, task: string | null): LiveArea | null => {
     const named = [areaOfNode(str(m.project)), areaOfNode(str(m.node)), task ? areaOfNode(taskNode.get(task) ?? null) : null, ...[m.channel, m.starter_channel, m.room, m.starter_room].flatMap((v) => (Array.isArray(v) ? v : [v])).flatMap((v) => String(v ?? "").split(",")).map(areaOfRoom)];
