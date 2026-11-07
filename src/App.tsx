@@ -1486,7 +1486,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   // Fallback when the hub is unreachable: the Uni of the room you were last in searches the vault and replies there (0.2.2: #Uni is
   // archived; there is no room for everything, so the ask goes where you were, and the button says which room).
-  const searchRoom = channel ? rooms.find((r) => r.id === channel && r.dm !== true) ?? null : null;
+  // (at the home no room is loaded: the last one you were in still counts. Never a known direct message; a room whose kind isn't known
+  // yet is offered, and one without its Uni in the roster stops with a line, posting nothing)
+  const lastRoom = useRef<string | null>(null);
+  useEffect(() => { if (channel) lastRoom.current = channel; }, [channel]);
+  const searchAt = channel ?? lastRoom.current;
+  const searchRoom = searchAt ? rooms.find((r) => r.id === searchAt && r.dm !== true) ?? null : null;
   async function askUniSearch(query: string): Promise<boolean> {
     setError(null);
     const room = searchRoom;

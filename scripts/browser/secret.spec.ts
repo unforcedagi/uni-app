@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
+import { startInRoom } from './startInRoom';
 
 // T-176: the secret-request card on the real built frontend, with the Tauri backend faked. Proves the value goes
 // only to `send_secret` (never `post_message`), the field is masked, and nothing of it is left in the page.
@@ -62,6 +63,7 @@ async function boot(page: Page, opts: { messages: { ref: string; body: string }[
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   }, { messages: opts.messages, trusted: !!opts.trusted, optOut: !!opts.optOut, signed, requests, value: opts.value ?? null, failSends: opts.failSends ?? 0 });
+  await startInRoom(page, 'test');
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: 'Message Test room' })).toBeVisible();
 }

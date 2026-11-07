@@ -78,9 +78,9 @@ test('round 2: what needs you is in the home\'s drawer above the rooms; the arch
   await expect(page.getByRole('region', { name: 'Needs you' })).not.toContainText(NO_IDS);
   await shot(page, '01b-needs-you');
   await item.click();
-  // T-335: its place's room, in focus, with its details (what needs you) up
+  // T-335: its place's room, in focus (0.2.2: with the ask's sheet over it, where its action is said)
   await expect(title(page)).toHaveText('Riverbend co-op site');
-  await expect(focusSheet(page).getByRole('region', { name: 'Riverbend co-op site details' })).toContainText('Choose the photo for the about page');
+  await expect(page.getByRole('dialog').filter({ has: page.locator('.task-kind') })).toContainText('Choose the photo for the about page');
 });
 
 test('a room keeps its chat at the heart, with one strip of its projects: archived behind one tab, a missing folder named', async ({ page }) => {

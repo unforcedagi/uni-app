@@ -1,6 +1,7 @@
 // T-270: a dot in a folder name is not a file extension. The vault returns the note's extension; the note view renders
 // by it, so `Projects/example.org/Launch plan` is markdown, not plain text.
 import { test, expect, type Page } from '@playwright/test';
+import { startInRoom } from './startInRoom';
 
 type Fake = { path: string; extension?: string; content: string };
 
@@ -30,6 +31,7 @@ async function boot(page: Page, note: Fake) {
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   }, { note });
+  await startInRoom(page, 'test');
   await page.goto('/');
   await expect(page.locator('.note-body')).toBeVisible();
 }

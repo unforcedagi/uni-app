@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { startInRoom } from './startInRoom';
 
 // T-234 milestone 2: Uni's approval card and morning card on the real built frontend, with the Tauri backend faked. The
 // fake stands in for Rust: `sealed_card` returns the checked view (or the refusal Rust would give), `sealed_answer` takes
@@ -71,6 +72,7 @@ async function boot(page: Page, o: Opts) {
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   }, { ME, UNI, o });
+  await startInRoom(page, 'test');
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: 'Message Test room' })).toBeVisible();
 }

@@ -47,8 +47,6 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
   onTitle?: (title: string) => void;
 }) {
   const [editing, setEditing] = useState(startEditing);
-  /** (0.2.2: every note has its tools; the read-only For you page, which hid them, is retired) */
-  const tools = true;
   const [data, setData] = useState<VaultNote | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,8 +98,6 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
     return () => { live = false; };
   }, [target.vault, target.ref, attempt]);
 
-  // Report only after React commits the loaded note to the view.
-
   const origin = data?.hub ?? target.hub ?? hub;
   const webUrl = origin ? noteUrl(origin, data?.vault ?? target.vault, data?.note.id ?? target.ref) : null;
 
@@ -142,19 +138,19 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
       <button className="note-back" onClick={onBack} aria-label={backIcon === "←" ? `Back to ${backLabel}` : backLabel}>
         <span className="note-back-arrow" aria-hidden="true">{backIcon}</span><span className="note-back-label">{backLabel}</span>
       </button>
-      {note && tools && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
+      {note && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
       {/* 0.2: Back, Edit and one More: a new note, Copy and Download live in it (the note beside a chat keeps its own short bar) */}
-      {note && tools && !compact && !editing && <NoteDownload note={note} title={heading} markdown={isMarkdownNote(note.extension)} extra={[
+      {note && !compact && !editing && <NoteDownload note={note} title={heading} markdown={isMarkdownNote(note.extension)} extra={[
         { label: "New note", run: () => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "") },
         { label: "Copy markdown", run: () => void copyText(note.content ?? "", "Copied markdown") }]} />}
-      {note && tools && compact && !editing && isMarkdownNote(note.extension) && <NoteDownload note={note} title={heading} compact={compact} />}
+      {note && compact && !editing && isMarkdownNote(note.extension) && <NoteDownload note={note} title={heading} compact={compact} />}
       {actions}
     </header>
     {note && editing ? <NoteEditor vault={data!.vault} note={note} onDirty={onDirty} onCancel={() => setEditing(false)} onSaved={(updated) => { setData({ ...data!, note: { ...data!.note, ...updated } }); setEditing(false); }} /> : <div className="note-scroll">
       <article className="note-page">
         <h1 className="note-title">{heading}</h1>
-        {tools && <p className="note-meta-line">{note ? noteMeta(data!.vault, note.path, note.updatedAt ?? note.createdAt) : `${target.vault} · ${error || missing ? "unavailable" : "opening…"}`}</p>}
-        {tools && tags.length > 0 && <p className="note-tags">{tags.map((t) => <span key={t} className="note-tag">#{t}</span>)}</p>}
+        {<p className="note-meta-line">{note ? noteMeta(data!.vault, note.path, note.updatedAt ?? note.createdAt) : `${target.vault} · ${error || missing ? "unavailable" : "opening…"}`}</p>}
+        {tags.length > 0 && <p className="note-tags">{tags.map((t) => <span key={t} className="note-tag">#{t}</span>)}</p>}
         {!data && !error && !missing && <OpeningNote key={attempt} onRetry={() => setAttempt((n) => n + 1)} onBack={onBack} backLabel={backLabel} />}
         {missing && <div className="note-error">
           <p role="status">No note named {target.ref} in {target.vault}</p>
@@ -176,10 +172,10 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
         {shown && <>
           {own && <PublishedMedia m={own} />}
           <NoteRenderer note={shown} format={render.format} overrides={overrides} className="md note-body" resolve={resolve} linkComponent={Link} rehypePlugins={rehype} components={MEDIA_COMPONENTS} />
-          {tools && <details className="note-backlinks"><summary>Linked from ({inbound.length})</summary>
+          {<details className="note-backlinks"><summary>Linked from ({inbound.length})</summary>
             {inbound.map((link) => <button className="vault-note" key={JSON.stringify([link.id, link.relationship])} onClick={() => onOpen({ hub: null, vault: data!.vault, ref: link.id }, null)}>{link.path} <small>· {link.relationship}</small></button>)}
           </details>}
-          {tools && <footer className="note-footer">
+          {<footer className="note-footer">
             {webUrl && <button className="note-quiet" onClick={() => openExternal(webUrl)}>Open in Parachute ↗</button>}
           </footer>}
         </>}

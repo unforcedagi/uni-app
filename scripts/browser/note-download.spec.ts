@@ -4,6 +4,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import fixture from '../fixtures/t204-notes.json' with { type: 'json' };
+import { startInRoom } from './startInRoom';
 
 type FixtureNote = (typeof fixture.notes)[number];
 
@@ -45,6 +46,7 @@ async function boot(page: Page, note: FixtureNote) {
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   }, { note });
+  await startInRoom(page, 'test');
   await page.goto('/');
   await expect(page.locator('.note-body')).toBeVisible();
 }

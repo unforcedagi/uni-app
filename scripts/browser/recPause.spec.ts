@@ -4,6 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import { startInRoom as openIn } from './startInRoom';
 
 const press = (page: Page, target: Locator) => test.info().project.name === 'mobile' ? target.tap() : target.click();
 const button = (page: Page, name: string) => page.getByRole('button', { name, exact: true });
@@ -67,6 +68,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function boot(page: Page, opts: { noWebm?: boolean } = {}) {
+  await openIn(page, 'test');
   if (opts.noWebm) { await page.goto('/'); await page.evaluate(() => sessionStorage.setItem('noWebm', '1')); }
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: 'Message Test room' })).toBeVisible();

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { startInRoom } from './startInRoom';
 
 async function boot(page: Page, scenario: string) {
   await page.addInitScript(({ scenario }) => {
@@ -38,6 +39,7 @@ async function boot(page: Page, scenario: string) {
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   }, { scenario });
+  await startInRoom(page, 'test');
   await page.goto('/');
 }
 

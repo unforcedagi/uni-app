@@ -2,6 +2,7 @@
 // any failure shows on the card. The Tauri commands are mocked here; the Rust save path has its own
 // tests (uni-core `saved_attachment_lands_in_downloads_under_its_name`).
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import { startInRoom } from './startInRoom';
 
 const PDF = '6'.repeat(64), MP4 = 'f'.repeat(64), JPG = '7'.repeat(64), BIG = '8'.repeat(64);
 const O = 'https://relay.example';
@@ -63,6 +64,7 @@ test.beforeEach(async ({ page }) => {
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   }, { PDF, MP4, JPG, BIG, O });
+  await startInRoom(page, 'test');
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Open Q3 report.pdf' })).toBeVisible();
 });

@@ -25,7 +25,7 @@ export type Needs = { rows: { id: string; title: string; where: string | null; p
 
 /** One quiet line: "Needs you · 4", which opens the list in place; each item opens its room. Nothing when nothing needs you. */
 function NeedsLine({ needs, onOpen, onAsk, shown = false, approvals = null }: { needs: Needs; onOpen: (path: string) => void;
-  /** 0.2.2: an ask opens in its own room, with its sheet (default: its place, as before) */ onAsk?: (row: { id: string; room: string | null }) => void; /** 0.2: in the home's drawer the list is simply there, under its heading */ shown?: boolean; approvals?: ReactNode }) {
+  /** 0.2.2: an ask opens in its own room, with its sheet (default: its place, as before) */ onAsk?: (row: { id: string; room: string | null; path: string }) => void; /** 0.2: in the home's drawer the list is simply there, under its heading */ shown?: boolean; approvals?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const n = needs.rows.length + needs.privates.reduce((k, p) => k + p.count, 0);
   if (!n && !approvals) return null;
@@ -33,7 +33,7 @@ function NeedsLine({ needs, onOpen, onAsk, shown = false, approvals = null }: { 
     <h2 className="fd-sec-h">Needs you</h2>
     {approvals}
     {n > 0 && <ul className="fd-needs-list">
-      {needs.rows.map((r) => <li key={r.id}><button type="button" data-room={r.room ?? undefined} onClick={() => (onAsk ? onAsk({ id: r.id, room: r.room ?? null }) : onOpen(r.path))}><span>{r.title}</span>{r.where && <small>{r.where}</small>}</button></li>)}
+      {needs.rows.map((r) => <li key={r.id}><button type="button" data-room={r.room ?? undefined} onClick={() => (onAsk ? onAsk({ id: r.id, room: r.room ?? null, path: r.path }) : onOpen(r.path))}><span>{r.title}</span>{r.where && <small>{r.where}</small>}</button></li>)}
       {needs.privates.map((p) => <li key={p.path}><button type="button" onClick={() => onOpen(p.path)}><span>In {p.place}: {p.count} thing{p.count === 1 ? "" : "s"} for you</span></button></li>)}
     </ul>}
   </section>;
@@ -43,7 +43,7 @@ function NeedsLine({ needs, onOpen, onAsk, shown = false, approvals = null }: { 
       <span>Needs you · {n}</span><i className="ps-chev" aria-hidden="true" />
     </button>
     {open && <ul className="fd-needs-list">
-      {needs.rows.map((r) => <li key={r.id}><button type="button" data-room={r.room ?? undefined} onClick={() => (onAsk ? onAsk({ id: r.id, room: r.room ?? null }) : onOpen(r.path))}><span>{r.title}</span>{r.where && <small>{r.where}</small>}</button></li>)}
+      {needs.rows.map((r) => <li key={r.id}><button type="button" data-room={r.room ?? undefined} onClick={() => (onAsk ? onAsk({ id: r.id, room: r.room ?? null, path: r.path }) : onOpen(r.path))}><span>{r.title}</span>{r.where && <small>{r.where}</small>}</button></li>)}
       {needs.privates.map((p) => <li key={p.path}><button type="button" onClick={() => onOpen(p.path)}><span>In {p.place}: {p.count} thing{p.count === 1 ? "" : "s"} for you</span></button></li>)}
     </ul>}
   </section>;
@@ -125,7 +125,7 @@ export function FrontDoor({ onOpenProject, doors, needs, onOpen, onOpenNeed, onO
   /** 0.2 one home: the head's drawer (what needs you, To post, the places) is open, and how to open or close it */ pulled?: boolean; onPull?: (open: boolean) => void;
   /** 0.2: the approval prompts waiting, shown under what needs you in the drawer */ approvals?: ReactNode;
   /** T-335 one surface: what needs you opens its place's room with its details (default: as a place does) */ onOpenNeed?: (path: string) => void;
-  /** 0.2.2: an ask opens in its own room, in focus, with its sheet over it (a private area's count still opens its place) */ onOpenAsk?: (row: { id: string; room: string | null }) => void;
+  /** 0.2.2: an ask opens in its own room, in focus, with its sheet over it (a private area's count still opens its place) */ onOpenAsk?: (row: { id: string; room: string | null; path: string }) => void;
   /** T-335 one surface: every room no area holds, folded under one line */ otherRooms?: readonly { id: string; name: string }[];
   /** No areas yet (once that is known): the home says so, with the way to the old #Uni where an account still has one (archived 10-26) */ noAreas?: (() => void) | null; /** T-335 as Aaron: only once the tasks have been read, fresh and whole, may the home say nothing needs you */ needsKnown?: NeedsKnown; /** approvals waiting, which the task feed doesn't count */ alsoNeeds?: number; onRetryNeeds?: () => void; doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
   /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */

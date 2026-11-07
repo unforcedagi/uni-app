@@ -4,6 +4,7 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { startInRoom } from './startInRoom';
 
 const MP4 = 'e'.repeat(64);
 const O = 'https://relay.example';
@@ -60,6 +61,7 @@ async function open(page: Page) {
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   }, { MP4, O });
+  await startInRoom(page, 'test');
   await page.goto('/');
   const play = page.getByRole('button', { name: /garden walk\.webm/ }).first();
   await expect(play).toBeVisible();

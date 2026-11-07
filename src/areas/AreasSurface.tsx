@@ -97,6 +97,9 @@ function ChatWait({ placeholder, retry }: { placeholder: string; retry: (() => v
 
 /** T-140: the area a node was reached through (a project linked to two areas sits under both); its crumbs and Back go there. */
 const viaMemory: { path: string | null; via: string | null } = { path: null, via: null };
+/** 0.2.2: an ask opened from the home's drawer, waiting for its room to come into focus (module memory: opening the room may draw this
+ *  surface afresh). `shown`: its sheet has been up over that room, so leaving the room ends it. */
+const askMemory: { pending: { id: string; room: string; shown: boolean } | null } = { pending: null };
 
 /**
  * T-335 one surface (0.2: one home). With rooms: the home is All (the stream, the composer that routes, and the drawer: what needs you,
@@ -178,9 +181,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const [sheetId, setSheetId] = useState<string | null>(null);
   const lastSheet = useRef<Task | null>(null);
   const openSheet = (t: Task) => { lastSheet.current = t; setSheetId(t.id); };
-  /** 0.2.2: an ask opened from the home's drawer: its sheet comes up over its own room once that room is in focus. */
-  const pendingSheet = useRef<{ id: string; room: string } | null>(null);
-  const closeSheet = () => { pendingSheet.current = null; setSheetId(null); };
+  const closeSheet = () => { askMemory.pending = null; setSheetId(null); };
   const via = viaMemory.path === path ? viaMemory.via : null;
   /** T-301/T-302: a project (or the Unfiled sessions) opened in place, over the room or the home. */
   const [projectOpen, setProjectOpen] = useState<string | null>(null);
@@ -256,10 +257,12 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   // Opening a room re-reads the tasks if the copy is more than a few seconds old (the needs-you feed must not show what is already done).
   useEffect(() => { tasks.refreshIfStale(); }, [node?.path, focus?.room]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    // (an ask opened from the drawer waits for its room: the sheet opens over it, and any other room drops it)
-    const p = pendingSheet.current;
-    if (p && focus?.room && p.room !== focus.room) pendingSheet.current = null;
-    setSheetId(p && p.room === focus?.room ? p.id : null); setProjectOpen(null); setAppOpen(false);
+    // (an ask opened from the drawer waits for its room: the sheet opens over it; another room, or leaving it once it was shown, ends it)
+    const p = askMemory.pending;
+    const here = !!p && !!focus && !focus.leaving && focus.room === p.room;
+    if (p && here) p.shown = true;
+    else if (p && ((focus && focus.room !== p.room) || (!focus && p.shown))) askMemory.pending = null;
+    setSheetId(p && here ? p.id : null); setProjectOpen(null); setAppOpen(false);
   }, [node?.path, focus?.room]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Who stewards a node: its own room, else the nearest ancestor's (an archived room's `room_fallback` stands in), else #Uni if the account
    *  still has one (archived 10-26: on the live relay, no room). An ask's own `room` comes first (`roomOfAsk`). */
@@ -358,14 +361,16 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
    * 0.2.2: an ask from the home's drawer opens in its own room (its `room`, else its node's), in focus, with its sheet over it: its action is
    * said there. One with no room anywhere opens its sheet over the home, never a room picked for it.
    */
-  const openAsk = (row: { id: string; room: string | null }) => {
+  const openAsk = (row: { id: string; room: string | null; path?: string }) => {
     closeProject();
     const t = tasks.all?.find((x) => x.id === row.id); if (t) lastSheet.current = t;
-    if (!row.room) { pendingSheet.current = null; setSheetId(row.id); return; }
-    pendingSheet.current = { id: row.id, room: row.room };
-    if (focus && focus.room === row.room) { allPlace?.onView("chat"); setSheetId(row.id); return; }
+    if (!row.room) { askMemory.pending = null; setSheetId(row.id); return; }
+    askMemory.pending = { id: row.id, room: row.room, shown: false };
+    if (focus && !focus.leaving && focus.room === row.room) { askMemory.pending.shown = true; allPlace?.onView("chat"); setSheetId(row.id); return; }
     setSheetId(null);
-    actions.openRoom(row.room);
+    // its room is its place's (its own, or the one it talks in): the place comes forward, as a door opens it; else the room itself
+    const place = row.path && row.path !== ROOT && roomOfNode(row.path)?.id === row.room ? row.path : null;
+    if (place) actions.openRoom(row.room, null, null, { path: place, view: "chat" }); else actions.openRoom(row.room);
   };
   const openPrivate = (o: PrivateNeed["open"]) => { closeSheet(); openPlace(o.path, "details"); };
   // r18: one summary for the details and the work: the node's `stands`, else its brief's "Now" (with the brief's own time), else the newest change it names

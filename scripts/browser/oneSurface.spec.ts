@@ -117,15 +117,16 @@ test.describe('every way into a room lands in focus over All', () => {
     await inFocus(page, /Glaze Tests|#glaze-tests/, /^Message glaze-tests/);
   });
 
-  test('what needs you, in the home\'s drawer, opens its room, its details showing the task', async ({ page }) => {
+  test('what needs you, in the home\'s drawer, opens its room with the ask\'s sheet over it (0.2.2: its action is said there)', async ({ page }) => {
     await boot(page);
     // 0.2: in the drawer the list is simply there, no "Needs you · N" to open first
     const needs = (await drawer(page)).getByRole('region', { name: 'Needs you' });
     await expect(needs.getByRole('button', { name: /^Needs you/ })).toHaveCount(0);
     await needs.getByRole('button', { name: /Find jars for the honey/ }).click();
     await inFocus(page, 'Bee Garden');
-    await expect(details(page)).toBeVisible();
-    await expect(details(page)).toContainText('Find jars for the honey');
+    const sheet = page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
+    await expect(sheet).toContainText('Find jars for the honey');
+    await expect(sheet.locator('.task-kind')).toContainText('#bee-garden');
   });
 
   test('a room the app reopens to, saved before this version, comes back in focus over All', async ({ page }) => {

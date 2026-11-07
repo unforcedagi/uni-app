@@ -129,6 +129,11 @@ test('T-302 round 2: what needs you, across the areas, is one line on the front 
   await expect(row).toContainText('COhere 2026');
   await row.click();
   await expect(title(page)).toHaveText('COhere 2026');
+  // 0.2.2: the ask opens over its room with its sheet; put it away before going home
+  const sheet = page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
+  await expect(sheet).toContainText('COhere festival readiness');
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
   // inside the private area its items are its own rows, with their words
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
   await openPlaces(page);

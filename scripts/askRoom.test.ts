@@ -17,6 +17,9 @@ check("a slashed name matches only itself", () => assert.equal(askRoom({ room: "
 
 check('"Say "x" in #room" says x', () => assert.deepEqual(stepAudience('Say "approve cards" in #garden', "garden"), { kind: "room", text: "approve cards" }));
 check("curly quotes too", () => assert.deepEqual(stepAudience("Say “ship it” when the build is green", "garden"), { kind: "room", text: "ship it" }));
+check("an apostrophe inside single quotes is part of the words", () => assert.deepEqual(stepAudience("Say 'don't merge yet' in #garden", "garden"), { kind: "room", text: "don't merge yet" }));
+check("curly single quotes with an apostrophe", () => assert.deepEqual(stepAudience("Say ‘we’re ready’ in #garden", "garden"), { kind: "room", text: "we’re ready" }));
+check("double quotes close only on a double quote", () => assert.deepEqual(stepAudience('Say "it\'s on" when ready', "garden"), { kind: "room", text: "it's on" }));
 check("an unquoted word keeps its clause", () => assert.deepEqual(stepAudience("Say go to deploy the site", "garden"), { kind: "room", text: "Go to deploy the site" }));
 
 if (failed) process.exit(1);

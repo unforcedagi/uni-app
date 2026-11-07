@@ -39,12 +39,13 @@ async function longPress(page: Page, msg: ReturnType<Page['locator']>) {
   return sheet;
 }
 const TASKS: BootOpts = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true, uniMember: true };
-/** The tour's way into a room of the tasks world: Uni's home, what needs you (0.2: in the home's drawer, its list open), its first item: its room in focus, with its details (T-335). */
-async function openRoomWithNeeds(page: Page) {
+/** The tour's way into an ask of the tasks world: Uni's home, what needs you (0.2: in the home's drawer, its list open), its first item: its
+ *  room in focus (T-335), with the ask's sheet over it (0.2.2). */
+async function openAskFromHome(page: Page) {
   await page.locator('[data-place="front-door"]').first().waitFor();
   await openPlaces(page);
   await page.locator('#fd-drawer').getByRole('region', { name: 'Needs you' }).locator('.fd-needs-list button').first().click();
-  await expect(focus(page).locator('.all-focus-details')).toBeVisible();
+  await expect(focus(page)).toBeVisible();
 }
 
 // ---------------------------------------------------------------- the rail
@@ -271,8 +272,7 @@ test('a note on a phone keeps its tools on one row, and Quote only shows when th
 // ---------------------------------------------------------------- tasks, decisions, approvals
 test('a task sheet speaks plainly: no "due due", no task number', async ({ page }) => {
   await bootAreas(page, 'seed', TASKS);
-  await openRoomWithNeeds(page);
-  await focus(page).getByRole('region', { name: 'Needs you' }).locator('.cp-need[data-id]').first().click();
+  await openAskFromHome(page);
   const sheet = page.locator('.task-sheet').first();
   await expect(sheet).toBeVisible();
   await expect(sheet).not.toContainText(/due due/i);
@@ -369,7 +369,8 @@ test('Search: nothing found is one line and a next step; a found note\'s folder 
   await field.fill('zzzqqq nothing like this');
   const none = page.locator('.search-nothing');
   await expect(none).toContainText('Nothing here for');
-  await expect(none.getByRole('button', { name: 'Ask Uni to look' })).toBeVisible();
+  // 0.2.2: the fallback asks the Uni of the room you were in, and says which
+  await expect(none.getByRole('button', { name: /^Ask Uni in #\S+ to look$/ })).toBeVisible();
   await expect(page.locator('.search-section')).toHaveCount(0);
   await field.fill('glaze');
   const hit = page.locator('.search-hit').first();

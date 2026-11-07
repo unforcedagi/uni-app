@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { closeSync, ftruncateSync, openSync, writeFileSync } from 'node:fs';
 import { test, expect, type Page, type Locator } from '@playwright/test';
 import { railGo } from './railGo';
+import { startInRoom } from './startInRoom';
 
 async function press(page: Page, target: Locator) {
   if (test.info().project.name === 'mobile') await target.tap();
@@ -85,6 +86,7 @@ test.beforeEach(async ({ page }) => {
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   });
+  await startInRoom(page, 'test');
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: 'Message Test room' })).toBeVisible();
 });

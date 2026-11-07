@@ -86,6 +86,9 @@ Rules: bring it back clean, say if it broke, and nobody takes the good saw home 
     orchard, archive,
     workshop: [msg('workshop', 0, UNI, 'Uni', `Rules for the shed are in uni:${ids.tools}.`), msg('workshop', 1, ROBIN, 'Robin Vale', 'Looks right to me.')],
   };
+  // 0.2.2: the app opens on the home when there is no Uni room (it used to open the first room); this world starts where its specs
+  // read and write, last left in #Orchard (only when nothing was saved yet, so a reload keeps whatever the app saved)
+  try { if (!localStorage.getItem('uni.tabs.v2')) localStorage.setItem('uni.tabs.v2', JSON.stringify({ v: 1, tabs: [{ id: 'orchard-tab', kind: 'all', title: 'Uni', channel: 'orchard' }], active: 'orchard-tab', recent: ['orchard-tab'] })); } catch { /* private storage */ }
   let sent = 0;
   const w = window as any;
   w.__notePane = { sent: [] as { channel: string; body: string }[] };
