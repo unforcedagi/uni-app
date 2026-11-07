@@ -221,8 +221,9 @@ export function setWorkOwner(id: string | null) {
 
 /** The account's rooms, which say what a room's id on a run note is. New rooms place the last read again, at once. */
 export function setWorkRooms(rooms: readonly { id: string; name: string }[]) {
-  // the rooms list is new with every message: only new ids or names place anything again
-  const same = rooms.length === hubRooms.length && rooms.every((r, i) => r.id === hubRooms[i].id && r.name === hubRooms[i].name);
+  // the rooms list is new, and in a new order, with every message: only new ids or names place anything again
+  const had = new Map(hubRooms.map((r) => [r.id, r.name]));
+  const same = rooms.length === hubRooms.length && rooms.every((r) => had.get(r.id) === r.name);
   hubRooms = rooms;
   if (same || !lastRead || !loadedFor || loadedFor !== currentOwner()) return;
   const work = workFrom({ ...lastRead, rooms });

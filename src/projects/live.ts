@@ -267,9 +267,10 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
       folder: byNode ? null : str(m.folder),
     }, roomRefs, null);
   };
-  /** Rooms not read yet: a run whose only word on its room is an id that no note names can't be told from a private one, so it waits, with no words, until they are. */
+  /** Rooms not read yet: a run holding a room's id that no note names can't be told from a private one, so it waits, with no words, until they are. A room's name beside it
+   *  says nothing of the id: a launcher can name one room and hold another's id. */
   const roomIds = new Set(roomRefs.map((r) => r.id));
-  const roomUnread = (m: Record<string, unknown>) => !src.rooms?.length && !str(m.room) && [m.channel, m.starter_channel].some((c) => { const id = str(c); return !!id && !roomIds.has(id); });
+  const roomUnread = (m: Record<string, unknown>) => !src.rooms?.length && [m.channel, m.starter_channel].some((c) => { const id = str(c); return !!id && !roomIds.has(id); });
   /** The private area a private run belongs to: the one its clues name, else the first that can be reached. */
   const privateHome = (m: Record<string, unknown>, task: string | null): LiveArea | null => {
     const named = [areaOfNode(str(m.project)), areaOfNode(str(m.node)), task ? areaOfNode(taskNode.get(task) ?? null) : null, ...[m.channel, m.starter_channel, m.room, m.starter_room].flatMap((v) => (Array.isArray(v) ? v : [v])).flatMap((v) => String(v ?? "").split(",")).map(areaOfRoom)];

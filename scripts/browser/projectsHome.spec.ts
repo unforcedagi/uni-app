@@ -7,7 +7,8 @@ import { bootProjects } from './projectsFixture.ts';
 const MIN = 60_000;
 const door = (page: Page, name: string) => page.getByRole('navigation', { name: 'Rooms' }).getByRole('button', { name: new RegExp(`^${name}\\b`) });
 const strip = (page: Page) => page.locator('[data-place="project-strip"]');
-const shot = (page: Page, name: string) => page.screenshot({ path: `__shots__/sessions-home/${test.info().project.name}-${name}.png` });
+// for walkthroughs: it asserts nothing, so a busy machine failing to capture one fails no test
+const shot = (page: Page, name: string) => page.screenshot({ path: `__shots__/sessions-home/${test.info().project.name}-${name}.png` }).catch(() => undefined);
 const posted = (page: Page) => page.evaluate(() => (window as any).__posted as { channel: string; body: string }[]);
 
 const run = (now: number, id: string, title: string, md: Record<string, unknown>) => ({ id, path: `Runs/2026-10-20 ${title}`, tags: ['run'], createdAt: new Date(now - 90 * MIN).toISOString(), updatedAt: new Date(now - MIN).toISOString(),
@@ -97,8 +98,8 @@ test("a run from a private room stays out of a public area's work view; a public
   await expect(view).not.toContainText('Quiet letter');
 });
 
-test("a run naming its room only by id waits, with no words, until the rooms are read, on the screen and in the device's copy", async ({ page }) => {
-  const idOnly = (now: number) => [run(now, 'run-id-only', 'A walk by the still lake', { node: 'node-uni', channel: 'hub-quiet-sub', starter_room: 'uni', doing_now: 'Reading lake.md' })];
+test("a run holding a room's id no note names waits, with no words, until the rooms are read, on the screen and in the device's copy", async ({ page }) => {
+  const idOnly = (now: number) => [run(now, 'run-id-only', 'A walk by the still lake', { node: 'node-uni', room: 'uni', channel: 'hub-quiet-sub', starter_room: 'uni', doing_now: 'Reading lake.md' })];
   const saved = () => page.evaluate(() => Object.entries(localStorage).filter(([k]) => k.startsWith('uni.work.')).map(([, v]) => v as string).join(''));
   await bootProjects(page, { moreRuns: idOnly, moreRooms: [{ id: 'hub-quiet-sub', name: 'sanctum/build' }], holdRooms: true });
   await page.goto('/');
