@@ -27,6 +27,17 @@ async function kiln(page: Page, o: BootOpts = {}) {
 }
 /** T-335 one surface: a room is in focus over All. */
 const focus = (page: Page) => page.getByRole('region', { name: /in focus$/ });
+/** A long press on a message (a finger down until the sheet is up, then up): its actions sheet (as chatfeel.spec.ts does). */
+async function longPress(page: Page, msg: ReturnType<Page['locator']>) {
+  await msg.scrollIntoViewIfNeeded();
+  const b = (await msg.locator('p').first().boundingBox())!;
+  const at = { x: b.x + 20, y: b.y + 8 };
+  await page.evaluate(({ x, y }) => { document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })); }, at);
+  const sheet = page.getByRole('dialog', { name: 'Message actions' });
+  await expect(sheet).toBeVisible();
+  await page.evaluate(({ x, y }) => { document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })); }, at);
+  return sheet;
+}
 const TASKS: BootOpts = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true, uniMember: true };
 /** The tour's way into a room of the tasks world: Uni's home, what needs you (0.2: in the home's drawer, its list open), its first item: its room in focus, with its details (T-335). */
 async function openRoomWithNeeds(page: Page) {
@@ -197,7 +208,13 @@ test('every room wears one colour: the home\'s door, All\'s stream and the room 
 test('a toast never sits on the composer', async ({ page }) => {
   onlyPhone();
   await kiln(page);
-  await focus(page).locator('.message-list article.message').last().getByRole('group', { name: 'Message actions' }).getByRole('button', { name: 'Copy', exact: true }).click();
+  // 0.2: on a touch screen Copy is in the latest reply's long-press sheet, not its always-on row
+  const latest = focus(page).locator('.message-list article.message').last();
+  await expect(latest.getByRole('group', { name: 'Message actions' }).getByRole('button', { name: 'Copy', exact: true })).toBeHidden();
+  const sheet = await longPress(page, latest);
+  await page.waitForTimeout(450); // the sheet takes no tap in its first 400 ms
+  await sheet.getByRole('button', { name: 'Copy', exact: true }).click();
+  await expect(page.locator('.toast')).toBeVisible();
   const toast = (await page.locator('.toast').boundingBox())!;
   const composer = (await focus(page).locator('.compose-row').boundingBox())!;
   expect(toast.y + toast.height).toBeLessThanOrEqual(composer.y);
@@ -326,7 +343,7 @@ test('one vault: Vault goes straight in; an open folder has small marks, not but
   if (phone()) await expect(browser.getByRole('button', { name: 'New note in Areas' })).toBeHidden();
   else {
     const plus = browser.getByRole('button', { name: 'New note in Areas' });
-    await browser.locator('.vault-folder', { has: plus }).first().hover();
+    await browser.locator('.vault-folder', { has: page.getByRole('button', { name: 'New note in Areas' }) }).first().hover();
     await expect(plus).toBeVisible();
     await expect(plus.locator('xpath=..')).toHaveCSS('opacity', '1');
   }
@@ -395,6 +412,7 @@ test('the home never says less than the cards beside it: an approval waiting is 
 });
 
 test('a re-read that fails after a good one doesn\'t leave the home saying nothing needs you (code review)', async ({ page }) => {
+  test.setTimeout(90_000); // the re-read comes on the tasks' own timer, up to 80 s after the good one
   await page.addInitScript(() => { (window as any).__extraInvoke = async (cmd: string, a: any) => { if (cmd.startsWith('vault_query') && ['task', 'decision'].includes(a.tag) && (window as any).__failTasks) throw new Error('the vault did not answer'); if (cmd.startsWith('vault_query') && ['task', 'decision'].includes(a.tag)) return []; return undefined; }; });
   await bootAreas(page, 'seed', { tree: true, tasks: true, uniMember: true });
   await page.locator('[data-place="front-door"]').waitFor();

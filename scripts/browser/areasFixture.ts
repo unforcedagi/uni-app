@@ -869,6 +869,8 @@ const frontDoor = (page: Page) => page.locator('[data-place="front-door"]:not(.a
 /** 0.2 one home: the places are in the drawer under the home's head; this pulls it down (nothing to do on a places page). */
 export async function openPlaces(page: Page) {
   const pull = page.locator('[data-place="front-door"] .fd-pull');
+  // (the home, not the empty "Reading your rooms…" screen before it; a vault without the glue has its tree)
+  await page.locator('[data-place="front-door"]:not(.all-empty), .th-phone-tree, nav[aria-label="Rooms and areas"]').first().waitFor({ timeout: 8000 }).catch(() => {});
   if (!(await pull.first().isVisible().catch(() => false))) return;
   // while the rooms are still being read the drawer is simply open (and the head can't close it); it folds once the stream comes, so wait
   // for that first (a world with no area rooms keeps it open for good)

@@ -47,6 +47,8 @@ test.describe('device cache', () => {
     await bootAreas(page, 'seed', { briefs: true, queryDelay: 1800, deviceCache: cached });
     await page.evaluate(() => { document.documentElement.dataset.t0 = String(performance.now()); });
     await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
+    // 0.2: the saved copy's places are in the home's drawer, there at once too
+    await expect(page.locator('[data-place="front-door"] .fd-pull')).toBeVisible({ timeout: 500 });
     await pullDown(page);
     await expect(areaCard(page, 'Techne')).toBeVisible({ timeout: 500 });
     await expect(page.locator('.areas-status')).toContainText('Saved copy · refreshing');
@@ -110,7 +112,8 @@ test.describe('device cache', () => {
     await page.getByRole('textbox', { name: 'Pairing link' }).fill('nostrpair://test');
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await page.getByRole('button', { name: 'Codes match', exact: true }).click();
-    await expect(page.getByRole('alert')).toContainText('account B offline');
+    // 0.2: the home is All's stream; account B's places can't be read, and it says so in place of the stream
+    await expect(page.locator('[data-place="front-door"] .all-quiet')).toContainText("Couldn't read your places just now.");
     await expect(areaCard(page, 'Techne')).toHaveCount(0);
   });
 

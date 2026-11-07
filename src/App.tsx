@@ -799,7 +799,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** `fromHistory`: Back and Forward move through the places visited; they do not add to them. */
   function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false, fromHistory = false, then?: () => void) {
     // 0.2 one home: Uni's places page is All, with its places under the head (an older save, a step back, a place's way up)
-    if (target.kind === "areas" && !target.path && homeIsAll) target = { kind: "all", title: "Uni" };
+    if (((target.kind === "areas" && !target.path) || (target.kind === "area" && !target.channel && tabsReady.current && roomsRef.current.length > 0)) && homeIsAll) target = { kind: "all", title: "Uni" };
     // already in All, with a room in focus: All is what is behind it
     if (target.kind === "all" && allFocusRef.current && activeTab(tabsRef.current)?.kind === "all") {
       // a panel over it goes first; the room stays in focus under it
@@ -2615,13 +2615,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const active = activeTab(tabs);
   useEffect(() => { setRailMore(false); }, [active?.id]);
   // 0.2 one home: a restored Uni places page (an older version's save) is the home, All
-  useLayoutEffect(() => { if (homeIsAll && tabsReady.current && active?.kind === "areas" && !active.path) openTarget(uniHome(), "replace"); }, [homeIsAll, active?.id, active?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  // (an area saved by an older version without its room is the home too: with rooms, a place is only ever its room in focus)
+  useLayoutEffect(() => { if (homeIsAll && tabsReady.current && oldHome(active)) openTarget(uniHome(), "replace"); }, [homeIsAll, active?.id, active?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (active && (active.kind === "areas" || active.kind === "area")) { const { id: _id, ...t } = active; originRef.current = t; } }, [active]);
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const areasOpen = active?.kind === "areas" || active?.kind === "area";
   /** T-335 one surface: every room opens in focus over All; Uni's home (and a vault without rooms, its areas' work) is the other side of it. */
   // 0.2 one home: Uni's places page, before the saved place is restored (or while a step back to it is turned into All), is drawn as the home
-  const allOpen = active?.kind === "all" || (homeIsAll && active?.kind === "areas" && !active.path);
+  const oldHome = (t: TabTarget | null | undefined) => !!t && ((t.kind === "areas" && !t.path) || (t.kind === "area" && !t.channel));
+  const allOpen = active?.kind === "all" || (homeIsAll && oldHome(active));
   const shellOpen = areasOpen || allOpen;
   // another place opened: the focus ended with All (whoever opened it has already moved the room's view on)
   useLayoutEffect(() => { if (!allOpen && allFocusRef.current) { stopLeaving(); setAllFocus(null, true); } }, [allOpen]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2790,7 +2792,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       : active?.kind === "posts" ? <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} />
       : active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix, query = "") => { setSearchQuery(query); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : shellOpen && active ? <AreasSurface allPlace={allOpen ? { backTo: "Uni", from: null, onBack: () => openTarget(uniHome()), forYou: homeIsAll ? { fresh: forYou.fresh, open: openForYou } : null, focus: allFocus, onFocus: (room, ref, threadRoot, place) => focusInAll(room, ref ?? null, threadRoot ?? null, place), onUnfocus: endAllFocus, onFocusBack: stepBackInFocus, onView: setFocusView } : null} noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} rooms={rooms} actions={areaActions} roomFor={areaRoomFor}
+      : shellOpen && active ? <AreasSurface allPlace={allOpen ? { backTo: "Uni", from: null, onBack: () => openTarget(uniHome()), forYou: homeIsAll ? { fresh: forYou.fresh, open: openForYou } : null, focus: allFocus, onFocus: (room, ref, threadRoot, place) => focusInAll(room, ref ?? null, threadRoot ?? null, place), onUnfocus: endAllFocus, onFocusBack: stepBackInFocus, onView: setFocusView } : null} noteBeside={asideShown && paneShape === "beside"} roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={allOpen ? `home:${identity ?? ""}` : `${active.id}:${identity ?? ""}`} path={shellPath} rooms={rooms} actions={areaActions} roomFor={areaRoomFor}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>

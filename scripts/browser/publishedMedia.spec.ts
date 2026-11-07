@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { bootAreas, openDetails } from './areasFixture';
+import { bootAreas, openDetails, openPlaces } from './areasFixture';
 
 /** The fixture's made-up Garden project's room (areasFixture `garden`). */
 const GARDEN = '5b0c4e8a-2f3d-4c1e-9a7b-6d8e0f1a2b3c';
@@ -79,9 +79,11 @@ async function open(page: Page, publish = true) {
   await bootAreas(page, 'seed', { tree: true, tasks: true, garden: true, pinned: true });
   await toGarden(page);
 }
-/** The made-up Garden project's room: its door on Uni's home, in focus over All (T-335 one surface). */
+/** The made-up Garden project's room: its door in the home's drawer (0.2), in focus over All (T-335 one surface). */
 async function toGarden(page: Page) {
   await page.locator('[data-place="front-door"]').first().waitFor();
+  await expect(page.locator('[data-place="front-door"] .fd-pull')).toBeEnabled(); // the drawer folds once All's stream is in; pull it after
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Projects/Garden"]').click();
   await expect(focus(page).locator('.all-focus-title')).toHaveText('Garden');
   await expect(focus(page).locator('.sr-chat')).toBeVisible();
@@ -279,18 +281,22 @@ test.describe('published media in notes and decisions', () => {
   });
 
   test('a new hub in Settings is read again: a note that showed only a link plays once the hub serves published files', async ({ page }) => {
-    test.skip(!wide(page), 'the Journal settings are reached from the rail');
+    test.skip(!wide(page), 'Settings is reached from the rail');
     await open(page, false);
     const view = await openNote(page, PUB, 'The garden walk clip is up:');
     await expect(view.locator('.note-body a[href="' + VIDEO + '"]')).toHaveCount(1);
     await expect(view.locator('video')).toHaveCount(0);
     // the hub is changed to one that serves published files (the fixture answers with its origin from now on)
     await page.evaluate((o) => { (window as any).__publishOrigins = [o]; }, ORIGIN);
-    await page.getByRole('button', { name: 'Journal', exact: true }).click();
-    await page.getByRole('button', { name: 'Journal settings' }).click();
-    await page.locator('.journal-settings').getByRole('button', { name: 'Save' }).click();
-    await expect(page.locator('.journal-settings')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Uni', exact: true }).first().click();
+    // 0.2: the Journal's hub and vault are in Settings → Developer ("Journal is kept in")
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.locator('.settings-dev > summary', { hasText: 'Developer' }).click();
+    const kept = page.getByRole('region', { name: "Journal's vault" });
+    await expect(kept).toContainText('Journal is kept in');
+    await kept.getByRole('button', { name: 'Save' }).click();
+    await page.getByRole('button', { name: 'Close panel', exact: true }).click();
+    await expect(page.locator('.settings')).toHaveCount(0);
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
     await toGarden(page);
     const again = await openNote(page, PUB, 'Again, the garden walk clip:');
     await expect(again.locator('video')).toHaveCount(1);

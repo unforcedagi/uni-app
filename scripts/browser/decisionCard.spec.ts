@@ -3,7 +3,7 @@
 // Run: DECISIONS_TEST_PORT=5731 npx playwright test --config playwright.decisions.config.ts
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, focusSheet, openDetails } from './areasFixture';
+import { bootAreas, focusSheet, openDetails, openPlaces } from './areasFixture';
 import { railGo } from './railGo';
 
 const BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb';
@@ -22,6 +22,9 @@ const seed = (page: Page, extra: Record<string, unknown> = {}) => page.addInitSc
 async function openAtlas(page: Page) {
   await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true });
   await page.locator('[data-place="front-door"]').first().waitFor();
+  // 0.2: the doors are in the home's drawer (openPlaces does nothing while the home still reads its rooms, so wait for its head)
+  await page.locator('[data-place="front-door"] .fd-pull').waitFor();
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Areas/Atlas"]').click();
   await openDetails(page);
   await focusSheet(page).getByRole('region', { name: 'Inside Atlas' }).locator('.fx-place').filter({ has: page.locator('span', { hasText: /^ATLAS$/ }) }).click();

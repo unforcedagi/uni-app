@@ -7,18 +7,28 @@ import { bootAreas, focusSheet, openAreasHome, openDetails } from './areasFixtur
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
 const boot = async (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => { await bootAreas(page, 'seed', { ...base, ...extra }); };
-const home = (page: Page) => page.locator('[data-place="front-door"][data-view="places"]');
+/** 0.2 one home: All's stream, its places (the doors) in the drawer under the head */
+const home = (page: Page) => page.locator('[data-place="front-door"][data-view="all"]');
+/** Uni's home with its drawer down, once the rooms are read (before that the places show open, then fold up under the head) */
+async function openPlaces(page: Page) {
+  if (!(await home(page).isVisible()) || await focusSheet(page).count()) await openAreasHome(page);
+  await expect(focusSheet(page)).toHaveCount(0);
+  const pull = home(page).locator('.fd-pull');
+  await expect(pull).toBeEnabled();
+  if ((await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
+  await expect(home(page).getByRole('region', { name: 'Your places' })).toBeVisible();
+}
 /** T-335 one surface: a room is in focus over All, opened from its door on Uni's home, or (a place inside an area) from the area's details */
 const INSIDE: Record<string, string> = { 'Atlas Institute': 'Atlas', 'Learn Vibe Build': 'Atlas', ATLAS: 'Atlas' };
 async function openRoom(page: Page, name: string, parent: string | null = INSIDE[name] ?? null) {
-  if (!(await home(page).isVisible())) await openAreasHome(page);
+  await openPlaces(page);
   await home(page).locator(`.fd-door[data-path="Areas/${parent ?? name}"]`).click();
   if (parent) { await openDetails(page); await focusSheet(page).getByRole('region', { name: `Inside ${parent}` }).locator('.fx-place').filter({ has: page.getByText(name, { exact: true }) }).click(); }
   await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(name);
 }
 /** T-335: the dot that counts what needs you is on the place's door on Uni's home */
 async function doorSays(page: Page, name: string, n: number) {
-  await openAreasHome(page);
+  await openPlaces(page);
   await expect(home(page).locator(`.fd-door[data-path="Areas/${name}"]`)).toHaveAttribute('aria-label', new RegExp(`^${name}, (.*, )?${n} needs? you(,|\\.|$)`));
 }
 const details = (page: Page) => focusSheet(page).locator('.all-focus-details .cp-body');

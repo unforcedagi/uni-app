@@ -4,7 +4,7 @@
 // Run: SIMPLE_TEST_PORT=5711 npx playwright test --config playwright.simple.config.ts
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, focusSheet, leaveFrontDoor, openAreaPage, openAreasHome, openDetails, showTree, toOldHome } from './areasFixture';
+import { bootAreas, focusSheet, leaveFrontDoor, openAreaPage, openAreasHome, openDetails, showTree } from './areasFixture';
 import { openRailMore, railGo } from './railGo';
 
 const SHOTS = 'scripts/browser/__shots__/simple';
@@ -33,7 +33,24 @@ async function answersOpen(sheet: ReturnType<Page['locator']>) {
 /** r28: the task's sheet (a phone's strip panel is a dialog too, and it stays under a task's sheet) */
 const taskDialog = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
 const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
-/** T-302: the app opens on the front door; a test starts where the old home put it (toOldHome) */
+/** 0.2 one home: All's stream, the places (the doors, what needs you, the rooms no area holds) in the drawer under its head. This pulls it
+ * down once the rooms are read (before that the places show open, then fold up under the head). */
+async function pullDown(page: Page) {
+  const pull = page.locator('[data-place="front-door"][data-view="all"] .fd-pull');
+  // (r9's world, cached rooms before the first fetch, keeps it disabled with the places open: so a wait, not an assertion)
+  await expect(pull).toBeEnabled().catch(() => {});
+  if ((await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
+  await expect(page.getByRole('region', { name: 'Your places' })).toBeVisible();
+}
+/** T-302: the app opens on the front door; a test starts where the old home put it: the first room, in focus over All (a vault without rooms
+ * stays on its tree) */
+async function toOldHome(page: Page) {
+  const door = page.locator('[data-place="front-door"]:not(.all-empty)').first();
+  if (!(await door.waitFor({ timeout: 3000 }).then(() => true, () => false))) return;
+  await pullDown(page);
+  await page.locator('.fd-door').first().click();
+  await expect(focusSheet(page)).toBeVisible();
+}
 const boot = async (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => { await bootAreas(page, 'seed', { ...base, ...extra }); await toOldHome(page); };
 /** T-335 one surface: a project's parent area (it is reached from the parent's details, "Inside <Name>"). */
 const PARENT: Record<string, string> = { ATLAS: 'Atlas', 'Learn Vibe Build': 'Atlas', 'Atlas Institute': 'Atlas', 'COhere 2026': 'Techne' };
@@ -45,8 +62,8 @@ async function openRoom(page: Page, name: string) {
   if (await taskDialog(page).count()) { await page.keyboard.press('Escape'); await expect(taskDialog(page)).toHaveCount(0); }
   await page.locator('[data-place="front-door"], .th-phone-tree, .all-focus, .wp').first().waitFor();
   if (await page.locator('.th-phone-tree, .wp').first().isVisible()) { await openAreaPage(page, name, { app: false }); return; }
-  // the All view (with or without a room in focus) is the front door's place too: the doors are on Uni's home
-  if (!(await page.locator('.fd-door').first().isVisible())) await openAreasHome(page);
+  // the doors are in the home's drawer: out of the focus first, then the drawer down
+  await homeF(page);
   const door = page.locator(`.fd-door[data-path="Areas/${name}"]`);
   if (await door.count()) await door.click();
   else {
@@ -111,10 +128,10 @@ async function openCompanion(page: Page) {
   await openDetails(page);
   await expect(companion(page)).toBeVisible();
 }
-/** T-335: Uni's home (the places), from a room in focus (the All view behind a focus is in the front door too). */
+/** T-335: Uni's home (the places, in its drawer), from a room in focus. */
 async function toHome(page: Page) {
   await page.locator('[data-place="front-door"], .all-focus').first().waitFor();
-  if (await focusSheet(page).count() && !(await page.locator('.fd-door').first().isVisible())) await openAreasHome(page);
+  await homeF(page);
 }
 /** T-335: Back one level: Android Back on a touch device, Escape with a keyboard. */
 const back = (page: Page) => test.info().project.name === 'phone'
@@ -343,7 +360,9 @@ test.describe('simple', () => {
     await expect(page.locator('.sr-chat .message-more-go')).toHaveCount(0);
     await expect(page.locator('.sr-chat .msg-actions.always')).toHaveCount(1);
     const latest = page.locator('.sr-chat .msg-actions.always');
-    await expect(latest.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
+    // 0.2: on a touch screen the always-on row leaves Copy (and Save as note) to the long-press sheet
+    if (test.info().project.use.hasTouch) await expect(latest.getByRole('button', { name: 'Copy', exact: true })).toBeHidden();
+    else await expect(latest.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
     await expect(latest.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
     if (wide(page)) {
       const first = page.locator('.sr-chat .message').first();
@@ -674,8 +693,9 @@ test.describe('simple', () => {
     expect(await page.evaluate(() => localStorage.getItem('uni.tabs.v2'))).toContain('Projects/ATLAS');
     await page.evaluate(() => { localStorage.removeItem('uni.tabs.v2'); localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'a', kind: 'area', path: 'Areas/Techne', title: 'Techne' }, { id: 'b', kind: 'areas', title: 'Uni' }, { id: 'c', kind: 'journal', title: 'Journal' }], active: 'a', recent: ['b', 'a'] })); });
     await page.reload();
-    // T-335: a 0.1.45-era area without its room opens on Uni's home (a room is only ever in focus over All); never a tab strip
-    await expect(page.locator('[data-place="front-door"][data-view="places"]')).toBeVisible();
+    // T-335: a 0.1.45-era area without its room opens on Uni's home (a room is only ever in focus over All; 0.2: the home is All); never a tab strip
+    await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible();
+    await expect(focusSheet(page)).toHaveCount(0);
     await expect(page.locator('.tab-strip')).toHaveCount(0);
   });
 
@@ -683,7 +703,7 @@ test.describe('simple', () => {
     await boot(page);
     await openRoom(page, 'Techne');
     await openCompanion(page);
-    const needs = page.getByRole('region', { name: 'Needs you' });
+    const needs = companion(page).getByRole('region', { name: 'Needs you' });
     await expect(needs).toContainText('COhere festival readiness'); // waiting on aaron, now
     await expect(needs).toContainText('Casey call: book it'); // now
     await expect(needs).not.toContainText('Already finished'); // done
@@ -964,7 +984,7 @@ test.describe('simple', () => {
   test('r12: a room no node owns is under "Other rooms" (folded) and opens in the same room focus', async ({ page }) => {
     await boot(page, { strayRoom: true });
     await toHome(page);
-    const group = page.locator('[data-place="front-door"][data-view="places"] details.fd-others');
+    const group = page.locator('[data-place="front-door"][data-view="all"]').getByRole('region', { name: 'Your places' }).locator('details.fd-others');
     await expect(group).toBeVisible();
     await expect(group).not.toHaveAttribute('open', '');
     // the rooms the home already shows (Techne, atlas/build, …) are not repeated; only the unfiled one is listed
@@ -993,7 +1013,7 @@ test.describe('simple', () => {
     await expect(page.locator('.sr-chat').getByRole('textbox')).toHaveAttribute('placeholder', 'Reply in thread…');
     await expect(page.locator('.conversation-header')).toHaveCount(0);
     await focusSheet(page).getByRole('button', { name: 'Back to ATLAS' }).click();
-    await expect(focusSheet(page).getByRole('button', { name: 'Back to All' })).toBeVisible();
+    await expect(focusSheet(page).getByRole('button', { name: 'Back to Uni' })).toBeVisible();
     await expect(page.locator('.sr-chat')).toContainText('Map labels are in a branch');
     expect(await fits(page)).toBe(true);
   });
@@ -1094,7 +1114,7 @@ test.describe('simple', () => {
     await boot(page, { manyTasks: 230 });
     await openRoom(page, 'Techne');
     await openCompanion(page);
-    await expect(page.getByRole('region', { name: 'Needs you' })).toContainText('Casey call: book it'); // the 231st task and after: page two
+    await expect(companion(page).getByRole('region', { name: 'Needs you' })).toContainText('Casey call: book it'); // the 231st task and after: page two
     const offsets = (await calls(page, 'vault_query_meta')).filter((a: any) => a.tag === 'task').map((a: any) => a.offset ?? 0);
     expect(offsets).toContain(200);
     await expect(page.locator('.cp-stale')).toHaveCount(0);
@@ -1496,6 +1516,7 @@ test.describe('r15', () => {
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeHidden();
     await expect(page.locator('[data-place="front-door"]')).toBeVisible();
     expect(await fits(page)).toBe(true);
+    await pullDown(page);
     await page.locator('.fd-door[data-path="Areas/Techne"]').click();
     await expect(focusTitle(page)).toHaveText('Techne');
     await expect(focusSheet(page).locator('.sr-chat')).toBeVisible();
@@ -1723,16 +1744,18 @@ test.describe('r16', () => {
 const PARENT_B: Record<string, string> = { ATLAS: 'Atlas', 'Learn Vibe Build': 'Atlas', 'Atlas Institute': 'Atlas', 'COhere 2026': 'Boulder' };
 async function openPlaceF(page: Page, name: string) {
   if (await page.getByRole('dialog').count()) { await page.keyboard.press('Escape'); await expect(page.getByRole('dialog')).toHaveCount(0); }
-  if (await focusSheet(page).count() && !(await page.locator('.fd-door').first().isVisible())) await homeF(page);
+  if (await page.locator('[data-place="front-door"], .all-focus').first().isVisible()) await homeF(page);
   await openAreaPage(page, name, { app: false, parent: PARENT_B[name] });
 }
-/** Uni's home from a room in focus: the rail's Uni, or (a short window has no rail) back out of the focus to All, then All's "← Uni". */
+/** Uni's home from a room in focus, its drawer down: the rail's Uni, or (a short window has no rail, a phone's is under the focus) back out
+ * of the focus (0.2: All is the home). */
 async function homeF(page: Page) {
-  if (await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).isVisible()) return openAreasHome(page);
-  for (let i = 0; i < 5 && await focusSheet(page).count(); i++) { await focusSheet(page).locator('.all-focus-back').click(); await page.waitForTimeout(150); }
+  if (await focusSheet(page).count() || !(await page.locator('[data-place="front-door"]').first().isVisible())) {
+    if (await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).isVisible()) await openAreasHome(page);
+    else for (let i = 0; i < 5 && await focusSheet(page).count(); i++) { await focusSheet(page).locator('.all-focus-back').click(); await page.waitForTimeout(150); }
+  }
   await expect(focusSheet(page)).toHaveCount(0);
-  await page.getByRole('button', { name: '← Uni' }).click();
-  await expect(page.locator('.fd-door').first()).toBeVisible();
+  await pullDown(page);
 }
 const detailsOf = (page: Page) => focusSheet(page).getByRole('region', { name: / details$/ });
 /** "All of X's work" from the details: the work view in the focus. */
@@ -2313,8 +2336,9 @@ test.describe('r19', () => {
     for (let i = 0; i < 12; i++) { await page.keyboard.press('Tab'); expect(await page.evaluate(() => !!document.activeElement?.closest('.task-sheet'))).toBe(true); }
     await page.keyboard.press('Escape');
     await expect(sheet).toHaveCount(0);
-    // (T-335: All behind the focus is inert while a room is in focus, by design: nothing else is)
-    expect(await page.evaluate(() => document.querySelectorAll('[inert]:not(.all-behind)').length)).toBe(0);
+    // (T-335: All behind the focus is inert while a room is in focus, by design, and 0.2: so is the stream under the home's drawer while the
+    // drawer is down, as it stays when a door opens a room: nothing else is)
+    expect(await page.evaluate(() => document.querySelectorAll('[inert]:not(.all-behind):not([data-pulled="true"] .fd-stream)').length)).toBe(0);
     if (wide(page) && await page.locator('.rail-settings').isVisible()) {
       await page.locator('.rail-settings').click();
       const panel = page.getByRole('dialog', { name: 'Settings' });
@@ -2782,7 +2806,9 @@ test.describe('r21', () => {
     await page.addInitScript(() => { (window as any).__noteDelay = { '01M3ZQF7EM4ADC7HEY36D3DC3B': 11000 }; });
     await boot(page);
     const rail = page.getByRole('navigation', { name: 'Main navigation' });
-    await rail.getByRole('button', { name: 'For you', exact: true }).click();
+    // 0.2: For you opens from the home's drawer
+    await homeF(page);
+    await page.getByRole('region', { name: 'Your places' }).getByRole('button', { name: /^For you/ }).click();
     await expect(page.locator('.note-sheet')).toContainText('Opening note…');
     await expect(page.locator('.note-sheet')).toContainText('Still opening this note.', { timeout: 10_000 });
     await expect(page.locator('.note-sheet').getByRole('button', { name: 'Retry' })).toBeVisible();
@@ -2829,10 +2855,9 @@ test.describe('r21', () => {
     if (!wide(page)) await page.setViewportSize({ width: 740, height: 360 });
     await boot(page, { privateTasks: true });
     // T-335: what needs you across the areas is on Uni's home: a private area by its place only
+    // (0.2: in the home's drawer, its Needs you list always open)
     await homeF(page);
-    const fold = page.locator('[data-place="front-door"]').getByRole('button', { name: /^Needs you · \d+$/ });
-    if ((await fold.getAttribute('aria-expanded')) !== 'true') await fold.click();
-    await expect(page.locator('[data-place="front-door"]').getByRole('button', { name: 'In Sanctum: 1 thing for you' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('region', { name: 'Your places' }).getByRole('region', { name: 'Needs you' }).getByRole('button', { name: 'In Sanctum: 1 thing for you' })).toBeVisible({ timeout: 15_000 });
     await page.waitForTimeout(6500);
     expect(await page.evaluate(() => (window as any).__sawPrivate)).toBe(false);
   });
@@ -2919,7 +2944,7 @@ test.describe('r22', () => {
     await seed(page, 'Areas/Techne', '2026-10-06T18:00:00.000Z');
     await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'Prod deploy of #38 is staged and waiting.', -426600));
     await add(page, { id: 'fresh', title: 'T-200 A fresh placeholder request', node: 'Areas/Techne', meta: { priority: 'now', next: 'Send the placeholder note to Casey', asked: new Date(Date.parse('2026-10-14T09:00:00.000Z') + 5000).toISOString() } });
-    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await refresh(page, '2026-10-14T09:01:00.000Z'); // a minute after seed's read: the window re-reads only what is stale (0.2: the home stays mounted)
     await openPlaceF(page, 'Techne');
     await openWork(page);
     // r28: Techne's chat talked about it since it was asked (Oct 6): it is not in Needs you; it is in the recheck list, whole, with when it was asked
@@ -3196,9 +3221,12 @@ test.describe('r23', () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
     const longRun = 'Waiting on your answer in #Uni: release 0.1.46 now, or keep going until two clean rounds. Round 21 keeps building meanwhile.';
+    let minute = 0;
     for (const [what, re] of [['Waiting on your answer in #Uni:', /^Waiting on your answer in #Uni$/], ['Waiting on your answer in #Uni: …', /^Waiting on your answer in #Uni$/], [longRun, /^Waiting on your answer in #Uni: release 0\.1\.46 now, or keep going until two clean rounds\. Round 21 keeps building meanwhile\.$/]] as const) {
       await page.evaluate((t) => (window as any).__setRunWhat('run-1', t), what);
-      await refresh(page, '2026-10-14T09:00:00.000Z');
+      // a minute later each time: coming back to the window re-reads the work only once it is stale (0.2: the home stays mounted, so going
+      // through it no longer reads everything afresh)
+      await refresh(page, new Date(Date.parse('2026-10-14T09:00:00.000Z') + 60_000 * minute++).toISOString());
       await openPlaceF(page, 'ATLAS');
       await openDetails(page);
       const run = page.locator('.fx-cp .cp-run .cp-run-text').first();

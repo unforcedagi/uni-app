@@ -226,7 +226,8 @@ test.describe('T-229 Calendar', () => {
     expect(d.door.outbox).toEqual([]);
     await detail(page).getByRole('button', { name: 'Send invites…' }).click();
     await page.getByRole('dialog', { name: 'Send invites?' }).getByRole('button', { name: 'Send invites' }).click();
-    await expect(page.getByRole('status').filter({ hasText: 'Invites are on their way, from your address.' })).toBeVisible();
+    // the place's own notice says it; once the event is read again its detail says it too (both for a while, so each by its own box)
+    await expect(cal(page).locator('.cal-notice[role="status"]')).toHaveText('Invites are on their way, from your address.');
     expect(d.door.outbox).toEqual([{ id: 'ev-0001', to: ['mailto:juno@example.com', 'mailto:mara@example.com'] }]);
     // on their way: not offered again
     await expect(box).toHaveCount(0);

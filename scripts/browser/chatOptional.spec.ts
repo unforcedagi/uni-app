@@ -1,7 +1,7 @@
 // Life OS profile PR 3: chat.provider null hides every Buzz surface and makes no Buzz calls (fixture-based: a uni vault whose profile note says chat null).
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, focusSheet } from './areasFixture';
+import { bootAreas, focusSheet, openPlaces } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/chat-optional';
 // T-335: with no chat the home is the tree of places (on every size), and a place opens its work page
@@ -41,7 +41,10 @@ test.describe('chat optional (profile.chat.provider null)', () => {
 
   test('chat buzz (the uni vault) keeps the room and its composer', async ({ page }) => {
     await boot(page, 'buzz');
-    // T-302: with chat, Uni's home is the front door of the rooms; a room keeps its composer (T-335: in focus over All)
+    // T-302: with chat, Uni's home is the front door of the rooms; a room keeps its composer (T-335: in focus over All; 0.2: its door is in the home's drawer)
+    // (openPlaces does nothing while the home still reads its rooms, so wait for its head)
+    await page.locator('[data-place="front-door"] .fd-pull').waitFor();
+    await openPlaces(page);
     await page.locator('.fd-door').first().click();
     await expect(focusSheet(page).locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toBeVisible();
   });

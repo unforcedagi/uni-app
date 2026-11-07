@@ -6,7 +6,7 @@
 import { mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, openPlaces } from './areasFixture';
 
 const fx = JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8'));
 const SHOTS = process.env.ELSEWHERE_SHOTS ?? '';
@@ -15,7 +15,8 @@ const focus = (page: Page) => page.getByRole('region', { name: /in focus$/ });
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 const line = (page: Page) => focus(page).locator('.approval-elsewhere');
 const title = (page: Page) => focus(page).locator('.all-focus-title');
-const homeApprovals = (page: Page) => page.locator('[data-place="front-door"][data-view="places"]').locator('..').locator('.cp-approval');
+/** 0.2 one home: the approvals are in the drawer under the home's head, with what needs you. */
+const homeApprovals = (page: Page) => page.locator('#fd-drawer .cp-approval');
 const shot = async (page: Page, name: string) => { if (!SHOTS) return; await mkdir(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` }); };
 
 async function boot(page: Page) {
@@ -44,18 +45,20 @@ async function boot(page: Page) {
   await page.locator('[data-place="front-door"]').waitFor();
 }
 async function openArea(page: Page, area: string) {
+  await openPlaces(page);
   await page.locator(`.fd-door[data-path="Areas/${area}"]`).click();
   await expect(title(page)).toHaveText(area);
 }
-/** Uni's home (a phone steps out of the focus first: the rail is hidden under it); `back` comes back to the room in focus by All. */
+/** Uni's home with its drawer down (a phone steps out of the focus first: the rail is hidden under it); `back` opens the room again from its door
+ *  (0.2: there is no All tab to come back by; the rail's Uni is the home). */
 async function home(page: Page) {
-  if (!(await rail(page).getByRole('button', { name: 'Uni', exact: true }).isVisible())) await focus(page).getByRole('button', { name: 'Back to All' }).click();
+  if (!(await rail(page).getByRole('button', { name: 'Uni', exact: true }).isVisible())) await focus(page).getByRole('button', { name: 'Back to Uni' }).click();
   await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
-  await page.locator('[data-place="front-door"][data-view="places"]').waitFor();
+  await page.locator('[data-place="front-door"][data-view="all"]').waitFor();
+  await openPlaces(page);
 }
 async function back(page: Page, area: string) {
-  await rail(page).getByRole('button', { name: 'All', exact: true }).click();
-  if (!(await focus(page).isVisible())) await page.locator(`.fd-door[data-path="Areas/${area}"]`).click();
+  if (!(await focus(page).isVisible())) await openArea(page, area);
   await expect(title(page)).toHaveText(area);
 }
 const card = (page: Page, room: string, inS = 900) => page.evaluate(([r, b, s]) => (window as any).__card(r, b, Math.floor(Date.now() / 1000) + Number(s)), [room, BODY, inS] as const);
@@ -76,7 +79,7 @@ test('a card in another room: a line at the top and a key on that room; the line
   expect(box!.y + box!.height).toBeLessThanOrEqual((await focus(page).locator('.sr-chat').boundingBox())!.y + 1);
   await shot(page, '01-line-in-kiln');
 
-  // Uni's home lists it; back by All, the room and its line are as they were
+  // Uni's home lists it; back in the room, its line is as it was
   await home(page);
   await expect(homeApprovals(page)).toHaveCount(1);
   await shot(page, '02-on-the-home');

@@ -5,10 +5,20 @@ import { test, expect, type Page } from '@playwright/test';
 import { bootAreas, focusSheet, openAreasHome, openDetails } from './areasFixture';
 
 const boot = async (page: Page) => { await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, atlas: true, boulder: true, links: true, pinned: true }); };
-const home = (page: Page) => page.locator('[data-place="front-door"][data-view="places"]');
+/** 0.2 one home: All's stream, its places (the doors) in the drawer under the head */
+const home = (page: Page) => page.locator('[data-place="front-door"][data-view="all"]');
+/** Uni's home with its drawer down, once the rooms are read (before that the places show open, then fold up under the head) */
+async function openPlaces(page: Page) {
+  if (!(await home(page).isVisible()) || await focusSheet(page).count()) await openAreasHome(page);
+  await expect(focusSheet(page)).toHaveCount(0);
+  const pull = home(page).locator('.fd-pull');
+  await expect(pull).toBeEnabled();
+  if ((await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
+  await expect(home(page).getByRole('region', { name: 'Your places' })).toBeVisible();
+}
 /** An area's details, from its door on Uni's home; the places inside it are its "Inside <Name>" list. */
 async function inside(page: Page, area: string) {
-  if (!(await home(page).isVisible())) await openAreasHome(page);
+  await openPlaces(page);
   await home(page).locator(`.fd-door[data-path="Areas/${area}"]`).click();
   await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(area);
   await openDetails(page);

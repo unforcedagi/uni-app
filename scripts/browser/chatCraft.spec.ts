@@ -66,6 +66,8 @@ async function boot(page: Page) {
             return { ref: `p${w.__posts.length}`, channel: args.channel };
           case 'vault_paths': case 'journal_pending': case 'search_messages': case 'vault_search': case 'vault_tree': case 'journal_list': return [];
           case 'vault_list': return ['uni'];
+          // a vault with no area nodes (null here reads as a failed read, and 0.2's home then shows only that)
+          case 'vault_query': return [];
           case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
           case 'journal_flush': return { sent: [], remaining: 0, error: null };
           case 'identity_forget': if (w.holdForget) await new Promise((resolve) => { w.finishForget = resolve; }); return null;
@@ -111,7 +113,7 @@ async function identityRead(page: Page) {
 /** T-335: a room no area holds is under "Other rooms" on Uni's home; it opens in focus over All. A phone steps out of the focus to reach the rail. */
 async function switchRoom(page: Page, name: string) {
   const focus = page.getByRole('region', { name: /in focus$/ });
-  if (await focus.isVisible()) await press(focus.getByRole('button', { name: 'Back to All' }));
+  if (await focus.isVisible()) await press(focus.getByRole('button', { name: 'Back to Uni' }));
   await press(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }));
   const others = page.locator('.fd-others');
   if (!(await others.evaluate((d) => (d as HTMLDetailsElement).open))) await press(others.locator('summary'));

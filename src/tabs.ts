@@ -145,7 +145,7 @@ function validTab(x: unknown): Tab | null {
   const t = x as Record<string, unknown>;
   if (!str(t.id)) return null;
   // T-335 one surface: a room or a thread saved by an older version is that room in focus over All
-  if ((t.kind === "room" || t.kind === "thread") && str(t.channel)) return { id: t.id, kind: "all", title: "All", channel: t.channel, ...(t.kind === "thread" && str(t.root) ? { root: t.root } : {}) };
+  if ((t.kind === "room" || t.kind === "thread") && str(t.channel)) return { id: t.id, kind: "all", title: "Uni", channel: t.channel, ...(t.kind === "thread" && str(t.root) ? { root: t.root } : {}) };
   if (!KINDS.includes(t.kind as TabKind)) return null;
   const title = typeof t.title === "string" ? t.title : "";
   const kind = t.kind as TabKind;
@@ -153,7 +153,7 @@ function validTab(x: unknown): Tab | null {
   if (kind === "mail") return { id: t.id, kind, title: "Mail" };
   if (kind === "calendar") return { id: t.id, kind, title: "Calendar" };
   if (kind === "messages") return { id: t.id, kind, title: "Messages" };
-  if (kind === "all") return { id: t.id, kind, title: "All", ...(str(t.channel) ? { channel: t.channel, ...(str(t.root) ? { root: t.root } : {}), ...(typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { path: t.path } : {}) } : {}) };
+  if (kind === "all") return { id: t.id, kind, title: "Uni", ...(str(t.channel) ? { channel: t.channel, ...(str(t.root) ? { root: t.root } : {}), ...(typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { path: t.path } : {}) } : {}) };
   if (kind === "arcade") return { id: t.id, kind, title: "Arcade" };
   if (kind === "posts") return { id: t.id, kind, title: "To post", ...(typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { path: t.path } : {}) };
   // The areas tab is Uni's home (saved tabs from before were titled "Areas").
@@ -190,7 +190,7 @@ export function restoreTabs(raw: string | null, roomIds: Iterable<string>): Tabs
     let t = validTab(x);
     if (!t || seen.has(t.id)) continue;
     // T-335: of an older version's room tabs, only the place's own is the room All keeps in focus: the active one, or under a note the latest
-    if (isLegacy(x) && t.id !== keepLegacy) t = { id: t.id, kind: "all", title: "All" };
+    if (isLegacy(x) && t.id !== keepLegacy) t = { id: t.id, kind: "all", title: "Uni" };
     const same = tabs.find((o) => sameTarget(o, t));
     // T-335: two saved rooms (an older version's tabs) are one All; the one that was active is the room it keeps in focus
     if (same && same.kind === "all" && t.id === d.active && t.channel && rooms.has(t.channel)) tabs[tabs.indexOf(same)] = { ...t, id: same.id };

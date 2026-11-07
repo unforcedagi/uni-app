@@ -435,20 +435,22 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const all = allRooms.length ? { rooms: allRooms, onOpenAt: openRoomAt } : null;
     const needsKnown = tasks.error || tasks.truncated || tasks.treeTruncated || (allNeeds.pending ?? []).some((t) => t.askFailed || t.check?.kind === "unavailable") ? "failed" as const : !tasks.ready || tasks.savedAt || (allNeeds.pending?.length ?? 0) > 0 ? "reading" as const : "known" as const;
     const focusRoomOpen = focus && !focus.leaving ? focus.room : null;
-    const approvalRows = <ApprovalRows approvals={allPlace ? approvalsAll.list.filter((x) => !privateChannel(x.channel)) : approvalsAll.list} className="cp-list cp-approvals th-approvals" />;
+    // (the drawer is the owner's own home, as the places page was: every approval waiting, a private room's too; All's stream keeps those out)
+    const approvalRows = <ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" />;
     // 0.2 one home: with rooms, the home is All; what the old home held (what needs you, the approvals, For you, To post, the places, the
     // rooms no area holds, the Unfiled sessions) is in the drawer under its head
     const home = <>{status}{!allPlace && approvalRows}
-      <FrontDoor needsKnown={needsKnown} alsoNeeds={allPlace ? approvalsAll.list.filter((x) => !privateChannel(x.channel)).length : approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={(p) => openPlace(p)} onOpenNeed={(p) => openPlace(p, "details")} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
+      <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={(p) => openPlace(p)} onOpenNeed={(p) => openPlace(p, "details")} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
         otherRooms={others} noAreas={!!data && !error && !doorAreas.length ? (uniRef ? () => actions.openRoom(uniRef.id) : null) : undefined}
         toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} onOpenProject={setProjectOpen}
-        pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.some((x) => !privateChannel(x.channel)) ? approvalRows : null} forYou={allPlace?.forYou ?? null} />
+        pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.length > 0 ? approvalRows : null} forYou={allPlace?.forYou ?? null} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>;
     // the home's Unfiled sessions open in place over it
     if (!allPlace) return <div className="areas-home tree-home-wrap">{home}{projectSheet}</div>;
     // T-335: All with nothing read yet, or no area with a room of its own: it says which (the focus still comes up over it)
     // 0.2: once the places are read, the home is there even with no area room yet (its places, open)
-    const behind = all || (data && !roomsPending && !loading) ? home : <AllEmpty reading={signingIn || loading || !data || roomsPending} error={error && !data ? retryAreas : null} />;
+    // (while the rooms list is still coming, the home is there with its places open: a door can be tapped on a slow cold launch)
+    const behind = all || data ? home : <AllEmpty reading={signingIn || loading || !data || roomsPending} error={error && !data ? retryAreas : null} />;
     // T-335 one fluid surface: All, and over it the room in focus
     const focusChat = focus ? roomFor(focus.room, focus.root) : null;
     const focusInfo = focus ? hostRooms.find((r) => r.id === focus.room) ?? null : null;

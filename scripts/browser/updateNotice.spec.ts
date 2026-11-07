@@ -4,7 +4,7 @@
 // Run: ELSEWHERE_TEST_PORT=5781 npx playwright test --config playwright.elsewhere.config.ts
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, openPlaces } from './areasFixture';
 import { railGo } from './railGo';
 
 const SHOTS = process.env.ELSEWHERE_SHOTS ?? '';
@@ -41,6 +41,8 @@ test('the update line is at the top, in the flow, and never over the composer or
   // in the main pane's flow: it is not laid over anything
   expect(await notice.evaluate((el) => getComputedStyle(el).position)).toBe('static');
 
+  // 0.2: the places are in the drawer under the home's head
+  await openPlaces(page);
   await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
   // T-335 one surface: the room is in focus over All
   const focus = page.getByRole('region', { name: /in focus$/ });

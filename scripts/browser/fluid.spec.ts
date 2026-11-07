@@ -4,7 +4,8 @@
 // Run: FLUID_TEST_PORT=1491 npx playwright test --config playwright.fluid.config.ts
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, openPlaces } from './areasFixture';
+import { railGo } from './railGo';
 
 const project = () => test.info().project.name;
 const touch = () => project() !== 'desktop';
@@ -14,7 +15,9 @@ const row = (page: Page, ref: string) => page.locator(`article.all-msg[data-ref=
 const field = (page: Page) => page.getByRole('textbox', { name: 'Message for your rooms' });
 const sheet = (page: Page) => page.getByRole('region', { name: /in focus$/ });
 const roomBox = (page: Page, slug: string) => page.getByRole('textbox', { name: new RegExp(`^Message ${slug}`) });
-const backToAll = (page: Page) => sheet(page).getByRole('button', { name: 'Back to All' });
+// 0.2 one home: All is Uni's home, so the focus's Back is "← Uni" and the rail's Uni is the way to All (there is no All tab)
+const backToAll = (page: Page) => sheet(page).getByRole('button', { name: 'Back to Uni' });
+const allTab = (page: Page) => rail(page).getByRole('button', { name: 'Uni', exact: true });
 const posts = (page: Page) => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => ({ channel: c.args.channel, body: c.args.body, replyTo: c.args.replyTo })));
 const calls = (page: Page, cmd: string) => page.evaluate((k) => (window as any).__calls.filter((c: any) => c.cmd === k).map((c: any) => c.args), cmd);
 /** Android's Back, as the plugin delivers it. */
@@ -51,8 +54,8 @@ async function boot(page: Page, opts: Record<string, unknown> = {}) {
   }, { long: LONG, sha: SHA });
 }
 async function allIn(page: Page) {
-  await rail(page).getByRole('button', { name: 'All', exact: true }).click();
-  await expect(page.locator('[data-view="all"]')).toBeVisible();
+  await allTab(page).click();
+  await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible();
   await expect(row(page, 'long1')).toBeVisible();
 }
 /** Scrolls All so this message is in the middle, well away from the newest. */
@@ -246,7 +249,7 @@ test.describe('a room in focus', () => {
     if (way === 'the Back button') await backToAll(page).click();
     else if (way === 'Android Back') await androidBack(page);
     else if (way === 'Escape') await page.keyboard.press('Escape');
-    else if (way === 'the rail') await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    else if (way === 'the rail') await allTab(page).click();
     else {
       // whatever of All shows around the room
       const box = (await sheet(page).boundingBox())!;
@@ -268,7 +271,7 @@ test.describe('a room in focus', () => {
       await expect(sheet(page).getByRole('heading', { name: 'Kiln Studio' })).toBeVisible();
       await expect(feed(page)).toBeAttached();
       expect(await feed(page).evaluate((el) => !!el.closest('[inert]'))).toBe(true);
-      await expect(rail(page).getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-current', 'page');
+      await expect(allTab(page)).toHaveAttribute('aria-current', 'page');
       // the room's own thread, older than All's view of it included, and nothing of the other rooms in it
       const list = sheet(page).locator('.message-list');
       await expect(list).toContainText('The bisque firing finished overnight');
@@ -348,7 +351,7 @@ test.describe('a room in focus', () => {
     await sheet(page).getByRole('button', { name: 'Send message' }).click();
     await expect.poll(() => posts(page)).toEqual([{ channel: 'ch-choir', body: 'Print two more.', replyTo: 'c3' }]);
     await androidBack(page);
-    await expect(sheet(page).getByRole('button', { name: 'Back to All' })).toBeVisible();
+    await expect(backToAll(page)).toBeVisible();
     await expect(sheet(page).locator('.message-list')).toContainText('Sheet music');
     await androidBack(page);
     await expect(sheet(page)).toHaveCount(0);
@@ -361,7 +364,7 @@ test.describe('a room in focus', () => {
     await allIn(page);
     await row(page, 'c3').getByRole('button', { name: '1 reply' }).click();
     await sheet(page).getByRole('button', { name: 'Back to Choir' }).click();
-    await expect(sheet(page).getByRole('button', { name: 'Back to All' })).toBeVisible();
+    await expect(backToAll(page)).toBeVisible();
     await expect(sheet(page).locator('.message-list')).toContainText('Sheet music');
     await backToAll(page).click();
     await expect(sheet(page)).toHaveCount(0);
@@ -448,6 +451,7 @@ test.describe('a room in focus', () => {
   test('a room opened from the home: the approval banner\'s Show on the newest message, and the room goes on following', async ({ page }) => {
     await boot(page);
     const prompt = JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8')).prompts.two_answers_30min;
+    await openPlaces(page);
     await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
     await expect(roomBox(page, 'kiln-studio')).toBeVisible();
     await page.evaluate((b) => (window as any).__arrive('ch-kiln', 'Uni', b), prompt);
@@ -560,7 +564,7 @@ test.describe('a room in focus', () => {
     await expect(details.getByRole('button', { name: /All of Kiln Studio's work/ })).toBeVisible();
     // the conversation (and its composer) is put aside, not gone; All stays behind
     await expect(roomBox(page, 'kiln-studio')).toBeHidden();
-    await expect(rail(page).getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-current', 'page');
+    await expect(allTab(page)).toHaveAttribute('aria-current', 'page');
     await sheet(page).getByRole('button', { name: 'Back to the conversation in Kiln Studio' }).click();
     await expect(details).toHaveCount(0);
     await expect(roomBox(page, 'kiln-studio')).toBeVisible();
@@ -727,18 +731,18 @@ test.describe('a room in focus', () => {
     await expect(mark).toBeInViewport();
   });
 
-  test('a panel opened over the focus goes first; the rail\'s All then ends the focus', async ({ page }) => {
-    test.skip(project() === 'phone', 'Settings is in the phone\'s More sheet; the rule is the same');
+  test('a panel opened over the focus goes first; the rail\'s Uni then ends the focus', async ({ page }) => {
+    test.skip(project() === 'phone', 'the phone\'s bar is under the focus; the rule is the same');
     await boot(page);
     await allIn(page);
     await row(page, 'k3').locator('.all-place').click();
     await expect(sheet(page)).toBeVisible();
-    await rail(page).getByRole('button', { name: 'Settings' }).click();
+    await railGo(page, 'Settings'); // 0.2: in the More sheet below 1100 px
     await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await allTab(page).click();
     await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
     await expect(sheet(page)).toBeVisible();
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await allTab(page).click();
     await expect(sheet(page)).toHaveCount(0);
   });
 

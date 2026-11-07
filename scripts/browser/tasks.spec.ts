@@ -144,8 +144,9 @@ test.describe('tasks in the work view', () => {
 });
 
 test('a task title is text, never markup', async ({ page }) => {
+  // 0.2: a place's room opens in focus over the home, with no new read of the tasks, so the task is in the vault from the start
+  await page.addInitScript(() => { (window as any).__seedTasks = [{ id: 'x1', path: 'Tasks/<img src=x onerror=window.__pwn=1> bold', extension: 'md', tags: ['task'], updatedAt: 'T', metadata: { node: 'Areas/Techne', state: 'open', owner: 'aaron', next: '<b>hi</b>' } }]; });
   await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true });
-  await page.evaluate(() => { (window as any).__tasks.push({ id: 'x1', path: 'Tasks/<img src=x onerror=window.__pwn=1> bold', extension: 'md', tags: ['task'], updatedAt: 'T', metadata: { node: 'Areas/Techne', state: 'open', owner: 'aaron', next: '<b>hi</b>' } }); });
   await workPage(page, 'Techne'); // T-302: Uni's own level went with the Uni room as home; an area's work view reads the same rows
   await expect(page.locator('.fx-work .cp-title', { hasText: '<img src=x' })).toBeVisible();
   expect(await page.evaluate(() => (window as any).__pwn)).toBeUndefined();

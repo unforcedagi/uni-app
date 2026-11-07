@@ -3,14 +3,26 @@
 // T-335 one surface: Needs you is in the room's details, inside its focus over All.
 // Run: SIMPLE_TEST_PORT=5711 npx playwright test --config playwright.simple.config.ts t145
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, focusSheet, openDetails } from './areasFixture';
+import { bootAreas, focusSheet, openAreasHome, openDetails } from './areasFixture';
 import { askSig } from '../../src/areas/taskCore';
 
 const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
 const boot = async (page: Page) => { await bootAreas(page, 'seed', base); };
+/** 0.2 one home: All's stream, its places (the doors) in the drawer under the head */
+const home = (page: Page) => page.locator('[data-place="front-door"][data-view="all"]');
+/** Uni's home with its drawer down, once the rooms are read (before that the places show open, then fold up under the head) */
+async function openPlaces(page: Page) {
+  if (!(await home(page).isVisible()) || await focusSheet(page).count()) await openAreasHome(page);
+  await expect(focusSheet(page)).toHaveCount(0);
+  const pull = home(page).locator('.fd-pull');
+  await expect(pull).toBeEnabled();
+  if ((await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
+  await expect(home(page).getByRole('region', { name: 'Your places' })).toBeVisible();
+}
 /** T-335: a room is in focus over All, opened from its door on Uni's home */
 async function openRoom(page: Page, name: string) {
-  await page.locator('[data-place="front-door"][data-view="places"]').locator(`.fd-door[data-path="Areas/${name}"]`).click();
+  await openPlaces(page);
+  await home(page).locator(`.fd-door[data-path="Areas/${name}"]`).click();
   await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(name);
 }
 /** The room's Needs you: in its details, inside the focus (T-335: the old side panel / the phone strip's panel). */

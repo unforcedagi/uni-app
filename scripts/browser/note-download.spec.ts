@@ -50,7 +50,7 @@ async function boot(page: Page, note: FixtureNote) {
 }
 
 async function download(page: Page) {
-  const [file] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download .md' }).click()]);
+  const [file] = await Promise.all([page.waitForEvent('download'), more(page).then(() => page.getByRole('button', { name: 'Download .md' }).click())]);
   return { name: file.suggestedFilename(), bytes: await readFile((await file.path())!) };
 }
 
@@ -65,10 +65,16 @@ for (const note of fixture.notes) {
   });
 }
 
+/** 0.2: the note's tools (Download, Share, the front matter toggle, Copy) are in its one More menu; this opens it unless it is open. */
+async function more(page: import('@playwright/test').Page) {
+  const b = page.getByRole('button', { name: 'More for this note' });
+  if ((await b.getAttribute('aria-expanded')) !== 'true') await b.click();
+}
+
 test('front matter is off by default; turned on, it adds path and dates and is remembered', async ({ page }) => {
   const note = fixture.notes[0];
   await boot(page, note);
-  await page.getByRole('button', { name: 'Download options' }).click();
+  await more(page);
   const toggle = page.getByRole('checkbox', { name: /front matter/ });
   await expect(toggle).not.toBeChecked();
   await toggle.check();
@@ -77,14 +83,14 @@ test('front matter is off by default; turned on, it adds path and dates and is r
   expect(file.bytes.equals(Buffer.from(head + note.content, 'utf8'))).toBe(true);
   await page.reload();
   await expect(page.locator('.note-body')).toBeVisible();
-  await page.getByRole('button', { name: 'Download options' }).click();
+  await more(page);
   await expect(page.getByRole('checkbox', { name: /front matter/ })).toBeChecked();
 });
 
 test('a note with its own front matter keeps it; only missing keys are added inside', async ({ page }) => {
   const note = fixture.notes[2];
   await boot(page, note);
-  await page.getByRole('button', { name: 'Download options' }).click();
+  await more(page);
   await page.getByRole('checkbox', { name: /front matter/ }).check();
   const file = await download(page);
   const expected = `---\npath: "${note.path}"\ncreated: "${note.createdAt}"\nupdated: "${note.updatedAt}"\n` + note.content.slice('---\n'.length);
@@ -93,6 +99,7 @@ test('a note with its own front matter keeps it; only missing keys are added ins
 
 test('a note that is not markdown has no Download .md', async ({ page }) => {
   await boot(page, { ...fixture.notes[0], extension: 'canvas' } as FixtureNote);
+  await more(page);
   await expect(page.getByRole('button', { name: 'Copy markdown' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Download .md' })).toHaveCount(0);
 });
@@ -100,13 +107,13 @@ test('a note that is not markdown has no Download .md', async ({ page }) => {
 test('a failed save says why once', async ({ page }) => {
   await boot(page, fixture.notes[0]);
   await page.evaluate(() => { const w = window as any; const inner = w.__TAURI_INTERNALS__.invoke; w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => { if (cmd === 'note_download') throw "Couldn't save the note: Permission denied (os error 13)"; return inner(cmd, args); }; });
-  await page.getByRole('button', { name: 'Download .md' }).click();
+  await more(page).then(() => page.getByRole('button', { name: 'Download .md' }).click());
   await expect(page.getByText("Couldn't save the note: Permission denied (os error 13)", { exact: true })).toBeVisible();
 });
 
 test('Share is not offered off Android', async ({ page }) => {
   await boot(page, fixture.notes[0]);
-  await page.getByRole('button', { name: 'Download options' }).click();
+  await more(page);
   await expect(page.getByRole('button', { name: 'Share…' })).toHaveCount(0);
 });
 
@@ -115,7 +122,7 @@ test.describe('on Android', () => {
   test('Share hands the same file to the share sheet', async ({ page }) => {
     const note = fixture.notes[0];
     await boot(page, note);
-    await page.getByRole('button', { name: 'Download options' }).click();
+    await more(page);
     await page.getByRole('button', { name: 'Share…' }).click();
     const shares = await page.evaluate(() => (window as any).shares);
     expect(shares).toEqual([{ name: note.expectedName, text: note.content, title: 'Plans 10/19 🌱: draft?' }]);

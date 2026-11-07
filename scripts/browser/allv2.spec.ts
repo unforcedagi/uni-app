@@ -20,7 +20,16 @@ const reply = (page: Page) => page.getByRole('group', { name: 'Where this goes' 
 const chosen = (page: Page) => page.locator('.all-chip.chosen:not(.all-reply-chip) .all-chip-name');
 const offered = (page: Page) => page.locator('.all-chip.suggested .all-chip-name');
 const send = (page: Page) => page.locator('.all-send');
-const allIn = async (page: Page) => { await rail(page).getByRole('button', { name: 'All', exact: true }).click(); await expect(page.locator('[data-view="all"]')).toBeVisible(); await expect(feed(page).locator('article.all-msg')).toHaveCount(13); };
+/** 0.2 one home: the rail's Uni opens All's stream (there is no All tab). */
+const allIn = async (page: Page) => { await rail(page).getByRole('button', { name: 'Uni', exact: true }).click(); await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible(); await expect(feed(page).locator('article.all-msg')).toHaveCount(13); };
+/** 0.2: All is the home and has no Back of its own; the way out is the rail (here the Journal), the keyboard put away first. */
+const leaveAll = async (page: Page) => {
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await railGo(page, 'Journal');
+  await expect(page.getByRole('textbox', { name: 'Journal entry', exact: true })).toBeVisible();
+};
+/** The home's head pulled down: what needs you and the places, over the stream, with the composer still at the foot. */
+const pullDown = async (page: Page) => { await page.locator('[data-place="front-door"] .fd-pull').click(); await expect(page.locator('#fd-drawer')).toBeVisible(); };
 
 type Stub = { mode: 'ok' | 'down' | 'slow' | 'off'; picks?: { id: string; why: string; sure?: boolean }[]; delay?: number };
 /** The door's answer: `off` (default) as a device off the tailnet. */
@@ -152,18 +161,21 @@ test.describe('inline reply', () => {
 });
 
 test.describe('All from everywhere', () => {
-  test('All is never where the app opens: a reload from All opens on rooms; home opens on Places even with an old saved choice', async ({ page }) => {
-    await page.addInitScript(() => localStorage.setItem('uni.home.view', 'all'));
+  // 0.2 one home: All's stream is where the app opens; an old saved choice of home view changes nothing, and the places stay folded under the head
+  test('the app opens on the one home, All with the places folded, even with an old saved choice; a reload opens there again', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('uni.home.view', 'places'));
     await boot(page);
-    await expect(page.locator('[data-view="places"]')).toBeVisible();
+    await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible();
+    await expect(page.locator('[data-view="places"]')).toHaveCount(0);
+    await expect(page.locator('#fd-drawer')).toHaveCount(0);
     await allIn(page);
     await page.reload();
     await page.locator('[data-place="front-door"]').waitFor();
-    await expect(page.locator('[data-view="places"]')).toBeVisible();
-    await expect(page.locator('[data-view="all"]')).toHaveCount(0);
+    await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible();
+    await expect(page.locator('[data-view="places"]')).toHaveCount(0);
   });
 
-  test('All is one tap from the Journal too; opening it posts nothing', async ({ page }) => {
+  test('the home is one tap from the Journal too; opening it posts nothing', async ({ page }) => {
     await boot(page);
     await rail(page).getByRole('button', { name: 'Journal', exact: true }).click();
     await allIn(page);
@@ -268,9 +280,9 @@ test.describe('review', () => {
     await hold(page, 500);
     await field(page).fill('Is the honey ready to jar?');
     await send(page).click();
-    await page.getByRole('button', { name: /^← / }).click();
+    await leaveAll(page);
     await page.waitForTimeout(800);
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(feed(page).locator('article.all-msg').first()).toBeVisible();
     await expect(field(page)).toHaveValue('');
     expect((await posts(page)).map((p: any) => p.channel)).toEqual(['ch-bees']);
@@ -285,9 +297,9 @@ test.describe('review', () => {
     await field(page).fill('Keep the crawled tile.');
     await send(page).click();
     await expect(field(page)).toHaveValue('');
-    await page.getByRole('button', { name: /^← / }).click();
+    await leaveAll(page);
     await page.waitForTimeout(700);
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(field(page)).toHaveValue('Keep the crawled tile.');
     await expect(reply(page)).toContainText('#kiln-studio');
     await expect(page.locator('.all-note.all-failed')).toContainText('relay said no');
@@ -380,18 +392,20 @@ test.describe('review', () => {
     await expect(field(page)).toHaveValue('And a second thought');
   });
 
-  test('a reply draft keeps its chip on the home, and sending there goes to that room', async ({ page }) => {
+  // 0.2: the places are the drawer under the home's head; the one composer stays at the foot with the draft and its chip
+  test('a reply draft keeps its chip with the places pulled down, and sending there goes to that room', async ({ page }) => {
     await boot(page);
     await allIn(page);
     await row(page, 'k3').locator('.message-content').click();
     await field(page).fill('yes, do it');
-    await page.getByRole('button', { name: /^← / }).click();
-    await expect(page.locator('[data-view="places"]')).toBeVisible();
+    await pullDown(page);
+    await expect(page.locator('.fd-door').first()).toBeVisible();
     await expect(field(page)).toHaveValue('yes, do it');
     await expect(reply(page)).toContainText('#kiln-studio');
     await send(page).click();
     await expect.poll(async () => (await posts(page)).map((p: any) => p.channel)).toEqual(['ch-kiln']);
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#fd-drawer')).toHaveCount(0);
     await expect(feed(page).locator('article.all-msg').first()).toBeVisible();
     await expect(reply(page)).toHaveCount(0);
   });
@@ -407,9 +421,8 @@ test.describe('review', () => {
     const n = (await calls(page, 'route_suggest')).length;
     expect(n).toBeLessThanOrEqual(4);
     expect(await page.evaluate(() => (window as any).__askingMax)).toBe(1);
-    await page.getByRole('button', { name: /^← / }).click();
-    await expect(page.locator('[data-view="places"]')).toBeVisible();
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await leaveAll(page);
+    await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(feed(page).locator('article.all-msg').first()).toBeVisible();
     await page.waitForTimeout(900);
     await expect(chosen(page)).toHaveText(['Long Table']);
@@ -466,14 +479,14 @@ test.describe('review', () => {
     expect(await posts(page)).toEqual([]);
   });
 
-  test('from the home, a reply says it went; tapping a second message in the same room keeps the keys', async ({ page }) => {
+  test('with the places pulled down, a reply says it went; tapping a second message in the same room keeps the keys', async ({ page }) => {
     await boot(page);
     await allIn(page);
     await row(page, 'k3').locator('.message-content').click();
     await row(page, 'k1').locator('.message-content').click();
     await expect(field(page)).toBeFocused();
     await field(page).fill('yes, do it');
-    await page.getByRole('button', { name: /^← / }).click();
+    await pullDown(page);
     await send(page).click();
     await expect(page.locator('.all-note')).toContainText('Sent to Kiln Studio');
   });
@@ -491,16 +504,21 @@ test.describe('review', () => {
 // Review round 3 (a fresh reviewer, NO-SHIP on privacy).
 test.describe('review 3', () => {
   const PROMPT = (cmd: string): string => JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8')).prompts.two_answers_30min.replace('feature/example-cleanup', cmd);
-  test('an approval waiting in a private room stays out of All; one in another room shows, and the home still has both', async ({ page }) => {
+  // 0.2 one home: All is the home, and what the old places page held (the approvals with it) is in the drawer under its head
+  test('an approval waiting in a private room stays out of All; one in another room shows, and the home\'s drawer still has both', async ({ page }) => {
     await boot(page);
     await page.evaluate((b) => { const w = window as any; w.__arrive('ch-sad', 'Uni', b[0]); w.__arrive('ch-kiln', 'Uni', b[1]); }, [PROMPT('private-thing'), PROMPT('kiln-thing')]);
-    await expect(page.locator('.cp-approval')).toHaveCount(2);
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
-    await expect(page.locator('[data-view="all"]')).toBeVisible();
-    await expect(page.locator('.cp-approval')).toHaveCount(1);
-    await expect(page.locator('.areas-home')).toContainText('kiln-thing');
-    await expect(page.locator('.areas-home')).not.toContainText('private-thing');
-    await expect(page.locator('.areas-home')).not.toContainText('anctum');
+    await allIn(page);
+    // the stream: only the one from a room All shows
+    await expect(feed(page).locator('.cp-approval')).toHaveCount(1);
+    await expect(feed(page)).toContainText('kiln-thing');
+    await expect(feed(page)).not.toContainText('private-thing');
+    await expect(feed(page)).not.toContainText('anctum');
+    // the drawer, the owner's own home: both, as the places page had them
+    await pullDown(page);
+    await expect(page.locator('#fd-drawer .cp-approval')).toHaveCount(2);
+    await expect(page.locator('#fd-drawer')).toContainText('kiln-thing');
+    await expect(page.locator('#fd-drawer')).toContainText('private-thing');
   });
 
   test('words added while a routed send is out: only the new words stay, and the next Send doesn\'t repeat the first', async ({ page }) => {
@@ -562,8 +580,9 @@ test.describe('review 4', () => {
     await field(page).fill('Is the honey ready to jar?');
     // the room goes (made private, or done): the target names a room All no longer has
     await page.evaluate(() => { (window as any).__allHeld.target = { room: 'ch-gone', root: null }; (document.activeElement as HTMLElement | null)?.blur(); });
+    // away and back, so All reads the target again
+    await leaveAll(page);
     await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
     await expect(reply(page)).toContainText("isn't in All now");
     await page.waitForTimeout(700);
     expect(await calls(page, 'route_suggest')).toEqual([]);
@@ -645,12 +664,12 @@ test.describe('review 4', () => {
     await expect(chosen(page)).toHaveText(['Kiln Studio']);
   });
 
-  test('All opened before the areas are read says so, with a way back; then it fills', async ({ page }) => {
+  // 0.2: All is the home, so it has no way back of its own (the rail is there)
+  test('the home opened before the areas are read says so; then it fills', async ({ page }) => {
     await page.addInitScript(() => { if (window.innerWidth === 828 && window.innerHeight === 1104) localStorage.setItem('uni.motion', 'calm'); });
     await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, queryDelay: 1800 } as any);
-    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
     await expect(page.locator('.all-empty')).toContainText('Reading your rooms');
-    await expect(page.locator('.all-empty .all-back')).toHaveText('← Back');
+    await expect(page.locator('.all-empty .all-back')).toHaveCount(0);
     await expect(feed(page).locator('article.all-msg')).toHaveCount(13);
     await expect(page.locator('.all-empty')).toHaveCount(0);
   });

@@ -4,7 +4,7 @@
 // view's routed composer (a sure route is named on Send; with no good signal nothing is chosen for you). Phone, Daylight and desktop.
 // Made-up world only (the fixture's `world: 'unread'` with `glow`). Run: CHATFEEL_TEST_PORT=1471 npx playwright test --config playwright.chatfeel.config.ts
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, openPlaces } from './areasFixture';
 
 const SHOTS = process.env.CHATFEEL_SHOTS ?? 'test-results/chatfeel-shots';
 const shot = (page: Page, name: string) => page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` });
@@ -21,9 +21,12 @@ async function boot(page: Page, unread: Record<string, number> = {}, view: 'plac
   }, view);
   await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, unread });
   await page.locator('[data-place="front-door"]').waitFor();
-  if (view === 'all') { await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'All', exact: true }).click(); await page.locator('[data-view="all"]').waitFor(); }
+  // 0.2 one home: the rail's Uni opens All's stream (no All tab)
+  if (view === 'all') { await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click(); await page.locator('[data-place="front-door"][data-view="all"]').waitFor(); }
 }
 async function openRoom(page: Page, name: string) {
+  // 0.2: the places are in the drawer under the home's head
+  await openPlaces(page);
   await page.locator(`.fd-door[data-path="Areas/${name}"]`).click();
   await page.locator('.all-focus').getByRole('textbox', { name: /^Message / }).waitFor();
   await page.waitForTimeout(300);
@@ -166,13 +169,32 @@ test('Stop: one tap asks Uni to stop, and the room says so, with Continue', asyn
   expect(after[0].body).toMatch(/^Continue/);
 });
 
-test('message actions: the latest reply has a quiet row (Copy, Try again, 👍, Reply, Save as note); no ⋯ on every message', async ({ page }) => {
+/** A long press on a message (a finger down until the sheet is up, then up): its actions sheet. */
+async function longPress(page: Page, msg: ReturnType<Page['locator']>) {
+  await msg.scrollIntoViewIfNeeded();
+  const b = (await msg.locator('p').first().boundingBox())!;
+  await page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y)!;
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true }));
+  }, { x: b.x + 20, y: b.y + 8 });
+  const sheet = page.getByRole('dialog', { name: 'Message actions' });
+  await expect(sheet).toBeVisible();
+  await page.evaluate(({ x, y }) => { document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })); }, { x: b.x + 20, y: b.y + 8 });
+  return sheet;
+}
+
+// 0.2: on a touch screen the always-on row keeps Try again, 👍 and Reply; Copy and Save as note are in the long-press sheet
+test('message actions: the latest reply has a quiet row (Copy and Save as note too where there is a pointer); no ⋯ on every message', async ({ page }) => {
   await boot(page);
   await openRoom(page, 'Kiln Studio');
   const latest = list(page).locator('article.message[data-ref="k3"]');
   const row = latest.getByRole('group', { name: 'Message actions' });
   await expect(row).toBeVisible();
-  for (const n of ['Copy', 'Ask Uni to try again', 'Thumbs up', 'Reply', 'Save as note']) await expect(row.getByRole('button', { name: n, exact: true })).toBeVisible();
+  for (const n of ['Ask Uni to try again', 'Thumbs up', 'Reply']) await expect(row.getByRole('button', { name: n, exact: true })).toBeVisible();
+  for (const n of ['Copy', 'Save as note']) {
+    if (touch()) await expect(row.getByRole('button', { name: n, exact: true })).toBeHidden();
+    else await expect(row.getByRole('button', { name: n, exact: true })).toBeVisible();
+  }
   await expect(page.locator('.message-more-go')).toHaveCount(0);
   if (touch()) for (const b of await row.getByRole('button').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await shot(page, '04-actions');
@@ -186,8 +208,9 @@ test('message actions: the latest reply has a quiet row (Copy, Try again, 👍, 
   expect((await posts(page)).slice(before)).toEqual([{ channel: 'ch-kiln', body: '/retry', recipients: [UNI] }]);
   await expect(list(page).locator('article.message.mine', { hasText: '/retry' })).toHaveCount(0);
   await expect(list(page).locator('.uni-retried')).toContainText('You asked Uni to try again');
-  // Save as note keeps the words in the vault, saying where they came from
-  await row.getByRole('button', { name: 'Save as note', exact: true }).click();
+  // Save as note keeps the words in the vault, saying where they came from (on touch, from the latest reply's long-press sheet)
+  if (touch()) { const sheet = await longPress(page, latest); await page.waitForTimeout(450); /* the sheet takes no tap in its first 400 ms */ await sheet.getByRole('button', { name: 'Save as note', exact: true }).click(); }
+  else await row.getByRole('button', { name: 'Save as note', exact: true }).click();
   await expect.poll(async () => (await calls(page, 'vault_create')).length).toBe(1);
   const made = (await calls(page, 'vault_create'))[0];
   expect(made.content).toContain('Three glaze tiles came out glossy');
@@ -210,16 +233,8 @@ test('message actions: the latest reply has a quiet row (Copy, Try again, 👍, 
     await own.hover();
     await expect(own.getByRole('group', { name: 'Message actions' }).getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
   } else {
-    await older.scrollIntoViewIfNeeded();
-    const b = (await older.locator('p').first().boundingBox())!;
-    await page.evaluate(({ x, y }) => {
-      const el = document.elementFromPoint(x, y)!;
-      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true }));
-    }, { x: b.x + 20, y: b.y + 8 });
     // the finger stays down until the sheet is up, as a person's does
-    const sheet = page.getByRole('dialog', { name: 'Message actions' });
-    await expect(sheet).toBeVisible();
-    await page.evaluate(({ x, y }) => { document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })); }, { x: b.x + 20, y: b.y + 8 });
+    const sheet = await longPress(page, older);
     for (const e of ['👍', '❤️', '✓', '❓']) await expect(sheet.getByRole('button', { name: `React ${e}` })).toBeVisible();
     for (const n of ['Reply', 'Copy', 'Save as note', 'Select text']) {
       const btn = sheet.getByRole('button', { name: n, exact: true });

@@ -1,11 +1,12 @@
 // T-294: Uni's rooms and Messages are two sides of one app, and each keeps its last place. In a room (T-335: in focus over All), over to
-// Messages, and the rail's All back: the same room, at the same spot in the conversation, with the half-typed draft. The
+// Messages, and Back (0.2: there is no All tab; the system Back on Android, Alt+← on a desktop): the same room, at the same spot in the
+// conversation, with the half-typed draft. The
 // same after the app is put away and comes back (a hidden page shown again), and after the system closed it (a reload:
 // the webview starts over from what the device kept). Messages keeps its own: the conversation open, and its draft.
 // The rooms are the areas fixture's made-up ones; Messages' Rust door is faked (`messages_*`), with made-up people.
 // Run: npx playwright test --config playwright.roomrestore.config.ts
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, focusSheet, openDetails } from './areasFixture';
+import { bootAreas, focusSheet, openDetails, openPlaces } from './areasFixture';
 import { railGo } from './railGo';
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
@@ -44,6 +45,7 @@ async function boot(page: Page) {
 /** Open a room as a person does (T-335: in focus over All): ATLAS is inside Atlas, so the Atlas door, its details, and "Inside Atlas". */
 async function openRoom(page: Page, name: string) {
   await page.locator('[data-place="front-door"]').waitFor();
+  await openPlaces(page); // 0.2: the places are in the drawer under the home's head
   await page.locator('.fd-door[data-path="Areas/Atlas"]').click();
   await openDetails(page);
   await focusSheet(page).getByRole('region', { name: 'Inside Atlas' }).locator('.fx-place').filter({ has: page.locator('span', { hasText: new RegExp(`^${name}$`) }) }).click();
@@ -54,10 +56,14 @@ async function openRoom(page: Page, name: string) {
 async function inFocus(page: Page, name: string) {
   await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(name);
   await expect(page.locator('.all-surface[data-focus="open"]')).toBeVisible();
-  if ((page.viewportSize()?.width ?? 0) >= 600) await expect(rail(page).getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-current', 'page');
+  // 0.2 one home: All is Uni's home, so the rail's Uni is the current place
+  if ((page.viewportSize()?.width ?? 0) >= 600) await expect(rail(page).getByRole('button', { name: 'Uni', exact: true })).toHaveAttribute('aria-current', 'page');
 }
-/** The rail's All (on a phone too: it is on the bar). */
-const toAll = (page: Page) => rail(page).getByRole('button', { name: 'All', exact: true }).click();
+/** 0.2: back to where you were on Uni's side: Android's Back (as the plugin delivers it) on a touch screen, Alt+← on a desktop. */
+const toAll = async (page: Page) => {
+  if (test.info().project.name === 'mac') { await page.keyboard.press('Alt+ArrowLeft'); return; }
+  await page.evaluate(() => { const w = window as any; w.__cbs[w.__backHandler.id]({ message: {}, index: w.__backIndex ?? 0 }); w.__backIndex = (w.__backIndex ?? 0) + 1; });
+};
 
 /** Where the reader is: the first message in sight and how far below the list's top edge it starts. */
 const spot = (page: Page) => list(page).evaluate((el) => {
@@ -102,7 +108,7 @@ async function inRoomWithDraft(page: Page) {
 const messagesView = (page: Page) => page.locator('section.msgs');
 
 test.describe('T-294 back to the room you were in', () => {
-  test('a room in focus, Messages, then the rail\'s All: the same room, at the same spot, with the draft', async ({ page }) => {
+  test('a room in focus, Messages, then Back: the same room, at the same spot, with the draft', async ({ page }) => {
     await boot(page);
     const was = await inRoomWithDraft(page);
     await railGo(page, 'Messages');
@@ -111,11 +117,14 @@ test.describe('T-294 back to the room you were in', () => {
     await expectSamePlace(page, was);
   });
 
-  test('Messages\' own Back says where it goes (All), and goes there: the room in focus, at its spot', async ({ page }) => {
+  // 0.2: the rail's places have no Back pill; the system Back is the way back
+  test('Messages has no Back of its own; Back goes to the room in focus, at its spot', async ({ page }) => {
     await boot(page);
     const was = await inRoomWithDraft(page);
     await railGo(page, 'Messages');
-    await messagesView(page).getByRole('button', { name: '← All' }).click();
+    await expect(page.getByRole('navigation', { name: 'Conversations' })).toBeVisible();
+    await expect(messagesView(page).getByRole('button', { name: /^(←|‹)/ })).toHaveCount(0);
+    await toAll(page);
     await expectSamePlace(page, was);
   });
 
@@ -145,7 +154,7 @@ test.describe('T-294 back to the room you were in', () => {
     await expectSamePlace(page, was);
   });
 
-  test('closed by the system in Messages (a reload): Messages reopens, and All goes back to the room, at the spot, with the draft', async ({ page }) => {
+  test('closed by the system in Messages (a reload): Messages reopens, and Back goes to the room, at the spot, with the draft', async ({ page }) => {
     await boot(page);
     const was = await inRoomWithDraft(page);
     await railGo(page, 'Messages');
@@ -158,7 +167,7 @@ test.describe('T-294 back to the room you were in', () => {
     await expectSamePlace(page, was);
   });
 
-  test('Messages keeps its own place: the conversation open, its draft and how far back it was read, across a trip to All', async ({ page }) => {
+  test('Messages keeps its own place: the conversation open, its draft and how far back it was read, across a trip back to the room', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await railGo(page, 'Messages');

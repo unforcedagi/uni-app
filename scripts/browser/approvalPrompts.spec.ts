@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, openPlaces } from './areasFixture';
 
 const fx = JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8'));
 const ROOM = 'ch-garden';
@@ -22,12 +22,12 @@ async function boot(page: Page) {
     w.Notification = class { static permission = 'granted'; static requestPermission = async () => 'granted'; constructor(title: string, o: { body?: string } = {}) { w.__notes.push({ title, body: o.body ?? '' }); } };
   });
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, strayRoom: true });
-  // T-302: Uni's home, the front door, holds every room's prompts ("Waiting on your OK")
+  // T-302: Uni's home, the front door, holds every room's prompts ("Waiting on your OK"; 0.2: in its drawer)
   await page.locator('[data-place="front-door"]').waitFor();
 }
-/** the Daylight upright opens on Uni's level with Needs you folded to one line: open it */
-const strip = (page: Page) => page.locator('.cp-line[aria-expanded="false"]');
-async function unfold(page: Page) { if (await strip(page).count()) await strip(page).click(); }
+/** 0.2 one home: the prompts wait in the home's drawer, under what needs you (every screen): pull it down (openPlaces does nothing
+ *  while the home still reads its rooms, so wait for its head) */
+async function unfold(page: Page) { await page.locator('[data-place="front-door"] .fd-pull').waitFor(); await openPlaces(page); }
 const rows = (page: Page) => page.locator('.cp-approval');
 /** a message over the live socket, each one second (and `later` more) after the one before (the fixture's own clock is the boot time) */
 const arrive = (page: Page, body: string, who = 'Uni', room = ROOM, root: string | null = null, later = 0) => page.evaluate(([c, n, b, r, l]) => { const w = window as any; w.__k = (w.__k ?? 0) + 1 + l; return w.__arrive(c, n, b, -w.__k, false, r); }, [room, who, body, root, later] as const);
@@ -43,8 +43,6 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await boot(page);
     await expect(rows(page)).toHaveCount(0);
     const ref = await arrive(page, fx.prompts.two_answers_30min);
-    // folded, its one line leads with the prompt
-    if (await strip(page).count()) await expect(strip(page)).toContainText('OK to run git branch -D feature/example-cleanup?');
     await unfold(page);
     const row = rows(page);
     await expect(row).toHaveCount(1);

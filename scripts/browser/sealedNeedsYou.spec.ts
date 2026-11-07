@@ -3,9 +3,11 @@
 // card takes it out of Needs you, the banner and the room's mark. Rust is faked (`sealed_waiting`, `sealed_card`,
 // `sealed_answer`); the T-161 areas fixture gives the real home surface. Synthetic names only.
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, openPlaces } from './areasFixture';
 
 const ROOM = 'ch-garden';
+/** 0.2 one home: the waiting cards are in the home's drawer; openPlaces does nothing while the home still reads its rooms, so wait for its head */
+const places = async (page: Page) => { await page.locator('[data-place="front-door"] .fd-pull').waitFor(); await openPlaces(page); };
 const android = (page: Page) => page.evaluate(() => /Android/i.test(navigator.userAgent));
 const BODY = '🔑 **Uni asks to use dns-zone** (powerful)\nFor: dns.edit. Add an A record for demo.example.org\nOpen this in the Uni app to see exactly what it unlocks.\n\n```uni-sealed-approval\n{"v": 1}\n```';
 
@@ -27,7 +29,6 @@ async function boot(page: Page, failTasks = false) {
   // T-302: Uni's home is the front door; its "Waiting on your OK" list holds the waiting cards from every room
   await page.locator('[data-place="front-door"]').waitFor();
 }
-const strip = (page: Page) => page.locator('.cp-line[aria-expanded="false"]');
 
 test('a waiting card is in Needs you with its room, credential, class and end; the row opens the card; answering it clears it', async ({ page }) => {
   test.setTimeout(120_000);
@@ -37,7 +38,8 @@ test('a waiting card is in Needs you with its room, credential, class and end; t
   const ref = await page.evaluate(([room, body]) => { const w = window as any; const r = w.__arrive(room, 'Uni', body, 0, false, null);
     w.__waiting = [{ ref: r, channel: room, root: null, ts: Math.floor(Date.now() / 1000), kind: 'single', credential: 'dns-zone', action: 'dns.edit', class: 'powerful', rows: 1, expires: Math.floor(Date.now() / 1000) + 900, fingerprint: '9b13b2ae' }];
     w.__arrive(room, 'Uni', 'and one more line', -1, false, null); return r; }, [ROOM, BODY] as const);
-  if (await strip(page).count()) { await expect(strip(page)).toContainText('Uni asks: dns-zone · dns.edit'); await strip(page).click(); }
+  // 0.2 one home: the waiting cards are in the home's drawer, under what needs you
+  await places(page);
   const row = rows.first();
   await expect(rows).toHaveCount(1);
   await expect(row.locator('.cp-approval-lead')).toHaveText('Uni asks to use a credential in #garden-club');
@@ -64,7 +66,7 @@ test('the task list failing to load still shows a waiting card in Needs you', as
   await page.evaluate(([room, body]) => { const w = window as any; const r = w.__arrive(room, 'Uni', body, 0, false, null);
     w.__waiting = [{ ref: r, channel: room, root: null, ts: Math.floor(Date.now() / 1000), kind: 'morning', credential: null, action: null, class: 'routine', rows: 3, expires: Math.floor(Date.now() / 1000) + 900, fingerprint: '0aa11bbc' }];
     w.__arrive(room, 'Uni', 'and one more line', -1, false, null); }, [ROOM, BODY.replace('uni-sealed-approval', 'uni-sealed-morning')] as const);
-  if (await strip(page).count()) await strip(page).click();
+  await places(page);
   // (the front door holds no task list, so there is no "Couldn't load" line to say; the card shows all the same)
   const row = page.locator('.cp-sealed').first();
   await expect(row.locator('.cp-approval-lead')).toHaveText("Uni's morning card in #garden-club");

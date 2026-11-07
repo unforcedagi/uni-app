@@ -3,12 +3,20 @@
 // build with the projects fixture (made-up vault, nothing leaves the page).
 import { expect, test, type Page } from '@playwright/test';
 import { bootProjects } from './projectsFixture.ts';
+import { openPlaces } from './areasFixture.ts';
 
 const MIN = 60_000;
 const door = (page: Page, name: string) => page.getByRole('navigation', { name: 'Rooms' }).getByRole('button', { name: new RegExp(`^${name}\\b`) });
 const strip = (page: Page) => page.locator('[data-place="project-strip"]');
+/** 0.2 one home: the doors and the Unfiled sessions are in the drawer under the home's head. */
+async function home(page: Page) {
+  await page.goto('/');
+  await page.locator('[data-place="front-door"] .fd-pull').waitFor();
+  await openPlaces(page);
+}
 /** T-335 one surface: a place's room in focus over All, and its details (its projects and sessions are there). */
 async function enter(page: Page, name: string) {
+  await openPlaces(page);
   await door(page, name).click();
   const focus = page.getByRole('region', { name: /in focus$/ });
   await expect(focus.locator('.all-focus-title')).toHaveText(name);
@@ -32,7 +40,7 @@ const moreRuns = (now: number) => [
 
 test('a working session on an area, with no project: the home counts it, its room shows it, and it can be stopped', async ({ page }) => {
   await bootProjects(page, { moreRuns });
-  await page.goto('/');
+  await home(page);
   await expect(door(page, 'Guild').locator('.fd-live')).toHaveText('1 working');
   await shot(page, '01-home');
   await enter(page, 'Guild');
@@ -63,7 +71,7 @@ test('a working session on an area, with no project: the home counts it, its roo
 
 test('a session whose only clue is its room shows under that room\'s area', async ({ page }) => {
   await bootProjects(page, { moreRuns });
-  await page.goto('/');
+  await home(page);
   await expect(door(page, 'Town Hall').locator('.fd-live')).toHaveText('1 working');
   await enter(page, 'Town Hall');
   await strip(page).getByRole('button', { name: /^Other sessions, 1 working/ }).click();
@@ -72,7 +80,7 @@ test('a session whose only clue is its room shows under that room\'s area', asyn
 
 test('a session with no area at all has a home too: Unfiled sessions, on the home, which opens in place', async ({ page }) => {
   await bootProjects(page, { moreRuns });
-  await page.goto('/');
+  await home(page);
   const line = page.getByRole('button', { name: /^Unfiled sessions/ });
   await expect(line).toHaveText(/1 working/);
   await line.click();
@@ -93,7 +101,7 @@ test("a run from a private room stays out of a public area's work view; a public
     run(now, 'run-area-private', 'A private errand', { node: 'area-guild', room: 'sanctum', summary: 'Quiet letter to someone' }),
     run(now, 'run-area-public', 'A public errand', { node: 'area-guild', room: 'guild', summary: 'Public minutes for the charter' }),
   ] });
-  await page.goto('/');
+  await home(page);
   await enter(page, 'Guild');
   await page.getByRole('button', { name: /All of Guild.s work/ }).first().click();
   const view = page.locator('.wv');
@@ -116,7 +124,7 @@ test("a run holding a room's id no note names waits, with no words, until the ro
 test('the same run, with the rooms read: the id says it is private, so it never shows its words', async ({ page }) => {
   const idOnly = (now: number) => [run(now, 'run-id-only', 'A walk by the still lake', { node: 'node-uni', channel: 'hub-quiet-sub', starter_room: 'uni', doing_now: 'Reading lake.md' })];
   await bootProjects(page, { moreRuns: idOnly, moreRooms: [{ id: 'hub-quiet-sub', name: 'sanctum/build' }] });
-  await page.goto('/');
+  await home(page);
   const line = page.getByRole('button', { name: /^Unfiled sessions/ });
   await line.click();
   const sheet = page.getByRole('dialog', { name: /Unfiled sessions/ });
@@ -128,18 +136,18 @@ test('the same run, with the rooms read: the id says it is private, so it never 
 test("a private run waiting on its decision lights no public door; a public one does", async ({ page }) => {
   const asking = (now: number, id: string, room: string) => run(now, id, 'A choice to make', { node: 'area-guild', state: 'decision', room });
   await bootProjects(page, { moreRuns: (now) => [asking(now, 'run-ask-private', 'sanctum')] });
-  await page.goto('/');
+  await home(page);
   await expect(door(page, 'Guild')).toBeVisible();
   await page.waitForTimeout(800);
   await expect(door(page, 'Guild').locator('.fd-need-n')).toHaveCount(0);
   await bootProjects(page, { moreRuns: (now) => [asking(now, 'run-ask-public', 'guild')] });
-  await page.goto('/');
+  await home(page);
   await expect(door(page, 'Guild').locator('.fd-need-n')).toHaveText(/1 for you/);
 });
 
 test('nothing unfiled: the home says nothing about it, and a room with only projects has no extra tab', async ({ page }) => {
   await bootProjects(page);
-  await page.goto('/');
+  await home(page);
   await expect(page.getByRole('button', { name: /^Unfiled sessions/ })).toHaveCount(0);
   await enter(page, 'Hearth');
   await expect(strip(page).getByRole('button', { name: /^Other sessions/ })).toHaveCount(0);

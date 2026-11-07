@@ -3,7 +3,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { bootProjects } from './projectsFixture.ts';
 import { railGo } from './railGo';
-import { focusSheet, openDetails } from './areasFixture.ts';
+import { focusSheet, openDetails, openPlaces } from './areasFixture.ts';
 
 const A = 'a'.repeat(64), B = 'b'.repeat(64);
 const MIN = 60_000;
@@ -11,9 +11,15 @@ const shot = (page: Page, name: string) => page.screenshot({ path: `__shots__/t3
 const workKeys = (page: Page) => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('uni.work.')));
 const door = (page: Page, name: string) => page.getByRole('navigation', { name: 'Rooms' }).getByRole('button', { name: new RegExp(`^${name}\\b`) });
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
+/** 0.2 one home: the doors and the work's health line are in the drawer under the home's head: pull it down. */
+async function places(page: Page) {
+  await page.locator('[data-place="front-door"] .fd-pull').waitFor();
+  await openPlaces(page);
+}
 async function home(page: Page) {
   await page.goto('/');
   await expect(page.locator('[data-place="front-door"]')).toBeVisible();
+  await places(page);
 }
 /** The first read has landed and been kept on the device for identity A. */
 /** T-335: a door opens its room in focus over All, and its details (the projects strip) inside the focus. */
@@ -32,6 +38,7 @@ test('P1: another identity on the same vault never sees the work this device kep
   // another key on this device, and its own reads of the work don't come through: only a copy could show anything
   await page.evaluate((b) => { sessionStorage.setItem('t.identity', b); sessionStorage.setItem('t.offline', '1'); }, B);
   await page.reload();
+  await places(page);
   await expect(door(page, 'Workshop')).toBeVisible();
   await expect(page.locator('.fd-live')).toHaveCount(0);
   await openRoomDetails(page, 'Workshop');
@@ -80,6 +87,7 @@ test('P2: offline, a kept copy ages by the clock: "working at <time>" while rece
   await page.clock.install({ time: new Date(Date.now() + 100 * MIN) });
   await page.evaluate(() => sessionStorage.setItem('t.offline', '1'));
   await page.reload();
+  await places(page);
   await expect(page.locator('.fd-status')).toContainText(/^Couldn't refresh · As of /);
   await expect(door(page, 'Workshop').locator('.fd-live')).toHaveText(/^2 working at /);
   // 25 minutes on, still offline: no one has heard from them for over 2 hours, so they no longer count as working
@@ -94,6 +102,7 @@ test('P2: when reads hang (no answer, no error), the clock alone stops a quiet s
   await page.clock.install({ time: new Date(Date.now() + 100 * MIN) });
   await page.evaluate(() => sessionStorage.setItem('t.hang', '1'));
   await page.reload();
+  await places(page);
   await expect(page.locator('.fd-status')).toHaveText(/^As of /);
   await expect(door(page, 'Workshop').locator('.fd-live')).toHaveText(/^2 working at /);
   await page.clock.fastForward(25 * MIN);
@@ -107,16 +116,28 @@ test('P2: a copy kept from hours ago opens with its sessions not working, at onc
   await page.clock.install({ time: new Date(Date.now() + 150 * MIN) });
   await page.evaluate(() => sessionStorage.setItem('t.offline', '1'));
   await page.reload();
+  await places(page);
   await expect(door(page, 'Workshop')).toBeVisible();
   await expect(page.locator('.fd-live')).toHaveCount(0, { timeout: 3000 });
 });
 
-test('P2: the usage line and the card read the note again (focus, and every few minutes), and an old reading says so', async ({ page }) => {
+// 0.2: the home's usage line is gone (Settings has the card); the card reads the note again the same ways
+const usageCard = async (page: Page) => {
+  await railGo(page, 'Settings');
+  const card = page.getByRole('region', { name: 'Claude accounts' });
+  await expect(card.getByRole('heading', { name: 'Claude accounts' })).toBeVisible();
+  return card;
+};
+
+test('P2: the usage card reads the note again (focus, and every few minutes), and an old reading says so', async ({ page }) => {
   await page.clock.install();
   await bootProjects(page);
   await home(page);
-  const line = page.locator('.fd-usage');
-  await expect(line).toHaveText('Claude: A 41% of the week · B 12% of the week · new work to B · as of 6 min ago');
+  await expect(page.locator('.fd-usage')).toHaveCount(0);
+  const card = await usageCard(page);
+  const age = card.locator('.usage-age');
+  await expect(age).toHaveText('As of 6 min ago');
+  await expect(card.locator('.usage-row').first()).toContainText('41%');
   const setUsage = (week: number, readMinAgo: number) => page.evaluate(([week, ago]) => {
     const u = (window as any).__world.usage; const at = new Date(Date.now() - ago * 60_000).toISOString();
     const doc = u.metadata.claude_accounts; doc.read_at = at; for (const a of doc.accounts) a.read_at = at; doc.accounts[0].week.used = week;
@@ -124,23 +145,23 @@ test('P2: the usage line and the card read the note again (focus, and every few 
   // coming back to the window reads it again
   await setUsage(55, 1);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(line).toHaveText('Claude: A 55% of the week · B 12% of the week · new work to B · as of 1 min ago');
-  // T-319: a reading three hours old is not shown as current: the line says so plainly, without its numbers
+  await expect(age).toHaveText('As of 1 min ago');
+  await expect(card.locator('.usage-row').first()).toContainText('55%');
+  // T-319: a reading three hours old is not shown as current: the card says so plainly
   await setUsage(55, 180);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(line).toHaveText('Claude: no fresh usage reading; the last one is from 3 h ago');
-  // the full card, left open, reads it again every few minutes
+  await expect(age).toHaveText('Last reading 3 h ago');
+  await expect(card.locator('.usage-stale')).toContainText('No fresh reading: the last one is from 3 h ago');
+  // the card, left open, reads it again every few minutes
   await setUsage(60, 1);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await line.click();
-  const card = page.getByRole('dialog', { name: 'Claude accounts' });
-  await expect(card).toContainText('60%');
+  await expect(card.locator('.usage-row').first()).toContainText('60%');
   await setUsage(70, 1);
   await page.clock.fastForward(5 * MIN + 1000);
-  await expect(card).toContainText('70%');
+  await expect(card.locator('.usage-row').first()).toContainText('70%');
 });
 
-test('T-319: the usage line says how old its reading is, says plainly when it is old, and Refresh reads the note again now', async ({ page }) => {
+test('T-319: the usage card says how old its reading is, says plainly when it is old, and Refresh reads the note again now', async ({ page }) => {
   await bootProjects(page);
   await page.addInitScript(() => {
     // count the reads of the usage note, and make its reading 28 hours old before the app's first read
@@ -151,10 +172,9 @@ test('T-319: the usage line says how old its reading is, says plainly when it is
     w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => { if (cmd === 'vault_note' && args?.noteRef === 'System/Claude accounts') w.__usageReads++; return inv(cmd, args); };
   });
   await home(page);
-  const line = page.locator('.fd-usage');
-  await expect(line).toHaveText('Claude: no fresh usage reading; the last one is from 28 h ago');
-  await expect(line).not.toContainText('%');
-  await line.scrollIntoViewIfNeeded();
+  const card = await usageCard(page);
+  await expect(card.locator('.usage-age')).toHaveText('Last reading 28 h ago');
+  await expect(card.locator('.usage-stale')).toContainText('No fresh reading: the last one is from 28 h ago');
   await shot(page, 'usage-stale');
   // the launcher writes a new reading; Refresh reads it at once (no waiting for the next few minutes, no leaving the window)
   await page.evaluate(() => {
@@ -162,15 +182,12 @@ test('T-319: the usage line says how old its reading is, says plainly when it is
     doc.read_at = at; for (const a of doc.accounts) a.read_at = at; doc.accounts[0].week.used = 47;
   });
   const reads = await page.evaluate(() => (window as any).__usageReads as number);
-  await page.getByRole('button', { name: 'Refresh Claude usage' }).click();
-  await expect(line).toHaveText('Claude: A 47% of the week · B 12% of the week · new work to B · as of 2 min ago');
+  await card.getByRole('button', { name: 'Refresh Claude usage' }).click();
+  await expect(card.locator('.usage-age')).toHaveText('As of 2 min ago');
+  await expect(card.locator('.usage-stale')).toHaveCount(0);
+  await expect(card.locator('.usage-row').first()).toContainText('47%');
   expect(await page.evaluate(() => (window as any).__usageReads as number)).toBeGreaterThan(reads);
   await shot(page, 'usage-fresh');
-  // the card, opened from the line: as of when, and its own Refresh
-  await line.click();
-  const card = page.getByRole('dialog', { name: 'Claude accounts' });
-  await expect(card.locator('.usage-age')).toHaveText('As of 2 min ago');
-  await expect(card.getByRole('button', { name: 'Refresh Claude usage' })).toBeVisible();
 });
 
 test('review f97fx1ji P3: a task list longer than the pages read still places a session found only through its task', async ({ page }) => {

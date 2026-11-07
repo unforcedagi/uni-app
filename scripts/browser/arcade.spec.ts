@@ -129,7 +129,10 @@ test('the Arcade opens from the app, a burst saves each pick once, and the way b
   // each reaction went to Rust once
   expect((await calls(page, 'arcade_react')).flatMap((a: any) => a.reactions).length).toBe(rs.length);
   await tap(page, page.locator('.ta-arcade').getByRole('button', { name: 'Arcade' }).first());
-  await tap(page, page.locator('.ta-home').getByRole('button', { name: /leave|back|close/i }).first());
+  // 0.2: the Arcade has no Back of its own; the rail is the way out, to Uni's home
+  await expect(page.locator('.ta-home')).toBeVisible();
+  await expect(page.locator('.ta-home').getByRole('button', { name: /leave|back|close/i })).toHaveCount(0);
+  await tap(page, page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }));
   await expect(page.locator('.arcade-place')).toHaveCount(0);
   await expect(page.locator('[data-place="front-door"]')).toBeVisible();
 });

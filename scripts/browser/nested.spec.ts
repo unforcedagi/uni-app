@@ -52,7 +52,7 @@ test.describe('nested rooms', () => {
     await expect(focusSheet(page).getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #atlas');
     // a project with its own room: its conversation, in focus
     await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
-    await expect(focusSheet(page)).toHaveCount(0); // home again (the drawer folded up), so the doors are opened from it afresh
+    await expect(focusSheet(page)).toHaveCount(0); // home again, out of the focus, before its doors are used
     await atlasDetails(page);
     await place(page, 'ATLAS').click();
     await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('ATLAS');

@@ -3,7 +3,27 @@ import { test, expect } from '@playwright/test';
 import { bootRail } from './railFixture';
 import { openRailMore, railGo } from './railGo';
 
-test.beforeEach(async ({ page }) => bootRail(page));
+test.beforeEach(async ({ page }) => {
+  // the rail fixture answers every unknown command with null, `vault_query` too, which 0.2's home reads as a failed read of the places (and
+  // then shows only "Couldn't read your places"); a vault with no area nodes answers an empty list, so that is what it gets here
+  await page.addInitScript(() => {
+    let v: any;
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, get: () => v, set: (x: any) => { const inv = x.invoke; x.invoke = async (cmd: string, args: any) => (cmd === 'vault_query' ? [] : inv(cmd, args)); v = x; } });
+  });
+  await bootRail(page);
+});
+/** 0.2: For you is no longer on the rail or in More; it is a line in the home's drawer (its dot says something new). */
+const homeForYou = (page: import('@playwright/test').Page) => page.locator('#fd-drawer .fd-foryou');
+async function toHomeDrawer(page: import('@playwright/test').Page) {
+  // Uni's own room in focus is Uni already (the rail's Uni leaves it be): its Back steps out to the home
+  const focus = page.getByRole('region', { name: /in focus$/ });
+  if (await focus.isVisible()) await focus.getByRole('button', { name: 'Back to Uni' }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
+  const pull = page.locator('[data-place="front-door"] .fd-pull');
+  if ((await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
+  await expect(homeForYou(page)).toBeVisible();
+}
 
 test('a saved Uni room opens as Uni\'s room at every width; on a phone it is the place shown (r12: no rooms sidebar beside it)', async ({ page }) => {
   await page.addInitScript(() => localStorage.removeItem('uni.lastSurface.v1'));
@@ -44,8 +64,8 @@ test('Rail surfaces, overlay panels, focus; a room no area holds is on Uni\'s ho
     await expect(rail).toBeHidden();
     await input.blur();
     await expect(rail).toBeVisible();
-    // T-335 as Aaron: Uni, All, Journal, Mail and More on the bar; For you, Vault, Search and Settings one tap more
-    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(5);
+    // 0.2: Uni, Journal, Mail and More on the bar; the rest one tap more
+    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(4);
   }
   await rail.getByRole('button', { name: 'Journal', exact: true }).click();
   const writing = page.getByRole('textbox', { name: 'Journal entry', exact: true });
@@ -66,10 +86,13 @@ test('Rail surfaces, overlay panels, focus; a room no area holds is on Uni\'s ho
   await expect(page.getByRole('button', { name: 'Focus' })).toHaveAttribute('aria-pressed', 'false');
   await page.getByRole('button', { name: 'Focus' }).click();
   await page.getByRole('button', { name: 'Focus' }).click();
-  const fy = rail.getByRole('button', { name: 'For you', exact: true });
-  if (phone) await expect(rail.getByRole('button', { name: 'More', exact: true }).locator('.rail-dot')).toBeVisible(); // what's behind More shows on it
+  // 0.2: For you is on neither the rail nor More; the home's drawer has it, with a dot while something is new
   await openRailMore(page);
-  await expect(fy.locator('.rail-count')).toHaveCount(0); await expect(fy.locator('.rail-dot')).toBeVisible();
+  await expect(rail.getByRole('button', { name: 'For you', exact: true })).toHaveCount(0);
+  if (page.viewportSize()!.width < 1100) await rail.getByRole('button', { name: 'More', exact: true }).click(); // More closes again
+  const fy = homeForYou(page);
+  await toHomeDrawer(page);
+  await expect(fy.locator('.fd-pull-dot')).toBeVisible();
   await fy.click();
   await expect(page.locator('.note-title')).toHaveText('For you');
   // r21 (Codex 5): a page to read, not a vault document: its note's tools only after "Open as a note"
@@ -79,9 +102,8 @@ test('Rail surfaces, overlay panels, focus; a room no area holds is on Uni\'s ho
   for (const sel of ['.note-meta-line', '.note-tags', '.note-backlinks', '.note-footer']) await expect(page.locator(sel), sel).toHaveCount(0);
   await shot('for-you');
   {
-    await expect(fy.locator('.rail-dot')).toHaveCount(0);
-    await rail.getByRole('button', { name: 'Uni', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
+    await toHomeDrawer(page);
+    await expect(fy.locator('.fd-pull-dot')).toHaveCount(0);
     // T-335: a room no node owns is under "Other rooms" on Uni's home, folded, and opens in focus over All
     const others = page.locator('details.fd-others');
     await others.locator('summary').click();
@@ -96,23 +118,20 @@ test('Rail surfaces, overlay panels, focus; a room no area holds is on Uni\'s ho
     await rail.getByRole('button', { name: 'Journal', exact: true }).click();
     await page.reload();
     await expect(writing).toHaveValue('A little room to think.');
-    // T-294 / T-335: from the Journal, All goes back to the room you were in (still in focus over it); Uni goes home
-    await rail.getByRole('button', { name: 'All', exact: true }).click();
-    await expect(focus.locator('.all-focus-title')).toHaveText('#Garden');
+    // from the Journal, Uni goes home (0.2: there is no All tab to come back to the room by)
     await rail.getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await page.evaluate(() => { (window as any).updated = '2026-10-02T12:00:00Z'; (window as any).content += '\n- A new suggestion'; document.dispatchEvent(new Event('visibilitychange')); });
-    await openRailMore(page);
-    await expect(fy.locator('.rail-count')).toHaveCount(0);
-    await expect(fy.locator('.rail-dot')).toBeVisible();
+    await toHomeDrawer(page);
+    await expect(fy.locator('.fd-pull-dot')).toBeVisible();
   }
 });
 
 test('Active For you renders the newer version before clearing its dot', async ({ page }, info) => {
-  const fy = page.getByRole('navigation').getByRole('button', { name: 'For you', exact: true });
-  await openRailMore(page);
+  const fy = homeForYou(page);
+  await toHomeDrawer(page);
   await fy.click();
   await expect(page.locator('.note-sheet li').filter({ hasText: 'Read something slowly' })).toBeVisible();
   await page.evaluate(() => {
@@ -121,9 +140,8 @@ test('Active For you renders the newer version before clearing its dot', async (
     w.content += '\n- A new suggestion';
     document.dispatchEvent(new Event('visibilitychange'));
   });
-  await openRailMore(page);
-  await expect(fy.locator('.rail-count')).toHaveCount(0);
-  await expect(fy.locator('.rail-dot')).toBeVisible();
+  await toHomeDrawer(page);
+  await expect(fy.locator('.fd-pull-dot')).toBeVisible();
   await page.evaluate(() => {
     const w = window as any;
     const invoke = w.__TAURI_INTERNALS__.invoke;
@@ -134,15 +152,14 @@ test('Active For you renders the newer version before clearing its dot', async (
     };
   });
   await fy.click();
-  await openRailMore(page);
-  await expect(fy.locator('.rail-dot')).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem('uni.forYou.opened.v1'))).toBe('2026-10-01T12:00:00Z');
+  // the newer version is still on its way: it is not yet counted as read (the dot is drawn from this)
   await page.waitForFunction(() => !!(window as any).releaseNote);
+  expect(await page.evaluate(() => localStorage.getItem('uni.forYou.opened.v1'))).toBe('2026-10-01T12:00:00Z');
   await page.evaluate(() => (window as any).releaseNote());
   await expect(page.locator('.note-sheet li').filter({ hasText: 'A new suggestion' })).toBeVisible();
-  await expect(fy.locator('.rail-count')).toHaveCount(0);
-  await expect(fy.locator('.rail-dot')).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('uni.forYou.opened.v1'))).toBe('2026-10-02T12:00:00Z');
+  await toHomeDrawer(page);
+  await expect(fy.locator('.fd-pull-dot')).toHaveCount(0);
 });
 
 for (const size of [{ width: 844, height: 390 }, { width: 1092, height: 600 }]) {
@@ -183,8 +200,11 @@ test('For you opened after an old tab set (a note was active) returns to the rea
   const head = page.getByRole('region', { name: /in focus$/ }).locator('.all-focus-title');
   const name = (await head.textContent())!;
   expect(name).toMatch(/^#?Uni$/);
-  await railGo(page, 'For you');
-  await expect(page.locator('.note-back-label')).toHaveText(name);
+  // 0.2: For you opens from the home's drawer, so its Back names the home, which is called Uni (not All), and goes there
+  await toHomeDrawer(page);
+  await homeForYou(page).click();
+  await expect(page.locator('.note-back-label')).toHaveText('Uni');
   await page.locator('.note-back').click();
-  await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
+  await expect(page.locator('[data-place="front-door"][data-view="all"]')).toBeVisible();
+  await expect(page.locator('.note-title')).toHaveCount(0);
 });

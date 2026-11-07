@@ -3,7 +3,8 @@
 // the room's Uni acts on. The native side is projectsFixture.ts (a made-up vault and rooms in the page; nothing leaves it).
 import { expect, test, type Page } from '@playwright/test';
 import { bootProjects } from './projectsFixture.ts';
-import { focusSheet, openDetails } from './areasFixture.ts';
+import { focusSheet, openDetails, openPlaces } from './areasFixture.ts';
+import { railGo } from './railGo';
 
 const shot = (page: Page, name: string) => page.screenshot({ path: `__shots__/t302/${test.info().project.name}-${name}.png` });
 const door = (page: Page, name: string) => page.getByRole('navigation', { name: 'Rooms' }).getByRole('button', { name: new RegExp(`^${name}\\b`) });
@@ -14,7 +15,13 @@ const NO_IDS = /\bT-\d+|\brun-|\bmts\b|\bp-coop|\bresume\b|zzzzzzzz/;
 
 /** T-335: a door opens its room in focus over All; the room's projects strip is in its details, inside the focus. */
 const title = (page: Page) => focusSheet(page).locator('.all-focus-title');
+/** 0.2 one home: the doors, what needs you and the Unfiled sessions are in the drawer under the home's head. */
+async function places(page: Page) {
+  await page.locator('[data-place="front-door"] .fd-pull').waitFor();
+  await openPlaces(page);
+}
 async function enter(page: Page, name: string) {
+  await places(page);
   await door(page, name).click();
   await expect(title(page)).toHaveText(name);
 }
@@ -33,39 +40,39 @@ async function openProject(page: Page, name: RegExp | string) {
   return sheet(page);
 }
 
-test('the front door is Uni: the seven rooms, where each stands, a mark where sessions work, and a quiet usage line', async ({ page }) => {
+test('the front door is Uni: the seven rooms, where each stands, a mark where sessions work; the usage is in Settings', async ({ page }) => {
   await bootProjects(page);
   await page.goto('/');
+  await places(page);
   const doors = page.getByRole('navigation', { name: 'Rooms' }).locator('.fd-door');
   await expect(doors).toHaveCount(7);
   await expect(door(page, 'Workshop')).toContainText('The co-op site goes to its board Thursday.');
   await expect(door(page, 'Workshop').locator('.fd-live')).toHaveText('2 working');
   await expect(door(page, 'Engine Room').locator('.fd-live')).toHaveText('1 working');
   await expect(door(page, 'Hearth').locator('.fd-live')).toHaveCount(0);
-  const usage = page.getByRole('button', { name: /^Claude:/ });
-  await expect(usage).toHaveText('Claude: A 41% of the week · B 12% of the week · new work to B · as of 6 min ago');
+  // 0.2: the home's usage line is gone; the full card is in Settings
+  await expect(page.getByRole('button', { name: /^Claude:/ })).toHaveCount(0);
   await expect(page.locator('[data-place="front-door"]')).not.toContainText(NO_IDS);
   await shot(page, '01-front-door');
-  // the usage line opens the full card, in place
-  await usage.click();
-  const card = page.getByRole('dialog', { name: 'Claude accounts' });
+  await railGo(page, 'Settings');
+  const card = page.getByRole('region', { name: 'Claude accounts' });
   await expect(card.getByRole('heading', { name: 'Claude accounts' })).toBeVisible();
   await expect(card).toContainText('Account B');
+  await expect(card.locator('.usage-age')).toHaveText('As of 6 min ago');
   await shot(page, '02-usage');
-  await page.keyboard.press('Escape');
-  await expect(card).toHaveCount(0);
 });
 
-test('round 2: what needs you is one quiet line above the rooms, which opens in place; the archived Uni room is no place', async ({ page }) => {
+test('round 2: what needs you is in the home\'s drawer above the rooms; the archived Uni room is no place', async ({ page }) => {
   await bootProjects(page);
   await page.goto('/');
+  // 0.2 one home: the head's one sentence counts it; pulling it down shows the list, open (no "Needs you · N" line there)
+  await expect(page.locator('[data-place="front-door"] .fd-pull')).toContainText('One thing needs you.');
+  await expect(page.getByText('Choose the photo for the about page')).toHaveCount(0);
+  await places(page);
   // the archived Uni room is no place of the home (T-335: the room tree beside a room is gone; the home's doors are the places)
   await expect(door(page, 'Workshop')).toBeVisible();
   await expect(door(page, 'Uni')).toHaveCount(0);
-  const line = page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^Needs you · 1/ });
-  await expect(line).toBeVisible();
-  await expect(page.getByText('Choose the photo for the about page')).toHaveCount(0);
-  await line.click();
+  await expect(page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^Needs you · / })).toHaveCount(0);
   const item = page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /Choose the photo for the about page/ });
   await expect(item).toContainText('Riverbend co-op site');
   await expect(page.getByRole('region', { name: 'Needs you' })).not.toContainText(NO_IDS);

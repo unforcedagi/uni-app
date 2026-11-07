@@ -83,7 +83,7 @@
 .journal-bar { min-height: 64px; }
 .journal-bar > div { flex: 1; }
 .panel-head { padding: 14px 12px 8px 22px; min-height: 52px; }
-.page-bar .note-refresh, .mail-bar .note-refresh, .cal-bar .note-refresh, .tp-bar .note-refresh { width: 40px; height: 40px; min-height: 40px; padding: 0; display: grid; place-items: center; border: 0; background: none; border-radius: 50%; color: var(--g-ink-2); }
+.page-bar .note-refresh, .mail-bar .note-refresh, .cal-bar .note-refresh, .tp-bar .note-refresh { width: 44px; height: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; border: 0; background: none; border-radius: 50%; color: var(--g-ink-2); }
 .page-bar .note-refresh:hover, .mail-bar .note-refresh:hover, .cal-bar .note-refresh:hover, .tp-bar .note-refresh:hover { background: var(--g-sunk); color: var(--g-ink); }
 :root[data-screen="ink"] .mail-bar, :root[data-screen="ink"] .cal-bar, :root[data-screen="ink"] .tp-bar, :root[data-screen="ink"] .msgs-bar, :root[data-screen="ink"] .page-bar { border-bottom: 1.5px solid #000; }
 
@@ -94,7 +94,7 @@
 
 /* ── papercuts the sweep found ── */
 /* a room's name is a real target (it opens the details) */
-.all-focus-open { min-height: 32px; display: inline-flex; align-items: center; }
+.all-focus-open { padding-block: 5px; }
 /* Settings: the key reads, and its copy mark is a target */
 .identity { opacity: 1; color: var(--g-ink-2); }
 .identity-copy { opacity: 1; min-width: 32px; min-height: 32px; color: var(--g-ink-2); border-radius: 8px; }

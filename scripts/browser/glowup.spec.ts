@@ -3,7 +3,7 @@
 // Made-up world only (the fixture's `world: 'unread'` with `glow`). Shots go to $GLOWUP_SHOTS (default test-results/glowup-shots),
 // never into the repo. Run: GLOWUP_TEST_PORT=1461 npx playwright test --config playwright.glowup.config.ts
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, openPlaces } from './areasFixture';
 import { railGo } from './railGo';
 
 const SHOTS = process.env.GLOWUP_SHOTS ?? 'test-results/glowup-shots';
@@ -12,7 +12,8 @@ const project = () => test.info().project.name;
 const touch = () => project() !== 'desktop';
 const UNI = 'c'.repeat(64);
 
-const toAll = async (page: Page) => { await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'All', exact: true }).click(); await page.locator('[data-view="all"]').waitFor(); };
+/** 0.2 one home: the rail's Uni opens All's stream (no All tab). */
+const toAll = async (page: Page) => { await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click(); await page.locator('[data-place="front-door"][data-view="all"]').waitFor(); };
 async function boot(page: Page, view: 'places' | 'all' = 'places') {
   await page.addInitScript((v) => {
     if (sessionStorage.getItem('glow.booted')) return;
@@ -32,8 +33,9 @@ const chips = (page: Page) => page.getByRole('group', { name: 'Where this goes' 
 test('look: home, a room and find wear the glow-up, at every size', async ({ page }) => {
   await boot(page);
   const wide = page.viewportSize()!.width >= 900;
-  // home: the day in one sentence, then the places as rows; the Daylight reads in ink
+  // home: the day in one sentence, and under it (0.2: pulled down from the head) the places as rows; the Daylight reads in ink
   await expect(page.locator('.fd-statement')).toHaveText(/needs? you\.|Nothing needs you\./);
+  await openPlaces(page);
   await expect(page.locator('.fd-door')).toHaveCount(7);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   if (project() === 'daylight') {
@@ -175,7 +177,8 @@ test('All: the route is a suggestion with its reason; chips edit it; Send posts 
   await expect(feed.locator('article.all-msg.mine', { hasText: 'jars are in the shed' })).toHaveCount(2);
 });
 
-test('Places: the home composer routes the same way, before the places', async ({ page }) => {
+// 0.2 one home: the home's one composer is All's, at the foot (no second one above the places)
+test('the home: its one composer routes the same way, and the sent line opens the room', async ({ page }) => {
   await boot(page);
   await field(page).click();
   await field(page).fill('Remind me which glaze crawled');

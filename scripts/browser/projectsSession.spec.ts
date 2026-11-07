@@ -5,10 +5,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import { bootProjects, type Boot } from './projectsFixture.ts';
 import { longShown } from './projectsWorld.ts';
-import { focusSheet, openDetails } from './areasFixture.ts';
+import { focusSheet, openDetails, openPlaces } from './areasFixture.ts';
 
 const shot = (page: Page, name: string) => page.screenshot({ path: `__shots__/t304/${test.info().project.name}-${name}.png` });
 const door = (page: Page, name: string) => page.getByRole('navigation', { name: 'Rooms' }).getByRole('button', { name: new RegExp(`^${name}\\b`) });
+/** 0.2 one home: the doors are in the drawer under the home's head (openPlaces does nothing while the home still reads its rooms, so wait for its head) */
+const places = async (page: Page) => { await page.locator('[data-place="front-door"] .fd-pull').waitFor(); await openPlaces(page); };
 const strip = (page: Page) => page.locator('[data-place="project-strip"]');
 const view = (page: Page) => page.locator('[data-place="session-view"]');
 const posted = (page: Page) => page.evaluate(() => (window as any).__posted as unknown[]);
@@ -17,7 +19,8 @@ const NO_IDS = /\bT-\d+|\brun-|\bfeed-|\bmts\b|\bp-coop|\bresume\b|zzzzzzzz/;
 async function openProject(page: Page, room: string, project: RegExp, boot: Boot = {}) {
   await bootProjects(page, boot);
   await page.goto('/');
-  // T-335: the door opens its room in focus over All; its projects strip is in the room's details, inside the focus
+  // T-335: the door opens its room in focus over All; its projects strip is in the room's details, inside the focus (0.2: the doors are in the home's drawer)
+  await places(page);
   await door(page, room).click();
   await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(room);
   await openDetails(page);
@@ -199,6 +202,7 @@ test('a steps note that can\'t be read says so, and the rest of the view still s
 test('the front door\'s working mark counts the room\'s Uni at work on your message, not only sessions', async ({ page }) => {
   await bootProjects(page);
   await page.goto('/');
+  await places(page);
   await expect(door(page, 'Workshop').locator('.fd-live')).toHaveText('2 working');
   await expect(door(page, 'Hearth').locator('.fd-live')).toHaveCount(0);
   // you ask in Hearth and Workshop; the room's Uni takes both (👀) and is working on them
