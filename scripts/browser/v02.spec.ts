@@ -36,6 +36,7 @@ test.describe('one home', () => {
     await check(page, 'home');
     await openForYou(page);
     await expect(page.getByRole('region', { name: 'For you' })).toContainText('Find jars for the honey');
+    await check(page, 'home-foryou-open');
     await openHead(page);
     await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0);
     await expect(page.locator('.fd-door[data-path="Areas/Kiln Studio"]')).toBeVisible();

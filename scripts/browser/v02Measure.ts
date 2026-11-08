@@ -15,6 +15,9 @@ export const TARGETS: Record<string, { phone: number; daylight: number; desktop:
   // 0.3.1: For you folded to its line (its items' controls are gone until it is opened); what is added is the stream itself (more of it shows,
   // and each run's room label is a control) and the scope row's chips (All and each area: phone 4 in sight, Daylight and desktop 6)
   'home': { phone: 17, daylight: 22, desktop: 25 }, // 0.1.103 11 / 20 / 18 → 0.2 11 / 14 / 17 → 0.3 15 / 20 / 21 → 0.3.1 17 / 22 / 25 (the labels in sight vary by one with the feed's place)
+  // 0.3.1: the home with For you opened: 0.3.0's home (15 / 20 / 21: its items in sight add 3 controls each) plus the fold button and the scope
+  // row's chips in sight (4 / 6 / 6), less the stream labels they push out of sight
+  'home-foryou-open': { phone: 18, daylight: 25, desktop: 26 },
   'home-open': { phone: 15, daylight: 18, desktop: 20 }, // 0.1.103 14 / 23 / 21 → 0.2 15 / 17 / 19
   'room': { phone: 16, daylight: 16, desktop: 22 }, // 0.1.103 18 / 23 / 23 → 0.2 15 / 15 / 21
   'room-details': { phone: 9, daylight: 10, desktop: 14 }, // 0.1.103 10 / 15 / 15 → 0.2 9 / 9 / 13
