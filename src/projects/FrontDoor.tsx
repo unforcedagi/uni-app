@@ -29,12 +29,16 @@ function NeedsLine({ needs, onOpen, onAsk, shown = false, approvals = null }: { 
   const [open, setOpen] = useState(false);
   const n = needs.rows.length + needs.privates.reduce((k, p) => k + p.count, 0);
   if (!n && !approvals) return null;
+  // (an ask opens in its own room; a private area's count opens that area)
+  const items = <>
+    {needs.rows.map((r) => <li key={r.id}><button type="button" data-room={r.room ?? undefined} onClick={() => (onAsk ? onAsk({ id: r.id, room: r.room ?? null, path: r.path }) : onOpen(r.path))}><span>{r.title}</span>{r.where && <small>{r.where}</small>}</button></li>)}
+    {needs.privates.map((p) => <li key={p.path}><button type="button" onClick={() => onOpen(p.path)}><span>In {p.place}: {p.count} thing{p.count === 1 ? "" : "s"} for you</span></button></li>)}
+  </>;
   if (shown) return <section className="fd-needs fd-needs-shown" aria-label="Needs you">
     <h2 className="fd-sec-h">Needs you</h2>
     {approvals}
     {n > 0 && <ul className="fd-needs-list">
-      {needs.rows.map((r) => <li key={r.id}><button type="button" data-room={r.room ?? undefined} onClick={() => (onAsk ? onAsk({ id: r.id, room: r.room ?? null, path: r.path }) : onOpen(r.path))}><span>{r.title}</span>{r.where && <small>{r.where}</small>}</button></li>)}
-      {needs.privates.map((p) => <li key={p.path}><button type="button" onClick={() => onOpen(p.path)}><span>In {p.place}: {p.count} thing{p.count === 1 ? "" : "s"} for you</span></button></li>)}
+      {items}
     </ul>}
   </section>;
   if (!n) return null;
@@ -43,8 +47,7 @@ function NeedsLine({ needs, onOpen, onAsk, shown = false, approvals = null }: { 
       <span>Needs you · {n}</span><i className="ps-chev" aria-hidden="true" />
     </button>
     {open && <ul className="fd-needs-list">
-      {needs.rows.map((r) => <li key={r.id}><button type="button" data-room={r.room ?? undefined} onClick={() => (onAsk ? onAsk({ id: r.id, room: r.room ?? null, path: r.path }) : onOpen(r.path))}><span>{r.title}</span>{r.where && <small>{r.where}</small>}</button></li>)}
-      {needs.privates.map((p) => <li key={p.path}><button type="button" onClick={() => onOpen(p.path)}><span>In {p.place}: {p.count} thing{p.count === 1 ? "" : "s"} for you</span></button></li>)}
+      {items}
     </ul>}
   </section>;
 }

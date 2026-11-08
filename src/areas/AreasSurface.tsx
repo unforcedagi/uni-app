@@ -99,7 +99,9 @@ function ChatWait({ placeholder, retry }: { placeholder: string; retry: (() => v
 const viaMemory: { path: string | null; via: string | null } = { path: null, via: null };
 /** 0.2.2: an ask opened from the home's drawer, waiting for its room to come into focus (module memory: opening the room may draw this
  *  surface afresh). `shown`: its sheet has been up over that room, so leaving the room ends it. */
-const askMemory: { pending: { id: string; room: string; shown: boolean; who: string | null } | null } = { pending: null };
+const askMemory: { pending: { id: string; room: string; shown: boolean; who: string | null; at: number } | null } = { pending: null };
+/** A drawer ask whose room hasn't come up by then never will (a refused open, an unsaved note kept): it lapses, never to come back unasked. */
+const ASK_WAIT_MS = 8000;
 
 /**
  * T-335 one surface (0.2: one home). With rooms: the home is All (the stream, the composer that routes, and the drawer: what needs you,
@@ -188,7 +190,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const closeProject = () => setProjectOpen(null);
   /** A vault without rooms: the place's app, shown in its page's place (Back closes it). */
   const [appOpen, setAppOpen] = useState(false);
-  /** 0.2 one home: the head's drawer (what needs you, For you, the places) is pulled down; Back closes it. Kept for the session, so a
+  /** 0.2 one home: the head's drawer (what needs you, To post, the places) is pulled down; Back closes it. Kept for the session, so a
    *  redraw of the home (the key arriving, a place's room coming back) leaves it as the person left it. */
   const [pulled, setPulledState] = useState(() => pulledMemory.open);
   const setPulled = useCallback((open: boolean) => { pulledMemory.open = open; setPulledState(open); }, []);
@@ -259,7 +261,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   useEffect(() => {
     // (an ask opened from the drawer waits for its room: the sheet opens over it; another room, or leaving it once it was shown, ends it)
     // (an ask from another key, or one no longer among the tasks, is dropped: never an empty sheet holding Back)
-    if (askMemory.pending && (askMemory.pending.who !== identity || (tasks.all && !tasks.all.some((t) => t.id === askMemory.pending!.id)))) askMemory.pending = null;
+    if (askMemory.pending && (askMemory.pending.who !== identity || (!askMemory.pending.shown && Date.now() - askMemory.pending.at > ASK_WAIT_MS) || (tasks.all && !tasks.all.some((t) => t.id === askMemory.pending!.id)))) askMemory.pending = null;
     const p = askMemory.pending;
     const here = !!p && !!focus && !focus.leaving && focus.room === p.room;
     if (p && here) p.shown = true;
@@ -367,7 +369,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     closeProject();
     const t = tasks.all?.find((x) => x.id === row.id); if (t) lastSheet.current = t;
     if (!row.room) { askMemory.pending = null; setSheetId(row.id); return; }
-    askMemory.pending = { id: row.id, room: row.room, shown: false, who: identity };
+    askMemory.pending = { id: row.id, room: row.room, shown: false, who: identity, at: Date.now() };
     // its room is already here, or on its way out (brought back): the sheet comes up now
     if (focus && focus.room === row.room) { askMemory.pending.shown = true; if (focus.leaving) actions.openRoom(row.room); else allPlace?.onView("chat"); setSheetId(row.id); return; }
     setSheetId(null);
@@ -472,7 +474,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const focusRoomOpen = focus && !focus.leaving ? focus.room : null;
     // (the drawer is the owner's own home, as the places page was: every approval waiting, a private room's too; All's stream keeps those out)
     const approvalRows = <ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" />;
-    // 0.2 one home: with rooms, the home is All; what the old home held (what needs you, the approvals, For you, To post, the places, the
+    // 0.2 one home: with rooms, the home is All; what the old home held (what needs you, the approvals, To post, the places, the
     // rooms no area holds, the Unfiled sessions) is in the drawer under its head
     // (an approval has a deadline: one waiting in a room All shows stays on the home, over its head, as it was over All's; the drawer lists them all)
     const home = <>{status}{!allPlace ? approvalRows : !pulled && all && <ApprovalRows approvals={approvalsAll.list.filter((x) => !privateChannel(x.channel))} className="cp-list cp-approvals th-approvals" />}
@@ -486,7 +488,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     // T-335: All with nothing read yet, or no area with a room of its own: it says which (the focus still comes up over it)
     // 0.2: once the places are read, the home is there even with no area room yet (its places, open)
     // (while the rooms list is still coming, the home is there with its places open: a door can be tapped on a slow cold launch)
-    // (and when the places can't be read, the home still: its drawer keeps the rooms no area holds, For you and the error with its retry)
+    // (and when the places can't be read, the home still: its drawer keeps the rooms no area holds and the error with its retry)
     const behind = all || data || (error && !signingIn) ? home : <AllEmpty reading={signingIn || loading || !data || roomsPending} error={error && !data ? retryAreas : null} />;
     // T-335 one fluid surface: All, and over it the room in focus
     const focusChat = focus ? roomFor(focus.room, focus.root) : null;

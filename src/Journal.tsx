@@ -301,7 +301,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onRecordingChange, 
         {offer !== null && e.entry_id === offer && !e.pending && cfg && areas.length > 0 && <div className="share-picker journal-offer" role="group" aria-label="Send to an area">
           <span className="journal-offer-label">Send to an area?</span>
           {areas.map((r) => areaChip(e, r))}
-          <button type="button" className="journal-offer-close" onClick={() => setOffer(null)}>{shared[e.id]?.some((x) => x.id !== uniRoomId) ? "Done" : "Not now"}</button>
+          <button type="button" className="journal-offer-close" onClick={() => setOffer(null)}>{shared[e.id]?.length ? "Done" : "Not now"}</button>
         </div>}
         {/* r21: no action strip repeated under every entry: one menu per entry, as in the chat ("⋯", then Share to a room) */}
         {!e.pending && <div className={`message-more journal-more ${menuFor === e.id ? "open" : ""}`}>

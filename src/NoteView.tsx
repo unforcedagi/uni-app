@@ -149,7 +149,7 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
     {note && editing ? <NoteEditor vault={data!.vault} note={note} onDirty={onDirty} onCancel={() => setEditing(false)} onSaved={(updated) => { setData({ ...data!, note: { ...data!.note, ...updated } }); setEditing(false); }} /> : <div className="note-scroll">
       <article className="note-page">
         <h1 className="note-title">{heading}</h1>
-        {<p className="note-meta-line">{note ? noteMeta(data!.vault, note.path, note.updatedAt ?? note.createdAt) : `${target.vault} · ${error || missing ? "unavailable" : "opening…"}`}</p>}
+        <p className="note-meta-line">{note ? noteMeta(data!.vault, note.path, note.updatedAt ?? note.createdAt) : `${target.vault} · ${error || missing ? "unavailable" : "opening…"}`}</p>
         {tags.length > 0 && <p className="note-tags">{tags.map((t) => <span key={t} className="note-tag">#{t}</span>)}</p>}
         {!data && !error && !missing && <OpeningNote key={attempt} onRetry={() => setAttempt((n) => n + 1)} onBack={onBack} backLabel={backLabel} />}
         {missing && <div className="note-error">
@@ -172,12 +172,12 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
         {shown && <>
           {own && <PublishedMedia m={own} />}
           <NoteRenderer note={shown} format={render.format} overrides={overrides} className="md note-body" resolve={resolve} linkComponent={Link} rehypePlugins={rehype} components={MEDIA_COMPONENTS} />
-          {<details className="note-backlinks"><summary>Linked from ({inbound.length})</summary>
+          <details className="note-backlinks"><summary>Linked from ({inbound.length})</summary>
             {inbound.map((link) => <button className="vault-note" key={JSON.stringify([link.id, link.relationship])} onClick={() => onOpen({ hub: null, vault: data!.vault, ref: link.id }, null)}>{link.path} <small>· {link.relationship}</small></button>)}
-          </details>}
-          {<footer className="note-footer">
+          </details>
+          <footer className="note-footer">
             {webUrl && <button className="note-quiet" onClick={() => openExternal(webUrl)}>Open in Parachute ↗</button>}
-          </footer>}
+          </footer>
         </>}
       </article>
     </div>}

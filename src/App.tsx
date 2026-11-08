@@ -1489,7 +1489,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // (at the home no room is loaded: the last one you were in still counts. Never a known direct message; a room whose kind isn't known
   // yet is offered, and one without its Uni in the roster stops with a line, posting nothing)
   const lastRoom = useRef<string | null>(null);
-  useEffect(() => { if (channel) lastRoom.current = channel; }, [channel]);
+  useEffect(() => { if (channel && rooms.some((r) => r.id === channel && r.dm !== true)) lastRoom.current = channel; }, [channel, rooms]);
   const searchAt = channel ?? lastRoom.current;
   const searchRoom = searchAt ? rooms.find((r) => r.id === searchAt && r.dm !== true) ?? null : null;
   async function askUniSearch(query: string): Promise<boolean> {
