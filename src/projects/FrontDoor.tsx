@@ -31,7 +31,9 @@ function ScopeRow({ rooms, scope, onScope, onOpenScope }: { rooms: readonly AllR
     const r = row.current, on = r?.querySelector<HTMLElement>('[aria-pressed="true"]'), all = r?.firstElementChild as HTMLElement | null;
     if (!r || !on || !all) return;
     if (on === all) { r.scrollLeft = 0; return; }
-    r.scrollLeft = Math.max(0, r.scrollLeft + on.getBoundingClientRect().left - all.getBoundingClientRect().right - 6);
+    // (only when it is out of sight: a row that fits stays as it is)
+    const box = r.getBoundingClientRect(), it = on.getBoundingClientRect(), from = all.getBoundingClientRect().right + 6;
+    if (it.left < from || it.right > box.right) r.scrollLeft = Math.max(0, r.scrollLeft + it.left - from);
   }, [scope?.path]);
   return <div className="all-scope">
     <nav className="all-scope-row" aria-label="Show in the stream" ref={row}>

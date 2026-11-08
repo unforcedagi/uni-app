@@ -144,7 +144,7 @@
   border: var(--g-hair) solid var(--g-line-strong); background: transparent; font: 500 13.5px/1 var(--g-font-ui); color: var(--g-ink); white-space: nowrap; }
 .all-scope-chip:first-child { position: sticky; left: 0; z-index: 1; box-shadow: 6px 0 0 0 var(--g-ground); background: var(--g-ground); }
 /* (the row's own inset, left of All, is ground too: nothing scrolls past behind it) */
-.all-scope-chip:first-child::before { content: ""; position: absolute; right: 100%; top: -2px; bottom: -2px; width: 72px; background: var(--g-ground); }
+.all-scope-chip:first-child::before { content: ""; position: absolute; right: calc(100% + 2px); top: -2px; bottom: -2px; width: 72px; background: var(--g-ground); }
 .all-scope-chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--room-tint, var(--g-accent)); }
 .all-scope-chip[aria-pressed="true"], .all-scope-chip:first-child[aria-pressed="true"] { background: var(--g-ink); color: var(--g-paper); border-color: transparent; }
 .all-scope-chip[aria-pressed="true"] i { background: var(--g-paper); }
