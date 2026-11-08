@@ -157,3 +157,12 @@ check("unsent words are kept per decision and vault", () => { assert.equal(store
 store.forget();
 check("Forget drops unsent words with the rest", () => assert.equal(store.draft(ID, "uni"), ""));
 if (failed) { console.log(`${failed} failed`); process.exit(1); }
+
+// 0.3.0: a decision written as a task reads open while the task is live, decided once done with a pick; an older note done is not "decided"
+{
+  const n = (tags: string[], md: Record<string, unknown>) => ({ id: "01ABC", tags, path: "Tasks/T-9 Pick a colour", content: "", metadata: { options: ["Teal", "Ochre"], ...md } });
+  assert.equal(parseDecisionNote(n(["task", "decision"], { state: "waiting" }))?.state, "open");
+  assert.equal(parseDecisionNote(n(["task", "decision"], { state: "done", decided: "Ochre" }))?.state, "decided");
+  assert.equal(parseDecisionNote(n(["decision"], { state: "done", decided: "Ochre" }))?.state, "other");
+  console.log("ok: task-form decisions");
+}

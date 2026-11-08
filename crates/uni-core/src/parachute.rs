@@ -584,6 +584,9 @@ impl VaultClient {
         if !note["tags"].as_array().is_some_and(|t| t.iter().filter_map(Value::as_str).any(|t| t == "decision")) {
             return Err(Error::Invalid("only decision notes can be decided".into()));
         }
+        if (to == "done") != is_task_form(&note) {
+            return Err(Error::Invalid("a decision written as a task closes to done; an older one to decided".into()));
+        }
         let args = decide_args(vault, id, &from, &to, metadata, if_updated_at)?;
         if note["updatedAt"].as_str() != Some(if_updated_at) {
             return Err(Error::Conflict(format!("note {id} has been modified since its question was read")));
@@ -616,14 +619,24 @@ impl VaultClient {
         if let Some(words) = words {
             md["decided_note"] = json!(words);
         }
-        match self.decide_note(vault, id, json!("open"), json!("decided"), md, shown).await {
+        // a task-form decision is answered like any ask: its live state -> done, the answer riding the same write
+        let task_form = is_task_form(&note);
+        let (from, to) = if task_form {
+            md["answer"] = json!(option);
+            md["answered_at"] = json!(at);
+            md["answered_by"] = json!(by);
+            (note["metadata"]["state"].clone(), json!("done"))
+        } else {
+            (json!("open"), json!("decided"))
+        };
+        match self.decide_note(vault, id, from, to, md, shown).await {
             Ok(note) => Ok(Pick::Picked { decided: option, title, note }),
             Err(e) => {
                 // lost the race (or the note moved, or the write failed): what is stored now decides what the card shows
                 let Ok(now) = self.get_note(vault, id).await else { return Err(e) };
                 let m = &now["metadata"];
                 // this very tap, whose answer was lost on the way back (same option, same stamp): it won
-                if m["state"] == "decided" && m["decided"] == option.as_str() && m["decided_by"] == by && m["decided_at"] == at {
+                if m["state"] == if task_form { "done" } else { "decided" } && m["decided"] == option.as_str() && m["decided_by"] == by && m["decided_at"] == at {
                     return Ok(Pick::Picked { decided: option, title, note: now });
                 }
                 match decision_state(&now, &option)? {
@@ -1263,15 +1276,22 @@ fn transition_args(vault: &str, id: &str, field: &str, from: &Value, to: &Value,
 /// The update-note arguments for deciding: only `open` -> `decided`, the checked metadata, and the stamp just read
 /// (the vault requires `if_updated_at` when metadata rides with a state transition).
 fn decide_args(vault: &str, id: &str, from: &Value, to: &Value, metadata: Value, if_updated_at: &str) -> Result<Value> {
-    if from.as_str() != Some("open") || to.as_str() != Some("decided") {
-        return Err(Error::Invalid("a decision can only go from open to decided".into()));
+    // an older Decisions/ note goes open -> decided; a task-form one (0.3.0) is closed like an ask: live -> done
+    let old_form = from.as_str() == Some("open") && to.as_str() == Some("decided");
+    let task_form = matches!(from.as_str(), Some("open" | "doing" | "waiting")) && to.as_str() == Some("done");
+    if !old_form && !task_form {
+        return Err(Error::Invalid("a decision can only go from open to decided (or, as a task, from open to done)".into()));
+    }
+    let answered = ["answer", "answered_at", "answered_by"].iter().filter(|k| metadata.get(**k).is_some()).count();
+    if (task_form && answered != 3) || (old_form && answered != 0) {
+        return Err(Error::Invalid("a decision closed as a task carries its answer; an older one carries none".into()));
     }
     if if_updated_at.is_empty() {
         return Err(Error::Invalid("deciding needs the note's updatedAt".into()));
     }
     Ok(json!({"vault": vault, "id": id, "include_content": false, "metadata": metadata,
         "if_updated_at": if_updated_at,
-        "state_transition": {"field": "state", "from": "open", "to": "decided"}}))
+        "state_transition": {"field": "state", "from": from, "to": to}}))
 }
 
 /// What one tap on a decision card did (T-212).
@@ -1298,13 +1318,21 @@ pub fn decision_title(note: &Value) -> String {
 
 /// Is this note a decision that `option` can still be picked on? `Ok(Ok(option))` (the stored spelling) when it is open,
 /// `Ok(Err(AlreadyDecided))` when it has an answer, else an error: not a decision, no such option, or another state.
+/// A decision written as a task (tags `task` and `decision`, 0.3.0) rather than an older `Decisions/` note.
+fn is_task_form(note: &Value) -> bool {
+    note["tags"].as_array().is_some_and(|t| t.iter().filter_map(Value::as_str).any(|t| t == "task"))
+}
+
 fn decision_state(note: &Value, option: &str) -> Result<std::result::Result<String, Pick>> {
     if !note["tags"].as_array().is_some_and(|t| t.iter().filter_map(Value::as_str).any(|t| t == "decision")) {
         return Err(Error::Invalid("only decision notes can be decided".into()));
     }
     let m = &note["metadata"];
     let title = decision_title(note);
-    if m["state"] == "decided" {
+    // 0.3.0: a decision made since For you is ONE note, a task tagged decision too: it is answered by closing the task
+    // (state -> done, with `decided`), so `done` with an answer is its "decided".
+    let closed = if is_task_form(note) { m["state"] == "done" && m["decided"].is_string() } else { m["state"] == "decided" };
+    if closed {
         return Ok(Err(Pick::AlreadyDecided {
             decided: m["decided"].as_str().unwrap_or_default().to_string(),
             decided_by: m["decided_by"].as_str().map(str::to_string),
@@ -1312,7 +1340,8 @@ fn decision_state(note: &Value, option: &str) -> Result<std::result::Result<Stri
             note: note.clone(),
         }));
     }
-    if m["state"] != "open" {
+    let open = if is_task_form(note) { matches!(m["state"].as_str(), Some("open" | "doing" | "waiting")) } else { m["state"] == "open" };
+    if !open {
         return Err(Error::Invalid(format!("this decision is {}, not open", m["state"])));
     }
     let want = option.trim().to_lowercase();
@@ -1406,9 +1435,9 @@ pub fn decision_note_text(note: Option<&str>) -> Result<Option<String>> {
 fn check_decide_patch(metadata: &Value) -> Result<()> {
     let obj = metadata
         .as_object()
-        .filter(|o| !o.is_empty() && o.keys().all(|k| matches!(k.as_str(), "decided" | "decided_at" | "decided_by" | "answered_rev" | "decided_note")));
+        .filter(|o| !o.is_empty() && o.keys().all(|k| matches!(k.as_str(), "decided" | "decided_at" | "decided_by" | "answered_rev" | "decided_note" | "answer" | "answered_at" | "answered_by")));
     let Some(obj) = obj else {
-        return Err(Error::Invalid("a decision takes only `decided`, `decided_at`, `decided_by`, `decided_note` and `answered_rev`".into()));
+        return Err(Error::Invalid("a decision takes only `decided`, `decided_at`, `decided_by`, `decided_note`, `answer`, `answered_at`, `answered_by` and `answered_rev`".into()));
     };
     if let Some(n) = obj.get("decided_note") {
         if !n.as_str().is_some_and(|s| decision_note_text(Some(s)).ok().flatten().as_deref() == Some(s)) {
@@ -1588,6 +1617,26 @@ mod tests {
         assert!(transition_args("uni", "T1", "state", &json!("open"), &json!("done"), "  ").is_err());
         assert!(transition_args("uni", "T1", "status", &json!("open"), &json!("done"), "x").is_err());
         assert!(transition_args("uni", " ", "state", &json!("open"), &json!("done"), "x").is_err());
+    }
+
+    #[test]
+    fn a_decision_written_as_a_task_closes_to_done_with_its_answer() {
+        let task = json!({"tags": ["decision", "task"], "metadata": {"state": "open", "options": ["Keep", "Drop"]}});
+        assert!(is_task_form(&task));
+        assert_eq!(decision_state(&task, "drop").unwrap().unwrap(), "Drop");
+        let done = json!({"tags": ["task", "decision"], "metadata": {"state": "done", "decided": "Keep", "options": ["Keep", "Drop"]}});
+        assert!(matches!(decision_state(&done, "Keep").unwrap(), Err(Pick::AlreadyDecided { .. })));
+        let old = json!({"tags": ["decision"], "metadata": {"state": "done", "options": ["Keep", "Drop"]}});
+        assert!(decision_state(&old, "Keep").is_err());
+        let md = json!({"decided": "Drop", "decided_at": "2026-11-08T05:00:00Z", "decided_by": "aaron",
+            "answer": "Drop", "answered_at": "2026-11-08T05:00:00Z", "answered_by": "aaron"});
+        check_decide_patch(&md).unwrap();
+        let a = decide_args("uni", "N1", &json!("waiting"), &json!("done"), md.clone(), "2026-11-08T04:00:00.000Z").unwrap();
+        assert_eq!(a["state_transition"], json!({"field": "state", "from": "waiting", "to": "done"}));
+        assert_eq!(a["metadata"]["answer"], "Drop");
+        // the two forms never cross: a task closes with its answer, an older decision without one
+        assert!(decide_args("uni", "N1", &json!("open"), &json!("done"), json!({"decided": "Drop"}), "x").is_err());
+        assert!(decide_args("uni", "N1", &json!("open"), &json!("decided"), md, "x").is_err());
     }
 
     #[test]

@@ -120,7 +120,10 @@ export function parseDecisionNote(note: any): DecisionView | null {
   const marked = raw.find((o) => DEFAULT_MARK.test(o));
   const named = str(m.default);
   const dflt = named && raw.some((o) => o.toLowerCase() === named.toLowerCase()) ? raw.find((o) => o.toLowerCase() === named.toLowerCase())! : marked ?? null;
-  const state = m.state === "open" ? "open" : m.state === "decided" ? "decided" : "other";
+  // 0.3.0: a decision written as a task (tags task + decision) is open while the task is live and decided once it is done with a pick
+  const asTask = note.tags.includes("task");
+  const state = m.state === "open" || (asTask && (m.state === "doing" || m.state === "waiting")) ? "open"
+    : m.state === "decided" || (asTask && m.state === "done" && typeof m.decided === "string") ? "decided" : "other";
   return {
     id: note.id, question: questionOf(note.content, note.path), options: [...new Set(raw)], dflt, state,
     decided: str(m.decided), decidedBy: str(m.decided_by), updatedAt: typeof note.updatedAt === "string" ? note.updatedAt : "", task: str(m.task),
