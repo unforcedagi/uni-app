@@ -546,7 +546,8 @@ impl VaultClient {
     }
 
     /// [`Self::transition_note`] that also records which revision the answer was given against (r26): `metadata` may hold only
-    /// `answered_rev`, written in the same update as the compare-and-set.
+    /// `answered_rev`, written in the same update as the compare-and-set. 0.3.0 For you: or an ask's answer (CONTRACT "Answering an ask"):
+    /// `answer`, `answered_at`, `answered_by` (and for a `choose` pick `decided`, `decided_at`, `decided_by`), only with `to: done`.
     #[allow(clippy::too_many_arguments)]
     pub async fn transition_note_with(
         &self,
@@ -561,7 +562,7 @@ impl VaultClient {
         check_vault(vault)?;
         let mut args = transition_args(vault, id, field, &from, &to, if_updated_at)?;
         if let Some(m) = metadata {
-            check_answered_patch(&m)?;
+            check_answered_patch(&m, &to)?;
             args["metadata"] = m;
         }
         let v = self.call("update-note", args).await?;
@@ -1063,10 +1064,16 @@ fn tag_query_args(vault: &str, tag: &str, include_content: bool, limit: usize) -
     {
         return Err(Error::Invalid(format!("bad tag: {tag}")));
     }
-    Ok(json!({
+    let mut args = json!({
         "vault": vault, "tag": tag, "include_content": include_content,
         "include_metadata": true, "limit": limit.clamp(1, 200), "sort": "asc",
-    }))
+    });
+    // 0.3.0: `decision` becomes a child of `task` in the vault's tag schemas, so `tag: task` would also return the old decision-only notes.
+    // A reader that means tasks asks for the tag exactly (vault 0.7.9 `expand`: subtypes|namespace|both|exact).
+    if tag == "task" {
+        args["expand"] = json!("exact");
+    }
+    Ok(args)
 }
 
 fn search_args(
@@ -1320,31 +1327,73 @@ fn decision_state(note: &Value, option: &str) -> Result<std::result::Result<Stri
 }
 
 /// The one key an answered task may carry besides its new state (r26): the revision the answer was given against.
-fn check_answered_patch(metadata: &Value) -> Result<()> {
-    let ok = metadata.as_object().is_some_and(|o| {
-        o.len() == 1 && o.get("answered_rev").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty() && s.len() <= 100)
-    });
-    if ok {
-        Ok(())
-    } else {
-        Err(Error::Invalid("an answered task takes only `answered_rev`".into()))
+/// The longest answer to an ask, in characters (a spoken one included).
+pub const ANSWER_MAX: usize = 4000;
+/// The keys an answer may write with the close (CONTRACT "Answering an ask").
+const ANSWER_KEYS: [&str; 3] = ["answer", "answered_at", "answered_by"];
+const DECIDED_KEYS: [&str; 3] = ["decided", "decided_at", "decided_by"];
+
+/// What may ride with a state compare-and-set: `answered_rev` alone (r26: "I did this"), or an ask's answer: all of `answer`,
+/// `answered_at`, `answered_by`, with `answered_rev` optional, and for a `choose` pick all of `decided`, `decided_at`, `decided_by` too; an
+/// answer only closes (`to` must be `done`). The answer is plain text (no control or direction-override characters, as a decision note);
+/// `answered_by` is a short name, never `uni-default` (that one is Uni's own, written by tasks.py when a default is taken).
+fn check_answered_patch(metadata: &Value, to: &Value) -> Result<()> {
+    let refuse = |why: &str| Err(Error::Invalid(why.into()));
+    let Some(o) = metadata.as_object() else { return refuse("an answered task takes an object of metadata") };
+    let short = |k: &str, max: usize| o.get(k).and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty() && s.len() <= max);
+    if o.keys().any(|k| k != "answered_rev" && !ANSWER_KEYS.contains(&k.as_str()) && !DECIDED_KEYS.contains(&k.as_str())) || o.is_empty() {
+        return refuse("an answered task takes only `answered_rev`, or an answer (`answer`, `answered_at`, `answered_by`, and `decided*` for a pick)");
     }
+    if o.contains_key("answered_rev") && !short("answered_rev", 100) {
+        return refuse("`answered_rev` must be the revision answered");
+    }
+    let answer = ANSWER_KEYS.iter().filter(|k| o.contains_key(**k)).count();
+    let decided = DECIDED_KEYS.iter().filter(|k| o.contains_key(**k)).count();
+    if answer == 0 && decided == 0 {
+        return Ok(());
+    }
+    if answer != ANSWER_KEYS.len() || (decided != 0 && decided != DECIDED_KEYS.len()) {
+        return refuse("an answer writes `answer`, `answered_at` and `answered_by` together (and all of `decided*` for a pick)");
+    }
+    if to.as_str() != Some("done") {
+        return refuse("an answer closes the ask: `to` must be `done`");
+    }
+    let text = o["answer"].as_str().unwrap_or("");
+    if text.is_empty() || text.chars().count() > ANSWER_MAX || plain_text(text) != text {
+        return refuse("`answer` must be plain text of at most 4000 characters");
+    }
+    let by_ok = o["answered_by"].as_str().is_some_and(|b| {
+        b != "uni-default" && b.len() <= 64 && !b.is_empty() && b.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
+    });
+    if !by_ok || !short("answered_at", 100) {
+        return refuse("`answered_by` must be a short name (not `uni-default`) and `answered_at` a time");
+    }
+    if decided != 0 && (!short("decided", 500) || !short("decided_at", 100) || o.get("decided_by") != o.get("answered_by")) {
+        return refuse("a pick writes `decided` (the option), `decided_at` and `decided_by` (who answered)");
+    }
+    Ok(())
 }
 
 /// T-226: the longest note Aaron can add to a decision, in characters (the card counts down near it).
 pub const DECISION_NOTE_MAX: usize = 1000;
 
-/// A decision note as it is stored: plain text, line breaks kept, no control or direction-override characters (they could make the
-/// room message read other than it is), trimmed. `None` when nothing is left; an error when it is longer than [`DECISION_NOTE_MAX`].
-pub fn decision_note_text(note: Option<&str>) -> Result<Option<String>> {
-    let Some(note) = note else { return Ok(None) };
+/// Text as it is stored for Aaron's words (a decision note, an ask's answer): line breaks kept, no control or direction-override characters
+/// (they could make the room message read other than it is), trimmed.
+fn plain_text(note: &str) -> String {
     let text: String = note
         .replace("\r\n", "\n")
         .chars()
         .map(|c| if c == '\r' { '\n' } else { c })
         .filter(|&c| c == '\n' || c == '\t' || !(c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}' | '\u{061c}')))
         .collect();
-    let text = text.trim();
+    text.trim().to_string()
+}
+
+/// A decision note as it is stored ([`plain_text`]). `None` when nothing is left; an error when it is longer than [`DECISION_NOTE_MAX`].
+pub fn decision_note_text(note: Option<&str>) -> Result<Option<String>> {
+    let Some(note) = note else { return Ok(None) };
+    let text = plain_text(note);
+    let text = text.as_str();
     if text.is_empty() {
         return Ok(None);
     }
@@ -1556,14 +1605,81 @@ mod tests {
 
     #[test]
     fn an_answer_records_the_revision_it_answered_and_nothing_else() {
-        assert!(check_answered_patch(&json!({"answered_rev": "2026-10-14T07:00:00.000Z"})).is_ok());
-        assert!(check_answered_patch(&json!({"answered_rev": ""})).is_err());
-        assert!(check_answered_patch(&json!({"answered_rev": "x", "state": "done"})).is_err());
-        assert!(check_answered_patch(&json!({"next": "x"})).is_err());
-        assert!(check_answered_patch(&json!("x")).is_err());
+        assert!(check_answered_patch(&json!({"answered_rev": "2026-10-14T07:00:00.000Z"}), &json!("done")).is_ok());
+        assert!(check_answered_patch(&json!({"answered_rev": ""}), &json!("done")).is_err());
+        assert!(check_answered_patch(&json!({"answered_rev": "x", "state": "done"}), &json!("done")).is_err());
+        assert!(check_answered_patch(&json!({"next": "x"}), &json!("done")).is_err());
+        assert!(check_answered_patch(&json!("x"), &json!("done")).is_err());
+        assert!(check_answered_patch(&json!({}), &json!("done")).is_err());
         let md = json!({"decided": "yes", "decided_at": "2026-10-13T08:00:00Z", "decided_by": "aaron", "answered_rev": "2026-10-13T07:00:00.000Z"});
         assert!(check_decide_patch(&md).is_ok());
         assert!(check_decide_patch(&json!({"decided": "yes", "owner": "x"})).is_err());
+    }
+
+    #[test]
+    fn an_asks_answer_rides_the_close_and_nothing_else_does() {
+        // 0.3.0 For you (CONTRACT "Answering an ask"): the answer, who and when, in the same compare-and-set as state -> done
+        let at = "2026-11-11T12:00:00.000Z";
+        let ans = json!({"answer": "Celadon", "answered_at": at, "answered_by": "aaron"});
+        assert!(check_answered_patch(&ans, &json!("done")).is_ok());
+        let mut with_rev = ans.clone();
+        with_rev["answered_rev"] = json!("2026-11-11T11:00:00.000Z");
+        assert!(check_answered_patch(&with_rev, &json!("done")).is_ok());
+        // a choose pick: decided, decided_at, decided_by too, by the one who answered
+        let mut pick = ans.clone();
+        for (k, v) in [("decided", "Celadon"), ("decided_at", at), ("decided_by", "aaron")] {
+            pick[k] = json!(v);
+        }
+        assert!(check_answered_patch(&pick, &json!("done")).is_ok());
+        // only a close carries an answer
+        for to in ["open", "doing", "waiting", "archived"] {
+            assert!(check_answered_patch(&ans, &json!(to)).is_err(), "{to}");
+        }
+        // all three together, all of decided* or none, and nothing else alongside
+        for k in ["answer", "answered_at", "answered_by"] {
+            let mut m = ans.clone();
+            m.as_object_mut().unwrap().remove(k);
+            assert!(check_answered_patch(&m, &json!("done")).is_err(), "{k}");
+        }
+        let mut half = ans.clone();
+        half["decided"] = json!("Celadon");
+        assert!(check_answered_patch(&half, &json!("done")).is_err());
+        for (k, v) in [("state", json!("done")), ("owner", json!("aaron")), ("next", json!("x")), ("default_auto", json!(true))] {
+            let mut m = ans.clone();
+            m[k] = v;
+            assert!(check_answered_patch(&m, &json!("done")).is_err(), "{k}");
+        }
+        // the app never answers as Uni taking a default, nor for someone else in a pick
+        let mut uni = ans.clone();
+        uni["answered_by"] = json!("uni-default");
+        assert!(check_answered_patch(&uni, &json!("done")).is_err());
+        let mut other = pick.clone();
+        other["decided_by"] = json!("someone");
+        assert!(check_answered_patch(&other, &json!("done")).is_err());
+        // plain text, bounded: a long spoken answer fits, control and direction-override characters don't
+        let mut long = ans.clone();
+        long["answer"] = json!("word ".repeat(700).trim());
+        assert!(check_answered_patch(&long, &json!("done")).is_ok());
+        long["answer"] = json!("x".repeat(ANSWER_MAX + 1));
+        assert!(check_answered_patch(&long, &json!("done")).is_err());
+        for bad in ["", "  ", "a\u{202e}b", "a\u{0007}b", " padded "] {
+            let mut m = ans.clone();
+            m["answer"] = json!(bad);
+            assert!(check_answered_patch(&m, &json!("done")).is_err(), "{bad:?}");
+        }
+        let mut lines = ans.clone();
+        lines["answer"] = json!("Yes.\nAnd use the blue one.");
+        assert!(check_answered_patch(&lines, &json!("done")).is_ok());
+    }
+
+    #[test]
+    fn a_task_query_asks_for_the_tag_exactly_and_other_tags_expand_as_before() {
+        // 0.3.0: once `decision` is a child of `task`, `tag: task` must not bring back the old decision-only notes
+        let t = tag_query_args("uni", "task", false, 200).unwrap();
+        assert_eq!(t["expand"], "exact");
+        for tag in ["decision", "node", "card", "run"] {
+            assert!(tag_query_args("uni", tag, false, 200).unwrap().get("expand").is_none(), "{tag}");
+        }
     }
 
     use super::*;
@@ -2015,7 +2131,7 @@ pub(crate) mod surface_tests {
         let (client, handle) = server(vec![
             (
                 "query-notes",
-                json!({"vault":"scope-test","tag":"task","include_content":false,"include_metadata":true,"limit":200,"sort":"asc","metadata":meta}),
+                json!({"vault":"scope-test","tag":"task","include_content":false,"include_metadata":true,"limit":200,"sort":"asc","metadata":meta,"expand":"exact"}),
                 json!({"notes":[{"id":"t1","path":"Tasks/T-1","metadata":{"state":"open"}}]}),
             ),
             (
@@ -2184,6 +2300,7 @@ pub(crate) mod surface_tests {
         let mut tasks = base.clone();
         tasks["tag"] = json!("task");
         tasks["limit"] = json!(200);
+        tasks["expand"] = json!("exact");
         tasks["metadata"] = json!({"state":{"in":["open","doing"]}});
         tasks["near"] = json!({"note_id":"Areas/Techne","relationship":"parent","direction":"inbound","depth":5,
             "then":{"relationship":"node","direction":"inbound"}});

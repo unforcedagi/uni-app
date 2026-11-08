@@ -93,7 +93,13 @@ export type Task = {
   hasDraft?: boolean;
   /** r19: what reading its supporting notes came to, as of now (set by the list, never stored): see `checkOf`. */
   check?: import("./simpleCore.ts").Check | null;
+  /** 0.3.0 For you: the note's tags and metadata as read (its ask fields: kind, card, why_now, default, reply_room…), for For you's one
+   *  data module (src/foryou/forYouCore.ts), which reads notes, not this shape. */
+  raw?: { tags: string[]; metadata: Record<string, unknown>; createdAt: string | null };
 };
+/** Whether a note read for `tag: task` is a task (0.3.0: once `decision` is a child of `task`, the vault may return old decision-only notes
+ *  there; Rust asks for the tag exactly, and this keeps a list right whatever the vault does). A row with no tags read is kept. */
+export const isTaskRow = (n: RawNote) => !Array.isArray(n.tags) || n.tags.includes("task");
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 const leaf = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
@@ -230,7 +236,9 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
   const id = str(n.id), path = str(n.path) && stripExt(str(n.path)!);
   if (!id || !path) return null;
   const m = (n.metadata && typeof n.metadata === "object" ? n.metadata : {}) as Record<string, unknown>;
-  const kind = Array.isArray(n.tags) && n.tags.includes("decision") ? "decision" : "task";
+  // 0.3.0: a new decision is one note tagged `task` and `decision` (closed by its answer, state -> done): a task; an old `Decisions/`
+  // note is tagged `decision` only (open -> decided)
+  const kind = Array.isArray(n.tags) && n.tags.includes("decision") && !n.tags.includes("task") ? "decision" : "task";
   const state = str(m.state);
   const valid = kind === "decision" ? ["open", "decided"] : ["open", "doing", "waiting", "done", "archived"];
   if (!state || !valid.includes(state)) return null;
@@ -258,6 +266,7 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
     ...(str(m.closed) ? { closed: str(m.closed) } : {}),
     ...(str(m.created) ?? str(n.createdAt) ? { added: str(m.created) ?? str(n.createdAt) } : {}),
     ...(str(m.detail) ? { detail: str(m.detail) } : {}),
+    raw: { tags: Array.isArray(n.tags) ? n.tags.filter((x): x is string => typeof x === "string") : [], metadata: m, createdAt: str(n.createdAt) },
   };
 }
 

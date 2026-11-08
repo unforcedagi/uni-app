@@ -2,7 +2,7 @@
 // vault call: `state_transition` for state (an atomic compare-and-set), a guarded metadata merge for snooze.
 // Nothing is cached here beyond one session's memory; the node view reconciles with each server answer.
 import { invoke } from "@tauri-apps/api/core";
-import { buildTaskTree, failureKind, groupOf, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
+import { buildTaskTree, isTaskRow, failureKind, groupOf, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { ROOT } from "./treeCore.ts";
 import { taskTitle } from "./whereCore.ts";
 import { askFromContent, askOrder, closedBy, hasDeps, isListLine, linkedRefs, questionCount, questionsFrom, refName, stepText, taskDeps, wouldNeedYou, type Assessed, type CheckRecord, type CheckState, type SourceRef, type SourceStamp } from "./simpleCore.ts";
@@ -95,7 +95,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     try {
       const t = await treeIn;
       const { rows } = await allPages((offset) => call("vault_query_meta", { vault: name(), tag: "task", metadata: { state: { in: ["done", "archived"] } }, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>);
-      return rows.map((n) => parseTask(n, t)).filter((x): x is Task => !!x && (x.state === "done" || x.state === "archived") && !!x.closed && x.closed.slice(0, 10) >= since);
+      return rows.filter(isTaskRow).map((n) => parseTask(n, t)).filter((x): x is Task => !!x && (x.state === "done" || x.state === "archived") && !!x.closed && x.closed.slice(0, 10) >= since);
     } catch { return null; }
   }
 
@@ -184,7 +184,8 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
       allPages((offset) => call("vault_query_meta", { vault: name(), tag: "task", metadata: { ...where, state: { in: [...LIVE_STATES] } }, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>),
       allPages((offset) => call("vault_query_meta", { vault: name(), tag: "decision", metadata: { ...where, state: { in: ["open"] } }, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>),
     ]);
-    return finish(tasks.rows, decisions.rows, !tasks.complete || !decisions.complete);
+    // (0.3.0: a `tag: task` page may hold old decision-only notes once `decision` is a child of `task`; they come with the decisions)
+    return finish(tasks.rows.filter(isTaskRow), decisions.rows, !tasks.complete || !decisions.complete);
   }
 
   /**
@@ -198,6 +199,20 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
       // r26: an answer ("I did this") records the revision it answered, in the same compare-and-set write
       const note = ((await call("vault_transition", { vault: name(), id: taskId, from, to, ifUpdatedAt, ...(answered ? { metadata: { answered_rev: ifUpdatedAt } } : {}) })) as RawNote);
       return ok(note);
+    } catch (e) {
+      const message = String(e);
+      return { ok: false, kind: failureKind(message), message };
+    }
+  }
+
+  /**
+   * 0.3.0 For you: answer an ask (CONTRACT "Answering an ask"): one compare-and-set on `state` (`from` -> `done`) with `answer`, `answered_at`,
+   * `answered_by` (and `decided*` for a pick) in the same write, guarded by the revision shown. Rust checks the keys (`check_answered_patch`).
+   */
+  async function answer(taskId: string, from: AnyState, ifUpdatedAt: string, metadata: Record<string, string>): Promise<WriteResult> {
+    if (!ifUpdatedAt) return { ok: false, kind: "conflict", message: "no revision: reload the ask first" };
+    try {
+      return ok(await call("vault_transition", { vault: name(), id: taskId, from, to: "done", ifUpdatedAt, metadata }));
     } catch (e) {
       const message = String(e);
       return { ok: false, kind: failureKind(message), message };
@@ -307,7 +322,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
       try { rows = (await call("vault_query_meta", { vault: home, tag: "task", metadata: { node: { in: [...nodeKeys] }, state: { in: ["done", "archived"] } }, limit: LIMIT })) as RawNote[]; } catch (e) { throw new Unavailable(String(e)); }
       // the id written in a merge note ("Merged into T-11"): an explicit pointer to this task, never a match on its title's words
       const merged = new RegExp(`\\bmerged into ${tid.replace(/[-]/g, "\\-")}\\b`, "i");
-      const r = (Array.isArray(rows) ? rows : []).find((x) => typeof x.id === "string" && merged.test(JSON.stringify(x.metadata ?? {})));
+      const r = (Array.isArray(rows) ? rows : []).filter(isTaskRow).find((x) => typeof x.id === "string" && merged.test(JSON.stringify(x.metadata ?? {})));
       if (r) { sources.push({ vault: home, id: String(r.id), rev: typeof r.updatedAt === "string" ? r.updatedAt : null }); return done({ kind: "closed", how: closedBy(meta(r)) ?? "closed", from: named(home, r) }); }
     }
     return done({ kind: "unclear", from: null });
@@ -374,7 +389,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     askCache.clear(); checkCache.clear(); askOwner = ""; checkOwner = "\u0000";
     try { for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && /^uni\.(asks|checks|support)\.v\d+:/.test(k)) localStorage.removeItem(k); } } catch { /* nothing kept */ }
   }
-  return { prioritize, forgetKept, setAskOwner, loadTree, loadTagged, loadClosed, loadAsks, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, decide, snooze, setPriority };
+  return { prioritize, forgetKept, setAskOwner, loadTree, loadTagged, loadClosed, loadAsks, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, answer, decide, snooze, setPriority };
 }
 
 export const vaultTasks = createVaultTasks();
