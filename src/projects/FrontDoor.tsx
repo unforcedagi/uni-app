@@ -140,9 +140,9 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
   const liveOf = (d: Door) => { const a = areaAt.get(d.path); return (a ? liveInArea(work, a.id).length : 0) + (d.room && turns.has(d.room) ? 1 : 0); };
   // working sessions with no area are somewhere moving too
   const moving = doors.filter((d) => liveOf(d) > 0).length + (liveSessions(work, UNFILED).length > 0 ? 1 : 0);
-  // 0.3.0: the sentence counts what For you holds for him (and the approvals waiting), and never says less than the doors beside it
-  // (they count the same asks by area, and a session waiting on his answer)
-  const needN = Math.max(yours + alsoNeeds, doors.reduce((k, d) => k + (d.needs ?? 0), 0));
+  // 0.3.0: the sentence counts what For you holds for him (and the approvals waiting): the list right under it. (A door's mark is its
+  // room's own count, by the details' rule, which also counts a session waiting on him.)
+  const needN = yours + alsoNeeds;
   const day = Math.floor((now - new Date(now).getTimezoneOffset() * 60_000) / 86_400_000);
   const lines = statement(needN, moving, day, needsKnown);
   const doorList = <nav aria-label="Rooms"><ul className="fd-doors">{doors.map((d) => {

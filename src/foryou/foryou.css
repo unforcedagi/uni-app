@@ -3,11 +3,12 @@
 .fy-wrap { flex: 0 1 auto; min-height: 0; max-height: 64%; display: flex; flex-direction: column; margin: 0 calc(-1 * clamp(20px, 5vw, 64px)); border-bottom: var(--g-hair) solid var(--g-line-strong); }
 .fy-wrap > .fy { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px clamp(20px, 5vw, 64px) 12px; }
 .fy > * { max-width: 720px; margin-left: auto; margin-right: auto; }
-@media (max-width: 599px) { .fy-wrap { margin: 0 -20px; } .fy-wrap > .fy { padding: 2px 16px 12px; } }
+@media (max-width: 599px) { .fy-wrap { margin: 0 -20px; max-height: 74%; } .fy-wrap > .fy { padding: 2px 16px 12px; } }
 .fd:not(.fd-all) > .fy { margin: 0 0 12px; }
 .fy-band { margin-top: 14px; }
-.fy-band > h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font: 600 12px/1.3 var(--g-font-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--g-ink-2); }
-.fy-band > h2 .fy-n { font-weight: 500; letter-spacing: .02em; text-transform: none; color: var(--g-ink-2); }
+/* (the look's rules: no capitals, no ink outlines on anything bigger than a mark) */
+.fy-band > h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font: 600 14px/1.3 var(--g-font-ui); color: var(--g-ink); }
+.fy-band > h2 .fy-n { font-weight: 500; color: var(--g-ink-2); }
 .fy-none { margin: 2px 0 6px; font: 400 15px/1.45 var(--g-font-ui); color: var(--g-ink-2); }
 
 /* the marks: shape, not colour */
@@ -30,12 +31,12 @@ button.fy-what { cursor: pointer; min-height: 30px; margin-top: 3px; padding: 3p
 .fy-why { margin: 4px 0 0 20px; font: 400 14.5px/1.45 var(--g-font-uni, Georgia, serif); color: var(--g-ink-2); overflow-wrap: anywhere; }
 .fy-acts { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 11px 0 0 20px; }
 .fy-default, .fy-opt, .fy-send { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 13px; border-radius: 999px; font: 500 14px/1.2 var(--g-font-ui); cursor: pointer; text-decoration: none; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
-.fy-default, .fy-send { background: var(--g-ink); color: var(--g-paper); border: 1.5px solid var(--g-ink); }
+.fy-default, .fy-send { background: var(--g-ink); color: var(--g-paper); border: 1.5px solid transparent; }
 .fy-opt { background: transparent; color: var(--g-ink); border: 1.5px solid var(--g-line-strong); }
 .fy-default:disabled, .fy-opt:disabled, .fy-send:disabled { opacity: .55; cursor: default; }
 .fy-default::before { content: ""; flex: none; width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid currentColor; background: linear-gradient(currentColor, currentColor) 50% 2px / 1.4px 4px no-repeat; }
 .fy-mic { margin-left: auto; flex: none; width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 1.5px solid var(--g-line-strong); background: transparent; color: var(--g-ink); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-.fy-mic[data-on] { background: var(--g-ink); color: var(--g-paper); border-color: var(--g-ink); box-shadow: 0 0 0 4px var(--g-line); }
+.fy-mic[data-on] { background: var(--g-ink); color: var(--g-paper); border-color: transparent; box-shadow: 0 0 0 4px var(--g-line); }
 .fy-nodefault { margin: 8px 0 0 20px; font: 500 13px/1.35 var(--g-font-ui); color: var(--g-ink-2); }
 .fy-goes { margin: 9px 0 0 20px; font: 400 12.5px/1.35 var(--g-font-ui); color: var(--g-ink-2); }
 .fy-goes::before { content: "↳ "; }
@@ -45,7 +46,7 @@ button.fy-what { cursor: pointer; min-height: 30px; margin-top: 3px; padding: 3p
 .fy-rec { margin: 4px 0 0; padding: 9px 12px; border-radius: 14px; background: var(--g-ink); color: var(--g-paper); font: 500 13.5px/1.4 var(--g-font-ui); }
 .fy-rec-failed { background: transparent; color: var(--g-ink); border: 1.5px dashed var(--g-line-strong); }
 .fy-said { margin-top: 4px; display: flex; flex-direction: column; gap: 8px; }
-.fy-said textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 14px; border: 1.5px solid var(--g-ink); background: var(--g-paper); color: var(--g-ink); font: 400 16px/1.4 var(--g-font-uni, Georgia, serif); resize: vertical; }
+.fy-said textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 14px; border: 1.5px solid var(--g-line-strong); background: var(--g-paper); color: var(--g-ink); font: 400 16px/1.4 var(--g-font-uni, Georgia, serif); resize: vertical; }
 .fy-said-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .fy-said-row small { font: 400 12.5px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
 .fy-link-btn { padding: 0; border: 0; background: none; color: var(--g-ink); font: 600 13.5px/1.3 var(--g-font-ui); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
@@ -73,7 +74,7 @@ button.fy-mv-t { cursor: pointer; }
   .fy-card { left: auto; top: 0; width: min(440px, 46vw); max-height: none; border-radius: 0; border-left: var(--g-hair) solid var(--g-line-strong); padding-top: 22px; }
 }
 .fy-card-top { display: flex; align-items: center; justify-content: space-between; }
-.fy-card-kicker { font: 600 12px/1.3 var(--g-font-ui); letter-spacing: .07em; text-transform: uppercase; color: var(--g-ink-2); }
+.fy-card-kicker { font: 500 13px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
 .fy-card-name { margin: 4px 0 0; font: 500 28px/1.1 var(--g-font-display, Georgia, serif); }
 .fy-card-stands { margin: 10px 0 0; font: 400 15.5px/1.5 var(--g-font-uni, Georgia, serif); }
 .fy-card-stands small { display: block; margin-top: 4px; font: 400 12.5px var(--g-font-ui); color: var(--g-ink-2); }

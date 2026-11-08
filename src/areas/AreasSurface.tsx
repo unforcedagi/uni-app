@@ -460,13 +460,6 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     // T-301/T-302: the home. Every area's room, each with one line on where it stands (a private area's own words stay inside it), a mark where
     // sessions are working, and a quiet usage line.
     const doorAreas = data ? childrenOf(data.tree, ROOT) : [];
-    // 0.3.0: a door's "for you" counts For you's own items in that area (the same asks the home's sentence counts)
-    const fyByArea = new Map<string, number>();
-    for (const it of [...fy.view.yours, ...fy.view.more]) if (it.where.areaPath) fyByArea.set(it.where.areaPath, (fyByArea.get(it.where.areaPath) ?? 0) + 1);
-    for (const p of fy.view.privates) if (p.areaPath) fyByArea.set(p.areaPath, (fyByArea.get(p.areaPath) ?? 0) + p.count);
-    // and a session waiting on his answer (not one whose ask For you already counts), as the doors always counted it
-    const fyIds = new Set([...fy.view.yours, ...fy.view.more, ...fy.view.look].map((i) => i.tid).filter(Boolean) as string[]);
-    const runNeeds = needsByRow([], rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), undefined, dotRuns.filter((r) => !(r.task && fyIds.has(r.task.toUpperCase()))));
     const doors: Door[] = doorAreas.map((a) => {
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
       const i = navRows.findIndex((r) => r.path === a.path && r.depth === 1);
@@ -475,8 +468,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
       return { path: a.path, name: a.name, about: isPrivatePath(data!.tree, a.path) ? null : a.purpose || null, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null,
         room: v.own ? v.target?.id ?? null : null,
         // T-335: everything new in the area's rooms (its own and its projects'); what needs you is what its details list: the tasks
-        // under it, and the approval prompts in its own room
-        ...(i >= 0 ? { unread: rolledUnread(navRows, newByPath, i), needs: (fyByArea.get(a.path) ?? 0) + rolledNeeds(navRows, runNeeds, i) + (v.own && v.target ? approvalsAll.list.filter((x) => x.channel === v.target!.id).length : 0) } : {}) };
+        // under it, and the approval prompts in its own room (0.3.0: the room's own rule, as its details; the home's sentence is For you's)
+        ...(i >= 0 ? { unread: rolledUnread(navRows, newByPath, i), needs: rolledNeeds(navRows, navNeeds, i) + (v.own && v.target ? approvalsAll.list.filter((x) => x.channel === v.target!.id).length : 0) } : {}) };
     });
     /** T-335: rooms no area holds (not the archived #Uni) with something new, newest first: each one tap into its room. */
     const newRooms: NewRoom[] = owned ? rooms.filter((r) => !owned.has(r.id) && r.id !== uniRoom && newByRoom.has(r.id)).sort((a, b) => (b.last_ts ?? 0) - (a.last_ts ?? 0)).map((r) => ({ id: r.id, name: r.name, unread: newByRoom.get(r.id)! })) : [];

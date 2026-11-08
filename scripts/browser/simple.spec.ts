@@ -2338,7 +2338,7 @@ test.describe('r19', () => {
     await expect(sheet).toHaveCount(0);
     // (T-335: All behind the focus is inert while a room is in focus, by design, and 0.2: so is the stream under the home's drawer while the
     // drawer is down, as it stays when a door opens a room: nothing else is)
-    expect(await page.evaluate(() => document.querySelectorAll('[inert]:not(.all-behind):not([data-pulled="true"] .fd-stream)').length)).toBe(0);
+    expect(await page.evaluate(() => document.querySelectorAll('[inert]:not(.all-behind):not([data-pulled="true"] .fd-stream):not([data-pulled="true"] .fy-wrap)').length)).toBe(0);
     if (wide(page) && await page.locator('.rail-settings').isVisible()) {
       await page.locator('.rail-settings').click();
       const panel = page.getByRole('dialog', { name: 'Settings' });

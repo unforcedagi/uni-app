@@ -171,6 +171,8 @@ export function ForYou(p: ForYouProps) {
   const yours = more ? [...view.yours, ...view.more] : view.yours;
   const nothing = !view.count && !view.look.length;
   return <section className="fy" aria-label="For you">
+    {/* what he just answered, first: where it went, and a post that didn't go with its Retry, in sight where he tapped */}
+    {view.answered.length > 0 && <Band name="Answered today"><ul className="fy-list">{view.answered.map((a) => <DoneLine key={a.id} a={a} retry={p.retry} />)}</ul></Band>}
     <Band name="Yours" n={view.count || undefined}>
       {p.failed && !view.count ? <p className="fy-none" role="status">Couldn't check what's yours. <button type="button" className="fy-link-btn" onClick={p.failed}>Try again</button></p>
         : p.reading && !view.count ? <p className="fy-none" role="status">Looking for what's yours…</p>
@@ -179,7 +181,6 @@ export function ForYou(p: ForYouProps) {
       {view.privates.map((x) => <button key={x.area} type="button" className="fy-private" onClick={() => p.onOpenPrivate?.(x)}><Mark kind="yours" />{x.area}: {x.count} thing{x.count === 1 ? "" : "s"} for you ›</button>)}
       {view.more.length > 0 && !more && <button type="button" className="fy-more" onClick={() => setMore(true)}>{view.more.length} more</button>}
     </Band>
-    {view.answered.length > 0 && <Band name="Answered today"><ul className="fy-list">{view.answered.map((a) => <DoneLine key={a.id} a={a} retry={p.retry} />)}</ul></Band>}
     {view.look.length > 0 && <Band name="Ready to look at" n={view.look.length}>{view.look.map((i) => <ItemView key={i.id} item={i} p={p} onCard={setCardOpen} />)}</Band>}
     {(view.moving.length > 0 || view.quiet.line) && <Band name="Moving" n={view.moving.length ? `since ${view.since >= now - 86_400_000 + 60_000 ? "you last looked" : "yesterday"}` : undefined}>
       <ul className="fy-list fy-moving">
