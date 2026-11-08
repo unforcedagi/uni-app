@@ -5,6 +5,7 @@ import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { forgetComposer } from "./all/AllView";
+import { forgetForYouFold } from "./foryou/ForYou";
 import { FOCUS_OUT_MS, type AllFocusState, type FocusView } from "./all/AllFocus";
 import { saidIn } from "./all/allCore";
 import { MoreIcon, SearchIcon, ToPostIcon, VaultIcon, SettingsIcon, UniIcon, JournalIcon, MailIcon, CalendarIcon, MessagesIcon } from "./Icons";
@@ -2159,7 +2160,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // a failed Forget gives saving back
     draftsForgotten.current = true;
     try { voiceMounted.current = false; uploadAborts.current.forEach((upload) => upload.abort()); await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
-      forgetDrafts(); forgetComposer(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar(); forgetMessages(); forgetWork(); forgetUsage();
+      forgetDrafts(); forgetComposer(); forgetForYouFold(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar(); forgetMessages(); forgetWork(); forgetUsage();
       try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith(CHAT_DRAFT_PREFIX) || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY || key === UNI_PLACE_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
       onForget(); } catch (e) { voiceMounted.current = true; draftsForgotten.current = false; setError(String(e)); }
   }

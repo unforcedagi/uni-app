@@ -62,6 +62,7 @@ check("the head: counts, then nothing with the day's line, never 'nothing' besid
   assert.deepEqual(headWords(none, { failed: true, reading: false, quiet: "Breathe out." }), { lead: "Couldn't check what needs you", rest: [] });
   assert.deepEqual(headWords(none, { failed: false, reading: true }), { lead: "Looking for what's yours…", rest: [] });
   assert.deepEqual(headWords(none, { failed: true, reading: false, approvals: 1 }), { lead: "1 waiting for your OK", rest: ["couldn't check the rest"] });
+  assert.deepEqual(headWords(all, { failed: true, reading: false }), { lead: "7 for you", rest: ["couldn't check the rest", "2 to look at", "2 moving"] });
   assert.deepEqual(headWords({ ...none, moving: all.moving }, { failed: false, reading: false, quiet: "Breathe out." }), { lead: "Nothing for you", rest: ["2 moving"] });
 });
 

@@ -41,6 +41,8 @@ const moreRuns = (now: number) => [
 test('a working session on an area, with no project: the home counts it, its room shows it, and it can be stopped', async ({ page }) => {
   await bootProjects(page, { moreRuns });
   await home(page);
+  // 0.3.1: For you's line is the day's sentence now; the places at work are said on the pull, beside "Places"
+  await expect(page.locator('[data-place="front-door"] .fd-pull-word')).toHaveText(/^[A-Z]\w* at work · Places$/);
   await expect(door(page, 'Guild').locator('.fd-live')).toHaveText('1 working');
   await shot(page, '01-home');
   await enter(page, 'Guild');

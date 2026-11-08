@@ -7,7 +7,7 @@ import { roomTint } from "../glow/roomTint";
 import { sameWords } from "../areas/sameWords";
 import { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, type ReactNode } from "react";
 import { AllComposer, AllFeed, roomWords, useEchoes, useReplyTarget, useRoomsFeed, type AllRoom } from "../all/AllView";
-import { roomAddress } from "../all/allCore";
+import { andList, roomAddress } from "../all/allCore";
 import { liveSessions, liveInArea, sessionsOf, span, UNFILED } from "./model";
 import { asOf, useWork } from "./store";
 import { useRoomTurns } from "./roomTurns";
@@ -39,11 +39,10 @@ function ScopeRow({ rooms, scope, onScope, onOpenScope }: { rooms: readonly AllR
       {rooms.map((r) => r.path && <button key={r.id} type="button" className="all-scope-chip" aria-pressed={scope?.path === r.path} style={{ ["--room-tint" as string]: roomTint(r.id) }}
         onClick={() => onScope(scope?.path === r.path ? null : r.path!)}><i aria-hidden="true" />{r.name}</button>)}
     </nav>
-    {scope && <p className="all-scope-line"><span>{scope.rooms.length > 1 ? `${andWords(scope.rooms.map((r) => roomAddress(r)))}, by time` : `${roomAddress(scope.rooms[0])}, by time`}</span>
+    {scope && <p className="all-scope-line"><span>{andList(scope.rooms.map((r) => roomAddress(r)))}, by time</span>
       {onOpenScope && <button type="button" className="all-link" onClick={() => onOpenScope(scope.path)}>Open {scope.name} ›</button>}</p>}
   </div>;
 }
-const andWords = (l: readonly string[]) => (l.length < 2 ? l.join("") : `${l.slice(0, -1).join(", ")} and ${l[l.length - 1]}`);
 
 /** T-335: a room outside the doors (one no area holds) with something new in it. */
 export type NewRoom = { id: string; name: string; unread: Unread };
@@ -222,7 +221,7 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
           aria-label={`${lines.join(" ")} ${open ? "Close" : "Open"} your places`}>
           {/* 0.3.1: with For you on the home its head is the day's line (what is yours, to look at, moving); the sentence stays its label */}
           {!forYou && <span className="fd-statement">{lines.map((line) => <span key={line}>{line}</span>)}</span>}
-          <span className="fd-pull-row" aria-hidden="true"><Weave doors={doors} liveOf={liveOf} />{all && <><span className="fd-pull-word">Places</span><i className="ps-chev" /></>}</span>
+          <span className="fd-pull-row" aria-hidden="true"><Weave doors={doors} liveOf={liveOf} />{all && <><span className="fd-pull-word">{forYou && moving > 0 ? `${count(moving)} at work · ` : ""}Places</span><i className="ps-chev" /></>}</span>
         </button>
       </header>
       <div className="fd-body">
@@ -241,7 +240,7 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
       {/* under the drawer the stream is out of reach (keys, screen readers) until it is put away */}
       {forYou && <div className="fy-wrap" inert={open}>{forYou}</div>}
       <div className="fd-stream" inert={open}>
-        {all && all.onScope && allRooms.length > 1 && <ScopeRow rooms={allRooms} scope={scope} onScope={all.onScope} onOpenScope={all.onOpenScope} />}
+        {all && all.onScope && (allRooms.length > 1 || scope) && <ScopeRow rooms={allRooms} scope={scope} onScope={all.onScope} onOpenScope={all.onOpenScope} />}
         {all ? <AllFeed key={scope?.path ?? ""} scope={scope?.path ?? ""} rooms={shownRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={openFromFeed} target={target} onTarget={setTarget} echoes={echoes.shown} receded={!!focusRoom || open} /> : <div className="all-feed-box" />}</div>
       </div>
       {composer}

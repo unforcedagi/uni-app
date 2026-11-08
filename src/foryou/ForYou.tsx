@@ -171,6 +171,8 @@ function Band({ name, n, children }: { name: string; n?: ReactNode; children: Re
 
 /** Open or folded, kept for the session: a redraw of the home (a key arriving, a scope change) leaves it as he left it; a fresh launch opens folded. */
 const openMemory = { open: false };
+/** Forget this device's key: the next home opens folded. */
+export const forgetForYouFold = () => { openMemory.open = false; };
 
 export function ForYou(p: ForYouProps & { /** The head says this place's name: For you is scoped to it. */ scope?: string | null;
   /** Approvals waiting for his OK (shown over the home): the head counts them, so it never says "Nothing" beside one. */ approvals?: number }) {
@@ -197,7 +199,7 @@ export function ForYou(p: ForYouProps & { /** The head says this place's name: F
         <span className="fy-sum" aria-hidden="true"><b>{head.lead}</b>{head.rest.map((r) => <span key={r}> · {r}</span>)}</span>
         <i className="ps-chev" aria-hidden="true" />
       </button>
-      {p.failed && !view.count && <button type="button" className="fy-link-btn fy-retry" onClick={p.failed}>Try again</button>}
+      {p.failed && <button type="button" className="fy-link-btn fy-retry" onClick={p.failed}>Try again</button>}
     </div>
     {!open && first && <button type="button" className="fy-first" data-id={first.id} onClick={() => setOpen(true)} aria-label={`${first.what}, ${first.where.label}. Open For you`}>
       <Mark kind={first.band} /><span className="fy-first-t">{first.what}</span><span className="fy-first-w">{first.where.label}</span></button>}
