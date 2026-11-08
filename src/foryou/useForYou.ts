@@ -26,7 +26,7 @@ const read = <T,>(key: string, fallback: T): T => { try { const v = localStorage
 const write = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* this session only */ } };
 /** An answer still owed to its room is kept until it goes (never dropped); a sent one for a day. A post cut off mid-send (the app
  *  closed) comes back as failed, with Retry. */
-const kept = (list: Entry[]): Entry[] => list.filter((e) => e.post === "failed" || e.post === "sending" || e.post === "none" || Date.now() - e.at < DAY)
+const kept = (list: Entry[]): Entry[] => list.filter((e) => e.post === "failed" || e.post === "sending" || (e.post === "none" && !!e.room) || Date.now() - e.at < DAY)
   .map((e) => (e.post === "sending" ? { ...e, post: "failed" as const, error: "the app closed before it went" } : e));
 const words = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : "it didn't go").replace(/^Error:\s*/, "").slice(0, 140);
 
