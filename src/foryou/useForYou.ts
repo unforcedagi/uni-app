@@ -26,7 +26,7 @@ const read = <T,>(key: string, fallback: T): T => { try { const v = localStorage
 const write = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* this session only */ } };
 /** An answer still owed to its room is kept until it goes (never dropped); a sent one for a day. A post cut off mid-send (the app
  *  closed) comes back as failed, with Retry. */
-const kept = (list: Entry[]): Entry[] => list.filter((e) => e.post === "failed" || e.post === "sending" || Date.now() - e.at < DAY)
+const kept = (list: Entry[]): Entry[] => list.filter((e) => e.post === "failed" || e.post === "sending" || e.post === "none" || Date.now() - e.at < DAY)
   .map((e) => (e.post === "sending" ? { ...e, post: "failed" as const, error: "the app closed before it went" } : e));
 const words = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : "it didn't go").replace(/^Error:\s*/, "").slice(0, 140);
 
@@ -46,7 +46,13 @@ async function postIn(channel: string, body: string, root: string | null): Promi
   catch (e) {
     if (!root || !/not cached/i.test(words(e))) throw e;
     await invoke("refresh").catch(() => {});
-    await send();
+    try { await send(); }
+    catch (e2) {
+      // the card's post is older than this device holds: the answer still goes to its room, as a plain message (it names its ask)
+      if (!/not cached/i.test(words(e2))) throw e2;
+      root = null;
+      await send();
+    }
   }
 }
 
@@ -104,11 +110,18 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
     [asks, cards, o.placeOf, since, entries, Math.floor(now / POLL_MS)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const post = useCallback(async (e: Entry) => {
-    if (!e.channel) return;
+    let channel = e.channel;
+    if (!channel) {
+      // no room found when it was answered: look again (rooms load late); still none, it stays owed with the reason
+      const room = o.roomOf({ replyRoom: e.room, node: "" } as Item);
+      if (!room) { change(e.id, (x) => ({ ...x, post: "none", error: e.room ? `#${e.room} isn't a room here yet` : "no room to send it to" })); return; }
+      channel = room.id;
+      change(e.id, (x) => ({ ...x, channel: room.id }));
+    }
     change(e.id, (x) => ({ ...x, post: "sending", error: null }));
-    try { await postIn(e.channel, e.body, e.root); change(e.id, (x) => ({ ...x, post: "sent", error: null })); }
+    try { await postIn(channel, e.body, e.root); change(e.id, (x) => ({ ...x, post: "sent", error: null })); }
     catch (err) { change(e.id, (x) => ({ ...x, post: "failed", error: words(err) })); }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [o.roomOf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Answer an ask: the compare-and-set first; only once it is written does the room hear it. */
   const answer = useCallback(async (item: Item, text: string) => {
@@ -137,7 +150,7 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
     const entry: Entry = { id: item.id, what: item.what, answer: said, at: Date.now(), room: room?.name.replace(/^#/, "") ?? item.replyRoom, post: room ? "sending" : "none",
       channel: room?.id ?? null, root: item.replyRoot, body: answerBody(item, said) };
     setEntries((list) => keep([...list.filter((e) => e.id !== item.id), entry]));
-    if (room) await post(entry);
+    await post(entry);
     o.refresh();
     void readCards();
   }, [o.roomOf, o.refresh, post, readCards]); // eslint-disable-line react-hooks/exhaustive-deps

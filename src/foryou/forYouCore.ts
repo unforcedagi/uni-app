@@ -192,7 +192,8 @@ export function forYou(input: ForYouInput): ForYouView {
     const card = cardPath ? cards.get(cardPath) ?? null : null;
     const kindRaw = s(m.kind)?.toLowerCase();
     const kind: Kind = legacy ? "decision" : kindRaw === "choose" || kindRaw === "look" || kindRaw === "tell" ? kindRaw : tags.includes("decision") ? "choose" : "do";
-    if (place.private || card?.private) {
+    // a card not read yet (or unreadable) may be private: until it is read, its ask is counted, never shown (review 11-07)
+    if (place.private || card?.private || (cardPath && !card)) {
       // (a private card's own area, wherever its ask is filed)
       const area = (card?.private ? card.area : null) ?? place.area ?? card?.area ?? "a private area";
       const p = privates.get(area) ?? { area, node: (card?.private ? card.areaNode : null) ?? node, areaPath: (card?.private ? card.areaNode : null) ?? place.areaPath ?? null, count: 0 };

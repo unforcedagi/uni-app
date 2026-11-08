@@ -220,3 +220,12 @@ check("a tag: task read keeps only tasks (decision is becoming a child of task);
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 console.log("\nall For you checks passed");
+
+// review 11-07: an ask on a card that isn't read yet (or can't be) is counted, never shown: the card may be private
+{
+  const v = view([task("a9", "T-9 Pick the glaze", { kind: "choose", options: ["Celadon", "Tenmoku"], why_now: "secret-ish why", card: "Cards/Kiln Studio/Unread Card", node: "Projects/Glaze Tests" })], [GLAZE]);
+  assert.equal(v.yours.length, 0);
+  assert.ok(!JSON.stringify(v).includes("secret-ish why"));
+  assert.equal(v.privates.reduce((n, p) => n + p.count, 0), 1);
+  console.log("ok   an ask whose card isn't read yet is only counted");
+}

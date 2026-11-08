@@ -290,7 +290,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     return { area: name, areaPath: top, room: room ? roomSlug(room.name) : null, private: !!priv };
   }, [tasks.tree, data, roomRefs, uniRef]); // eslint-disable-line react-hooks/exhaustive-deps
   /** 0.3.0 For you: the room an answer goes to: its `reply_room` (else its room, else its node's), by id or name. */
-  const answerRoom = useCallback((item: ForYouItem) => askRoomOf({ room: item.replyRoom, node: item.node }, roomRefs, roomOfNode), [roomRefs, data, uniRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the room its footer names, exactly: a named room that isn't here is no room (the answer waits, owed), never another room
+  const answerRoom = useCallback((item: ForYouItem) => askRoomOf({ room: item.replyRoom, node: item.node }, roomRefs, () => null), [roomRefs]);
   const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.all ?? tasks.tasks : null, placeOf: fyPlaceOf, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
   // r31: an ask is current because its task note says so (`asked_at` / `confirmed_at` within 3 days), resolved here before any row, count or dot shows it.
   const confirmNow = useMemo(() => Date.now(), [tasks.tasks, tasks.lastOk]); // eslint-disable-line react-hooks/exhaustive-deps

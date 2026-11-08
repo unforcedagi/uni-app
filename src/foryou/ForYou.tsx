@@ -130,7 +130,7 @@ function DoneLine({ a, retry }: { a: Answered; retry: (id: string) => void }) {
     <span className="fy-done-t"><b>{a.what}</b> · “{a.answer}”{a.room ? ` → #${a.room}` : ""}</span>
     {a.post === "failed" ? <span className="fy-done-fail" role="alert">Couldn't post in #{a.room}{a.error ? `: ${a.error}` : ""} <button type="button" className="fy-link-btn" onClick={() => retry(a.id)}>Retry</button></span>
       : a.post === "sending" ? <span className="fy-at">sending…</span>
-      : a.post === "none" ? <span className="fy-at">no room to post in</span>
+      : a.post === "none" ? <span className="fy-done-fail" role="alert">Not posted yet: {a.error ?? "no room to post in"} <button type="button" className="fy-link-btn" onClick={() => retry(a.id)}>Retry</button></span>
       : <span className="fy-at">{new Date(a.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>}
   </li>;
 }
