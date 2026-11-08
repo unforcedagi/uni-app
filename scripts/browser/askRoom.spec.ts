@@ -1,4 +1,4 @@
-// 0.2.2: an ask acts in its own room. Every action from an ask (its Needs-you row in the home's drawer, its row in a room's details, its sheet's
+// 0.2.2: an ask acts in its own room. Every action from an ask (0.3.0: its item in For you at the top of the home, its row in a room's details, its sheet's
 // "Say it in #room", "Ask #room for the message", "Ask Uni to draft it") opens the ask's room (its `room`, else its node's) in focus with the
 // words ready, and never the home composer's "Choose a room". The live relay has no #Uni (archived 10-26): `noUniRoom` is that world.
 // Run: ASKROOM_TEST_PORT=5793 npx playwright test --config playwright.askroom.config.ts
@@ -14,13 +14,14 @@ async function ask(page: Page, node: string, room: string | null, next: string, 
   await page.clock.setFixedTime(Date.parse('2026-10-09T10:01:00.000Z'));
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
 }
-/** The home, its drawer pulled down (the app may have opened elsewhere). */
-async function home(page: Page) {
+/** The home (the app may have opened elsewhere), its drawer pulled down unless `pull` is false (For you, at its top, is under the drawer). */
+async function home(page: Page, pull = true) {
   await page.locator('[data-place="front-door"], .all-focus').first().waitFor();
   if (await focusSheet(page).count()) await openAreasHome(page);
-  await openPlaces(page);
+  if (pull) await openPlaces(page);
 }
-const needRow = (page: Page) => page.getByRole('region', { name: 'Your places' }).locator('.fd-needs-list button', { hasText: 'Turn on the tap cards' });
+/** 0.3.0: the ask's item in For you (it replaced the drawer's Needs-you list): what it asks opens its sheet in its room. */
+const needRow = (page: Page) => page.getByRole('region', { name: 'For you' }).locator('.fy-what', { hasText: 'Turn on the tap cards' });
 /** Nothing went out, and the home composer was never asked to pick a room. */
 async function nothingSent(page: Page) {
   expect(await calls(page, 'post_message')).toHaveLength(0);
@@ -29,10 +30,10 @@ async function nothingSent(page: Page) {
 }
 
 for (const noUniRoom of [false, true]) test.describe(noUniRoom ? 'no #Uni' : 'with #Uni', () => {
-  test('a Needs-you row in the drawer opens the ask in its own room, not its node\'s, and "Say it" fills that room\'s composer', async ({ page }) => {
+  test('an ask\'s item in For you opens the ask in its own room, not its node\'s, and "Say it" fills that room\'s composer', async ({ page }) => {
     await bootAreas(page, 'seed', { ...base, noUniRoom });
     await ask(page, 'Areas/Unforced Development', 'techne', 'Say "approve cards" in #techne');
-    await home(page);
+    await home(page, false);
     await needRow(page).click();
     await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('Techne');
     const sheet = taskDialog(page);
@@ -46,7 +47,7 @@ for (const noUniRoom of [false, true]) test.describe(noUniRoom ? 'no #Uni' : 'wi
   test('an ask filed at the top (no room of its own there) still opens in its room: the row is never dead', async ({ page }) => {
     await bootAreas(page, 'seed', { ...base, noUniRoom });
     await ask(page, 'Uni', 'techne', 'Say "approve cards" in #techne');
-    await home(page);
+    await home(page, false);
     await needRow(page).click();
     await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('Techne');
     await taskDialog(page).locator('.task-do', { hasText: 'Say it in #Techne' }).click();
@@ -73,7 +74,7 @@ for (const noUniRoom of [false, true]) test.describe(noUniRoom ? 'no #Uni' : 'wi
   test('an ask worded "In #room, tap the card" opens with that room in focus behind its sheet (the card is there)', async ({ page }) => {
     await bootAreas(page, 'seed', { ...base, noUniRoom });
     await ask(page, 'Uni', 'techne', 'In #techne, tap the card. If it has expired, say "approve cards" there.');
-    await home(page);
+    await home(page, false);
     await needRow(page).click();
     await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('Techne');
     await expect(taskDialog(page).locator('.task-kind')).toHaveText(/in #Techne/);
@@ -83,7 +84,7 @@ for (const noUniRoom of [false, true]) test.describe(noUniRoom ? 'no #Uni' : 'wi
   test('"Ask Uni to draft it" asks in the ask\'s own room', async ({ page }) => {
     await bootAreas(page, 'seed', { ...base, noUniRoom });
     await ask(page, 'Areas/Unforced Development', 'techne', 'Email Casey Rowe about the venue deposit');
-    await home(page);
+    await home(page, false);
     await needRow(page).click();
     await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('Techne');
     const sheet = taskDialog(page);
@@ -98,7 +99,7 @@ for (const noUniRoom of [false, true]) test.describe(noUniRoom ? 'no #Uni' : 'wi
 test('an ask with no room anywhere opens its sheet over the home, and offers no room it wasn\'t given', async ({ page }) => {
   await bootAreas(page, 'seed', { ...base, noUniRoom: true });
   await ask(page, 'Uni', null, 'Say "approve cards"');
-  await home(page);
+  await home(page, false);
   await needRow(page).click();
   const sheet = taskDialog(page);
   await expect(sheet).toBeVisible();

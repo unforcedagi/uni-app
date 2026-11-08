@@ -117,12 +117,10 @@ test.describe('every way into a room lands in focus over All', () => {
     await inFocus(page, /Glaze Tests|#glaze-tests/, /^Message glaze-tests/);
   });
 
-  test('what needs you, in the home\'s drawer, opens its room with the ask\'s sheet over it (0.2.2: its action is said there)', async ({ page }) => {
+  test('what needs you, in For you at the top of the home, opens its room with the ask\'s sheet over it (0.2.2: its action is said there)', async ({ page }) => {
     await boot(page);
-    // 0.2: in the drawer the list is simply there, no "Needs you · N" to open first
-    const needs = (await drawer(page)).getByRole('region', { name: 'Needs you' });
-    await expect(needs.getByRole('button', { name: /^Needs you/ })).toHaveCount(0);
-    await needs.getByRole('button', { name: /Find jars for the honey/ }).click();
+    // 0.3.0: For you replaced the drawer's Needs-you list
+    await page.getByRole('region', { name: 'For you' }).locator('.fy-what', { hasText: /Find jars for the honey/ }).click();
     await inFocus(page, 'Bee Garden');
     const sheet = page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
     await expect(sheet).toContainText('Find jars for the honey');

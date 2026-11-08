@@ -121,8 +121,8 @@ test('01-home-needs-collapsed', async ({ page }) => {
 
 test('02-home-needs-open', async ({ page }) => {
   await projects(page);
-  await openPlaces(page);
-  await expect(page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /Choose the photo/ })).toBeVisible();
+  // 0.3.0: what needs you is For you, at the top of the home (not in the drawer)
+  await expect(page.getByRole('region', { name: 'For you' }).locator('.fy-what', { hasText: /Choose the photo/ })).toBeVisible();
   await snap(page, '02-home-needs-open');
 });
 

@@ -113,21 +113,19 @@ test.describe('seed apps and navigation', () => {
   });
 });
 
-test('T-302 round 2: what needs you, across the areas, is one line on the front door; a private area is a count there, its words stay inside', async ({ page }) => {
+test('0.3.0: what needs you, across the areas, is For you at the top of the home; a private area is a count there, its words stay inside', async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, privateTasks: true, pinned: true });
-  // 0.2 one home: the head's one sentence says how many things need you; pulling it down shows the list (no "Needs you · N" toggle there)
+  // the head's one sentence says how many things need you; For you lists them over the stream (the drawer holds no list of them now)
   const pull = page.locator('[data-place="front-door"] .fd-pull');
   await expect(pull).toContainText(/^\w+ things? needs? you\./);
   await expect(page.locator('[data-place="front-door"]')).not.toContainText(/Sit twenty|Find a teacher|T-3[12]/);
-  await openPlaces(page);
-  const needs = page.getByRole('region', { name: 'Your places' }).getByRole('region', { name: 'Needs you' });
-  await expect(needs.getByRole('button', { name: /^Needs you · \d+/ })).toHaveCount(0);
-  await expect(needs.getByRole('button', { name: /^In Sanctum: \d+ things? for you$/ })).toBeVisible();
+  const needs = page.getByRole('region', { name: 'For you' });
+  await expect(needs.locator('.fy-private', { hasText: /^Sanctum: \d+ things? for you/ })).toBeVisible();
   await expect(needs).not.toContainText(/Sit twenty|Find a teacher|T-\d+/);
-  // an item names where it sits and opens there
-  const row = needs.getByRole('button').filter({ hasText: 'COhere festival readiness' });
-  await expect(row).toContainText('COhere 2026');
-  await row.click();
+  // an item names where it sits (its area, when it has no card) and opens there
+  const row = needs.locator('article.fy-item', { hasText: 'COhere festival readiness' });
+  await expect(row.locator('.fy-where')).toHaveText('Techne');
+  await row.locator('.fy-what').click();
   await expect(title(page)).toHaveText('COhere 2026');
   // 0.2.2: the ask opens over its room with its sheet; put it away before going home
   const sheet = page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
@@ -136,8 +134,7 @@ test('T-302 round 2: what needs you, across the areas, is one line on the front 
   await expect(sheet).toHaveCount(0);
   // inside the private area its items are its own rows, with their words
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
-  await openPlaces(page);
-  await page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^In Sanctum/ }).click();
+  await page.getByRole('region', { name: 'For you' }).locator('.fy-private', { hasText: /^Sanctum/ }).click();
   await expect(title(page)).toHaveText('Sanctum');
 });
 

@@ -2857,9 +2857,9 @@ test.describe('r21', () => {
     if (!wide(page)) await page.setViewportSize({ width: 740, height: 360 });
     await boot(page, { privateTasks: true });
     // T-335: what needs you across the areas is on Uni's home: a private area by its place only
-    // (0.2: in the home's drawer, its Needs you list always open)
+    // (0.3.0: in For you, at the top of the home)
     await homeF(page);
-    await expect(page.getByRole('region', { name: 'Your places' }).getByRole('region', { name: 'Needs you' }).getByRole('button', { name: 'In Sanctum: 1 thing for you' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('region', { name: 'For you' }).locator('.fy-private', { hasText: 'Sanctum: 1 thing for you' })).toBeVisible({ timeout: 15_000 });
     await page.waitForTimeout(6500);
     expect(await page.evaluate(() => (window as any).__sawPrivate)).toBe(false);
   });

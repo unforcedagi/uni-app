@@ -1,6 +1,6 @@
 // T-335 Uni 0.2: one home, fewer controls, one calm language. Every main screen at a 360 px phone, the Daylight in Calm screen (judged in
 // greyscale) and a desktop:
-// - there is one home: the rail's Uni opens All's stream with what needs you and the places folded under its head; no second home, no All tab;
+// - there is one home: the rail's Uni opens All's stream with For you at its top (0.3.0) and the places folded under its head; no second home, no All tab;
 // - each screen's visible controls stay at or under the targets the audit set (before → after counts in the report);
 // - nothing runs past the edge or overlaps at 360 px, and every word reads in greyscale (contrast 4.5:1, 3:1 for large type).
 // Made-up world only. Run: V02_TEST_PORT=17611 npx playwright test --config playwright.v02.config.ts
@@ -11,7 +11,7 @@ import { boot, check, go, openHead, openPlace, phone, project, rail } from './v0
 import * as mailMock from './mailMock';
 
 test.describe('one home', () => {
-  test('the rail has one home: Uni opens All\'s stream, with what needs you and the places folded under its head', async ({ page }) => {
+  test('the rail has one home: Uni opens All\'s stream, with For you at its top and the places folded under its head', async ({ page }) => {
     // the places page is never drawn, not even for a frame while the saved place is restored
     await page.addInitScript(() => { const w = window as any; w.__placesSeen = 0; new MutationObserver(() => { if (document.querySelector('[data-view="places"]')) w.__placesSeen++; }).observe(document, { subtree: true, childList: true, attributes: true }); });
     await boot(page);
@@ -27,15 +27,17 @@ test.describe('one home', () => {
     // one composer, at the foot of the stream
     await expect(page.getByRole('region', { name: 'Talk to Uni' })).toHaveCount(1);
     await expect(page.locator('article.all-msg').first()).toBeVisible();
-    // the head says the day, and opens to what needs you and every place
+    // the head says the day, and opens to every place
     const pull = page.locator('[data-place="front-door"] .fd-pull');
     await expect(pull).toHaveText(/(thing|things) needs? you\./);
     await expect(page.locator('.fd-door')).toHaveCount(0);
+    // 0.3.0: For you is the top of the home, over the stream
+    await expect(page.getByRole('region', { name: 'For you' })).toContainText('Find jars for the honey');
     await check(page, 'home');
     await openHead(page);
-    await expect(page.getByRole('region', { name: 'Needs you' })).toContainText('Find jars for the honey');
+    await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0);
     await expect(page.locator('.fd-door[data-path="Areas/Kiln Studio"]')).toBeVisible();
-    // 0.2.2: no For you (the retired Aaron/For you note): asks live in their rooms and in Needs you
+    // no For you button or tab (the retired Aaron/For you note is never opened): For you is the home's own top
     await expect(page.getByRole('button', { name: /^For you/ })).toHaveCount(0);
     await check(page, 'home-open');
     // a place opens its room in focus over the home; Back comes home with the head as it was

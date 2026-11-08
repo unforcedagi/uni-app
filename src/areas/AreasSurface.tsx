@@ -44,7 +44,10 @@ import type { Approval } from "../approvals";
 import "./areas.css";
 import type { AllRoom } from "../all/AllView";
 import { AllFocusSheet, type AllFocusState, type FocusLine, type FocusView } from "../all/AllFocus";
-import { AllEmpty, FrontDoor, type Door, type Needs, type NewRoom } from "../projects/FrontDoor";
+import { AllEmpty, FrontDoor, type Door, type NewRoom } from "../projects/FrontDoor";
+import { ForYou } from "../foryou/ForYou";
+import { useForYou } from "../foryou/useForYou";
+import type { Item as ForYouItem, Place } from "../foryou/forYouCore";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
 import { plainWords } from "../projects/live";
@@ -104,8 +107,8 @@ const askMemory: { pending: { id: string; room: string; shown: boolean; who: str
 const ASK_WAIT_MS = 8000;
 
 /**
- * T-335 one surface (0.2: one home). With rooms: the home is All (the stream, the composer that routes, and the drawer: what needs you,
- * To post, the places), with a room in focus over it. Every
+ * T-335 one surface (0.2: one home). With rooms: the home is All (0.3.0: For you at its top, the stream, the composer that routes, and
+ * the drawer: the approvals, To post, the places), with a room in focus over it. Every
  * room is shown in that focus and nowhere else; its details (what needs you, its summary, its projects and sessions, all of its work, its app)
  * are a step inside it. Without rooms (a vault whose profile has no chat): the tree of its places, and each place's work.
  */
@@ -277,6 +280,18 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const roomOfNode = (p: string) => stewardOf(p).room;
   /** 0.2.2: an ask's own room (its `room`, else its node's): where every action from it is said, wherever it is shown. */
   const roomOfAsk = (t: { room?: string | null; node: string }) => askRoomOf(t, roomRefs, roomOfNode);
+  /** 0.3.0 For you: where a node sits (its area, by name and path; its room; whether it is private), from the trees already read. */
+  const fyPlaceOf = useCallback((node: string): Place => {
+    let top: string | null = node && node !== ROOT ? node : null;
+    for (let i = 0; top && i < 12; i++) { const up = tasks.tree?.parent.get(top) ?? data?.tree.parent.get(top); if (!up || up === ROOT) break; top = up; }
+    const name = top ? data?.tree.nodes.get(top)?.name ?? tasks.tree?.byPath.get(top)?.name ?? top.split("/").pop() ?? null : null;
+    const room = node ? roomOfNode(node) : null;
+    const priv = node ? (data ? privateRoot(data.tree, node) : tasks.tree ? privateRootIn(tasks.tree, node) : null) : null;
+    return { area: name, areaPath: top, room: room ? roomSlug(room.name) : null, private: !!priv };
+  }, [tasks.tree, data, roomRefs, uniRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** 0.3.0 For you: the room an answer goes to: its `reply_room` (else its room, else its node's), by id or name. */
+  const answerRoom = useCallback((item: ForYouItem) => askRoomOf({ room: item.replyRoom, node: item.node }, roomRefs, roomOfNode), [roomRefs, data, uniRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.all ?? tasks.tasks : null, placeOf: fyPlaceOf, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
   // r31: an ask is current because its task note says so (`asked_at` / `confirmed_at` within 3 days), resolved here before any row, count or dot shows it.
   const confirmNow = useMemo(() => Date.now(), [tasks.tasks, tasks.lastOk]); // eslint-disable-line react-hooks/exhaustive-deps
   const confirm = useMemo(() => ({ of: (t: Task): Resolved => confirmationOf(t, confirmNow) }), [confirmNow]);
@@ -445,6 +460,13 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     // T-301/T-302: the home. Every area's room, each with one line on where it stands (a private area's own words stay inside it), a mark where
     // sessions are working, and a quiet usage line.
     const doorAreas = data ? childrenOf(data.tree, ROOT) : [];
+    // 0.3.0: a door's "for you" counts For you's own items in that area (the same asks the home's sentence counts)
+    const fyByArea = new Map<string, number>();
+    for (const it of [...fy.view.yours, ...fy.view.more]) if (it.where.areaPath) fyByArea.set(it.where.areaPath, (fyByArea.get(it.where.areaPath) ?? 0) + 1);
+    for (const p of fy.view.privates) if (p.areaPath) fyByArea.set(p.areaPath, (fyByArea.get(p.areaPath) ?? 0) + p.count);
+    // and a session waiting on his answer (not one whose ask For you already counts), as the doors always counted it
+    const fyIds = new Set([...fy.view.yours, ...fy.view.more, ...fy.view.look].map((i) => i.tid).filter(Boolean) as string[]);
+    const runNeeds = needsByRow([], rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), undefined, dotRuns.filter((r) => !(r.task && fyIds.has(r.task.toUpperCase()))));
     const doors: Door[] = doorAreas.map((a) => {
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
       const i = navRows.findIndex((r) => r.path === a.path && r.depth === 1);
@@ -454,31 +476,29 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
         room: v.own ? v.target?.id ?? null : null,
         // T-335: everything new in the area's rooms (its own and its projects'); what needs you is what its details list: the tasks
         // under it, and the approval prompts in its own room
-        ...(i >= 0 ? { unread: rolledUnread(navRows, newByPath, i), needs: rolledNeeds(navRows, navNeeds, i) + (v.own && v.target ? approvalsAll.list.filter((x) => x.channel === v.target!.id).length : 0) } : {}) };
+        ...(i >= 0 ? { unread: rolledUnread(navRows, newByPath, i), needs: (fyByArea.get(a.path) ?? 0) + rolledNeeds(navRows, runNeeds, i) + (v.own && v.target ? approvalsAll.list.filter((x) => x.channel === v.target!.id).length : 0) } : {}) };
     });
     /** T-335: rooms no area holds (not the archived #Uni) with something new, newest first: each one tap into its room. */
     const newRooms: NewRoom[] = owned ? rooms.filter((r) => !owned.has(r.id) && r.id !== uniRoom && newByRoom.has(r.id)).sort((a, b) => (b.last_ts ?? 0) - (a.last_ts ?? 0)).map((r) => ({ id: r.id, name: r.name, unread: newByRoom.get(r.id)! })) : [];
-    // T-302 round 2: what needs you, across the areas, as one quiet line above the rooms (a private area's items stay a count, its words inside)
-    const privAt = (p: string) => (data ? privateRoot(data.tree, p) : null) ?? (tasks.tree ? privateRootIn(tasks.tree, p) : null);
-    const allNeeds = needsFeed(tasks.tasks, privAt, null, undefined, confirm.of);
-    const needs: Needs = {
-      rows: allNeeds.rows.map((t) => ({ id: t.id, title: taskTitle(t.title).rest || t.title, where: data?.tree.nodes.get(t.node)?.name ?? null, path: t.node, room: roomOfAsk(t)?.id ?? null })),
-      privates: allNeeds.privates.map((g) => ({ place: g.place, count: g.count, path: g.open.path })),
-    };
     // T-335 All view: every area's own room, interleaved, with a composer that routes; a private area stays out of it
     const privateChannel = (channel: string) => !!data && isPrivateRoom(data.tree, channel, roomRefs, uniRef);
     const allRooms: AllRoom[] = doors.filter((d) => d.room && !isPrivatePath(data!.tree, d.path) && !privateChannel(d.room)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, about: d.about ?? null, lastTs: d.lastTs }));
     const openRoomAt = (room: string, ref?: string | null, threadRoot?: string | null) => { if (allPlace) allPlace.onFocus(room, ref ?? null, threadRoot ?? null); else actions.openRoom(room, ref ?? null); };
     const all = allRooms.length ? { rooms: allRooms, onOpenAt: openRoomAt } : null;
-    const needsKnown = tasks.error || tasks.truncated || tasks.treeTruncated || (allNeeds.pending ?? []).some((t) => t.askFailed || t.check?.kind === "unavailable") ? "failed" as const : !tasks.ready || tasks.savedAt || (allNeeds.pending?.length ?? 0) > 0 ? "reading" as const : "known" as const;
+    // 0.3.0: For you is known once the tasks are read, fresh and whole
+    const needsKnown = tasks.error || tasks.truncated || tasks.treeTruncated ? "failed" as const : !tasks.ready || tasks.savedAt ? "reading" as const : "known" as const;
+    // an item's what opens its own sheet, in its own room (0.2.2's ask path); a private area's line opens that area's details
+    const openItem = (it: ForYouItem) => { const t = tasks.all?.find((x) => x.id === it.id); openAsk({ id: it.id, room: (t ? roomOfAsk(t) : answerRoom(it))?.id ?? null, path: it.node }); };
+    const forYou = <ForYou view={fy.view} answer={fy.answer} retry={fy.retry} errors={fy.errors} busy={fy.busy} onOpenAsk={openItem}
+      onOpenPrivate={(x) => openPlace(x.areaPath ?? x.node, "details")} failed={needsKnown === "failed" ? tasks.refresh : null} reading={needsKnown === "reading"} />;
     const focusRoomOpen = focus && !focus.leaving ? focus.room : null;
     // (the drawer is the owner's own home, as the places page was: every approval waiting, a private room's too; All's stream keeps those out)
     const approvalRows = <ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" />;
-    // 0.2 one home: with rooms, the home is All; what the old home held (what needs you, the approvals, To post, the places, the
-    // rooms no area holds, the Unfiled sessions) is in the drawer under its head
+    // 0.2 one home: with rooms, the home is All; what the old home held (the approvals, To post, the places, the rooms no area holds,
+    // the Unfiled sessions) is in the drawer under its head. 0.3.0: For you (what is his, ready to look at, moving) is over the stream
     // (an approval has a deadline: one waiting in a room All shows stays on the home, over its head, as it was over All's; the drawer lists them all)
     const home = <>{status}{!allPlace ? approvalRows : !pulled && all && <ApprovalRows approvals={approvalsAll.list.filter((x) => !privateChannel(x.channel))} className="cp-list cp-approvals th-approvals" />}
-      <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} needs={needs} onOpen={(p) => openPlace(p)} onOpenNeed={(p) => openPlace(p, "details")} onOpenAsk={openAsk} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
+      <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} forYou={forYou} yours={fy.view.count} onOpen={(p) => openPlace(p)} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
         otherRooms={others} noAreas={!!data && !error && !doorAreas.length ? (uniRef ? () => actions.openRoom(uniRef.id) : null) : undefined}
         toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} onOpenProject={setProjectOpen}
         pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.length > 0 ? approvalRows : null} />

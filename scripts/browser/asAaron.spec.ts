@@ -39,12 +39,11 @@ async function longPress(page: Page, msg: ReturnType<Page['locator']>) {
   return sheet;
 }
 const TASKS: BootOpts = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true, uniMember: true };
-/** The tour's way into an ask of the tasks world: Uni's home, what needs you (0.2: in the home's drawer, its list open), its first item: its
- *  room in focus (T-335), with the ask's sheet over it (0.2.2). */
+/** The tour's way into an ask of the tasks world: Uni's home, For you at its top (0.3.0; it replaced the drawer's Needs-you list), its first
+ *  item: its room in focus (T-335), with the ask's sheet over it (0.2.2). */
 async function openAskFromHome(page: Page) {
   await page.locator('[data-place="front-door"]').first().waitFor();
-  await openPlaces(page);
-  await page.locator('#fd-drawer').getByRole('region', { name: 'Needs you' }).locator('.fd-needs-list button').first().click();
+  await page.getByRole('region', { name: 'For you' }).locator('.fy-what').first().click();
   await expect(focus(page)).toBeVisible();
 }
 

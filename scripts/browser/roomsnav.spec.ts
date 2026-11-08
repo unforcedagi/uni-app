@@ -127,7 +127,8 @@ test.describe('rooms nav', () => {
     const drawer = home.getByRole('region', { name: 'Your places' });
     await expect(drawer.locator('.fd-door[data-path="Areas/Sanctum"]')).toBeVisible();
     // the private area's items are counted there, by its place only (once the tasks are read)
-    await expect(drawer.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: 'In Sanctum: 1 thing for you' })).toBeVisible();
+    // (0.3.0: in For you at the top of the home, not in the drawer)
+    await expect(home.getByRole('region', { name: 'For you' }).locator('.fy-private', { hasText: 'Sanctum: 1 thing for you' })).toBeVisible();
     await expect(home).not.toContainText(/T-3[12]|Sit twenty/);
     // r14: the area itself, opened by Aaron: its items are ordinary rows, with their titles
     await go(page, 'Sanctum');

@@ -4,7 +4,8 @@ An Android-first, Telegram-like Buzz conversation client. The product contract a
 
 ## What works in this branch
 
-- One home (since 0.2): All, every area room's stream, with a drawer for what needs you, To post and the places; a room opens in focus over it. An ask (a task on you) acts in its own room.
+- One home (since 0.2): All, every area room's stream, with a drawer for the approvals waiting, To post and the places; a room opens in focus over it. An ask (a task on you) acts in its own room.
+- For you (since 0.3): the top of the home. Yours (what only you can answer, the earliest default first, five at a time), Ready to look at, and Moving (card lines since you last looked). One tap takes an ask's default; hold to talk to answer in your own words; the answer is posted in the ask's room, under its card's post. One data module, `src/foryou/forYouCore.ts`.
 - Chronological cached messages, focused root/reply threads, per-room public-key recipient, text compose, manual/on-resume sync and explicit error states.
 - Rust core discovers joined channels, authenticates with NIP-42, fetches kind-9 history and kind-0 profiles, persists messages in SQLite, and stores NIP-10 root/parent references alongside legacy rows.
 - Sending signs a Buzz SDK kind-9 event with `h`/`e`/`p` tags; it checks the selected room and cached reply target, waits for relay `OK`, and only then persists the event. Relay rejection does not clear the draft.

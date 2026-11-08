@@ -62,22 +62,24 @@ test('the front door is Uni: the seven rooms, where each stands, a mark where se
   await shot(page, '02-usage');
 });
 
-test('round 2: what needs you is in the home\'s drawer above the rooms; the archived Uni room is no place', async ({ page }) => {
+test('0.3.0: what needs you is For you, at the top of the home (the drawer keeps the places); the archived Uni room is no place', async ({ page }) => {
   await bootProjects(page);
   await page.goto('/');
-  // 0.2 one home: the head's one sentence counts it; pulling it down shows the list, open (no "Needs you · N" line there)
+  // the head's one sentence counts it; For you holds it, over the stream, with where it is (no card: its area) and no ids
   await expect(page.locator('[data-place="front-door"] .fd-pull')).toContainText('One thing needs you.');
-  await expect(page.getByText('Choose the photo for the about page')).toHaveCount(0);
+  const fy = page.getByRole('region', { name: 'For you' });
+  const item = fy.locator('article.fy-item', { hasText: 'Choose the photo for the about page' });
+  await expect(item.locator('.fy-where')).toHaveText('Workshop');
+  await expect(fy).not.toContainText(NO_IDS);
+  await shot(page, '01b-needs-you');
   await places(page);
   // the archived Uni room is no place of the home (T-335: the room tree beside a room is gone; the home's doors are the places)
   await expect(door(page, 'Workshop')).toBeVisible();
   await expect(door(page, 'Uni')).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^Needs you · / })).toHaveCount(0);
-  const item = page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /Choose the photo for the about page/ });
-  await expect(item).toContainText('Riverbend co-op site');
-  await expect(page.getByRole('region', { name: 'Needs you' })).not.toContainText(NO_IDS);
-  await shot(page, '01b-needs-you');
-  await item.click();
+  // the drawer no longer holds a Needs-you list
+  await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0);
+  await page.locator('[data-place="front-door"] .fd-pull').click();
+  await item.locator('.fy-what').click();
   // T-335: its place's room, in focus (0.2.2: with the ask's sheet over it, where its action is said)
   await expect(title(page)).toHaveText('Riverbend co-op site');
   await expect(page.getByRole('dialog').filter({ has: page.locator('.task-kind') })).toContainText('Choose the photo for the about page');

@@ -11,7 +11,8 @@ export const rail = (page: Page) => page.getByRole('navigation', { name: 'Main n
 /** The audit's targets: the most visible controls each screen may show, per device (phone 360, Daylight 828, desktop 1440): 0.2's count, plus one where
  *  that stays under 0.1.103's. The old home's numbers are its places page; All was a second screen (13 / 21 / 19) and is now the same one. */
 export const TARGETS: Record<string, { phone: number; daylight: number; desktop: number }> = {
-  'home': { phone: 11, daylight: 15, desktop: 17 }, // 0.1.103 11 / 20 / 18 → 0.2 11 / 14 / 17
+  // 0.3.0: For you is the top of the home: each item in sight adds what it asks (its sheet), its one tap and hold to talk (3 a visible item)
+  'home': { phone: 15, daylight: 20, desktop: 21 }, // 0.1.103 11 / 20 / 18 → 0.2 11 / 14 / 17 → 0.3 15 / 20 / 21
   'home-open': { phone: 15, daylight: 18, desktop: 20 }, // 0.1.103 14 / 23 / 21 → 0.2 15 / 17 / 19
   'room': { phone: 16, daylight: 16, desktop: 22 }, // 0.1.103 18 / 23 / 23 → 0.2 15 / 15 / 21
   'room-details': { phone: 9, daylight: 10, desktop: 14 }, // 0.1.103 10 / 15 / 15 → 0.2 9 / 9 / 13
