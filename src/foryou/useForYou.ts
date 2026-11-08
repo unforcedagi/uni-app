@@ -118,11 +118,16 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
     setBusy((b) => new Set(b).add(item.id));
     setErrors(({ [item.id]: _, ...rest }) => rest);
     const me = activeProfile().me, at = new Date().toISOString();
-    const r = item.legacy
-      ? await vaultTasks.decide(item.id, said, me, item.updatedAt ?? "", at)
-      : await vaultTasks.answer(item.id, item.state as Task["state"], item.updatedAt ?? "", answerMeta(item, said, me, at));
-    setBusy((b) => { const n = new Set(b); n.delete(item.id); return n; });
-    inFlight.current.delete(item.id);
+    let r: Awaited<ReturnType<typeof vaultTasks.answer>>;
+    try {
+      r = item.legacy
+        ? await vaultTasks.decide(item.id, said, me, item.updatedAt ?? "", at)
+        : await vaultTasks.answer(item.id, item.state as Task["state"], item.updatedAt ?? "", answerMeta(item, said, me, at));
+    } catch (e) { r = { ok: false, kind: "error", message: words(e) }; }
+    finally {
+      setBusy((b) => { const n = new Set(b); n.delete(item.id); return n; });
+      inFlight.current.delete(item.id);
+    }
     if (!r.ok) {
       setErrors((x) => ({ ...x, [item.id]: r.kind === "conflict" ? "It changed elsewhere. Showing the latest." : `Couldn't answer: ${words(r.message)}` }));
       o.refresh();

@@ -210,7 +210,7 @@ export function forYou(input: ForYouInput): ForYouView {
     const cardName = card?.name ?? (cardPath ? leaf(cardPath) : null);
     // (the label and the path from one source: the card's area when it names one, else the node's)
     const area = card?.area ?? place.area;
-    const areaPath = card?.area ? card.areaNode ?? place.areaPath ?? null : place.areaPath ?? null;
+    const areaPath = card?.area ? card.areaNode ?? null : place.areaPath ?? null;
     const where = cardName ? { label: [cardName, area].filter(Boolean).join(" · "), card: cardName, cardPath, area, areaPath } : { label: area ?? "Uni", card: null, cardPath: null, area, areaPath };
     const footer = replyRoom ? `Goes to #${replyRoom}${replyRoot ? (cardName ? `, under ${cardName}'s post` : ", in its thread") : ""}` : "No room to send it to";
     const choices = kind === "choose" || kind === "decision" ? options.filter((o) => o !== defValue) : [];
