@@ -5,7 +5,8 @@
 //
 // It could become an applet with a manifest: it needs the types `task` (with the ask fields: kind, card, why_now, default, default_at,
 // no_default, options, reply_room, reply_root, answer, answered_at), `decision` (the old ones: state open, options) and `card` (name, area,
-// area_node, private, status, stands, stands_at, hill, lines[]), as declared in the vault's tag schemas. Nothing else.
+// area_node, project, private, status, stands, stands_at, hill, lines[], threads[], open_asks[], last_session_at), as declared in the vault's
+// tag schemas. Nothing else. 0.3.2: the card itself is drawn from here too (its marks, an area's cards, which card a room's message is about).
 
 /** A vault note as the query returns it (metadata only). */
 export type Note = { id?: unknown; path?: unknown; tags?: unknown; metadata?: unknown; updatedAt?: unknown; createdAt?: unknown };
@@ -13,7 +14,8 @@ export type Note = { id?: unknown; path?: unknown; tags?: unknown; metadata?: un
 export type Place = { area: string | null; room: string | null; private: boolean; /** the area's node path (the home's door it belongs to) */ areaPath?: string | null };
 export type Kind = "do" | "choose" | "look" | "tell" | "decision";
 /** An answer given on this device today, kept until midnight (the vault's own record is the ask's `answer`). */
-export type Answered = { id: string; what: string; answer: string; at: number; room: string | null; post: "sending" | "sent" | "failed" | "none"; error?: string | null };
+export type Answered = { id: string; what: string; answer: string; at: number; room: string | null; post: "sending" | "sent" | "failed" | "none"; error?: string | null;
+  /** 0.3.2: the card the ask was on: the card shows the answer as his line until its own line comes back from the vault. */ card?: string | null };
 
 export type ForYouInput = {
   /** Live `task` notes (any owner: only Aaron's are kept) and open old `decision` notes. A note may come twice (both queries): it is kept once. */
@@ -61,10 +63,18 @@ export type Item = {
   asked: string | null;
 };
 export type PrivateLine = { area: string; node: string; areaPath: string | null; count: number };
+/** One line on a card: one per session, newest first; `mine`: Aaron's own answer (the line says so, or it was given on this device). */
+export type CardLine = { at: string | null; text: string; mine: boolean };
 export type CardView = {
-  path: string; name: string; area: string | null; areaNode: string | null; status: string; private: boolean;
+  path: string; name: string; area: string | null; areaNode: string | null; project: string | null; status: string; private: boolean;
   stands: string | null; standsAt: string | null; hill: { pos: number; words: string; stuck: boolean } | null;
-  lines: { at: string | null; text: string }[];
+  lines: CardLine[];
+  /** Its recent thread names, newest first (a private card's are topics, as stored). */
+  threads: string[];
+  /** The open asks on it (T-NN ids, as the card note keeps them). */
+  openAsks: string[];
+  /** When its newest session started (orders an area's cards). */
+  lastAt: string | null;
 };
 export type MovingLine = { card: string; cardPath: string; area: string | null; text: string; at: string; private: boolean };
 export type ForYouView = {
@@ -123,8 +133,22 @@ export function whenLabel(v: string | null, now: number): string | null {
 /** Where the hill puts a card, in words: "Uphill, 30" (still figuring out), "Downhill, 64" (making), "Done". */
 export function hillWords(pos: number): string { return pos >= 100 ? "Done" : `${pos >= 50 ? "Downhill" : "Uphill"}, ${Math.round(pos)}`; }
 
-/** A card note as the view needs it. A private card keeps only its name, area and lines as stored (its stands and hill are never shown). */
-export function cardView(n: Note): CardView | null {
+/** A line that is Aaron's own answer: the line names him (`by`/`who`/`author`, or its status is `answer`), or says so in its words
+ *  ("Aaron: ...", by the profile's `me`). Its words lose the name: the card marks the line instead. */
+function lineOf(o: Record<string, unknown>, me: string): CardLine | null {
+  const raw = s(o.text);
+  if (!raw) return null;
+  const by = s(o.by) ?? s(o.who) ?? s(o.author);
+  const colon = raw.indexOf(":");
+  const said = colon > 0 && isMe(raw.slice(0, colon), me);
+  const mine = (by ? isMe(by, me) : false) || said || (s(o.status) ?? "").toLowerCase() === "answer";
+  const text = said ? raw.slice(colon + 1).trim() || raw : raw;
+  return { at: s(o.ended) ?? s(o.at), text, mine };
+}
+
+/** A card note as the view needs it. A private card keeps only its name, area, lines and thread names as stored (its stands and hill are never
+ *  shown, and its open asks only as a count). */
+export function cardView(n: Note, me = "aaron"): CardView | null {
   const m = meta(n), path = refPath(n.path);
   if (!path) return null;
   const priv = m.private === true;
@@ -132,14 +156,15 @@ export function cardView(n: Note): CardView | null {
   const pos = hill && typeof hill.pos === "number" && Number.isFinite(hill.pos) ? Math.max(0, Math.min(100, hill.pos)) : null;
   const lines = (Array.isArray(m.lines) ? m.lines : []).flatMap((l) => {
     if (!l || typeof l !== "object") return [];
-    const o = l as Record<string, unknown>; const text = s(o.text);
-    return text ? [{ at: s(o.ended) ?? s(o.at), text }] : [];
+    const line = lineOf(l as Record<string, unknown>, me);
+    return line ? [line] : [];
   }).sort((a, b) => (ms(b.at) ?? 0) - (ms(a.at) ?? 0));
+  const strings = (v: unknown) => (Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x.trim() : x && typeof x === "object" ? s((x as Record<string, unknown>).name) ?? "" : "")).filter(Boolean) : []);
   return {
-    path, name: s(m.name) ?? leaf(path), area: s(m.area), areaNode: refPath(m.area_node), status: s(m.status) ?? "active", private: priv,
+    path, name: s(m.name) ?? leaf(path), area: s(m.area), areaNode: refPath(m.area_node), project: refPath(m.project), status: s(m.status) ?? "active", private: priv,
     stands: priv ? null : s(m.stands), standsAt: priv ? null : s(m.stands_at),
     hill: priv || pos === null ? null : { pos, words: hillWords(pos), stuck: hill?.stuck === true },
-    lines,
+    lines, threads: strings(m.threads).slice(0, 6), openAsks: strings(m.open_asks), lastAt: s(m.last_session_at) ?? lines[0]?.at ?? null,
   };
 }
 
@@ -160,7 +185,7 @@ export function forYou(input: ForYouInput): ForYouView {
   const cap = input.cap ?? 5;
   const since = input.lastLooked ?? now - DAY;
   const cards = new Map<string, CardView>();
-  for (const n of input.cards) { const c = cardView(n); if (c && c.status !== "retired") cards.set(c.path, c); }
+  for (const n of input.cards) { const c = cardView(n, me); if (c && c.status !== "retired") cards.set(c.path, c); }
   const today = localDay(now);
   // today's, and any still owed to its room (a failed post keeps its Retry past midnight)
   const answered = (input.answered ?? []).filter((a) => localDay(a.at) === today || a.post === "failed" || a.post === "sending");
@@ -257,4 +282,70 @@ export function answerMeta(item: Pick<Item, "kind" | "options" | "default">, ans
   const picked = item.kind === "choose" && (item.default?.value === answer || item.options.includes(answer));
   if (picked) Object.assign(m, { decided: answer, decided_at: at, decided_by: by });
   return m;
+}
+
+// ------------------------------------------------------------------ 0.3.2: the card itself (tap a card's name anywhere: For you, the stream, an area)
+
+/** What a card is to him now, by shape (Daylight is greyscale): ● something on it is his, ◐ something on it is ready to look at, ○ it is moving,
+ *  — it is resting. A private card is his when its note counts open asks (none of their words are read here). */
+export type CardMark = "yours" | "look" | "moving" | "rest";
+export const MARK_WORDS: Record<CardMark, string> = { yours: "waits on you", look: "ready to look at", moving: "moving", rest: "resting" };
+const onCard = (path: string) => (i: Item) => i.where.cardPath === path;
+export function cardMark(view: Pick<ForYouView, "yours" | "more" | "look">, card: CardView): CardMark {
+  const on = onCard(card.path);
+  if (view.yours.some(on) || view.more.some(on) || (card.private && card.openAsks.length > 0)) return "yours";
+  if (view.look.some(on)) return "look";
+  return card.status === "resting" ? "rest" : "moving";
+}
+/** The asks on a card that For you shows (his first, then the ones to look at). A private card's are never shown: they are counted (openAsks). */
+export function cardItems(view: Pick<ForYouView, "yours" | "more" | "look">, card: CardView): Item[] {
+  const on = onCard(card.path);
+  return card.private ? [] : [...view.yours, ...view.more, ...view.look].filter(on);
+}
+
+const RANK: Record<CardMark, number> = { yours: 0, look: 1, moving: 2, rest: 3 };
+export type AreaCard = { card: CardView; mark: CardMark };
+/** A place's cards (the card's area is this node, or the card is this project's face): the active ones first (his, then to look at, then moving;
+ *  the newest session first), the resting ones apart (folded where they are shown). */
+export function areaCards(view: Pick<ForYouView, "yours" | "more" | "look" | "cards">, node: string): { active: AreaCard[]; resting: AreaCard[] } {
+  const all = [...view.cards.values()].filter((c) => c.areaNode === node || c.project === node).map((card) => ({ card, mark: cardMark(view, card) }));
+  const order = (a: AreaCard, b: AreaCard) => RANK[a.mark] - RANK[b.mark] || (ms(b.card.lastAt) ?? 0) - (ms(a.card.lastAt) ?? 0) || a.card.name.localeCompare(b.card.name);
+  return { active: all.filter((c) => c.mark !== "rest").sort(order), resting: all.filter((c) => c.mark === "rest").sort(order) };
+}
+
+const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+/** The card's lines, newest first: one per session, and his own answers marked. An answer given on this device shows at once, as his line, until
+ *  the card's own line for it comes back (the same words). */
+export function cardLines(card: CardView, answered: readonly Answered[] = []): CardLine[] {
+  const have = new Set(card.lines.filter((l) => l.mine).map((l) => norm(l.text)));
+  const here = answered.filter((a) => a.card === card.path && !have.has(norm(a.answer))).map((a) => ({ at: new Date(a.at).toISOString(), text: a.answer, mine: true }));
+  return [...here, ...card.lines].sort((a, b) => (ms(b.at) ?? 0) - (ms(a.at) ?? 0));
+}
+
+/** "1 thing waits on you" / "3 things wait on you": a private card's asks, by count only. */
+export const waitsWords = (n: number) => `${n} thing${n === 1 ? " waits" : "s wait"} on you`;
+
+/**
+ * The card a room's message is about: the card's post that its asks thread under (an ask's `reply_root`), a reply in that thread, or a message that
+ * opens with the card's name ("Glaze Tests: …", "**Glaze Tests**") in a room of the card's own area or project. Never a private card (a private
+ * area's rooms are not in the stream; this keeps it so).
+ */
+export function cardOfMessage(view: Pick<ForYouView, "yours" | "more" | "look" | "cards">, m: { ref: string; root?: string | null; body: string }, roomPath: string | null): CardView | null {
+  const items = [...view.yours, ...view.more, ...view.look];
+  for (const ref of [m.ref, m.root]) {
+    if (!ref) continue;
+    const it = items.find((i) => i.replyRoot === ref && i.where.cardPath);
+    const c = it ? view.cards.get(it.where.cardPath!) : null;
+    if (c && !c.private) return c;
+  }
+  if (!roomPath) return null;
+  const head = m.body.trimStart().replace(/^[#>*_\s]+/, "").toLowerCase();
+  let best: CardView | null = null;
+  for (const c of view.cards.values()) {
+    if (c.private || !c.name) continue;
+    const here = (!!c.areaNode && (roomPath === c.areaNode || roomPath.startsWith(`${c.areaNode}/`))) || (!!c.project && roomPath === c.project);
+    const n = c.name.toLowerCase();
+    if (here && head.startsWith(n) && /^[*_]*\s*(:|\n|$)/.test(head.slice(n.length)) && (!best || c.name.length > best.name.length)) best = c;
+  }
+  return best;
 }

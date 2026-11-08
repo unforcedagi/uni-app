@@ -35,8 +35,10 @@ export function asks(now: number) {
 }
 
 const line = (now: number, run: string, hoursAgo: number, text: string) => ({ run, at: ago(now, (hoursAgo + 1) * H), ended: ago(now, hoursAgo * H), status: 'completed', text });
-/** The cards: two moved in the last day (and the private one), two quiet, one resting. */
-export function cards(now: number) {
+/** The cards: two moved in the last day (and the private one), two quiet, one resting. `more` (0.3.2, the card itself): the glaze card also
+ *  carries one of Aaron's answers as a line, its threads and its asks; Kiln Studio gains a quiet card with eight lines and a resting one; the
+ *  private card counts its ask. */
+export function cards(now: number, more = false) {
   const card = (area: string, name: string, meta: Record<string, unknown>) => ({ id: `card-${name.replace(/\W+/g, '-').toLowerCase()}`, path: `Cards/${area}/${name}`, extension: 'md', tags: ['card'], createdAt: ago(now, 30 * D), updatedAt: ago(now, H),
     metadata: { schema: 'card/1', name, area, area_node: `Areas/${area}`, origin: 'project', private: false, status: 'active', stands: '', hill: { pos: null }, lines: [], ...meta } });
   return [
@@ -47,11 +49,17 @@ export function cards(now: number) {
     card('North Field', 'Gate Path', { origin: 'thread', stands: 'Gravel is ordered.', hill: { pos: 30, phase: 'uphill' }, lines: [line(now, 'r5', 120, 'Measured the path by the gate.')] }),
     card('Long Table', 'Supper Club', { stands: 'Saturday is set.', hill: { pos: 50 }, lines: [line(now, 'r6', 90, 'Counted the chairs.')] }),
     card('Sanctum', 'daily practice', { private: true, origin: 'thread', lines: [line(now, 'r7', 1, 'A session on daily practice: completed.')] }),
-  ];
+  ].map((c) => (!more ? c : c.metadata.name === 'Glaze Tests' ? { ...c, metadata: { ...c.metadata, threads: ['test tiles', 'glaze recipes'], last_session_at: ago(now, 3 * H),
+    lines: [...(c.metadata.lines as unknown[]), { at: ago(now, 30 * H), by: 'aaron', status: 'answer', text: 'Aaron: Keep the cracked pot for the glaze tests.' }] } }
+    : c.metadata.name === 'daily practice' ? { ...c, metadata: { ...c.metadata, threads: ['daily practice'], open_asks: ['T-520'] } } : c)).concat(!more ? [] : [
+    card('Kiln Studio', 'Kiln Shelves', { stands: 'The new shelves are level.', hill: { pos: 40, phase: 'uphill' }, last_session_at: ago(now, 31 * H),
+      lines: Array.from({ length: 8 }, (_, i) => line(now, `s${i}`, 30 + 24 * i, `Shelf session ${8 - i}.`)) }),
+    card('Kiln Studio', 'Clay Order', { status: 'resting', stands: 'The clay came in October.', hill: { pos: 100 }, lines: [line(now, 'c1', 400, 'Ordered the clay.')] }),
+  ]);
 }
 
 /** Boots the made-up world with these asks and cards. `postFails`: the fake relay refuses that many posts first. */
-export async function bootForYou(page: Page, opts: { postFails?: number; transcript?: string } = {}) {
+export async function bootForYou(page: Page, opts: { postFails?: number; transcript?: string; more?: boolean } = {}) {
   const now = Date.now();
   await page.addInitScript(({ seed, deck, postFails, transcript }) => {
     const w = window as any;
@@ -69,7 +77,7 @@ export async function bootForYou(page: Page, opts: { postFails?: number; transcr
       if (cmd === 'post_message' && w.__postFails > 0) { w.__postFails--; throw 'relay unreachable: connection refused'; }
       return undefined;
     };
-  }, { seed: asks(now), deck: cards(now), postFails: opts.postFails ?? 0, transcript: opts.transcript ?? null });
+  }, { seed: asks(now), deck: cards(now, !!opts.more), postFails: opts.postFails ?? 0, transcript: opts.transcript ?? null });
   await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, tasks: true, noWait: true } as any);
   await page.locator('[data-place="front-door"]').first().waitFor();
 }

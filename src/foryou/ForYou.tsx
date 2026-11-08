@@ -3,10 +3,11 @@
 // what (tap: its sheet in its room), why now, one tap = the default with its date, the other options, hold to talk, where it goes.
 // States read by shape, never by colour alone (Daylight is greyscale): a filled dot is yours, a half-filled one ready to look at, a ring
 // moving, a dash resting; the default is filled, the other options outlined.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+// 0.3.2: the card is its own panel (CardPanel, below), opened from For you, the stream and an area alike (AreasSurface holds which is open).
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRecorder } from "../recorder";
 import { transcribe } from "./useForYou";
-import type { Answered, CardView, ForYouView, Item, MovingLine, PrivateLine } from "./forYouCore";
+import { cardItems, cardLines, cardMark, MARK_WORDS, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine } from "./forYouCore";
 import { quietLine } from "../projects/FrontDoor";
 import { headWords } from "./scope";
 import "./foryou.css";
@@ -24,9 +25,11 @@ export type ForYouProps = {
   /** The tasks couldn't be read: "Couldn't check" with Try again, never "Nothing for you". */
   failed?: (() => void) | null;
   reading?: boolean;
+  /** 0.3.2: open a card (by its path): the one card panel, wherever its name was tapped. */
+  onCard: (path: string) => void;
 };
 
-const Mark = ({ kind }: { kind: "yours" | "look" | "moving" | "rest" }) => <i className="fy-mark" data-mark={kind} aria-hidden="true" />;
+export const Mark = ({ kind }: { kind: CardMark }) => <i className="fy-mark" data-mark={kind} aria-hidden="true" />;
 const MIC = <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="5.5" y="1.5" width="5" height="9" rx="2.5" /><path d="M3 8a5 5 0 0 0 10 0M8 13v2" /></svg>;
 
 /** A small hill: left of the top is figuring out, right is making; the dot is where the card is. */
@@ -99,16 +102,21 @@ function Said({ text, footer, onSend, onCancel }: { text: string; footer: string
   </div>;
 }
 
-function ItemView({ item, p, onCard }: { item: Item; p: ForYouProps; onCard: (path: string) => void }) {
+/** What an item needs to be answered from wherever it is drawn (For you, or the card). */
+export type ItemActions = Pick<ForYouProps, "view" | "answer" | "retry" | "errors" | "busy" | "onOpenAsk">;
+
+function ItemView({ item, p, onCard, inCard = false }: { item: Item; p: ItemActions; onCard: ((path: string) => void) | null; inCard?: boolean }) {
   const busy = p.busy.has(item.id);
   const go = (text: string) => void p.answer(item, text);
   const card = item.where.cardPath ? p.view.cards.get(item.where.cardPath) ?? null : null;
   return <article className="fy-item" data-id={item.id} data-kind={item.kind} aria-busy={busy || undefined}>
     <div className="fy-head">
       <Mark kind={item.band} />
-      {item.where.cardPath ? <button type="button" className="fy-where" onClick={() => onCard(item.where.cardPath!)}>{item.where.label}</button>
+      {/* (on its own card, the card is said already: the head says whose it is instead) */}
+      {inCard ? <span className="fy-where">{item.band === "look" ? "Ready to look at" : "Yours"}</span>
+        : item.where.cardPath && onCard ? <button type="button" className="fy-where" onClick={() => onCard(item.where.cardPath!)}>{item.where.label}</button>
         : <span className="fy-where">{item.where.label}</span>}
-      {card?.hill && <Hill pos={card.hill.pos} />}
+      {card?.hill && !inCard && <Hill pos={card.hill.pos} />}
     </div>
     {p.onOpenAsk ? <button type="button" className="fy-what" onClick={() => p.onOpenAsk!(item)}>{item.what}</button> : <p className="fy-what">{item.what}</p>}
     {item.why && <p className="fy-why">{item.why}</p>}
@@ -140,29 +148,11 @@ function DoneLine({ a, retry }: { a: Answered; retry: (id: string) => void }) {
 function MovingRow({ m, now, onCard }: { m: MovingLine; now: number; onCard: (path: string) => void }) {
   return <li className="fy-mv">
     <Mark kind="moving" />
-    {m.private ? <span className="fy-mv-t">{m.text}</span>
+    {/* (a private card opens too: it shows only what its note already says, its lines as stored and its count) */}
+    {m.private ? <button type="button" className="fy-mv-t" onClick={() => onCard(m.cardPath)}>{m.text}</button>
       : <button type="button" className="fy-mv-t" onClick={() => onCard(m.cardPath)}><b>{m.card}</b> · {m.text}</button>}
     <span className="fy-at">{ago(m.at, now)}</span>
   </li>;
-}
-
-/** The card: where it stands, the hill, the last lines, and what on it waits for him. A private card: its lines as stored, nothing else. */
-function CardSheet({ card, items, p, onClose }: { card: CardView; items: Item[]; p: ForYouProps; onClose: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { ref.current?.focus(); const k = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }; window.addEventListener("keydown", k, true); return () => window.removeEventListener("keydown", k, true); }, [onClose]);
-  return <>
-    <button type="button" className="fy-scrim" aria-label="Close the card" tabIndex={-1} onClick={onClose} />
-    <div className="fy-card" role="dialog" aria-modal="true" aria-label={`${card.name} card`} ref={ref} tabIndex={-1}>
-      <div className="fy-card-top"><span className="fy-card-kicker">{card.area ? `${card.area} · card` : "card"}{card.status === "resting" ? " · resting" : ""}</span>
-        <button type="button" className="fy-link-btn fy-card-close" onClick={onClose}>Close</button></div>
-      <h3 className="fy-card-name">{card.name}</h3>
-      {card.stands && <p className="fy-card-stands">{card.stands}{card.standsAt && <small>as of {new Date(card.standsAt).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}</small>}</p>}
-      {card.hill && <p className="fy-card-hill"><Hill pos={card.hill.pos} w={120} h={38} /><span><b>{card.hill.words}.</b>{card.hill.stuck ? " It hasn't moved in a while." : card.hill.pos >= 50 ? " Past figuring out; now making." : " Still figuring it out."}</span></p>}
-      {items.length > 0 && <div className="fy-card-asks">{items.map((i) => <ItemView key={i.id} item={i} p={p} onCard={() => {}} />)}</div>}
-      {card.lines.length > 0 ? <ul className="fy-card-lines">{card.lines.slice(0, 6).map((l, i) => <li key={i}><span className="fy-at">{l.at ? new Date(l.at).toLocaleDateString(undefined, { month: "numeric", day: "numeric" }) : ""}</span><span>{l.text}</span></li>)}</ul>
-        : <p className="fy-none">No sessions on it yet.</p>}
-    </div>
-  </>;
 }
 
 function Band({ name, n, children }: { name: string; n?: ReactNode; children: ReactNode }) {
@@ -180,10 +170,8 @@ export function ForYou(p: ForYouProps & { /** The head says this place's name: F
   const [more, setMore] = useState(false);
   const [open, setOpenState] = useState(openMemory.open);
   const setOpen = (v: boolean) => { openMemory.open = v; setOpenState(v); };
-  const [cardOpen, setCardOpen] = useState<string | null>(null);
   const now = Date.now();
-  const card = cardOpen ? view.cards.get(cardOpen) ?? null : null;
-  const all = [...view.yours, ...view.more, ...view.look];
+  const setCardOpen = p.onCard;
   const yours = more ? [...view.yours, ...view.more] : view.yours;
   const nothing = !view.count && !view.look.length;
   const day = Math.floor((now - new Date(now).getTimezoneOffset() * 60_000) / 86_400_000);
@@ -223,6 +211,87 @@ export function ForYou(p: ForYouProps & { /** The head says this place's name: F
       </ul>
     </Band>}
     </div>}
-    {card && <CardSheet card={card} items={all.filter((i) => i.where.cardPath === card.path)} p={p} onClose={() => setCardOpen(null)} />}
+  </section>;
+}
+
+// ------------------------------------------------------------------ 0.3.2: the card, and an area's cards
+
+/** A wide screen (Daylight, desktop): the card opens beside the list, and the list stays in use; a phone: a sheet from the bottom. */
+const WIDE = "(min-width: 760px)";
+const onWide = (f: () => void) => { const m = window.matchMedia(WIDE); m.addEventListener("change", f); return () => m.removeEventListener("change", f); };
+export const useCardBeside = () => useSyncExternalStore(onWide, () => window.matchMedia(WIDE).matches, () => true);
+
+const LINES_SHOWN = 6;
+const lineDate = (at: string | null, now: number) => {
+  if (!at) return "";
+  const t = Date.parse(at);
+  if (!Number.isFinite(t)) return "";
+  if (now - t < 60 * 60_000) return "now";
+  return new Date(t).toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
+};
+
+/**
+ * The card: where it stands (and since when), the hill, its last lines (one per session, newest first, his own answers marked), what on it is
+ * open for him (answerable right here, as in For you), its threads, and where an answer lands. A private card shows only what its note already
+ * says: its lines as stored, its thread topics and how many things wait on him; never a stand, a hill or an ask's words.
+ */
+export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardView; p: ItemActions; onClose: () => void;
+  /** The room thread its answers land in (the card's post), when there is one: opens it. */ onThread?: { label: string; open: () => void } | null;
+  /** Beside the list (wide screens), not over it. */ beside: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [all, setAll] = useState(false);
+  const now = Date.now();
+  // a new card opened in the same panel: its top, its first lines
+  useEffect(() => { setAll(false); ref.current?.scrollTo?.({ top: 0 }); ref.current?.focus({ preventScroll: true }); }, [card.path]);
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) { e.stopPropagation(); onClose(); } }; window.addEventListener("keydown", k, true); return () => window.removeEventListener("keydown", k, true); }, [onClose]);
+  // beside the list, the home makes room for it (the list stays in sight and in use)
+  useEffect(() => {
+    if (!beside) return;
+    document.documentElement.dataset.card = "beside";
+    return () => { delete document.documentElement.dataset.card; };
+  }, [beside]);
+  const mark = cardMark(p.view, card);
+  const items = cardItems(p.view, card);
+  const lines = cardLines(card, p.view.answered);
+  const shown = all ? lines : lines.slice(0, LINES_SHOWN);
+  return <>
+    {!beside && <button type="button" className="fy-scrim" aria-label="Close the card" tabIndex={-1} onClick={onClose} />}
+    <div className="fy-card" data-beside={beside || undefined} data-card={card.path} role="dialog" aria-modal={beside ? undefined : true} aria-label={`${card.name} card`} ref={ref} tabIndex={-1}>
+      <div className="fy-card-top">
+        <span className="fy-card-kicker"><Mark kind={mark} /><span>{card.area ? `${card.area} · card` : "card"}<span className="fy-card-state"> · {MARK_WORDS[mark]}</span></span></span>
+        <button type="button" className="fy-link-btn fy-card-close" onClick={onClose}>Close</button></div>
+      <h3 className="fy-card-name">{card.name}</h3>
+      {card.stands && <p className="fy-card-stands">{card.stands}{card.standsAt && <small>as of {new Date(card.standsAt).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}</small>}</p>}
+      {card.hill && <p className="fy-card-hill"><Hill pos={card.hill.pos} w={120} h={38} /><span><b>{card.hill.words}.</b>{card.hill.stuck ? " It hasn't moved in a while." : card.hill.pos >= 100 ? "" : card.hill.pos >= 50 ? " Past figuring out; now making." : " Still figuring it out."}</span></p>}
+      {lines.length > 0 ? <ul className="fy-card-lines" aria-label="Its last lines, newest first">
+        {shown.map((l, i) => <li key={i} data-mine={l.mine || undefined}><span className="fy-at">{lineDate(l.at, now)}</span>
+          <span className="fy-card-line">{l.mine && <b className="fy-you">You</b>}{l.mine ? `“${l.text}”` : l.text}</span></li>)}
+        {lines.length > shown.length && <li className="fy-card-earlier"><button type="button" className="fy-link-btn" onClick={() => setAll(true)}>{lines.length - shown.length} earlier</button></li>}
+      </ul> : <p className="fy-none">No sessions on it yet.</p>}
+      {card.private ? card.openAsks.length > 0 && <p className="fy-card-count"><Mark kind="yours" />{waitsWords(card.openAsks.length)}<small>Open its area to answer</small></p>
+        : items.length > 0 && <section className="fy-card-asks" aria-label="Open on this card"><h4>Open on this card <span className="fy-n">{items.length}</span></h4>
+          {items.map((i) => <ItemView key={i.id} item={i} p={p} onCard={null} inCard />)}</section>}
+      {card.threads.length > 0 && <p className="fy-card-threads"><span>Threads</span>{card.threads.map((t) => <i key={t}>{t}</i>)}</p>}
+      {onThread && <p className="fy-card-room"><button type="button" className="fy-link-btn" onClick={onThread.open}>{onThread.label} ›</button></p>}
+    </div>
+  </>;
+}
+
+/** An area's cards (on its stream and in its details): the active ones, each with its mark and hill, and the resting ones folded under one line. */
+export function AreaCardList({ name, cards, onCard, compact = false }: { name: string; cards: { active: AreaCard[]; resting: AreaCard[] }; onCard: (path: string) => void;
+  /** One row (the area's stream): names only; otherwise each card's stand too. */ compact?: boolean }) {
+  const [rest, setRest] = useState(false);
+  if (!cards.active.length && !cards.resting.length) return null;
+  const row = ({ card, mark }: AreaCard) => <li key={card.path}><button type="button" className="fy-ac" data-card={card.path} data-mark={mark} onClick={() => onCard(card.path)}
+    aria-label={`${card.name}, ${MARK_WORDS[mark]}. Open the card`}>
+    <Mark kind={mark} /><span className="fy-ac-name">{card.name}</span>{!compact && card.hill && <Hill pos={card.hill.pos} />}
+    {!compact && card.stands && <span className="fy-ac-stands">{card.stands}</span>}</button></li>;
+  return <section className={`fy-acs${compact ? " fy-acs-row" : ""}`} aria-label={`${name}'s cards`}>
+    {!compact && <h3 className="cp-h">Cards</h3>}
+    <ul>
+      {cards.active.map(row)}
+      {cards.resting.length > 0 && (rest ? cards.resting.map(row)
+        : <li><button type="button" className="fy-ac fy-ac-rest" aria-expanded={false} onClick={() => setRest(true)}><Mark kind="rest" /><span className="fy-ac-name">{cards.resting.length} resting</span></button></li>)}
+    </ul>
   </section>;
 }

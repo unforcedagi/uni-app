@@ -6,7 +6,7 @@
 import { roomTint } from "../glow/roomTint";
 import { sameWords } from "../areas/sameWords";
 import { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, type ReactNode } from "react";
-import { AllComposer, AllFeed, roomWords, useEchoes, useReplyTarget, useRoomsFeed, type AllRoom } from "../all/AllView";
+import { AllComposer, AllFeed, roomWords, useEchoes, useReplyTarget, useRoomsFeed, type AllRoom, type FeedCards } from "../all/AllView";
 import { andList, roomAddress } from "../all/allCore";
 import { liveSessions, liveInArea, sessionsOf, span, UNFILED } from "./model";
 import { asOf, useWork } from "./store";
@@ -24,7 +24,8 @@ export type Scope = { path: string; name: string; rooms: readonly AllRoom[] };
 
 /** 0.3.1: the stream's scope, one tap each: every area's rooms, or one area's. The same stream, never another screen; All is always the first
  *  chip, so the way back to every room is one tap (Back and Escape too). Shown when there is more than one area to choose from, or an area is chosen. */
-function ScopeRow({ rooms, scope, onScope, onOpenScope }: { rooms: readonly AllRoom[]; scope: Scope | null; onScope: (path: string | null) => void; onOpenScope?: (path: string) => void }) {
+function ScopeRow({ rooms, scope, onScope, onOpenScope, cards = null }: { rooms: readonly AllRoom[]; scope: Scope | null; onScope: (path: string | null) => void; onOpenScope?: (path: string) => void;
+  /** 0.3.2: the area's cards, one row under its line */ cards?: ReactNode }) {
   const row = useRef<HTMLElement>(null);
   // the chosen area's chip is in sight just right of All (a row wider than a phone scrolls sideways; All stays put at its start)
   useLayoutEffect(() => {
@@ -43,6 +44,7 @@ function ScopeRow({ rooms, scope, onScope, onOpenScope }: { rooms: readonly AllR
     </nav>
     {scope && <p className="all-scope-line"><span>{andList(scope.rooms.map((r) => roomAddress(r)))}, by time</span>
       {onOpenScope && <button type="button" className="all-link" onClick={() => onOpenScope(scope.path)}>Open {scope.name} ›</button>}</p>}
+    {scope && cards}
   </div>;
 }
 
@@ -129,7 +131,9 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
   /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */
   all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string | null, root?: string | null) => void;
     /** 0.3.1: the stream's scope: one area's rooms (its own and the places' inside it), shown by time in place of every area's; null: all of them. */
-    scope?: Scope | null; onScope?: (path: string | null) => void; onOpenScope?: (path: string) => void } | null;
+    scope?: Scope | null; onScope?: (path: string | null) => void; onOpenScope?: (path: string) => void;
+    /** 0.3.2: the chosen area's cards (under its line), and the card a stream message is about (a tap on it opens the card) */
+    scopeCards?: ReactNode; cards?: FeedCards | null } | null;
   /** 0.2: this is the home (All's stream, the drawer under its head); null: the places page of a vault without the Uni glue. */
   allPlace?: { backTo: string; onBack: () => void; /** A room in focus over All. */ focusRoom?: string | null } | null; onComposerFocus?: (on: boolean) => void;
   /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
@@ -242,8 +246,8 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
       {/* under the drawer the stream is out of reach (keys, screen readers) until it is put away */}
       {forYou && <div className="fy-wrap" inert={open}>{forYou}</div>}
       <div className="fd-stream" inert={open}>
-        {all && all.onScope && (allRooms.length > 1 || scope) && <ScopeRow rooms={allRooms} scope={scope} onScope={all.onScope} onOpenScope={all.onOpenScope} />}
-        {all ? <AllFeed key={scope?.path ?? ""} scope={scope?.path ?? ""} rooms={shownRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={openFromFeed} target={target} onTarget={setTarget} echoes={echoes.shown} receded={!!focusRoom || open} /> : <div className="all-feed-box" />}</div>
+        {all && all.onScope && (allRooms.length > 1 || scope) && <ScopeRow rooms={allRooms} scope={scope} onScope={all.onScope} onOpenScope={all.onOpenScope} cards={all.scopeCards} />}
+        {all ? <AllFeed key={scope?.path ?? ""} scope={scope?.path ?? ""} rooms={shownRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={openFromFeed} target={target} onTarget={setTarget} echoes={echoes.shown} receded={!!focusRoom || open} cards={all.cards ?? null} /> : <div className="all-feed-box" />}</div>
       </div>
       {composer}
     </div>;

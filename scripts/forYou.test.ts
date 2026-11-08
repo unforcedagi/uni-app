@@ -3,7 +3,7 @@
 process.env.TZ = "UTC";
 import assert from "node:assert/strict";
 import { buildTaskTree, isTaskRow, parseTask } from "../src/areas/taskCore.ts";
-import { answerBody, answerMeta, cardView, forYou, hillWords, quietLine, splitTitle, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
+import { answerBody, answerMeta, areaCards, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -216,6 +216,77 @@ check("a tag: task read keeps only tasks (decision is becoming a child of task);
   assert.equal(nd.raw?.metadata.kind, "choose");
   const old = parseTask({ id: "d", path: "Decisions/Old", tags: ["decision"], metadata: { state: "decided", node: "Uni" } }, tree)!;
   assert.equal(old.kind, "decision");
+});
+
+// ------------------------------------------------------------------ 0.3.2: the card itself
+check("a card's lines: his own answers marked (by the line's author, its status, or his name before the words), the name dropped", () => {
+  const c = cardView(card("Kiln Studio", "Glaze Tests", { lines: [
+    { run: "r3", at: iso(NOW - H), text: "Aaron: Use the cracked pot for tests." },
+    { at: iso(NOW - 2 * H), by: "aaron", text: "Keep the shelf clear." },
+    { at: iso(NOW - 3 * H), status: "answer", text: "Celadon" },
+    { run: "r2", at: iso(NOW - 4 * H), text: "Aaronson's kiln: fired the second load." },
+    { run: "r1", at: iso(NOW - 5 * H), by: "uni", text: "Mixed glazes." },
+  ], threads: ["test tiles", { name: "shelf order" }], open_asks: ["T-501"], last_session_at: iso(NOW - H) }), "aaron")!;
+  assert.deepEqual(c.lines.map((l) => [l.text, l.mine]), [["Use the cracked pot for tests.", true], ["Keep the shelf clear.", true], ["Celadon", true],
+    ["Aaronson's kiln: fired the second load.", false], ["Mixed glazes.", false]]);
+  assert.deepEqual(c.threads, ["test tiles", "shelf order"]);
+  assert.deepEqual(c.openAsks, ["T-501"]);
+  assert.equal(c.lastAt, iso(NOW - H));
+});
+
+check("an answer given here shows on its card at once, as his line, until the card's own line says it", () => {
+  const c = cardView(GLAZE)!;
+  const a = { id: "g", what: "Pick the glaze", answer: "Celadon", at: NOW - 60_000, room: "kiln-studio", post: "sent" as const, card: "Cards/Kiln Studio/Glaze Tests" };
+  const other = { ...a, id: "o", answer: "Elsewhere", card: "Cards/North Field/Gate" };
+  assert.deepEqual(cardLines(c, [a, other]).map((l) => [l.text, l.mine]), [["Celadon", true], ["The tiles came out.", false], ["Mixed glazes.", false]]);
+  const back = cardView(card("Kiln Studio", "Glaze Tests", { lines: [{ at: iso(NOW - 30_000), text: "Aaron: celadon." }] }))!;
+  assert.deepEqual(cardLines(back, [a]).map((l) => l.text), ["celadon."]);
+});
+
+check("a card's mark by shape: his, ready to look at, moving, resting; a private card's asks by count only", () => {
+  const glaze = task("g", "T-1 Pick the glaze", { node: "Areas/Kiln Studio", kind: "choose", card: "Cards/Kiln Studio/Glaze Tests", options: ["A", "B"], no_default: true });
+  const photos = task("p", "T-2 Look at the photos", { node: "Areas/Kiln Studio", kind: "look", card: "Cards/Kiln Studio/Shelves", no_default: true });
+  const quiet = task("q", "T-3 Private words", { node: "Areas/Sanctum", kind: "tell", card: "Cards/Sanctum/practice", no_default: true });
+  const cards = [GLAZE, card("Kiln Studio", "Shelves", { area_node: "Areas/Kiln Studio" }), card("Kiln Studio", "Clay", { status: "resting", area_node: "Areas/Kiln Studio" }),
+    card("Kiln Studio", "Wheel", { area_node: "Areas/Kiln Studio", last_session_at: iso(NOW - D) }), card("Kiln Studio", "Kiln", { area_node: "Areas/Kiln Studio", last_session_at: iso(NOW - H) }),
+    card("Sanctum", "practice", { private: true, area_node: "Areas/Sanctum", open_asks: ["T-3"], threads: ["practice"] })];
+  const v = view([glaze, photos, quiet], cards.map((c) => ({ ...c, metadata: { area_node: `Areas/${(c.metadata as any).area}`, ...(c.metadata as any) } })));
+  const mark = (p: string) => cardMark(v, v.cards.get(p)!);
+  assert.equal(mark("Cards/Kiln Studio/Glaze Tests"), "yours");
+  assert.equal(mark("Cards/Kiln Studio/Shelves"), "look");
+  assert.equal(mark("Cards/Kiln Studio/Wheel"), "moving");
+  assert.equal(mark("Cards/Kiln Studio/Clay"), "rest");
+  assert.equal(mark("Cards/Sanctum/practice"), "yours");
+  // the asks shown on a card: its own; a private card's none (counted)
+  assert.deepEqual(cardItems(v, v.cards.get("Cards/Kiln Studio/Glaze Tests")!).map((i) => i.id), ["g"]);
+  assert.deepEqual(cardItems(v, v.cards.get("Cards/Sanctum/practice")!), []);
+  assert.equal(waitsWords(1), "1 thing waits on you");
+  assert.equal(waitsWords(3), "3 things wait on you");
+  // an area's cards: active first (his, to look at, then moving by the newest session), resting apart
+  const k = areaCards(v, "Areas/Kiln Studio");
+  assert.deepEqual(k.active.map((c) => [c.card.name, c.mark]), [["Glaze Tests", "yours"], ["Shelves", "look"], ["Kiln", "moving"], ["Wheel", "moving"]]);
+  assert.deepEqual(k.resting.map((c) => c.card.name), ["Clay"]);
+  // a project's own card is its place's too
+  assert.deepEqual(areaCards(v, "Projects/Glaze Tests").active.map((c) => c.card.name), ["Glaze Tests"]);
+  assert.deepEqual(areaCards(v, "Areas/North Field"), { active: [], resting: [] });
+});
+
+check("which card a room's message is about: the post its asks thread under, a reply in it, or the card's name first, in its area's rooms", () => {
+  const glaze = task("g", "T-1 Pick the glaze", { node: "Areas/Kiln Studio", kind: "choose", card: "Cards/Kiln Studio/Glaze Tests", options: ["A", "B"], no_default: true, reply_root: "post-1" });
+  const cards = [{ ...GLAZE, metadata: { ...(GLAZE.metadata as any), area_node: "Areas/Kiln Studio" } }, card("Kiln Studio", "Glaze", { area_node: "Areas/Kiln Studio" }),
+    card("Sanctum", "practice", { private: true, area_node: "Areas/Sanctum" })];
+  const v = view([glaze], cards);
+  const of = (m: { ref: string; root?: string | null; body: string }, room: string | null) => cardOfMessage(v, m, room)?.name ?? null;
+  assert.equal(of({ ref: "post-1", body: "Anything at all." }, null), "Glaze Tests");
+  assert.equal(of({ ref: "r9", root: "post-1", body: "A reply." }, "Areas/North Field"), "Glaze Tests");
+  // by name: the longest card name that opens the message, in a room of the card's area (or a place inside it)
+  assert.equal(of({ ref: "m1", body: "Glaze Tests: the tiles are out. 1 for you: pick the glaze." }, "Areas/Kiln Studio"), "Glaze Tests");
+  assert.equal(of({ ref: "m2", body: "**Glaze Tests**\nThe tiles are out." }, "Areas/Kiln Studio/Glaze Tests"), "Glaze Tests");
+  assert.equal(of({ ref: "m3", body: "Glaze: mixed." }, "Areas/Kiln Studio"), "Glaze");
+  assert.equal(of({ ref: "m4", body: "Glaze Tests went well today." }, "Areas/Kiln Studio"), null);
+  assert.equal(of({ ref: "m5", body: "Glaze Tests: out." }, "Areas/North Field"), null);
+  // never a private card
+  assert.equal(of({ ref: "m6", body: "practice: done." }, "Areas/Sanctum"), null);
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

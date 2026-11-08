@@ -351,7 +351,12 @@ const BAND_CLEAR = 52;
 /** The reading band's own height (all.css .all-reading-band: 46 px, 40 on an ink screen). */
 const readBand = () => (document.documentElement.dataset.screen === "ink" ? 40 : 46);
 
-const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named, targeted, open, onOpen, onTap, onRead }: { m: Message; place: string; address: string; mine: boolean; me: string | null;
+/** 0.3.2: which card a stream message is about (its name and its mark), and how to open it. */
+export type FeedCard = { path: string; name: string; mark: "yours" | "look" | "moving" | "rest" };
+export type FeedCards = { of: (m: Message) => FeedCard | null; open: (path: string) => void };
+
+const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named, targeted, open, onOpen, onTap, onRead, card = null, cardName = null, cardMark = null, onCard }: { m: Message; place: string; address: string; mine: boolean; me: string | null;
+  /** 0.3.2: the card this message is about (its path, name and mark: plain values, so the row redraws only when they change) */ card?: string | null; cardName?: string | null; cardMark?: FeedCard["mark"] | null; onCard?: (path: string) => void;
   /** The first message of a run from one room: it carries the room's label. */ run: boolean; /** Says who and when (a new author, or a pause). */ named: boolean;
   /** The composer is replying here. */ targeted: boolean;
   /** A long message opened: it reads whole, here. */ open: boolean;
@@ -399,6 +404,8 @@ const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named,
         : !files && <p className="all-file">{media?.length ? `${media.length === 1 ? "A file" : `${media.length} files`}: its room shows ${media.length === 1 ? "it" : "them"}` : "(nothing to show here)"}</p>}
       {(cut || (long && open)) && <button type="button" className="all-rest" aria-expanded={open} onClick={(e) => read(e.currentTarget.closest("article")!)}>{open ? "Show less" : "Read the rest"}</button>}
       <Attachments body={m.body} media={media} />
+      {card && cardName && onCard && <button type="button" className="all-card" data-card={card} aria-label={`${cardName}: open the card`} onClick={() => onCard(card)}>
+        <i className="fy-mark" data-mark={cardMark ?? "moving"} aria-hidden="true" />{cardName}<span aria-hidden="true"> · card ›</span></button>}
       {replies > 0 && <button type="button" className="all-thread" onClick={() => onOpen(m.channel, m.ref, m.ref)}>{replies} {replies === 1 ? "reply" : "replies"}<span aria-hidden="true"> ›</span></button>}
     </div>
     <button type="button" className="all-reply-go" aria-label={`Reply in ${address}${m.root || replies ? ", in the thread" : ""}`} aria-pressed={targeted} onClick={() => onTap(m)}>Reply</button>
@@ -433,12 +440,13 @@ function pinSpot(el: HTMLElement, s: FeedSpot): boolean {
   return !!row;
 }
 
-export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = null, onTarget, echoes = NO_ECHOES, receded = false, scope = "" }: { rooms: readonly AllRoom[]; byRoom: ReadonlyMap<string, Message[]>; loaded: boolean; failed: readonly string[];
+export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = null, onTarget, echoes = NO_ECHOES, receded = false, scope = "", cards = null }: { rooms: readonly AllRoom[]; byRoom: ReadonlyMap<string, Message[]>; loaded: boolean; failed: readonly string[];
   /** 0.3.1: which stream this is ("" all the areas, else the area's path): its place is kept apart from the others'. Fixed for the feed's life. */ scope?: string;
   me: string | null; onOpen: (room: string, ref: string | null, root?: string | null) => void;
   /** A room is in focus over the feed: it stays exactly where it is until that ends. */ receded?: boolean;
   /** Where the composer is replying, and how a tap or a swipe sets it. */ target?: ReplyTarget | null; onTarget?: (t: ReplyTarget | null) => void;
-  /** Your replies not yet in their room's list. */ echoes?: readonly Echo[] }) {
+  /** Your replies not yet in their room's list. */ echoes?: readonly Echo[];
+  /** 0.3.2: the card a message is about, and how to open it. */ cards?: FeedCards | null }) {
   const nameOf = useMemo(() => new Map(rooms.map((r) => [r.id, r.name])), [rooms]);
   const addressOf = useMemo(() => new Map(rooms.map((r) => [r.id, roomAddress(r)])), [rooms]);
   const [feedMemory] = useState(() => memoryOf(scope));
@@ -592,7 +600,8 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     const run = !sameDay || prev!.channel !== m.channel;
     const named = run || prev!.author !== m.author || m.ts - prev!.ts >= 300;
     const targeted = !!target && tapped === m.ref && target.room === m.channel;
-    rows.push(<FeedRow key={`${m.channel}:${m.ref}`} m={m} place={nameOf.get(m.channel) ?? "Room"} address={addressOf.get(m.channel) ?? "this room"} mine={!!me && m.author === me} me={me} run={run} named={named} targeted={targeted} open={opened.has(m.ref)} onOpen={onOpen} onTap={tap} onRead={onRead} />);
+    const card = cards?.of(m) ?? null;
+    rows.push(<FeedRow key={`${m.channel}:${m.ref}`} m={m} place={nameOf.get(m.channel) ?? "Room"} address={addressOf.get(m.channel) ?? "this room"} mine={!!me && m.author === me} me={me} run={run} named={named} targeted={targeted} open={opened.has(m.ref)} onOpen={onOpen} onTap={tap} onRead={onRead}  card={card?.path ?? null} cardName={card?.name ?? null} cardMark={card?.mark ?? null} onCard={cards?.open}/>);
     prev = m;
   }
   return <div className="all-feed-box">

@@ -42,13 +42,13 @@ import { ApprovalElsewhere, ApprovalRows } from "./ApprovalRows";
 import { ApprovalsContext, useApprovalList } from "../approvalsLive";
 import type { Approval } from "../approvals";
 import "./areas.css";
-import type { AllRoom } from "../all/AllView";
+import type { AllRoom, FeedCards } from "../all/AllView";
 import { AllFocusSheet, type AllFocusState, type FocusLine, type FocusView } from "../all/AllFocus";
 import { AllEmpty, FrontDoor, type Door, type NewRoom, type Scope } from "../projects/FrontDoor";
 import { scopeForYou } from "../foryou/scope";
-import { ForYou } from "../foryou/ForYou";
+import { AreaCardList, CardPanel, ForYou, useCardBeside } from "../foryou/ForYou";
 import { useForYou } from "../foryou/useForYou";
-import type { Item as ForYouItem, Place } from "../foryou/forYouCore";
+import { areaCards, cardItems, cardMark, cardOfMessage, type CardView, type Item as ForYouItem, type Place } from "../foryou/forYouCore";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
 import { plainWords } from "../projects/live";
@@ -310,6 +310,16 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   // the room its footer names, exactly: a named room that isn't here is no room (the answer waits, owed), never another room
   const answerRoom = useCallback((item: ForYouItem) => askRoomOf({ room: item.replyRoom, node: item.node }, roomRefs, () => null), [roomRefs]);
   const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.all ?? tasks.tasks : null, placeOf: fyPlaceOf, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
+  // 0.3.2: the card open now (one panel, wherever its name was tapped: For you, a message in the stream, an area's cards), and beside the list or over it
+  const [cardOpen, setCardOpen] = useState<string | null>(null);
+  const openCard = useCallback((path: string) => setCardOpen(path), []);
+  const cardBeside = useCardBeside();
+  /** The stream's rooms by their place's path (set as the home draws): a message names a card of its own area. */
+  const roomPaths = useRef(new Map<string, string>());
+  const feedCards = useMemo<FeedCards>(() => ({ open: openCard, of: (m) => {
+    const c = cardOfMessage(fy.view, m, roomPaths.current.get(m.channel) ?? null);
+    return c ? { path: c.path, name: c.name, mark: cardMark(fy.view, c) } : null;
+  } }), [fy.view, openCard]);
   // r31: an ask is current because its task note says so (`asked_at` / `confirmed_at` within 3 days), resolved here before any row, count or dot shows it.
   const confirmNow = useMemo(() => Date.now(), [tasks.tasks, tasks.lastOk]); // eslint-disable-line react-hooks/exhaustive-deps
   const confirm = useMemo(() => ({ of: (t: Task): Resolved => confirmationOf(t, confirmNow) }), [confirmNow]);
@@ -511,14 +521,29 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     };
     const scope = scopePath ? scopeOf(scopePath) : null;
     scopeShown.current = !scopePath || !!scope || !data || !allRooms.length;
-    const all = allRooms.length ? { rooms: allRooms, onOpenAt: openRoomAt, scope, onScope: allPlace ? setScope : undefined, onOpenScope: (p: string) => openPlace(p) } : null;
+    roomPaths.current = new Map([...allRooms, ...(scope?.rooms ?? [])].flatMap((r) => (r.path ? [[r.id, r.path] as const] : [])));
+    const all = allRooms.length ? { rooms: allRooms, onOpenAt: openRoomAt, scope, onScope: allPlace ? setScope : undefined, onOpenScope: (p: string) => openPlace(p),
+      scopeCards: scope ? <AreaCardList compact name={scope.name} cards={areaCards(fy.view, scope.path)} onCard={openCard} /> : null, cards: feedCards } : null;
     // 0.3.0: For you is known once the tasks are read, fresh and whole
     const needsKnown = tasks.error || tasks.truncated || tasks.treeTruncated ? "failed" as const : !tasks.ready || tasks.savedAt ? "reading" as const : "known" as const;
     // an item's what opens its own sheet, in its own room (0.2.2's ask path); a private area's line opens that area's details
     const openItem = (it: ForYouItem) => { const t = tasks.all?.find((x) => x.id === it.id); openAsk({ id: it.id, room: (t ? roomOfAsk(t) : answerRoom(it))?.id ?? null, path: it.node }); };
     const forYou = <ForYou view={scope ? scopeForYou(fy.view, scope.path) : fy.view} scope={scope?.name ?? null}
       approvals={scope ? approvalsAll.list.filter((x) => scope.rooms.some((r) => r.id === x.channel)).length : approvalsAll.list.length} answer={fy.answer} retry={fy.retry} errors={fy.errors} busy={fy.busy} onOpenAsk={openItem}
-      onOpenPrivate={(x) => openPlace(x.areaPath ?? x.node, "details")} failed={needsKnown === "failed" ? tasks.refresh : null} reading={needsKnown === "reading"} />;
+      onOpenPrivate={(x) => openPlace(x.areaPath ?? x.node, "details")} failed={needsKnown === "failed" ? tasks.refresh : null} reading={needsKnown === "reading"} onCard={openCard} />;
+    // 0.3.2: the card. Where its answers land: the thread under the card's post (an open ask's reply_root), else its area's room; a private card's
+    // way on is its area's details (the asks are answered there, in its own words)
+    const cardThread = (c: CardView) => {
+      const closeOnPhone = () => { if (!cardBeside) setCardOpen(null); };
+      if (c.private) return c.areaNode ? { label: `Open ${c.area ?? "its area"}`, open: () => { setCardOpen(null); openPlace(c.areaNode!, "details"); } } : null;
+      const it = cardItems(fy.view, c).find((i) => i.replyRoot) ?? null;
+      const room = it ? answerRoom(it) : null;
+      if (it && room) return { label: `Open its thread in #${roomSlug(room.name)}`, open: () => { closeOnPhone(); openRoomAt(room.id, it.replyRoot, it.replyRoot); } };
+      return c.areaNode && allRooms.some((r) => r.path === c.areaNode) ? { label: `Open ${c.area ?? "its area"}`, open: () => { closeOnPhone(); openPlace(c.areaNode!); } } : null;
+    };
+    const cardNow = cardOpen ? fy.view.cards.get(cardOpen) ?? null : null;
+    const cardPanel = cardNow && <CardPanel card={cardNow} beside={cardBeside} onClose={() => setCardOpen(null)} onThread={cardThread(cardNow)}
+      p={{ view: fy.view, answer: fy.answer, retry: fy.retry, errors: fy.errors, busy: fy.busy, onOpenAsk: (it) => { if (!cardBeside) setCardOpen(null); openItem(it); } }} />;
     const focusRoomOpen = focus && !focus.leaving ? focus.room : null;
     // (the drawer is the owner's own home, as the places page was: every approval waiting, a private room's too; All's stream keeps those out)
     const approvalRows = <ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" />;
@@ -532,7 +557,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
         pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.length > 0 ? approvalRows : null} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>;
     // the home's Unfiled sessions open in place over it
-    if (!allPlace) return <div className="areas-home tree-home-wrap">{home}{sheetView}{projectSheet}</div>;
+    if (!allPlace) return <div className="areas-home tree-home-wrap">{home}{sheetView}{projectSheet}{cardPanel}</div>;
     // T-335: All with nothing read yet, or no area with a room of its own: it says which (the focus still comes up over it)
     // 0.2: once the places are read, the home is there even with no area room yet (its places, open)
     // (while the rooms list is still coming, the home is there with its places open: a door can be tapped on a slow cold launch)
@@ -559,6 +584,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
         : focusView === "app" ? (app ? <div className="fx-app">{app.bar}{app.main}</div> : <p className="cp-none">This place has no app.</p>)
         : <div className="fx">
           <div className="cp fx-cp">{node && companionProps ? <CompanionBody {...companionProps} fit={false} /> : <p className="cp-lede cp-note">{UNFILED}</p>}</div>
+          {/* 0.3.2: the place's cards (its area's, or its project's own): active first, resting folded; a tap opens the card */}
+          {node && !isRoot && <div className="fx-sec fx-cards"><AreaCardList name={node.name} cards={areaCards(fy.view, node.path)} onCard={openCard} /></div>}
           {borrowed && <p className="fx-context">{node!.name} has no room of its own yet: it talks in {borrowed}.</p>}
           {strip && <div className="fx-strip">{strip}</div>}
           {inside.length > 0 && <section className="fx-sec" aria-label={`Inside ${node!.name}`}><h3 className="cp-h">Inside {node!.name}</h3>
@@ -588,6 +615,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     return <ApprovalsContext.Provider value={{ ...approvalsAll, open: openApproval }}><div className="areas-home tree-home-wrap all-surface" data-focus={focus ? (focus.leaving ? "leaving" : "open") : undefined}>
       <div className="all-behind" inert={!!focus && !focus.leaving}>{behind}</div>
       {focus ? withApp(sheet) : <>{sheetView}{projectSheet}</>}
+      {cardPanel}
     </div></ApprovalsContext.Provider>;
   }
 

@@ -148,7 +148,7 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
     }
     const room = o.roomOf(item);
     const entry: Entry = { id: item.id, what: item.what, answer: said, at: Date.now(), room: room?.name.replace(/^#/, "") ?? item.replyRoom, post: room ? "sending" : "none",
-      channel: room?.id ?? null, root: item.replyRoot, body: answerBody(item, said) };
+      channel: room?.id ?? null, root: item.replyRoot, body: answerBody(item, said), card: item.where.cardPath };
     setEntries((list) => keep([...list.filter((e) => e.id !== item.id), entry]));
     await post(entry);
     o.refresh();
