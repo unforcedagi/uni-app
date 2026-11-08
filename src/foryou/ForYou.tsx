@@ -50,6 +50,8 @@ type Talk = { state: "idle" } | { state: "listening" } | { state: "hearing" } | 
 function HoldToTalk({ item, onSend, disabled }: { item: Item; onSend: (text: string) => void; disabled: boolean }) {
   const [talk, setTalk] = useState<Talk>({ state: "idle" });
   const live = useRef(true);
+  /** Let go before the microphone opened (a quick tap): it stops as soon as it starts. */
+  const released = useRef(false);
   useEffect(() => () => { live.current = false; }, []);
   const rec = useRecorder(async (blob, mime) => {
     if (!blob.size) { if (live.current) setTalk({ state: "failed", why: "Nothing was heard. Hold, speak, then let go." }); return; }
@@ -62,11 +64,15 @@ function HoldToTalk({ item, onSend, disabled }: { item: Item; onSend: (text: str
   const down = async (e: React.PointerEvent) => {
     e.preventDefault();
     if (disabled || rec.busy) return;
+    released.current = false;
     setTalk({ state: "listening" });
-    try { if (!(await rec.start(undefined))) setTalk({ state: "idle" }); }
+    try {
+      if (!(await rec.start(undefined))) { setTalk({ state: "idle" }); return; }
+      if (released.current) rec.stop();
+    }
     catch (err) { setTalk({ state: "failed", why: `Microphone unavailable: ${String(err).slice(0, 80)}` }); }
   };
-  const up = () => { if (rec.recording) rec.stop(); };
+  const up = () => { released.current = true; if (rec.recording) rec.stop(); };
   const mic = <button type="button" className="fy-mic" aria-label="Hold to talk" title="Hold to talk" data-on={talk.state === "listening" || undefined} disabled={disabled}
     onPointerDown={(e) => void down(e)} onPointerUp={up} onPointerCancel={up} onPointerLeave={up} onContextMenu={(e) => e.preventDefault()}
     onKeyDown={(e) => { if ((e.key === " " || e.key === "Enter") && !e.repeat && !rec.busy) { e.preventDefault(); void down(e as unknown as React.PointerEvent); } }}

@@ -201,6 +201,9 @@ check("answered on this device: gone from the bands at once, listed today only",
   const v = view(asks, [], { answered: [{ id: "a", what: "One", answer: "Done", at: NOW - H, room: "north-field", post: "sent" }, { id: "z", what: "Yesterday", answer: "x", at: NOW - 2 * D, room: null, post: "sent" }] });
   assert.deepEqual(v.yours.map((i) => i.id), ["b"]);
   assert.deepEqual(v.answered.map((a) => a.id), ["a"]);
+  // a post still owed to its room keeps its line (and Retry) past midnight
+  const owed = view(asks, [], { answered: [{ id: "y", what: "Late", answer: "x", at: NOW - 20 * H, room: "north-field", post: "failed", error: "relay down" }] });
+  assert.deepEqual(owed.answered.map((a) => a.id), ["y"]);
 });
 
 check("a tag: task read keeps only tasks (decision is becoming a child of task); a task + decision note is a task closed by done", () => {

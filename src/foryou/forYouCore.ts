@@ -162,7 +162,8 @@ export function forYou(input: ForYouInput): ForYouView {
   const cards = new Map<string, CardView>();
   for (const n of input.cards) { const c = cardView(n); if (c && c.status !== "retired") cards.set(c.path, c); }
   const today = localDay(now);
-  const answered = (input.answered ?? []).filter((a) => localDay(a.at) === today);
+  // today's, and any still owed to its room (a failed post keeps its Retry past midnight)
+  const answered = (input.answered ?? []).filter((a) => localDay(a.at) === today || a.post === "failed" || a.post === "sending");
   const gone = new Set((input.answered ?? []).map((a) => a.id));
 
   const seen = new Set<string>();
@@ -207,8 +208,9 @@ export function forYou(input: ForYouInput): ForYouView {
     const replyRoom = (s(m.reply_room) ?? s(m.room) ?? place.room)?.replace(/^#/, "") ?? null;
     const replyRoot = s(m.reply_root);
     const cardName = card?.name ?? (cardPath ? leaf(cardPath) : null);
+    // (the label and the path from one source: the card's area when it names one, else the node's)
     const area = card?.area ?? place.area;
-    const areaPath = place.areaPath ?? card?.areaNode ?? null;
+    const areaPath = card?.area ? card.areaNode ?? place.areaPath ?? null : place.areaPath ?? null;
     const where = cardName ? { label: [cardName, area].filter(Boolean).join(" · "), card: cardName, cardPath, area, areaPath } : { label: area ?? "Uni", card: null, cardPath: null, area, areaPath };
     const footer = replyRoom ? `Goes to #${replyRoom}${replyRoot ? (cardName ? `, under ${cardName}'s post` : ", in its thread") : ""}` : "No room to send it to";
     const choices = kind === "choose" || kind === "decision" ? options.filter((o) => o !== defValue) : [];

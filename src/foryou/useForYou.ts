@@ -24,6 +24,10 @@ const lookedKey = (owner: string) => `uni.foryou.looked.v1:${owner}`;
 const answeredKey = (owner: string) => `uni.foryou.answered.v1:${owner}`;
 const read = <T,>(key: string, fallback: T): T => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) as T : fallback; } catch { return fallback; } };
 const write = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* this session only */ } };
+/** An answer still owed to its room is kept until it goes (never dropped); a sent one for a day. A post cut off mid-send (the app
+ *  closed) comes back as failed, with Retry. */
+const kept = (list: Entry[]): Entry[] => list.filter((e) => e.post === "failed" || e.post === "sending" || Date.now() - e.at < DAY)
+  .map((e) => (e.post === "sending" ? { ...e, post: "failed" as const, error: "the app closed before it went" } : e));
 const words = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : "it didn't go").replace(/^Error:\s*/, "").slice(0, 140);
 
 /** This launch's "last looked", per key and vault. */
@@ -60,10 +64,10 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
   // when he last looked: the lines since then are Moving. Read once a launch (a redraw of the home is the same look); the app going out
   // of sight ends this look, and the next launch counts from there
   const since = sinceOf(owner);
-  const [entries, setEntries] = useState<Entry[]>(() => read<Entry[]>(answeredKey(owner), []).filter((e) => Date.now() - e.at < DAY));
+  const [entries, setEntries] = useState<Entry[]>(() => kept(read<Entry[]>(answeredKey(owner), [])));
   // the key arrives after the first draw (or another vault is chosen): that owner's answers, kept on this device
   const ownerRef = useRef(owner);
-  useEffect(() => { if (ownerRef.current === owner) return; ownerRef.current = owner; setEntries(read<Entry[]>(answeredKey(owner), []).filter((e) => Date.now() - e.at < DAY)); }, [owner]);
+  useEffect(() => { if (ownerRef.current === owner) return; ownerRef.current = owner; setEntries(kept(read<Entry[]>(answeredKey(owner), []))); }, [owner]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const now = Date.now();
@@ -90,7 +94,9 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
     window.addEventListener("pagehide", mark);
     return () => { document.removeEventListener("visibilitychange", onHide); window.removeEventListener("pagehide", mark); };
   }, [enabled, owner]);
-  const keep = (next: Entry[]) => { write(answeredKey(ownerRef.current), next.filter((e) => Date.now() - e.at < DAY)); return next; };
+  const keep = (next: Entry[]) => { write(answeredKey(ownerRef.current), next.filter((e) => e.post !== "sent" || Date.now() - e.at < DAY)); return next; };
+  // one answer at a time per ask (a double tap is one answer): set before the first await, not on the next draw
+  const inFlight = useRef(new Set<string>());
   const change = (id: string, f: (e: Entry) => Entry) => setEntries((list) => keep(list.map((e) => (e.id === id ? f(e) : e))));
 
   const asks = useMemo(() => (o.tasks ?? []).map(noteOf), [o.tasks]);
@@ -107,7 +113,8 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
   /** Answer an ask: the compare-and-set first; only once it is written does the room hear it. */
   const answer = useCallback(async (item: Item, text: string) => {
     const said = text.trim();
-    if (!said || busy.has(item.id)) return;
+    if (!said || inFlight.current.has(item.id)) return;
+    inFlight.current.add(item.id);
     setBusy((b) => new Set(b).add(item.id));
     setErrors(({ [item.id]: _, ...rest }) => rest);
     const me = activeProfile().me, at = new Date().toISOString();
@@ -115,6 +122,7 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
       ? await vaultTasks.decide(item.id, said, me, item.updatedAt ?? "", at)
       : await vaultTasks.answer(item.id, item.state as Task["state"], item.updatedAt ?? "", answerMeta(item, said, me, at));
     setBusy((b) => { const n = new Set(b); n.delete(item.id); return n; });
+    inFlight.current.delete(item.id);
     if (!r.ok) {
       setErrors((x) => ({ ...x, [item.id]: r.kind === "conflict" ? "It changed elsewhere. Showing the latest." : `Couldn't answer: ${words(r.message)}` }));
       o.refresh();
@@ -127,7 +135,7 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
     if (room) await post(entry);
     o.refresh();
     void readCards();
-  }, [busy, o.roomOf, o.refresh, post, readCards]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [o.roomOf, o.refresh, post, readCards]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const retry = useCallback((id: string) => { const e = entries.find((x) => x.id === id); if (e) void post(e); }, [entries, post]);
   return { view, answer, retry, errors, busy, cardsFailed };

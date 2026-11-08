@@ -2127,7 +2127,7 @@ pub(crate) mod surface_tests {
     #[tokio::test]
     async fn task_queries_and_transitions_send_the_vault_calls() {
         crate::init_crypto();
-        let meta = json!({"node": {"in": ["Areas/Techne", "n1"]}, "state": {"in": ["open", "doing", "waiting"]}});
+        let meta = json!({"node": {"in": ["Areas/Kiln Studio", "n1"]}, "state": {"in": ["open", "doing", "waiting"]}});
         let (client, handle) = server(vec![
             (
                 "query-notes",
@@ -2296,24 +2296,24 @@ pub(crate) mod surface_tests {
         let mut nodes = base.clone();
         nodes["tag"] = json!("node");
         nodes["limit"] = json!(200);
-        nodes["near"] = json!({"note_id":"Areas/Techne","relationship":"parent","direction":"inbound","depth":5});
+        nodes["near"] = json!({"note_id":"Areas/Kiln Studio","relationship":"parent","direction":"inbound","depth":5});
         let mut tasks = base.clone();
         tasks["tag"] = json!("task");
         tasks["limit"] = json!(200);
         tasks["expand"] = json!("exact");
         tasks["metadata"] = json!({"state":{"in":["open","doing"]}});
-        tasks["near"] = json!({"note_id":"Areas/Techne","relationship":"parent","direction":"inbound","depth":5,
+        tasks["near"] = json!({"note_id":"Areas/Kiln Studio","relationship":"parent","direction":"inbound","depth":5,
             "then":{"relationship":"node","direction":"inbound"}});
         let (client, handle) = server(vec![
-            ("query-notes", nodes, json!({"notes":[{"id":"n1","path":"Areas/Techne"}]})),
+            ("query-notes", nodes, json!({"notes":[{"id":"n1","path":"Areas/Kiln Studio"}]})),
             ("query-notes", tasks, json!({"notes":[{"id":"t1","path":"Tasks/T-1"}]})),
         ]);
-        let n = client.query_subtree_nodes("scope-test", "Areas/Techne").await.unwrap();
+        let n = client.query_subtree_nodes("scope-test", "Areas/Kiln Studio").await.unwrap();
         assert_eq!(n.len(), 1);
         let st = vec!["open".to_string(), "doing".to_string()];
-        let t = client.query_subtree_tasks("scope-test", "task", "Areas/Techne", &st, 500).await.unwrap();
+        let t = client.query_subtree_tasks("scope-test", "task", "Areas/Kiln Studio", &st, 500).await.unwrap();
         assert_eq!(t.len(), 1);
-        assert!(client.query_subtree_tasks("scope-test", "journal", "Areas/Techne", &st, 5).await.is_err());
+        assert!(client.query_subtree_tasks("scope-test", "journal", "Areas/Kiln Studio", &st, 5).await.is_err());
         assert!(client.query_subtree_tasks("scope-test", "task", "../x", &st, 5).await.is_err());
         assert!(client.query_subtree_tasks("scope-test", "task", "A\nB", &st, 5).await.is_err());
         assert!(client.query_subtree_tasks("scope-test", "task", "A", &["x y".to_string()], 5).await.is_err());
@@ -2322,7 +2322,7 @@ pub(crate) mod surface_tests {
     }
 
     fn meta_of() -> Value {
-        json!({"node": {"in": ["Areas/Techne", "n1"]}, "state": {"in": ["open", "doing", "waiting"]}})
+        json!({"node": {"in": ["Areas/Kiln Studio", "n1"]}, "state": {"in": ["open", "doing", "waiting"]}})
     }
 
     #[tokio::test]
