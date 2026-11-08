@@ -116,13 +116,15 @@ const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).
 test('01-home-needs-collapsed', async ({ page }) => {
   await projects(page);
   await expect(page.locator('.fd-pull')).toHaveAttribute('aria-label', /One thing needs you\./);
-  await openForYou(page);
+  // 0.3.1: For you is folded to its line on the home
+  await expect(page.getByRole('region', { name: 'For you' }).locator('.fy-toggle')).toHaveAttribute('aria-expanded', 'false');
   await snap(page, '01-home-needs-collapsed');
 });
 
 test('02-home-needs-open', async ({ page }) => {
   await projects(page);
-  // 0.3.0: what needs you is For you, at the top of the home (not in the drawer)
+  // 0.3.0: what needs you is For you, at the top of the home (not in the drawer); 0.3.1: opened from its line
+  await openForYou(page);
   await expect(page.getByRole('region', { name: 'For you' }).locator('.fy-what', { hasText: /Choose the photo/ })).toBeVisible();
   await snap(page, '02-home-needs-open');
 });
