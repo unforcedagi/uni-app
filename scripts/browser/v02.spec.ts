@@ -32,10 +32,10 @@ test.describe('one home', () => {
     await expect(pull).toHaveAttribute('aria-label', /(thing|things) needs? you\./);
     await expect(page.getByRole('region', { name: 'For you' }).locator('.fy-toggle')).toHaveText(/^\d+ for you/);
     await expect(page.locator('.fd-door')).toHaveCount(0);
-    // 0.3.0: For you is the top of the home, over the stream
+    // 0.3.0: For you is the top of the home, over the stream (0.3.1: folded to its line; the home is measured as he first meets it)
+    await check(page, 'home');
     await openForYou(page);
     await expect(page.getByRole('region', { name: 'For you' })).toContainText('Find jars for the honey');
-    await check(page, 'home');
     await openHead(page);
     await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0);
     await expect(page.locator('.fd-door[data-path="Areas/Kiln Studio"]')).toBeVisible();

@@ -1,5 +1,5 @@
 // T-301/T-302: the front door (0.2: the home, All's stream, with these doors in the drawer under its head; a vault without the Uni
-// glue keeps them as its places page). Every area's room, each with one line on where it stands. Calm: a name, a line, when
+// glue keeps them as its places page; 0.3.1: the stream scoped to All or one area's rooms). Every area's room, each with one line on where it stands. Calm: a name, a line, when
 // the room last talked, and a small mark when sessions are working there. No ids. 0.3.0: For you (src/foryou) is the top of the home, above
 // the stream; the separate Needs-you list that sat in the drawer is gone. Under the rooms, one quiet line on the Claude accounts.
 // T-304: the working mark counts the room's Uni at work on your message too, not only Claude Code sessions.
@@ -212,7 +212,8 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
   const health = (at || ws.partial.length > 0) ? <p className="fd-status" role="status">{[at && `${ws.error ? "Couldn't refresh · " : ""}As of ${at}`, ...ws.partial].filter(Boolean).join(" · ")}</p> : null;
   if (view === "all") {
     // 0.2 one home: the day in one sentence is the head; one tap pulls down the approvals waiting, To post and every place. 0.3.0: For you
-    // is the top of the home, under the head and over the stream (the retired Aaron/For you note is never read). No rooms with an area yet: the places, open.
+    // is the top of the home, under the head and over the stream (the retired Aaron/For you note is never read). 0.3.1: For you folds to its line,
+    // which is the day's sentence now (the pull keeps it as its label); the stream has a scope row (All, each area). No rooms with an area yet: the places, open.
     const open = pulled || !all;
     return <div className="fd fd-all fd-home" data-place="front-door" data-view="all" data-pulled={open ? "true" : undefined}>
       <header className="fd-head fd-homehead" data-moving={moving > 0 ? "true" : undefined}>

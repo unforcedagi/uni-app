@@ -12,7 +12,9 @@ export const rail = (page: Page) => page.getByRole('navigation', { name: 'Main n
  *  that stays under 0.1.103's. The old home's numbers are its places page; All was a second screen (13 / 21 / 19) and is now the same one. */
 export const TARGETS: Record<string, { phone: number; daylight: number; desktop: number }> = {
   // 0.3.0: For you is the top of the home: each item in sight adds what it asks (its sheet), its one tap and hold to talk (3 a visible item)
-  'home': { phone: 15, daylight: 20, desktop: 21 }, // 0.1.103 11 / 20 / 18 → 0.2 11 / 14 / 17 → 0.3 15 / 20 / 21
+  // 0.3.1: For you folded to its line (its items' controls are gone until it is opened); what is added is the stream itself (more of it shows,
+  // and each run's room label is a control) and the scope row's chips (All and each area: phone 4 in sight, Daylight and desktop 6)
+  'home': { phone: 17, daylight: 22, desktop: 25 }, // 0.1.103 11 / 20 / 18 → 0.2 11 / 14 / 17 → 0.3 15 / 20 / 21 → 0.3.1 17 / 22 / 25 (the labels in sight vary by one with the feed's place)
   'home-open': { phone: 15, daylight: 18, desktop: 20 }, // 0.1.103 14 / 23 / 21 → 0.2 15 / 17 / 19
   'room': { phone: 16, daylight: 16, desktop: 22 }, // 0.1.103 18 / 23 / 23 → 0.2 15 / 15 / 21
   'room-details': { phone: 9, daylight: 10, desktop: 14 }, // 0.1.103 10 / 15 / 15 → 0.2 9 / 9 / 13

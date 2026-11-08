@@ -346,6 +346,8 @@ const OPEN_MS = 200;
 const READ_HOLD_MS = OPEN_MS + 700;
 /** What a message scrolled into sight keeps clear at the top: the band that names the room (all.css says the same in scroll-margin). */
 const BAND_CLEAR = 52;
+/** The reading band's own height (all.css .all-reading-band). */
+const READ_BAND = 46;
 
 const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named, targeted, open, onOpen, onTap, onRead }: { m: Message; place: string; address: string; mine: boolean; me: string | null;
   /** The first message of a run from one room: it carries the room's label. */ run: boolean; /** Says who and when (a new author, or a pause). */ named: boolean;
@@ -462,8 +464,9 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
     if (!el) return;
     const rows = el.querySelectorAll<HTMLElement>("article.all-msg[data-ref]");
     let lo = 0, hi = rows.length;
-    // the first row still showing at the top
-    while (lo < hi) { const mid = (lo + hi) >> 1, r = rows[mid]; if (r.offsetTop + r.offsetHeight > el.scrollTop + 4) hi = mid; else lo = mid + 1; }
+    // the first row still showing at the top, under where the band would sit (0.3.1: a row with only a sliver left under the band is gone,
+    // so the band never lies over the next row's own label)
+    while (lo < hi) { const mid = (lo + hi) >> 1, r = rows[mid]; if (r.offsetTop + r.offsetHeight > el.scrollTop + READ_BAND) hi = mid; else lo = mid + 1; }
     const row = rows[lo];
     // that row's own label, on screen: it says it itself
     const own = row?.querySelector<HTMLElement>(".all-place");
