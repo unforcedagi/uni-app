@@ -4,7 +4,7 @@
 // Run: SIMPLE_TEST_PORT=5711 npx playwright test --config playwright.simple.config.ts
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, focusSheet, leaveFrontDoor, openAreaPage, openAreasHome, openDetails, showTree } from './areasFixture';
+import { bootAreas, focusSheet, leaveFrontDoor, openAreaPage, openAreasHome, openDetails, showTree, openForYou } from './areasFixture';
 import { openRailMore, railGo } from './railGo';
 
 const SHOTS = 'scripts/browser/__shots__/simple';
@@ -2859,6 +2859,7 @@ test.describe('r21', () => {
     // T-335: what needs you across the areas is on Uni's home: a private area by its place only
     // (0.3.0: in For you, at the top of the home)
     await homeF(page);
+    await openForYou(page);
     await expect(page.getByRole('region', { name: 'For you' }).locator('.fy-private', { hasText: 'Sanctum: 1 thing for you' })).toBeVisible({ timeout: 15_000 });
     await page.waitForTimeout(6500);
     expect(await page.evaluate(() => (window as any).__sawPrivate)).toBe(false);

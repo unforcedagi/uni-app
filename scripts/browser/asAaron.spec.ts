@@ -2,7 +2,7 @@
 // Made-up data only: the fixtures are the tour's.
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, openPlaces, type BootOpts } from './areasFixture';
+import { bootAreas, openPlaces, type BootOpts, openForYou } from './areasFixture';
 import { installNotePaneFixture } from './notePaneFixture';
 import * as mailMock from './mailMock';
 import * as calMock from './calMock';
@@ -43,6 +43,7 @@ const TASKS: BootOpts = { briefs: true, tree: true, tasks: true, atlas: true, st
  *  item: its room in focus (T-335), with the ask's sheet over it (0.2.2). */
 async function openAskFromHome(page: Page) {
   await page.locator('[data-place="front-door"]').first().waitFor();
+  await openForYou(page);
   await page.getByRole('region', { name: 'For you' }).locator('.fy-what').first().click();
   await expect(focus(page)).toBeVisible();
 }
@@ -389,7 +390,9 @@ test('Search: nothing found is one line and a next step; a found note\'s folder 
 // ---------------------------------------------------------------- the home
 test('the home: a quiet day has its own line, the places sit on one thread, and All explains only what it guessed', async ({ page }) => {
   await glow(page);
-  const quiet = await page.locator('.fd-statement span').last().textContent();
+  // 0.3.1: For you's head is the day's line on the home: nothing for you, then the day's quiet line
+  await expect(page.locator('.fy-toggle')).toHaveText(/^Nothing for you · /);
+  const quiet = (await page.locator('.fy-toggle .fy-sum > span').last().textContent())!.replace(/^ · /, '');
   expect(['All quiet.', 'The rooms are resting.', 'The mycelium has it.', 'Go look at a tree.', "Nothing's on fire.", 'Breathe out.', 'The garden keeps itself today.']).toContain(quiet);
   // 0.2 one home: the thread runs under the day's sentence; its knots are the drawer's doors, one each
   await openPlaces(page);
@@ -408,7 +411,8 @@ test('the home never says less than the cards beside it: an approval waiting is 
   await page.evaluate(([c, n, b]) => (window as any).__arrive(c, n, b), ['ch-garden', 'Uni', PROMPTS.prompts.two_answers_30min] as const);
   await openPlaces(page);
   await expect(page.locator('#fd-drawer .cp-approval')).toBeVisible();
-  await expect(page.locator('.fd-statement')).not.toContainText('Nothing needs you');
+  await expect(page.locator('.fy-toggle')).not.toContainText('Nothing for you');
+  await expect(page.locator('.fy-toggle')).toContainText('1 waiting for your OK');
 });
 
 test('a re-read that fails after a good one doesn\'t leave the home saying nothing needs you (code review)', async ({ page }) => {
@@ -416,22 +420,22 @@ test('a re-read that fails after a good one doesn\'t leave the home saying nothi
   await page.addInitScript(() => { (window as any).__extraInvoke = async (cmd: string, a: any) => { if (cmd.startsWith('vault_query') && ['task', 'decision'].includes(a.tag) && (window as any).__failTasks) throw new Error('the vault did not answer'); if (cmd.startsWith('vault_query') && ['task', 'decision'].includes(a.tag)) return []; return undefined; }; });
   await bootAreas(page, 'seed', { tree: true, tasks: true, uniMember: true });
   await page.locator('[data-place="front-door"]').waitFor();
-  await expect(page.locator('.fd-statement')).toContainText('Nothing needs you');
+  await expect(page.locator('.fy-toggle')).toContainText('Nothing for you');
   await page.evaluate(() => { (window as any).__failTasks = true; document.dispatchEvent(new Event('visibilitychange')); });
-  await expect(page.locator('.fd-statement')).toContainText("Couldn't check what needs you.", { timeout: 80_000 });
+  await expect(page.locator('.fy-toggle')).toContainText("Couldn't check what needs you", { timeout: 80_000 });
 });
 
 test('a failed read of what needs you says so and offers another try, instead of "Nothing needs you" (review round 3)', async ({ page }) => {
   await page.addInitScript(() => { (window as any).__extraInvoke = async (cmd: string, a: any) => { if (cmd.startsWith('vault_query') && a.tag === 'task' && (window as any).__failTasks !== false) throw new Error('the vault did not answer'); return undefined; }; });
   await bootAreas(page, 'seed', { tree: true, tasks: true, uniMember: true });
   await page.locator('[data-place="front-door"]').waitFor();
-  await expect(page.locator('.fd-statement')).toContainText("Couldn't check what needs you.");
-  await expect(page.locator('.fd-statement')).not.toContainText('Nothing needs you');
+  await expect(page.locator('.fy-toggle')).toContainText("Couldn't check what needs you");
+  await expect(page.locator('.fy-toggle')).not.toContainText('Nothing for you');
   await page.evaluate(() => { (window as any).__failTasks = false; });
   // 0.2: the other try is in the home's drawer, at its top
   await openPlaces(page);
   await page.locator('#fd-drawer').getByRole('button', { name: 'Try again' }).click();
-  await expect(page.locator('.fd-statement')).not.toContainText("Couldn't check");
+  await expect(page.locator('.fy-toggle')).not.toContainText("Couldn't check");
 });
 
 // ---------------------------------------------------------------- Mail, Calendar, Messages

@@ -3,7 +3,7 @@
 // the room's Uni acts on. The native side is projectsFixture.ts (a made-up vault and rooms in the page; nothing leaves it).
 import { expect, test, type Page } from '@playwright/test';
 import { bootProjects } from './projectsFixture.ts';
-import { focusSheet, openDetails, openPlaces } from './areasFixture.ts';
+import { focusSheet, openDetails, openPlaces, openForYou } from './areasFixture.ts';
 import { railGo } from './railGo';
 
 const shot = (page: Page, name: string) => page.screenshot({ path: `__shots__/t302/${test.info().project.name}-${name}.png` });
@@ -66,7 +66,9 @@ test('0.3.0: what needs you is For you, at the top of the home (the drawer keeps
   await bootProjects(page);
   await page.goto('/');
   // the head's one sentence counts it; For you holds it, over the stream, with where it is (no card: its area) and no ids
-  await expect(page.locator('[data-place="front-door"] .fd-pull')).toContainText('One thing needs you.');
+  await expect(page.locator('[data-place="front-door"] .fd-pull')).toHaveAttribute('aria-label', /One thing needs you\./);
+  await expect(page.getByRole('region', { name: 'For you' }).locator('.fy-toggle')).toHaveText(/^1 for you/);
+  await openForYou(page);
   const fy = page.getByRole('region', { name: 'For you' });
   const item = fy.locator('article.fy-item', { hasText: 'Choose the photo for the about page' });
   await expect(item.locator('.fy-where')).toHaveText('Workshop');

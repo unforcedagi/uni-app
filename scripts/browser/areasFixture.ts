@@ -941,3 +941,14 @@ export async function openAreaPage(page: Page, name: string, opts: { app?: boole
   else await focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click();
 }
 
+
+/** 0.3.1: For you is folded to its head on the home; this opens its bands (nothing to do when they are open, or when there is no For you). */
+export async function openForYou(page: Page) {
+  const toggle = page.getByRole('region', { name: 'For you' }).locator('.fy-toggle');
+  await toggle.first().waitFor({ timeout: 8000 });
+  // the places' drawer lies over For you: fold it first, as a person would
+  const pull = page.locator('[data-place="front-door"] .fd-pull[aria-expanded="true"]');
+  if (await pull.count() && await pull.first().isEnabled()) { await pull.first().click(); await expect(page.locator('#fd-drawer')).toHaveCount(0); }
+  if ((await toggle.first().getAttribute('aria-expanded')) !== 'true') await toggle.first().click();
+  await expect(toggle.first()).toHaveAttribute('aria-expanded', 'true');
+}

@@ -4,7 +4,7 @@
 // (The "Where we are" census, its Now/Soon/Someday buckets and the per-row priority selects were deleted in r13.)
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, focusSheet, openAreaPage, openAreasHome, openDetails } from './areasFixture';
+import { bootAreas, focusSheet, openAreaPage, openAreasHome, openDetails, openForYou } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/roomsnav';
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
@@ -128,6 +128,7 @@ test.describe('rooms nav', () => {
     await expect(drawer.locator('.fd-door[data-path="Areas/Sanctum"]')).toBeVisible();
     // the private area's items are counted there, by its place only (once the tasks are read)
     // (0.3.0: in For you at the top of the home, not in the drawer)
+    await openForYou(page);
     await expect(home.getByRole('region', { name: 'For you' }).locator('.fy-private', { hasText: 'Sanctum: 1 thing for you' })).toBeVisible();
     await expect(home).not.toContainText(/T-3[12]|Sit twenty/);
     // r14: the area itself, opened by Aaron: its items are ordinary rows, with their titles

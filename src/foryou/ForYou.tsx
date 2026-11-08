@@ -7,6 +7,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRecorder } from "../recorder";
 import { transcribe } from "./useForYou";
 import type { Answered, CardView, ForYouView, Item, MovingLine, PrivateLine } from "./forYouCore";
+import { quietLine } from "../projects/FrontDoor";
+import { headWords } from "./scope";
 import "./foryou.css";
 
 export type ForYouProps = {
@@ -167,22 +169,46 @@ function Band({ name, n, children }: { name: string; n?: ReactNode; children: Re
   return <section className="fy-band" aria-label={name}><h2>{name}{n !== undefined && <span className="fy-n">{n}</span>}</h2>{children}</section>;
 }
 
-export function ForYou(p: ForYouProps) {
+/** Open or folded, kept for the session: a redraw of the home (a key arriving, a scope change) leaves it as he left it; a fresh launch opens folded. */
+const openMemory = { open: false };
+
+export function ForYou(p: ForYouProps & { /** The head says this place's name: For you is scoped to it. */ scope?: string | null;
+  /** Approvals waiting for his OK (shown over the home): the head counts them, so it never says "Nothing" beside one. */ approvals?: number }) {
   const { view } = p;
   const [more, setMore] = useState(false);
+  const [open, setOpenState] = useState(openMemory.open);
+  const setOpen = (v: boolean) => { openMemory.open = v; setOpenState(v); };
   const [cardOpen, setCardOpen] = useState<string | null>(null);
   const now = Date.now();
   const card = cardOpen ? view.cards.get(cardOpen) ?? null : null;
   const all = [...view.yours, ...view.more, ...view.look];
   const yours = more ? [...view.yours, ...view.more] : view.yours;
   const nothing = !view.count && !view.look.length;
-  return <section className="fy" aria-label="For you">
+  const day = Math.floor((now - new Date(now).getTimezoneOffset() * 60_000) / 86_400_000);
+  const head = headWords(view, { failed: !!p.failed, reading: !!p.reading, approvals: p.approvals ?? 0, quiet: quietLine(day) });
+  const first = view.yours[0] ?? view.look[0] ?? null;
+  // an answer whose post didn't go keeps its Retry in sight, folded or not
+  const owed = view.answered.filter((a) => a.post === "failed" || a.post === "none");
+  return <section className="fy" aria-label="For you" data-open={open || undefined}>
+    {/* folded: one line of counts and the first ask; a tap opens the bands. Calm at first glance, the stream keeps the screen. */}
+    <div className="fy-top">
+      <button type="button" className="fy-toggle" aria-expanded={open} aria-controls={open ? "fy-bands" : undefined} onClick={() => setOpen(!open)}
+        aria-label={`${[head.lead, ...head.rest].join(", ")}${p.scope ? ` in ${p.scope}` : ""}. ${open ? "Fold" : "Open"} For you`}>
+        <span className="fy-sum" aria-hidden="true"><b>{head.lead}</b>{head.rest.map((r) => <span key={r}> · {r}</span>)}</span>
+        <i className="ps-chev" aria-hidden="true" />
+      </button>
+      {p.failed && head.lead.startsWith("Couldn") && <button type="button" className="fy-link-btn fy-retry" onClick={p.failed}>Try again</button>}
+    </div>
+    {!open && first && <button type="button" className="fy-first" data-id={first.id} onClick={() => setOpen(true)} aria-label={`${first.what}, ${first.where.label}. Open For you`}>
+      <Mark kind={first.band} /><span className="fy-first-t">{first.what}</span><span className="fy-first-w">{first.where.label}</span></button>}
+    {!open && owed.length > 0 && <ul className="fy-list fy-owed">{owed.map((a) => <DoneLine key={a.id} a={a} retry={p.retry} />)}</ul>}
+    {open && <div id="fy-bands" className="fy-bands">
     {/* what he just answered, first: where it went, and a post that didn't go with its Retry, in sight where he tapped */}
     {view.answered.length > 0 && <Band name="Answered today"><ul className="fy-list">{view.answered.map((a) => <DoneLine key={a.id} a={a} retry={p.retry} />)}</ul></Band>}
     <Band name="Yours" n={view.count || undefined}>
       {p.failed && !view.count ? <p className="fy-none" role="status">Couldn't check what's yours. <button type="button" className="fy-link-btn" onClick={p.failed}>Try again</button></p>
         : p.reading && !view.count ? <p className="fy-none" role="status">Looking for what's yours…</p>
-        : nothing ? <p className="fy-none">Nothing for you. The rooms have it.</p> : null}
+        : nothing ? <p className="fy-none">Nothing for you{p.scope ? ` in ${p.scope}` : ""}. The rooms have it.</p> : null}
       {yours.map((i) => <ItemView key={i.id} item={i} p={p} onCard={setCardOpen} />)}
       {view.privates.map((x) => <button key={x.area} type="button" className="fy-private" onClick={() => p.onOpenPrivate?.(x)}><Mark kind="yours" />{x.area}: {x.count} thing{x.count === 1 ? "" : "s"} for you ›</button>)}
       {view.more.length > 0 && !more && <button type="button" className="fy-more" onClick={() => setMore(true)}>{view.more.length} more</button>}
@@ -194,6 +220,7 @@ export function ForYou(p: ForYouProps) {
         {view.quiet.line && <li className="fy-quiet"><Mark kind="rest" />{view.quiet.line}</li>}
       </ul>
     </Band>}
+    </div>}
     {card && <CardSheet card={card} items={all.filter((i) => i.where.cardPath === card.path)} p={p} onClose={() => setCardOpen(null)} />}
   </section>;
 }

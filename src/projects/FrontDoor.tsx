@@ -5,8 +5,9 @@
 // T-304: the working mark counts the room's Uni at work on your message too, not only Claude Code sessions.
 import { roomTint } from "../glow/roomTint";
 import { sameWords } from "../areas/sameWords";
-import { useEffect, useRef, useCallback, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, type ReactNode } from "react";
 import { AllComposer, AllFeed, roomWords, useEchoes, useReplyTarget, useRoomsFeed, type AllRoom } from "../all/AllView";
+import { roomAddress } from "../all/allCore";
 import { liveSessions, liveInArea, sessionsOf, span, UNFILED } from "./model";
 import { asOf, useWork } from "./store";
 import { useRoomTurns } from "./roomTurns";
@@ -18,6 +19,27 @@ export type Door = { path: string; name: string; slug: string | null; stands: st
   /** The area note's own one line on what it is (never a private area's): the route's description of it. */ about?: string | null;
   /** The area's own room (its id), where a turn of the room's Uni is looked for; null when it has none of its own. */ room?: string | null;
   /** T-335: what is new in the area's rooms (its own and its projects'), and how many things there need you. */ unread?: Unread | null; needs?: number };
+/** 0.3.1: an area's own stream: its path and name, and its rooms (its own first). */
+export type Scope = { path: string; name: string; rooms: readonly AllRoom[] };
+
+/** 0.3.1: the stream's scope, one tap each: every area's rooms, or one area's. The same stream, never another screen; All is always the first
+ *  chip, so the way back to every room is one tap (Back and Escape too). Shown when there is more than one area to choose from. */
+function ScopeRow({ rooms, scope, onScope, onOpenScope }: { rooms: readonly AllRoom[]; scope: Scope | null; onScope: (path: string | null) => void; onOpenScope?: (path: string) => void }) {
+  const row = useRef<HTMLElement>(null);
+  // the chosen area's chip is in sight (a row wider than a phone scrolls sideways)
+  useLayoutEffect(() => { const on = row.current?.querySelector<HTMLElement>('[aria-pressed="true"]'); const r = row.current; if (on && r) r.scrollLeft = Math.max(0, on.offsetLeft - (r.clientWidth - on.offsetWidth) / 2); }, [scope?.path]);
+  return <div className="all-scope">
+    <nav className="all-scope-row" aria-label="Show in the stream" ref={row}>
+      <button type="button" className="all-scope-chip" aria-pressed={!scope} onClick={() => onScope(null)}>All</button>
+      {rooms.map((r) => r.path && <button key={r.id} type="button" className="all-scope-chip" aria-pressed={scope?.path === r.path} style={{ ["--room-tint" as string]: roomTint(r.id) }}
+        onClick={() => onScope(scope?.path === r.path ? null : r.path!)}><i aria-hidden="true" />{r.name}</button>)}
+    </nav>
+    {scope && <p className="all-scope-line"><span>{scope.rooms.length > 1 ? `${andWords(scope.rooms.map((r) => roomAddress(r)))}, by time` : `${roomAddress(scope.rooms[0])}, by time`}</span>
+      {onOpenScope && <button type="button" className="all-link" onClick={() => onOpenScope(scope.path)}>Open {scope.name} ›</button>}</p>}
+  </div>;
+}
+const andWords = (l: readonly string[]) => (l.length < 2 ? l.join("") : `${l.slice(0, -1).join(", ")} and ${l[l.length - 1]}`);
+
 /** T-335: a room outside the doors (one no area holds) with something new in it. */
 export type NewRoom = { id: string; name: string; unread: Unread };
 /** T-335: the rooms no door holds that have something new, each one tap into its room. Nothing when there is nothing new there. */
@@ -99,7 +121,9 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
   /** T-335 one surface: every room no area holds, folded under one line */ otherRooms?: readonly { id: string; name: string }[];
   /** No areas yet (once that is known): the home says so, with the way to the old #Uni where an account still has one (archived 10-26) */ noAreas?: (() => void) | null; /** T-335 as Aaron: only once the tasks have been read, fresh and whole, may the home say nothing needs you */ needsKnown?: NeedsKnown; /** approvals waiting, which For you doesn't count */ alsoNeeds?: number; onRetryNeeds?: () => void; doors: readonly Door[]; onOpen: (path: string) => void;
   /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */
-  all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string | null, root?: string | null) => void } | null;
+  all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string | null, root?: string | null) => void;
+    /** 0.3.1: the stream's scope: one area's rooms (its own and the places' inside it), shown by time in place of every area's; null: all of them. */
+    scope?: Scope | null; onScope?: (path: string | null) => void; onOpenScope?: (path: string) => void } | null;
   /** 0.2: this is the home (All's stream, the drawer under its head); null: the places page of a vault without the Uni glue. */
   allPlace?: { backTo: string; onBack: () => void; /** A room in focus over All. */ focusRoom?: string | null } | null; onComposerFocus?: (on: boolean) => void;
   /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
@@ -121,7 +145,14 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
   const roomsKey = JSON.stringify(all?.rooms ?? NONE);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const allRooms = useMemo(() => all?.rooms ?? NONE, [roomsKey]);
-  const feed = useRoomsFeed(allRooms, !!all && (view === "all" || wantWords));
+  // 0.3.1: an area's stream shows its rooms (its own and those inside it); the feed reads them with every area's, so All is still there when you come back
+  const scope = all?.scope ?? null;
+  const scopeKey = JSON.stringify(scope?.rooms ?? null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const shownRooms = useMemo(() => scope?.rooms ?? allRooms, [scopeKey, allRooms]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const readRooms = useMemo(() => (scope ? [...allRooms, ...scope.rooms.filter((r) => !allRooms.some((a) => a.id === r.id))] : allRooms), [scopeKey, allRooms]);
+  const feed = useRoomsFeed(readRooms, !!all && (view === "all" || wantWords));
   const words = useMemo(() => roomWords(feed.byRoom, me), [feed.byRoom, me]);
   const openAt = all?.onOpenAt;
   // T-335 one fluid surface: what you said in a room in focus is in All when you come back (a message of your own may bring no live event)
@@ -134,7 +165,7 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
   const opener = useRef(openAt);
   opener.current = openAt;
   const openFromFeed = useCallback((room: string, ref: string | null, root?: string | null) => opener.current?.(room, ref, root), []);
-  const composer = all && <AllComposer rooms={allRooms} words={words} onOpen={(id) => openAt?.(id)} onFocus={() => setWantWords(true)} onSent={feed.reread} place={view === "all" && (pulled || !all) ? "places" : view}
+  const composer = all && <AllComposer rooms={shownRooms} words={words} onOpen={(id) => openAt?.(id)} onFocus={() => setWantWords(true)} onSent={feed.reread} place={view === "all" && (pulled || !all) ? "places" : view}
     target={target} onTarget={setTarget} echo={echoes.send} onKeyboard={onComposerFocus} />;
   // T-335 glow-up: how many places are moving (a session or the room's Uni at work), for the home's one sentence
   const liveOf = (d: Door) => { const a = areaAt.get(d.path); return (a ? liveInArea(work, a.id).length : 0) + (d.room && turns.has(d.room) ? 1 : 0); };
@@ -183,8 +214,9 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
         <div className="fd-mark"><h1 className="fd-title"><Enso />Uni</h1><span className="fd-date">{today()}</span></div>
         <button type="button" className="fd-pull" aria-expanded={open} aria-controls={open ? "fd-drawer" : undefined} disabled={!all} onClick={() => onPull?.(!pulled)}
           aria-label={`${lines.join(" ")} ${open ? "Close" : "Open"} your places`}>
-          <span className="fd-statement">{lines.map((line) => <span key={line}>{line}</span>)}</span>
-          <span className="fd-pull-row" aria-hidden="true"><Weave doors={doors} liveOf={liveOf} />{all && <i className="ps-chev" />}</span>
+          {/* 0.3.1: with For you on the home its head is the day's line (what is yours, to look at, moving); the sentence stays its label */}
+          {!forYou && <span className="fd-statement">{lines.map((line) => <span key={line}>{line}</span>)}</span>}
+          <span className="fd-pull-row" aria-hidden="true"><Weave doors={doors} liveOf={liveOf} />{all && <><span className="fd-pull-word">Places</span><i className="ps-chev" /></>}</span>
         </button>
       </header>
       <div className="fd-body">
@@ -202,7 +234,9 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
       </div>}
       {/* under the drawer the stream is out of reach (keys, screen readers) until it is put away */}
       {forYou && <div className="fy-wrap" inert={open}>{forYou}</div>}
-      <div className="fd-stream" inert={open}>{all ? <AllFeed rooms={allRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={openFromFeed} target={target} onTarget={setTarget} echoes={echoes.shown} receded={!!focusRoom || open} /> : <div className="all-feed-box" />}</div>
+      <div className="fd-stream" inert={open}>
+        {all && all.onScope && allRooms.length > 1 && <ScopeRow rooms={allRooms} scope={scope} onScope={all.onScope} onOpenScope={all.onOpenScope} />}
+        {all ? <AllFeed key={scope?.path ?? ""} scope={scope?.path ?? ""} rooms={shownRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={openFromFeed} target={target} onTarget={setTarget} echoes={echoes.shown} receded={!!focusRoom || open} /> : <div className="all-feed-box" />}</div>
       </div>
       {composer}
     </div>;

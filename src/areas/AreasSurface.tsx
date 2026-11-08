@@ -44,7 +44,8 @@ import type { Approval } from "../approvals";
 import "./areas.css";
 import type { AllRoom } from "../all/AllView";
 import { AllFocusSheet, type AllFocusState, type FocusLine, type FocusView } from "../all/AllFocus";
-import { AllEmpty, FrontDoor, type Door, type NewRoom } from "../projects/FrontDoor";
+import { AllEmpty, FrontDoor, type Door, type NewRoom, type Scope } from "../projects/FrontDoor";
+import { scopeForYou } from "../foryou/scope";
 import { ForYou } from "../foryou/ForYou";
 import { useForYou } from "../foryou/useForYou";
 import type { Item as ForYouItem, Place } from "../foryou/forYouCore";
@@ -79,6 +80,8 @@ export type Overlay = { close: () => void; modal: boolean; history: boolean };
 
 /** 0.2: whether the home's drawer is down, across redraws of the home (this launch only) */
 const pulledMemory = { open: false };
+/** 0.3.1: the home's stream scoped to one area (its path), kept while the home is up (a room in focus over it, a redraw); leaving the home ends it. */
+const scopeMemory = { path: null as string | null };
 
 /** r28: the rechecks are logged once per launch (the module lives as long as the app does) */
 const recheckLogged = { done: false };
@@ -198,7 +201,11 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const [pulled, setPulledState] = useState(() => pulledMemory.open);
   const setPulled = useCallback((open: boolean) => { pulledMemory.open = open; setPulledState(open); }, []);
   // leaving the home for another place folds it: the home comes back as a fresh page (a redraw in place keeps it, as above)
-  useEffect(() => () => { if (!document.querySelector('[data-place="front-door"]')) pulledMemory.open = false; }, []);
+  useEffect(() => () => { if (!document.querySelector('[data-place="front-door"]')) { pulledMemory.open = false; scopeMemory.path = null; } }, []);
+  const [scopePath, setScopeState] = useState<string | null>(() => scopeMemory.path);
+  const setScope = useCallback((p: string | null) => { scopeMemory.path = p; setScopeState(p); }, []);
+  // an area that is gone, or private, has no stream of its own: back to every room (never a Back that does nothing you can see)
+  useEffect(() => { if (scopePath && data && (!data.tree.nodes.has(scopePath) || isPrivatePath(data.tree, scopePath))) setScope(null); }, [scopePath, data, setScope]);
   const focusView: FocusView = focus?.view ?? "chat";
   /** Without rooms, a place's page is its work; with rooms, the focus's "all of its work" step. */
   const workShown = !chat ? !!node : focusView === "work";
@@ -209,23 +216,27 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const overlay: Overlay | null = projectOpen ? { close: closeProject, modal: true, history: false } : sheetId ? { close: closeSheet, modal: true, history: false }
     : appOpen && !chat ? { close: () => setAppOpen(false), modal: false, history: true }
     // 0.2: the home's drawer is over the stream: Back, Alt+← and Escape put it away first
-    : pulled && chat && allPlace && !allPlace.focus ? { close: () => setPulled(false), modal: false, history: true } : null;
-  const overlayKey = `${projectOpen ? "project" : ""}${sheetId ? "sheet" : ""}${appOpen && !chat ? "app" : ""}${pulled && chat && allPlace && !allPlace.focus ? "pulled" : ""}`;
+    : pulled && chat && allPlace && !allPlace.focus ? { close: () => setPulled(false), modal: false, history: true }
+    // 0.3.1: an area's stream is a step in from All: Back, Alt+← and Escape go back to every room
+    : scopePath && chat && allPlace && !allPlace.focus ? { close: () => setScope(null), modal: false, history: true } : null;
+  const overlayKey = `${projectOpen ? "project" : ""}${sheetId ? "sheet" : ""}${appOpen && !chat ? "app" : ""}${pulled && chat && allPlace && !allPlace.focus ? "pulled" : ""}${scopePath && chat && allPlace && !allPlace.focus ? `scope:${scopePath}` : ""}`;
   // Escape at the home puts the drawer away (a room in focus over it has its own Escape; a field or a dialog keeps its own)
   const drawerUp = pulled && !!chat && !!allPlace && !allPlace.focus;
+  const scopedUp = !!scopePath && !!chat && !!allPlace && !allPlace.focus;
   useEffect(() => {
-    if (!drawerUp) return;
+    if (!drawerUp && !scopedUp) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       if (e.target instanceof Element && e.target.closest("input, textarea, [contenteditable=true], [role=dialog], [role=alertdialog]")) return;
-      setPulled(false);
+      // the drawer first, then the area's stream
+      if (drawerUp) setPulled(false); else setScope(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [drawerUp, setPulled]);
+  }, [drawerUp, scopedUp, setPulled, setScope]);
   // (layout effects: what is over the place is known to the host's Back before the first key can reach it)
   useLayoutEffect(() => {
-    onBackChange(projectOpen ? closeProject : sheetId ? closeSheet : appOpen && !chat ? () => setAppOpen(false) : pulled && chat && allPlace ? () => setPulled(false) : back);
+    onBackChange(projectOpen ? closeProject : sheetId ? closeSheet : appOpen && !chat ? () => setAppOpen(false) : pulled && chat && allPlace ? () => setPulled(false) : scopePath && chat && allPlace ? () => setScope(null) : back);
     return () => onBackChange(null);
   }, [path, data, onBackChange, overlayKey, rootOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => { onOverlayChange?.(overlay); }, [overlayKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -476,14 +487,30 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const newRooms: NewRoom[] = owned ? rooms.filter((r) => !owned.has(r.id) && r.id !== uniRoom && newByRoom.has(r.id)).sort((a, b) => (b.last_ts ?? 0) - (a.last_ts ?? 0)).map((r) => ({ id: r.id, name: r.name, unread: newByRoom.get(r.id)! })) : [];
     // T-335 All view: every area's own room, interleaved, with a composer that routes; a private area stays out of it
     const privateChannel = (channel: string) => !!data && isPrivateRoom(data.tree, channel, roomRefs, uniRef);
-    const allRooms: AllRoom[] = doors.filter((d) => d.room && !isPrivatePath(data!.tree, d.path) && !privateChannel(d.room)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, about: d.about ?? null, lastTs: d.lastTs }));
+    const allRooms: AllRoom[] = doors.filter((d) => d.room && !isPrivatePath(data!.tree, d.path) && !privateChannel(d.room)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, about: d.about ?? null, lastTs: d.lastTs, path: d.path }));
     const openRoomAt = (room: string, ref?: string | null, threadRoot?: string | null) => { if (allPlace) allPlace.onFocus(room, ref ?? null, threadRoot ?? null); else actions.openRoom(room, ref ?? null); };
-    const all = allRooms.length ? { rooms: allRooms, onOpenAt: openRoomAt } : null;
+    // 0.3.1: an area's stream: its own room, then the rooms of the places inside it that have their own (never a private one)
+    const scopeOf = (p: string): Scope | null => {
+      const own = allRooms.find((r) => r.path === p);
+      if (!own || !data) return null;
+      const inner: AllRoom[] = [];
+      const walk = (at: string, depth: number) => { if (depth > 6) return; for (const c of childrenOf(data.tree, at)) {
+        if (isPrivatePath(data.tree, c.path)) continue;
+        const v = roomView(data.tree, c.path, roomRefs, uniRef);
+        if (v.own && v.target && !privateChannel(v.target.id) && v.target.id !== own.id && !inner.some((r) => r.id === v.target!.id)) inner.push({ id: v.target.id, name: c.name, slug: v.slash ? v.slash.replace(/^#/, "") : null, stands: null, about: c.purpose || null, lastTs: rooms.find((r) => r.id === v.target!.id)?.last_ts ?? null, path: c.path });
+        walk(c.path, depth + 1);
+      } };
+      walk(p, 0);
+      return { path: p, name: own.name, rooms: [own, ...inner] };
+    };
+    const scope = scopePath ? scopeOf(scopePath) : null;
+    const all = allRooms.length ? { rooms: allRooms, onOpenAt: openRoomAt, scope, onScope: allPlace ? setScope : undefined, onOpenScope: (p: string) => openPlace(p) } : null;
     // 0.3.0: For you is known once the tasks are read, fresh and whole
     const needsKnown = tasks.error || tasks.truncated || tasks.treeTruncated ? "failed" as const : !tasks.ready || tasks.savedAt ? "reading" as const : "known" as const;
     // an item's what opens its own sheet, in its own room (0.2.2's ask path); a private area's line opens that area's details
     const openItem = (it: ForYouItem) => { const t = tasks.all?.find((x) => x.id === it.id); openAsk({ id: it.id, room: (t ? roomOfAsk(t) : answerRoom(it))?.id ?? null, path: it.node }); };
-    const forYou = <ForYou view={fy.view} answer={fy.answer} retry={fy.retry} errors={fy.errors} busy={fy.busy} onOpenAsk={openItem}
+    const forYou = <ForYou view={scope ? scopeForYou(fy.view, scope.path) : fy.view} scope={scope?.name ?? null}
+      approvals={scope ? approvalsAll.list.filter((x) => scope.rooms.some((r) => r.id === x.channel)).length : approvalsAll.list.length} answer={fy.answer} retry={fy.retry} errors={fy.errors} busy={fy.busy} onOpenAsk={openItem}
       onOpenPrivate={(x) => openPlace(x.areaPath ?? x.node, "details")} failed={needsKnown === "failed" ? tasks.refresh : null} reading={needsKnown === "reading"} />;
     const focusRoomOpen = focus && !focus.leaving ? focus.room : null;
     // (the drawer is the owner's own home, as the places page was: every approval waiting, a private room's too; All's stream keeps those out)

@@ -6,7 +6,7 @@
 // Run: ONE_TEST_PORT=1493 npx playwright test --config playwright.onesurface.config.ts
 import { readdirSync, readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, openPlaces } from './areasFixture';
+import { bootAreas, openPlaces, openForYou } from './areasFixture';
 import { railGo } from './railGo';
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
@@ -120,6 +120,7 @@ test.describe('every way into a room lands in focus over All', () => {
   test('what needs you, in For you at the top of the home, opens its room with the ask\'s sheet over it (0.2.2: its action is said there)', async ({ page }) => {
     await boot(page);
     // 0.3.0: For you replaced the drawer's Needs-you list
+    await openForYou(page);
     await page.getByRole('region', { name: 'For you' }).locator('.fy-what', { hasText: /Find jars for the honey/ }).click();
     await inFocus(page, 'Bee Garden');
     const sheet = page.getByRole('dialog').filter({ has: page.locator('.task-kind') });

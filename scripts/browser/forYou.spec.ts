@@ -4,8 +4,11 @@
 // Phone 360, Daylight 828 (greyscale), desktop 1440. Made-up world only (forYouFixture.ts); the relay is the fixture's fake `post_message`.
 // Run: FORYOU_TEST_PORT=17631 npx playwright test --config playwright.foryou.config.ts
 import { test, expect, type Page } from '@playwright/test';
-import { bootForYou } from './forYouFixture';
-import { openPlaces } from './areasFixture';
+import { bootForYou as bootFolded } from './forYouFixture';
+
+/** 0.3.1: For you is folded to its head on the home; these tests start with its bands open. */
+const bootForYou = async (page: Page, opts?: Parameters<typeof bootFolded>[1]) => { await bootFolded(page, opts); await openForYou(page); };
+import { openForYou, openPlaces } from './areasFixture';
 
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.map((x: any, i: number) => ({ ...x, i })).filter((x: any) => x.cmd === c), cmd);
 const forYou = (page: Page) => page.getByRole('region', { name: 'For you' });
@@ -15,7 +18,7 @@ const item = (page: Page, id: string) => forYou(page).locator(`article.fy-item[d
 test.describe('For you', () => {
   test('is the top of the home: three bands, five of yours in order, the rest behind one line', async ({ page }) => {
     await bootForYou(page);
-    // there without pulling anything down
+    // there without pulling anything down (opened from its head: homeLayout.spec.ts has it folded)
     await expect(forYou(page)).toBeVisible();
     await expect(page.locator('[data-place="front-door"] .fd-pull')).toHaveAttribute('aria-expanded', 'false');
     await expect(forYou(page).locator('.fy-band > h2')).toHaveText([/^Yours/, /^Ready to look at/, /^Moving/]);
@@ -58,8 +61,9 @@ test.describe('For you', () => {
     const moving = band(page, 'Moving');
     await expect(moving.locator('.fy-mv .fy-mv-t')).toHaveText(['A session on daily practice: completed.', /Glaze Tests.*The test tiles came out of the kiln\./, /Honey Harvest.*Hive two was weighed/]);
     await expect(moving.locator('.fy-quiet')).toHaveText('2 cards quiet, 1 resting');
-    // the head counts what is yours
-    await expect(page.locator('[data-place="front-door"] .fd-pull')).toContainText(/Eight things need you\./);
+    // the head counts what is yours (0.3.1: For you's own head; the places' pull keeps the day's sentence as its label)
+    await expect(forYou(page).locator('.fy-toggle')).toHaveText(/^8 for you · 1 to look at · 3 moving$/);
+    await expect(page.locator('[data-place="front-door"] .fd-pull')).toHaveAttribute('aria-label', /Eight things need you\./);
   });
 
   test('one tap takes the default: one compare-and-set with the answer, then the reply in its room under the card\'s post', async ({ page }) => {

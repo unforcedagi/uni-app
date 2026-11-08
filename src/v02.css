@@ -16,6 +16,9 @@
 .fd-pull .fd-statement > span { display: block; }
 .fd-pull-row { display: flex; align-items: center; gap: 12px; height: 26px; margin-top: 8px; }
 .fd-pull-row .fd-weave { flex: 1; }
+/* 0.3.1: For you's head is the day's line now; the pull is the places' thread and the word that says what it opens */
+.fd-pull-word { flex: none; font: 500 13px/1 var(--g-font-ui); color: var(--g-ink-2); }
+.fd-pull > .fd-pull-row:first-child { margin-top: 0; }
 .fd-pull-row .ps-chev { flex: none; width: 9px; height: 9px; margin: 0 4px 4px 0; border-right: 1.5px solid var(--g-ink-2); border-bottom: 1.5px solid var(--g-ink-2); transform: rotate(45deg); transition: transform var(--g-t-state) var(--g-ease); }
 .fd-pull[aria-expanded="true"] .ps-chev { transform: rotate(225deg); margin-bottom: -4px; }
 @media (hover: hover) { .fd-pull:not(:disabled):hover .fd-weave path { stroke: var(--g-ink-2); } }

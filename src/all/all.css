@@ -135,3 +135,23 @@
 :root[data-screen="ink"] .all-reading-band { background: #fff; height: 40px; border-bottom: 1px solid rgba(0, 0, 0, .35); }
 @media (pointer: coarse) { .all-reading { min-height: 36px; } }
 .all-empty .all-quiet { width: 100%; max-width: 720px; margin: 24px auto; }
+
+/* 0.3.1: the stream's scope: every area's rooms, or one area's (its own and the places' inside it). The same stream; All is always first. */
+.all-scope { flex: none; width: 100%; max-width: 720px; margin: 0 auto; padding-bottom: 6px; border-bottom: var(--g-hair) solid var(--g-line); }
+.all-scope-row { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 8px 0 4px; margin: 0 calc(-1 * clamp(20px, 5vw, 64px)); padding-left: clamp(20px, 5vw, 64px); padding-right: clamp(20px, 5vw, 64px); }
+.all-scope-row::-webkit-scrollbar { display: none; }
+.all-scope-chip { all: unset; box-sizing: border-box; flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 999px; cursor: pointer;
+  border: var(--g-hair) solid var(--g-line-strong); background: transparent; font: 500 13.5px/1 var(--g-font-ui); color: var(--g-ink); white-space: nowrap; }
+.all-scope-chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--room-tint, var(--g-accent)); }
+.all-scope-chip[aria-pressed="true"] { background: var(--g-ink); color: var(--g-paper); border-color: transparent; }
+.all-scope-chip[aria-pressed="true"] i { background: var(--g-paper); }
+.all-scope-chip:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+.all-scope-line { display: flex; gap: 12px; align-items: baseline; margin: 2px 0 4px; font: 400 13px/1.4 var(--g-font-ui); color: var(--g-ink-2); }
+.all-scope-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.all-scope-line .all-link { flex: none; font-size: 13px; }
+@media (max-width: 599px) { .all-scope-row { margin: 0 -20px; padding-left: 20px; padding-right: 20px; } }
+:root[data-screen="ink"] .all-scope-chip { border-color: #000; border-width: 1.5px; }
+:root[data-screen="ink"] .all-scope-chip i { background: #000; }
+:root[data-screen="ink"] .all-scope-chip[aria-pressed="true"] { background: #000; color: #fff; }
+:root[data-screen="ink"] .all-scope-chip[aria-pressed="true"] i { background: #fff; }
+:root[data-screen="ink"] .all-scope-line { color: #222; }

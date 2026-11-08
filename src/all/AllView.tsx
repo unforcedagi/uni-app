@@ -31,7 +31,8 @@ import "./all.css";
 
 /** A place in the All view: an area and its own room. */
 export type AllRoom = { id: string; name: string; slug: string | null; stands: string | null; lastTs: number | null;
-  /** The area note's own one line on what it is (the route's description of the room). */ about?: string | null };
+  /** The area note's own one line on what it is (the route's description of the room). */ about?: string | null;
+  /** 0.3.1: the place it is the room of (an area's path), for its scope chip. */ path?: string | null };
 
 type Message = FeedMessage & { mentions: Member[]; edited: boolean; media?: MediaRef[] | null; reply_count?: number };
 type Live = { kind: string; channel: string | null };
@@ -88,7 +89,10 @@ export function useRoomsFeed(rooms: readonly AllRoom[], on: boolean) {
 }
 
 /** Where the feed was and which messages were opened, for coming back to All from anywhere (never saved: a restart opens at the newest). */
-const feedMemory = { spot: null as FeedSpot | null, at: 0, open: new Set<string>() };
+type FeedMemory = { spot: FeedSpot | null; at: number; open: Set<string> };
+/** 0.3.1: one per scope (all the areas, or one area's rooms): coming back to All finds All where it was, not where the area's stream was. */
+const feedMemories = new Map<string, FeedMemory>();
+const memoryOf = (scope: string): FeedMemory => { let m = feedMemories.get(scope); if (!m) feedMemories.set(scope, (m = { spot: null, at: 0, open: new Set() })); return m; };
 /** A spot this old is another visit: All opens at its newest. */
 const SPOT_KEEP_MS = 15 * 60_000;
 type FeedSpot = { ref: string; offset: number };
@@ -121,7 +125,7 @@ function useHeld() {
 /** Forget this device's key: nothing typed under it stays in memory, or could be read to a model under the next key. */
 export function forgetComposer() {
   setHeld({ text: "", chosen: null, target: null, attempt: null, sending: false, outcome: null, lost: [], era: held.era + 1 });
-  feedMemory.spot = null; feedMemory.open = new Set(); label.el = null;
+  feedMemories.clear(); label.el = null;
   forgetModelRoute();
 }
 if (import.meta.env.VITE_AREAS_TESTHOOKS === "1" && typeof window !== "undefined") (window as unknown as { __allHeld: typeof held }).__allHeld = held;
@@ -425,13 +429,15 @@ function pinSpot(el: HTMLElement, s: FeedSpot): boolean {
   return !!row;
 }
 
-export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = null, onTarget, echoes = NO_ECHOES, receded = false }: { rooms: readonly AllRoom[]; byRoom: ReadonlyMap<string, Message[]>; loaded: boolean; failed: readonly string[];
+export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = null, onTarget, echoes = NO_ECHOES, receded = false, scope = "" }: { rooms: readonly AllRoom[]; byRoom: ReadonlyMap<string, Message[]>; loaded: boolean; failed: readonly string[];
+  /** 0.3.1: which stream this is ("" all the areas, else the area's path): its place is kept apart from the others'. Fixed for the feed's life. */ scope?: string;
   me: string | null; onOpen: (room: string, ref: string | null, root?: string | null) => void;
   /** A room is in focus over the feed: it stays exactly where it is until that ends. */ receded?: boolean;
   /** Where the composer is replying, and how a tap or a swipe sets it. */ target?: ReplyTarget | null; onTarget?: (t: ReplyTarget | null) => void;
   /** Your replies not yet in their room's list. */ echoes?: readonly Echo[] }) {
   const nameOf = useMemo(() => new Map(rooms.map((r) => [r.id, r.name])), [rooms]);
   const addressOf = useMemo(() => new Map(rooms.map((r) => [r.id, roomAddress(r)])), [rooms]);
+  const [feedMemory] = useState(() => memoryOf(scope));
   const feed = useMemo(() => interleave(new Map([...byRoom].filter(([id]) => nameOf.has(id)).map(([id, list]) => [id, list.filter((m) => !notTalk(m))]))), [byRoom, nameOf]);
   const list = useRef<HTMLDivElement>(null);
   // back in All within a while: where it was, once the rows it was at are read
@@ -617,7 +623,7 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
       {!loaded && <p className="all-quiet" role="status">Reading your rooms…</p>}
       {loaded && !feed.length && <p className="all-quiet">Nothing said in your rooms yet.</p>}
       {rows}
-      {failed.length > 0 && <p className="all-quiet" role="status">Couldn't read {andList(failed.map((id) => nameOf.get(id) ?? id))} just now.</p>}
+      {failed.some((id) => nameOf.has(id)) && <p className="all-quiet" role="status">Couldn't read {andList(failed.filter((id) => nameOf.has(id)).map((id) => nameOf.get(id)!))} just now.</p>}
     </div>
     </div>
   </div>;

@@ -6,7 +6,7 @@
 // Made-up world only. Run: V02_TEST_PORT=17611 npx playwright test --config playwright.v02.config.ts
 // V02_COUNTS=<file>: each screen's measures are appended there as one JSON line (the report's before/after table).
 import { test, expect, type Page } from '@playwright/test';
-import { focusSheet } from './areasFixture';
+import { focusSheet, openForYou } from './areasFixture';
 import { boot, check, go, openHead, openPlace, phone, project, rail } from './v02Measure';
 import * as mailMock from './mailMock';
 
@@ -27,11 +27,13 @@ test.describe('one home', () => {
     // one composer, at the foot of the stream
     await expect(page.getByRole('region', { name: 'Talk to Uni' })).toHaveCount(1);
     await expect(page.locator('article.all-msg').first()).toBeVisible();
-    // the head says the day, and opens to every place
+    // the head says the day (0.3.1: in For you's folded line; the pull keeps the sentence as its label), and opens to every place
     const pull = page.locator('[data-place="front-door"] .fd-pull');
-    await expect(pull).toHaveText(/(thing|things) needs? you\./);
+    await expect(pull).toHaveAttribute('aria-label', /(thing|things) needs? you\./);
+    await expect(page.getByRole('region', { name: 'For you' }).locator('.fy-toggle')).toHaveText(/^\d+ for you/);
     await expect(page.locator('.fd-door')).toHaveCount(0);
     // 0.3.0: For you is the top of the home, over the stream
+    await openForYou(page);
     await expect(page.getByRole('region', { name: 'For you' })).toContainText('Find jars for the honey');
     await check(page, 'home');
     await openHead(page);

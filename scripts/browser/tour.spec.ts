@@ -4,7 +4,7 @@
 // Run: TOUR_TEST_PORT=17491 TOUR_SHOTS=/some/dir npx playwright test --config playwright.tour.config.ts
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, focusSheet, openAreaPage, openDetails, openPlaces, type BootOpts } from './areasFixture';
+import { bootAreas, focusSheet, openAreaPage, openDetails, openPlaces, type BootOpts, openForYou } from './areasFixture';
 import { bootProjects, type Boot } from './projectsFixture';
 import { audit, lookViolations } from './tourAudit';
 import { installNotePaneFixture } from './notePaneFixture';
@@ -115,7 +115,8 @@ const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).
 // ---------------------------------------------------------------------------------------------------------- front door and rooms
 test('01-home-needs-collapsed', async ({ page }) => {
   await projects(page);
-  await expect(page.locator('.fd-pull')).toHaveText(/One thing needs you\./);
+  await expect(page.locator('.fd-pull')).toHaveAttribute('aria-label', /One thing needs you\./);
+  await openForYou(page);
   await snap(page, '01-home-needs-collapsed');
 });
 

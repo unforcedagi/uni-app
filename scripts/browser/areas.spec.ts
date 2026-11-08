@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { areaCard, bootAreas, focusSheet, openAreaPage, openAreasHome, openDetails, openPlaces, FOCUS_STEAL, navApp, SUGGEST } from './areasFixture';
+import { areaCard, bootAreas, focusSheet, openAreaPage, openAreasHome, openDetails, openPlaces, FOCUS_STEAL, navApp, SUGGEST, openForYou } from './areasFixture';
 import { startListener } from './areasListener';
 import { openRailMore, railGo } from './railGo';
 
@@ -119,6 +119,7 @@ test('0.3.0: what needs you, across the areas, is For you at the top of the home
   const pull = page.locator('[data-place="front-door"] .fd-pull');
   await expect(pull).toContainText(/^\w+ things? needs? you\./);
   await expect(page.locator('[data-place="front-door"]')).not.toContainText(/Sit twenty|Find a teacher|T-3[12]/);
+  await openForYou(page);
   const needs = page.getByRole('region', { name: 'For you' });
   await expect(needs.locator('.fy-private', { hasText: /^Sanctum: \d+ things? for you/ })).toBeVisible();
   await expect(needs).not.toContainText(/Sit twenty|Find a teacher|T-\d+/);
@@ -134,6 +135,7 @@ test('0.3.0: what needs you, across the areas, is For you at the top of the home
   await expect(sheet).toHaveCount(0);
   // inside the private area its items are its own rows, with their words
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
+  await openForYou(page);
   await page.getByRole('region', { name: 'For you' }).locator('.fy-private', { hasText: /^Sanctum/ }).click();
   await expect(title(page)).toHaveText('Sanctum');
 });

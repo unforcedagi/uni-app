@@ -34,7 +34,8 @@ test('look: home, a room and find wear the glow-up, at every size', async ({ pag
   await boot(page);
   const wide = page.viewportSize()!.width >= 900;
   // home: the day in one sentence, and under it (0.2: pulled down from the head) the places as rows; the Daylight reads in ink
-  await expect(page.locator('.fd-statement')).toHaveText(/needs? you\.|Nothing needs you\./);
+  // 0.3.1: For you's head says it (the places' pull keeps the sentence as its label)
+  await expect(page.locator('.fy-toggle')).toHaveText(/for you/);
   await openPlaces(page);
   await expect(page.locator('.fd-door')).toHaveCount(7);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

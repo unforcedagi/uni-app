@@ -1,10 +1,29 @@
 /* For you (0.3.0): the top of the home. Bold and calm; every state also by shape (Daylight is greyscale e-paper). */
-/* on the home (All's stream under it): at most most of the screen, scrolling on its own; the stream keeps the rest */
+/* on the home (All's stream under it): folded to its head by default (0.3.1); opened, at most most of the screen, scrolling on its own */
 .fy-wrap { flex: 0 1 auto; min-height: 0; max-height: 64%; display: flex; flex-direction: column; margin: 0 calc(-1 * clamp(20px, 5vw, 64px)); border-bottom: var(--g-hair) solid var(--g-line-strong); }
 .fy-wrap > .fy { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px clamp(20px, 5vw, 64px) 12px; }
 .fy > * { max-width: 720px; margin-left: auto; margin-right: auto; }
 @media (max-width: 599px) { .fy-wrap { margin: 0 -20px; max-height: 74%; } .fy-wrap > .fy { padding: 2px 16px 12px; } }
 .fd:not(.fd-all) > .fy { margin: 0 0 12px; }
+
+/* 0.3.1: the head, folded: one line of counts and the first ask; calm, the stream keeps the screen */
+.fy-top { display: flex; align-items: center; gap: 12px; }
+.fy-toggle { all: unset; box-sizing: border-box; flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.fy-toggle:focus-visible, .fy-first:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; border-radius: 10px; }
+.fy-sum { flex: 1; min-width: 0; font: 400 14.5px/1.35 var(--g-font-ui); color: var(--g-ink-2); }
+.fy-sum b { font: 520 19px/1.2 var(--g-font-display, Georgia, serif); color: var(--g-ink); letter-spacing: -.01em; }
+.fy-toggle .ps-chev { flex: none; width: 8px; height: 8px; margin: 0 6px 4px 0; border-right: 1.5px solid var(--g-ink-2); border-bottom: 1.5px solid var(--g-ink-2); transform: rotate(45deg); transition: transform var(--g-t-state, .18s) var(--g-ease, ease); }
+.fy-toggle[aria-expanded="true"] .ps-chev { transform: rotate(225deg); margin-bottom: -4px; }
+.fy-retry { flex: none; }
+.fy-first { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 9px; width: 100%; max-width: 720px; margin: 0 auto; min-height: 36px; padding: 4px 0 8px; cursor: pointer; }
+.fy-first .fy-mark { align-self: flex-start; margin-top: 6px; }
+.fy-first-t { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 16px/1.35 var(--g-font-display, Georgia, serif); color: var(--g-ink); }
+.fy-first-w { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 13px/1.35 var(--g-font-ui); color: var(--g-ink-2); }
+.fy > .fy-owed { margin: 2px auto 8px; }
+.fy-bands > .fy-band:first-child { margin-top: 4px; }
+.fy:not([data-open]) { padding-bottom: 4px; }
+:root[data-screen="ink"] .fy-toggle .ps-chev { border-color: #000; }
+:root[data-screen="ink"] .fy-sum, :root[data-screen="ink"] .fy-first-w { color: #222; }
 .fy-band { margin-top: 14px; }
 /* (the look's rules: no capitals, no ink outlines on anything bigger than a mark) */
 .fy-band > h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font: 600 14px/1.3 var(--g-font-ui); color: var(--g-ink); }

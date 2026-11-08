@@ -3,7 +3,7 @@
 // words ready, and never the home composer's "Choose a room". The live relay has no #Uni (archived 10-26): `noUniRoom` is that world.
 // Run: ASKROOM_TEST_PORT=5793 npx playwright test --config playwright.askroom.config.ts
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, focusSheet, openAreasHome, openDetails, openPlaces } from './areasFixture';
+import { bootAreas, focusSheet, openAreasHome, openDetails, openPlaces, openForYou } from './areasFixture';
 
 const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
@@ -21,7 +21,8 @@ async function home(page: Page, pull = true) {
   if (pull) await openPlaces(page);
 }
 /** 0.3.0: the ask's item in For you (it replaced the drawer's Needs-you list): what it asks opens its sheet in its room. */
-const needRow = (page: Page) => page.getByRole('region', { name: 'For you' }).locator('.fy-what', { hasText: 'Turn on the tap cards' });
+/** 0.3.1: For you is folded on the home; its row is reached by opening it. */
+const needRow = (page: Page) => ({ click: async () => { await openForYou(page); await page.getByRole('region', { name: 'For you' }).locator('.fy-what', { hasText: 'Turn on the tap cards' }).click(); } });
 /** Nothing went out, and the home composer was never asked to pick a room. */
 async function nothingSent(page: Page) {
   expect(await calls(page, 'post_message')).toHaveLength(0);
