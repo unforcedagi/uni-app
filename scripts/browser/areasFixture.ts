@@ -504,6 +504,9 @@ Two proposals wait on a scope decision.
     if (d.unread) for (const r of rooms) { const u = d.unread[r.id]; if (u !== undefined) { r.unread = typeof u === 'number' ? u : u.n; r.mentions = typeof u === 'number' ? false : !!u.at; } }
     const announceRooms = () => { for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'rooms' } }); };
     /** T-335: a message that names you, in a room you are not in (the store's `mentions_me`): the room's count goes up and it is marked as mentioning you. */
+    /** 0.3.1: a room leaves the store (made private elsewhere, archived): it is gone from the rooms list, announced like the real event. */
+    w.__dropRoom = (id: string) => { const i = rooms.findIndex((x) => x.id === id); if (i >= 0) (w.__dropped ??= {})[id] = rooms.splice(i, 1)[0]; announceRooms(); };
+    w.__restoreRoom = (id: string) => { const r = w.__dropped?.[id]; if (r) { rooms.push(r); delete w.__dropped[id]; announceRooms(); } };
     w.__mention = (channel: string, name: string, body: string) => { const ref = w.__arrive(channel, name, body); const r = rooms.find((x) => x.id === channel); if (r && r.unread > 0) r.mentions = true; announceRooms(); return ref; };
     // A message arriving over the live socket: stored, then announced like the real `uni://live` event.
     // r18: `ago` (seconds) and `edited` give a message from earlier (a progress ping from Monday)

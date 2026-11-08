@@ -23,7 +23,7 @@ export type Door = { path: string; name: string; slug: string | null; stands: st
 export type Scope = { path: string; name: string; rooms: readonly AllRoom[] };
 
 /** 0.3.1: the stream's scope, one tap each: every area's rooms, or one area's. The same stream, never another screen; All is always the first
- *  chip, so the way back to every room is one tap (Back and Escape too). Shown when there is more than one area to choose from. */
+ *  chip, so the way back to every room is one tap (Back and Escape too). Shown when there is more than one area to choose from, or an area is chosen. */
 function ScopeRow({ rooms, scope, onScope, onOpenScope }: { rooms: readonly AllRoom[]; scope: Scope | null; onScope: (path: string | null) => void; onOpenScope?: (path: string) => void }) {
   const row = useRef<HTMLElement>(null);
   // the chosen area's chip is in sight just right of All (a row wider than a phone scrolls sideways; All stays put at its start)
@@ -218,7 +218,7 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
       <header className="fd-head fd-homehead" data-moving={moving > 0 ? "true" : undefined}>
         <div className="fd-mark"><h1 className="fd-title"><Enso />Uni</h1><span className="fd-date">{today()}</span></div>
         <button type="button" className="fd-pull" aria-expanded={open} aria-controls={open ? "fd-drawer" : undefined} disabled={!all} onClick={() => onPull?.(!pulled)}
-          aria-label={`${lines.join(" ")} ${open ? "Close" : "Open"} your places`}>
+          aria-label={`${forYou && moving > 0 ? `${count(moving)} at work. ` : ""}${lines.join(" ")} ${open ? "Close" : "Open"} your places`}>
           {/* 0.3.1: with For you on the home its head is the day's line (what is yours, to look at, moving); the sentence stays its label */}
           {!forYou && <span className="fd-statement">{lines.map((line) => <span key={line}>{line}</span>)}</span>}
           <span className="fd-pull-row" aria-hidden="true"><Weave doors={doors} liveOf={liveOf} />{all && <><span className="fd-pull-word">{forYou && moving > 0 ? `${count(moving)} at work · ` : ""}Places</span><i className="ps-chev" /></>}</span>

@@ -105,6 +105,25 @@ test.describe('home layout', () => {
     await expect(stream(page)).not.toContainText('Probe words for the tiles.');
   });
 
+  test("an area whose room leaves goes back to every room by itself; when the room comes back, nothing re-scopes unasked", async ({ page }) => {
+    await bootForYou(page);
+    await chip(page, 'Kiln Studio').click();
+    await expect(chip(page, 'Kiln Studio')).toHaveAttribute('aria-pressed', 'true');
+    await page.evaluate(() => (window as any).__dropRoom('ch-kiln'));
+    // its chip goes with its room; the stream is every room again, with All pressed, and nothing left scoped behind it
+    await expect(chip(page, 'Kiln Studio')).toHaveCount(0);
+    await expect(chip(page, 'All')).toHaveAttribute('aria-pressed', 'true', { timeout: 5000 });
+    await expect(page.locator('.all-scope-line')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => document.querySelectorAll('[data-place="front-door"]').length)).toBe(1);
+    expect(await roomsShown(page)).toEqual(['ch-bees', 'ch-choir', 'ch-north', 'ch-table']);
+    // the area was let go (after its moment's grace): its room returning brings its chip back, not its stream
+    await page.waitForTimeout(2000);
+    await page.evaluate(() => (window as any).__restoreRoom('ch-kiln'));
+    await expect(chip(page, 'Kiln Studio')).toHaveAttribute('aria-pressed', 'false');
+    await expect(chip(page, 'All')).toHaveAttribute('aria-pressed', 'true');
+    await expect(stream(page).locator('article.all-msg[data-room="ch-north"]').first()).toBeVisible();
+  });
+
   test('nothing in the head or the scope row runs past the edge', async ({ page }) => {
     await bootForYou(page);
     await chip(page, 'Long Table').click();

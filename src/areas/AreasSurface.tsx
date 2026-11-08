@@ -207,8 +207,10 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   /** Whether the scope chosen still has a stream (its area's own room is among All's), as of the last draw; unknown while the rooms are read. */
   const scopeShown = useRef(true);
   // an area that is gone, private, or without its room in All has no stream of its own: back to every room (never a Back that does nothing you can see)
-  // (only once it has stayed so for a moment: a room list re-syncing may lack it for a draw)
-  const scopeGone = !!scopePath && !scopeShown.current;
+  // (only once it has stayed so for a moment: a room list re-syncing may lack it for a draw). The ref is written later in the draw, so it is read
+  // after it (an effect) and carried in state: the timer starts on the draw that lost it, with nothing else needed to draw again.
+  const [scopeGone, setScopeGone] = useState(false);
+  useEffect(() => { setScopeGone(!!scopePath && !scopeShown.current); });
   useEffect(() => { if (!scopeGone) return; const t = setTimeout(() => { if (!scopeShown.current) setScope(null); }, 1500); return () => clearTimeout(t); }, [scopeGone, setScope]);
   const focusView: FocusView = focus?.view ?? "chat";
   /** Without rooms, a place's page is its work; with rooms, the focus's "all of its work" step. */
