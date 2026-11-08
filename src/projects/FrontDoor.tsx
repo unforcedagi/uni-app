@@ -26,8 +26,13 @@ export type Scope = { path: string; name: string; rooms: readonly AllRoom[] };
  *  chip, so the way back to every room is one tap (Back and Escape too). Shown when there is more than one area to choose from. */
 function ScopeRow({ rooms, scope, onScope, onOpenScope }: { rooms: readonly AllRoom[]; scope: Scope | null; onScope: (path: string | null) => void; onOpenScope?: (path: string) => void }) {
   const row = useRef<HTMLElement>(null);
-  // the chosen area's chip is in sight (a row wider than a phone scrolls sideways)
-  useLayoutEffect(() => { const on = row.current?.querySelector<HTMLElement>('[aria-pressed="true"]'); const r = row.current; if (on && r) r.scrollLeft = Math.max(0, on.offsetLeft - (r.clientWidth - on.offsetWidth) / 2); }, [scope?.path]);
+  // the chosen area's chip is in sight just right of All (a row wider than a phone scrolls sideways; All stays put at its start)
+  useLayoutEffect(() => {
+    const r = row.current, on = r?.querySelector<HTMLElement>('[aria-pressed="true"]'), all = r?.firstElementChild as HTMLElement | null;
+    if (!r || !on || !all) return;
+    if (on === all) { r.scrollLeft = 0; return; }
+    r.scrollLeft = Math.max(0, r.scrollLeft + on.getBoundingClientRect().left - all.getBoundingClientRect().right - 6);
+  }, [scope?.path]);
   return <div className="all-scope">
     <nav className="all-scope-row" aria-label="Show in the stream" ref={row}>
       <button type="button" className="all-scope-chip" aria-pressed={!scope} onClick={() => onScope(null)}>All</button>
