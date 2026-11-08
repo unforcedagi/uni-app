@@ -125,7 +125,9 @@ function useHeld() {
 /** Forget this device's key: nothing typed under it stays in memory, or could be read to a model under the next key. */
 export function forgetComposer() {
   setHeld({ text: "", chosen: null, target: null, attempt: null, sending: false, outcome: null, lost: [], era: held.era + 1 });
-  feedMemories.clear(); label.el = null;
+  // (in place: a feed still drawn holds its scope's memory object, and must lose its place too)
+  for (const m of feedMemories.values()) { m.spot = null; m.at = 0; m.open = new Set(); }
+  label.el = null;
   forgetModelRoute();
 }
 if (import.meta.env.VITE_AREAS_TESTHOOKS === "1" && typeof window !== "undefined") (window as unknown as { __allHeld: typeof held }).__allHeld = held;
