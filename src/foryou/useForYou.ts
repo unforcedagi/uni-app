@@ -2,7 +2,7 @@
 // reads (useTasks: live tasks and open decisions, with each note's metadata); the cards are read here (`card` notes, metadata only). An
 // answer is one compare-and-set on the ask (vaultTasks.answer; an old decision keeps vaultTasks.decide), then Aaron's message in the ask's
 // room, threaded under its `reply_root` when there is one. A post that fails stays on the "Answered today" line with Retry, kept on the
-// device until it goes: never dropped.
+// device until it goes (one with no room named is let go after a day, like a sent one).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { allPages, vaultTasks } from "../areas/vaultTasks";
@@ -24,7 +24,7 @@ const lookedKey = (owner: string) => `uni.foryou.looked.v1:${owner}`;
 const answeredKey = (owner: string) => `uni.foryou.answered.v1:${owner}`;
 const read = <T,>(key: string, fallback: T): T => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) as T : fallback; } catch { return fallback; } };
 const write = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* this session only */ } };
-/** An answer still owed to its room is kept until it goes (never dropped); a sent one for a day. A post cut off mid-send (the app
+/** An answer still owed to its room is kept until it goes; a sent one, or one with no room named, for a day. A post cut off mid-send (the app
  *  closed) comes back as failed, with Retry. */
 const kept = (list: Entry[]): Entry[] => list.filter((e) => e.post === "failed" || e.post === "sending" || (e.post === "none" && !!e.room) || Date.now() - e.at < DAY)
   .map((e) => (e.post === "sending" ? { ...e, post: "failed" as const, error: "the app closed before it went" } : e));
