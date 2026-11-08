@@ -296,7 +296,7 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
     onBlurCapture={(e) => { const box = e.currentTarget; requestAnimationFrame(() => onKeyboard?.(box.contains(document.activeElement))); }}>
     {target && <div className="all-route" role="group" aria-label="Where this goes">
       <span className="all-chip chosen all-reply-chip" data-room={target.room}>
-        <span className="all-chip-name">{targetRoom ? <>Replying in {where}{target.root ? " · thread" : ""}</> : "That room isn't in All now"}</span>
+        <span className="all-chip-name">{targetRoom ? <>Replying in {where}{target.root ? " · thread" : ""}</> : "That room isn't in this stream now"}</span>
         <button type="button" className="all-chip-x" aria-label={`Stop replying in ${where}`} onClick={() => { onTarget?.(null); field.current?.focus({ preventScroll: true }); }}>×</button>
       </span>
     </div>}
@@ -576,7 +576,8 @@ export const AllFeed = memo(function AllFeed({ rooms, byRoom, loaded, failed, me
   const endSwipe = () => { const s = swipe.current; if (s) s.el.style.transform = ""; swipe.current = null; };
   const rows: React.ReactNode[] = [];
   let prev: { channel: string; author: string; ts: number } | null = null;
-  const items: (Message | Echo)[] = [...feed, ...echoes].sort((a, b) => a.ts - b.ts);
+  // (a reply sent in another stream, to a room this one doesn't hold, is that stream's: never a stray "Room" row here)
+  const items: (Message | Echo)[] = [...feed, ...echoes.filter((e) => nameOf.has(e.room))].sort((a, b) => a.ts - b.ts);
   for (const m of items) {
     const sameDay = !!prev && new Date(prev.ts * 1000).toDateString() === new Date(m.ts * 1000).toDateString();
     if (!sameDay) rows.push(<div key={`d-${"ref" in m && m.ref ? m.ref : (m as Echo).key}`} className="day-divider" role="separator"><span>{dayLabel(m.ts)}</span></div>);

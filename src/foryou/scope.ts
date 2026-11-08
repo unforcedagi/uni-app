@@ -26,7 +26,8 @@ export function scopeForYou(view: ForYouView, areaPath: string): ForYouView {
 export function headWords(view: Pick<ForYouView, "count" | "look" | "moving">, state: { failed: boolean; reading: boolean; approvals?: number; quiet?: string }): { lead: string; rest: string[] } {
   const ok = state.approvals ?? 0;
   const okWords = `${ok} waiting for your OK`;
-  const rest = [view.count && ok ? okWords : "", view.look.length ? `${view.look.length} to look at` : "", view.moving.length ? `${view.moving.length} moving` : ""].filter(Boolean);
+  // a failed read beside approvals: they are counted, and the failure is said too (with its Try again)
+  const rest = [view.count && ok ? okWords : "", !view.count && ok && state.failed ? "couldn't check the rest" : "", view.look.length ? `${view.look.length} to look at` : "", view.moving.length ? `${view.moving.length} moving` : ""].filter(Boolean);
   if (!view.count && !ok && state.failed) return { lead: "Couldn't check what needs you", rest: [] };
   if (!view.count && !ok && state.reading) return { lead: "Looking for what's yours…", rest: [] };
   if (!view.count && !ok && !rest.length) return { lead: "Nothing for you", rest: state.quiet ? [state.quiet] : [] };

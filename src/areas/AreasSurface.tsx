@@ -204,8 +204,10 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   useEffect(() => () => { if (!document.querySelector('[data-place="front-door"]')) { pulledMemory.open = false; scopeMemory.path = null; } }, []);
   const [scopePath, setScopeState] = useState<string | null>(() => scopeMemory.path);
   const setScope = useCallback((p: string | null) => { scopeMemory.path = p; setScopeState(p); }, []);
-  // an area that is gone, or private, has no stream of its own: back to every room (never a Back that does nothing you can see)
-  useEffect(() => { if (scopePath && data && (!data.tree.nodes.has(scopePath) || isPrivatePath(data.tree, scopePath))) setScope(null); }, [scopePath, data, setScope]);
+  /** Whether the scope chosen still has a stream (its area's own room is among All's), as of the last draw; unknown while the rooms are read. */
+  const scopeShown = useRef(true);
+  // an area that is gone, private, or without its room in All has no stream of its own: back to every room (never a Back that does nothing you can see)
+  useEffect(() => { if (scopePath && !scopeShown.current) setScope(null); });
   const focusView: FocusView = focus?.view ?? "chat";
   /** Without rooms, a place's page is its work; with rooms, the focus's "all of its work" step. */
   const workShown = !chat ? !!node : focusView === "work";
@@ -504,6 +506,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
       return { path: p, name: own.name, rooms: [own, ...inner] };
     };
     const scope = scopePath ? scopeOf(scopePath) : null;
+    scopeShown.current = !scopePath || !!scope || !data || !allRooms.length;
     const all = allRooms.length ? { rooms: allRooms, onOpenAt: openRoomAt, scope, onScope: allPlace ? setScope : undefined, onOpenScope: (p: string) => openPlace(p) } : null;
     // 0.3.0: For you is known once the tasks are read, fresh and whole
     const needsKnown = tasks.error || tasks.truncated || tasks.treeTruncated ? "failed" as const : !tasks.ready || tasks.savedAt ? "reading" as const : "known" as const;

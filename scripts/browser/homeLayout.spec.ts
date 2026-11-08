@@ -88,6 +88,23 @@ test.describe('home layout', () => {
     await expect(stream(page).locator('article.all-msg[data-room="ch-north"]').first()).toBeVisible();
   });
 
+  test("a reply sent in an area's stream stays in that stream: no stray row in All, none in another area's", async ({ page }) => {
+    await bootForYou(page);
+    await chip(page, 'Kiln Studio').click();
+    // reply to the project's room from the area's stream
+    await stream(page).locator('article.all-msg[data-room="ch-glaze"] .message-content').first().click();
+    await page.getByRole('textbox', { name: 'Message for your rooms' }).fill('Probe words for the tiles.');
+    await page.getByRole('region', { name: 'Talk to Uni' }).getByRole('button', { name: /^(Send|Reply)/ }).click();
+    await expect.poll(async () => (await calls(page, 'post_message')).map((a: any) => a.channel)).toEqual(['ch-glaze']);
+    await expect(stream(page)).toContainText('Probe words for the tiles.');
+    // All doesn't hold the project's room: the reply isn't there, as itself or as a stand-in
+    await chip(page, 'All').click();
+    await expect(stream(page).locator('article.all-msg[data-room="ch-north"]').first()).toBeVisible();
+    await expect(stream(page)).not.toContainText('Probe words for the tiles.');
+    await chip(page, 'Choir').click();
+    await expect(stream(page)).not.toContainText('Probe words for the tiles.');
+  });
+
   test('nothing in the head or the scope row runs past the edge', async ({ page }) => {
     await bootForYou(page);
     await chip(page, 'Long Table').click();

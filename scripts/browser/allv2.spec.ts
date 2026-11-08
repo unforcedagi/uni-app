@@ -583,7 +583,7 @@ test.describe('review 4', () => {
     // away and back, so All reads the target again
     await leaveAll(page);
     await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
-    await expect(reply(page)).toContainText("isn't in All now");
+    await expect(reply(page)).toContainText("isn't in this stream now");
     await page.waitForTimeout(700);
     expect(await calls(page, 'route_suggest')).toEqual([]);
     await expect(send(page)).toBeDisabled();

@@ -197,7 +197,7 @@ export function ForYou(p: ForYouProps & { /** The head says this place's name: F
         <span className="fy-sum" aria-hidden="true"><b>{head.lead}</b>{head.rest.map((r) => <span key={r}> · {r}</span>)}</span>
         <i className="ps-chev" aria-hidden="true" />
       </button>
-      {p.failed && head.lead.startsWith("Couldn") && <button type="button" className="fy-link-btn fy-retry" onClick={p.failed}>Try again</button>}
+      {p.failed && !view.count && <button type="button" className="fy-link-btn fy-retry" onClick={p.failed}>Try again</button>}
     </div>
     {!open && first && <button type="button" className="fy-first" data-id={first.id} onClick={() => setOpen(true)} aria-label={`${first.what}, ${first.where.label}. Open For you`}>
       <Mark kind={first.band} /><span className="fy-first-t">{first.what}</span><span className="fy-first-w">{first.where.label}</span></button>}
