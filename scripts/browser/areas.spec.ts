@@ -117,7 +117,7 @@ test('0.3.0: what needs you, across the areas, is For you at the top of the home
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, privateTasks: true, pinned: true });
   // the head's one sentence says how many things need you; For you lists them over the stream (the drawer holds no list of them now)
   const pull = page.locator('[data-place="front-door"] .fd-pull');
-  await expect(pull).toContainText(/^\w+ things? needs? you\./);
+  await expect(pull).toHaveAttribute('aria-label', /^\w+ things? needs? you\./); // 0.3.1: the sentence is the pull's label; For you's line says it
   await expect(page.locator('[data-place="front-door"]')).not.toContainText(/Sit twenty|Find a teacher|T-3[12]/);
   await openForYou(page);
   const needs = page.getByRole('region', { name: 'For you' });
