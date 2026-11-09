@@ -10,7 +10,7 @@ import { transcribe } from "./useForYou";
 import { cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine } from "./forYouCore";
 import { quietLine } from "../projects/FrontDoor";
 import { headWords } from "./scope";
-import { dialogOpen, openDialog } from "../areas/focusTrap";
+import { dialogOpen, holdTop, openDialog } from "../areas/focusTrap";
 import "./foryou.css";
 
 export type ForYouProps = {
@@ -93,8 +93,11 @@ function HoldToTalk({ item, onSend, disabled }: { item: Item; onSend: (text: str
 /** What he said, to read and fix before it goes. */
 function Said({ text, footer, onSend, onCancel }: { text: string; footer: string; onSend: (t: string) => void; onCancel: () => void }) {
   const [t, setT] = useState(text);
+  // while his words are up to read, Escape never closes the card around them (they would be lost with it): Send or Cancel decides; in the
+  // box, Escape only leaves it
+  useEffect(() => holdTop(), []);
   return <div className="fy-said">
-    <textarea aria-label="Your answer" value={t} rows={Math.min(5, Math.max(2, Math.ceil(t.length / 40)))} onChange={(e) => setT(e.target.value)} />
+    <textarea aria-label="Your answer" value={t} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.currentTarget.blur(); } }} rows={Math.min(5, Math.max(2, Math.ceil(t.length / 40)))} onChange={(e) => setT(e.target.value)} />
     <div className="fy-said-row">
       <button type="button" className="fy-send" disabled={!t.trim()} onClick={() => onSend(t)}>Send</button>
       <button type="button" className="fy-opt" onClick={onCancel}>Cancel</button>
@@ -283,7 +286,7 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
         <span className="fy-card-kicker"><Mark kind={mark} /><span>{card.area ? `${card.area} · card` : "card"}<span className="fy-card-state"> · {MARK_WORDS[mark]}</span></span></span>
         <button type="button" className="fy-link-btn fy-card-close" onClick={onClose}>Close</button></div>
       <h3 className="fy-card-name">{card.name}</h3>
-      {card.stands && <p className="fy-card-stands">{card.stands}{card.standsAt && <small>as of {new Date(ms(card.standsAt) ?? 0).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}</small>}</p>}
+      {card.stands && <p className="fy-card-stands">{card.stands}{ms(card.standsAt) !== null && <small>as of {new Date(ms(card.standsAt)!).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}</small>}</p>}
       {card.hill && <p className="fy-card-hill"><Hill pos={card.hill.pos} w={120} h={38} /><span><b>{card.hill.words}.</b>{card.hill.stuck ? " It hasn't moved in a while." : card.hill.pos >= 100 ? "" : card.hill.pos >= 50 ? " Past figuring out; now making." : " Still figuring it out."}</span></p>}
       {lines.length > 0 ? <ul className="fy-card-lines" aria-label="Its last lines, newest first">
         {shown.map((l, i) => <li key={i} data-mine={l.mine || undefined}><span className="fy-at">{lineDate(l.at, now)}</span>

@@ -307,6 +307,7 @@ check("review: a named author rules; an old answer in the same words doesn't hid
     { at: iso(NOW - 7 * D), text: "Aaron: Done" },
   ] }))!;
   assert.deepEqual(c.lines.map((l) => l.mine), [false, false, true]);
+  assert.equal(c.lines[1].text, "Aaron: asked for blue.");
   const now = { id: "d", what: "Shelf", answer: "Done", at: NOW - 60_000, room: "kiln-studio", post: "sent" as const, card: "Cards/Kiln Studio/Glaze Tests" };
   assert.deepEqual(cardLines(c, [now]).map((l) => l.text).slice(0, 1), ["Done"]);
   assert.equal(cardLines(c, [now]).filter((l) => l.text === "Done").length, 2);

@@ -203,6 +203,30 @@ test.describe('the card', () => {
     expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-card'))).toBe('Cards/Kiln Studio/Glaze Tests');
   });
 
+  test("hold to talk on the card: Escape keeps the words and the card (Send or Cancel decides)", async ({ page }) => {
+    await bootForYou(page, { more: true, transcript: 'Tenmoku, and keep two tiles back.' });
+    await openForYou(page);
+    await item(page, 'fy-glaze').locator('.fy-where').click();
+    const c = card(page, 'Glaze Tests');
+    const mic = c.locator('article.fy-item[data-id="fy-glaze"]').getByRole('button', { name: 'Hold to talk' });
+    await mic.dispatchEvent('pointerdown');
+    await expect(c.locator('.fy-rec')).toContainText(/Listening/);
+    await page.waitForTimeout(900);
+    await mic.dispatchEvent('pointerup');
+    const box = c.getByRole('textbox', { name: 'Your answer' });
+    await expect(box).toHaveValue('Tenmoku, and keep two tiles back.');
+    await box.focus();
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await expect(c).toBeVisible();
+    await expect(box).toHaveValue('Tenmoku, and keep two tiles back.');
+    await c.getByRole('button', { name: 'Cancel' }).click();
+    await expect(box).toHaveCount(0);
+    // the words gone, Escape is the card's again
+    await page.keyboard.press('Escape');
+    await expect(c).toHaveCount(0);
+  });
+
   test('reads in greyscale: the marks by shape, his answer by its tag, every word dark enough', async ({ page }) => {
     await boot(page);
     await page.addStyleTag({ content: 'html { filter: grayscale(1) !important; }' });

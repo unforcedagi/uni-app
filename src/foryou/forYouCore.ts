@@ -146,7 +146,8 @@ function lineOf(o: Record<string, unknown>, me: string): CardLine | null {
   const said = colon > 0 && isMe(raw.slice(0, colon), me);
   // (a line that names its author is that author's, whatever its words say)
   const mine = by ? isMe(by, me) : said || (s(o.status) ?? "").toLowerCase() === "answer";
-  const text = said ? raw.slice(colon + 1).trim() || raw : raw;
+  // (his name is dropped only from his own line: a line by someone else that quotes him keeps it)
+  const text = said && mine ? raw.slice(colon + 1).trim() || raw : raw;
   return { at: s(o.ended) ?? s(o.at), text, mine };
 }
 
