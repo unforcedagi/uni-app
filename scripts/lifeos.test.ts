@@ -271,7 +271,9 @@ check("the Uni root is a node on the Uni channel, and refresh drafts name the no
   assert.equal(r.path, ROOT); assert.deepEqual(r.rooms, [UNI_ROOM]);
   assert.match(refreshDraft("Techne", "Areas/Techne"), /^@Uni .*Areas\/Techne\/Brief/);
   assert.match(refreshDraft("COhere 2026", "Projects/COhere/COhere 2026"), /Projects\/COhere\/COhere 2026\/Brief/);
-  assert.match(refreshDraft("Uni", ""), /Areas\/Today/);
+  // T-335 (11-09): the Areas/Today roll-up is retired: the root asks for its own summary, never the retired note
+  assert.doesNotMatch(refreshDraft("Uni", ""), /Areas\/Today/);
+  assert.match(refreshDraft("Uni", ""), /^@Uni .*summary/);
 });
 
 check("project summary supplies purpose with a lean query", () => {

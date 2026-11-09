@@ -175,7 +175,8 @@ export function updatedLabel(iso: string | null | undefined, now: number): strin
   return `updated ${Math.floor(s / (7 * 86400))}w ago`;
 }
 
-/** The Refresh action: a draft asking Uni to rewrite a node's Brief (the Uni home: Today). Never sent by the app. */
+/** The Refresh action: a draft asking Uni to rewrite a node's Brief (the Uni home: its own summary; the Areas/Today roll-up was retired
+ *  11-09, T-335). Never sent by the app. */
 export const refreshDraft = (name: string, path: string | null) => path === null || path === ""
-  ? "@Uni Please refresh Areas/Today: what needs me, what moved, and what is quiet."
+  ? "@Uni Please update the summary on my home: what needs me, what moved, and what is quiet."
   : `@Uni Please refresh ${name}'s brief (${path}/Brief): what is current, what needs me, and what moved since it was written.`;
