@@ -50,7 +50,12 @@ android {
             }
         }
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            // T-335: UNI_ANDROID_UNSIGNED=1 (publish.sh, via scripts/android-release-build.sh) builds the release APK
+            // unsigned (app-universal-release-unsigned.apk, still zip-aligned) and never opens a keystore; the sealed
+            // broker signs it after the owner approves. Unset, local release builds sign as before.
+            if (System.getenv("UNI_ANDROID_UNSIGNED") != "1") {
+                signingConfig = signingConfigs.getByName("release")
+            }
             // T-305: no R8. Rust finds the Kotlin classes (RustWebView, Ipc, the plugins) by name over JNI, and the
             // dex is a few MB of a release; shrinking it is not worth a class renamed out from under the shell.
             isMinifyEnabled = false

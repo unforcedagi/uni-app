@@ -5,10 +5,13 @@
 # apps trust ($ANDROID_USER_HOME/debug.keystore, from ~/.config/uni/android.env). The Rust library is built for size:
 # LTO, opt-level s, one codegen unit, stripped. Set here and not in Cargo.toml's [profile.release], so the Mac build
 # (the same profile, on the hosted runner) is unchanged. 0.1.83, a debug build, was 553 MB; this is about 24 MB.
+# T-335: UNI_ANDROID_UNSIGNED=1 (what publish.sh sets) builds it unsigned, with no keystore read, and prints the
+# app-universal-release-unsigned.apk path; publish.sh has the sealed broker sign it after the owner approves.
+# UNI_ANDROID_ENV names another env file (default ~/.config/uni/android.env), e.g. one whose ANDROID_USER_HOME is empty.
 set -euo pipefail
 VERSION=${1:?version}; CODE=${2:?versionCode}
 cd "$(dirname "$0")/.."
-source "$HOME/.config/uni/android.env"
+source "${UNI_ANDROID_ENV:-$HOME/.config/uni/android.env}"
 export PATH="$HOME/.cargo/bin:$PATH"
 export CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_OPT_LEVEL=s CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
   CARGO_PROFILE_RELEASE_STRIP=true
@@ -19,5 +22,6 @@ rm -rf src-tauri/gen/android/app/build/outputs/apk
 pnpm tauri android build --apk --target aarch64 --features messages \
   --config "{\"version\":\"$VERSION\",\"bundle\":{\"android\":{\"versionCode\":$CODE}}}"
 APK=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+if [[ ${UNI_ANDROID_UNSIGNED:-} == 1 ]]; then APK=${APK%.apk}-unsigned.apk; fi
 test -s "$APK"
 echo "$(pwd)/$APK"
