@@ -1,6 +1,6 @@
 # Talk to Uni — Android conversation client
 
-**Status:** history: the phase-1 contract (September). Since 0.2 the app opens on one home, All (every area room's stream, with a drawer for To post and the places; since 0.3 For you, what is yours, sits at its top, folded to one line since 0.3.1; since 0.3.1 the stream can be scoped to one area's rooms); a room opens in focus over it; #Uni was archived on 10-26 and there is no room for everything; an ask acts in its own room. Read what follows as where the app started.
+**Status:** history: the phase-1 contract (September). Since 0.2 the app opens on one home, All (every area room's stream, with a drawer for To post and the places; since 0.3 For you, what is yours, sits at its top, folded to one line since 0.3.1; since 0.3.1 the stream can be scoped to one area's rooms; since 0.3.2 a card's name, there or in an area, opens the card); a room opens in focus over it; #Uni was archived on 10-26 and there is no room for everything; an ask acts in its own room. Read what follows as where the app started.
 
 This replaces the September 20 unified Buzz/Parachute timeline proposal. Aaron wants a small, Telegram-like app for talking to Uni, not a second Buzz desktop or a vault browser.
 
