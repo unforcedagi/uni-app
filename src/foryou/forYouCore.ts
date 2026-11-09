@@ -41,6 +41,8 @@ export type ForYouInput = {
   /** A room's name as a live room's name (an archived room's name: the live room its work went to); null: no live room by that name.
    *  Absent: every named room counts as live (tests, a vault with no rooms). */
   liveRoom?: (name: string) => string | null;
+  /** Whether a room's name is a private place's room: an ask that names one is that room's, wherever its node is (counted, never shown). */
+  privateRoom?: (name: string) => boolean;
 };
 
 export type Item = {
@@ -201,6 +203,25 @@ export function currentAt(m: Record<string, unknown>, createdAt: unknown, now: n
   if (sane.length || ok.length) return Math.max(...(sane.length ? sane : ok));
   return ms(s(m.created)) ?? ms(s(createdAt));
 }
+/** A place in one of these is not live (T-335 fresh): For you shows nothing of it. */
+export const DORMANT = /^(archived|resting|done)$/i;
+/** A node as the dormant rule reads it (the vault's node notes, archived ones included). */
+export type PlaceNote = { id: string; path: string; kind: string; status?: string; parent?: string | null; links?: readonly string[]; metadata: Record<string, unknown> };
+/**
+ * Whether a node (by id or path) isn't live: it is archived, resting or done, or every area it is linked to (its `parent` or `links`, or an area whose
+ * `links` name it) is, archived areas included. An area stands by its own status. null: the node isn't among `all`. The same rule as uni-tasks
+ * for_you.dormant.
+ */
+export function placeDormant(all: readonly PlaceNote[], ref: string): boolean | null {
+  const n = all.find((a) => a.id === ref || a.path === ref);
+  if (!n) return null;
+  const off = (a: PlaceNote) => a.status === "archived" || a.status === "done" || DORMANT.test(String(a.metadata.status ?? ""));
+  if (off(n)) return true;
+  if (n.kind === "area") return false;
+  const mine = new Set([n.parent, ...(n.links ?? [])].map(refPath).filter((x): x is string => !!x));
+  const areas = all.filter((a) => a.kind === "area" && a.id !== n.id && (mine.has(a.id) || mine.has(a.path) || (a.links ?? []).map(refPath).some((r) => r === n.id || r === n.path)));
+  return areas.length > 0 && areas.every(off);
+}
 /** The quiet line for what went back: "3 waiting on their rooms" ("" for none). */
 export const awayLine = (n: number): string => (n ? `${n} waiting on ${n === 1 ? "its room" : "their rooms"}` : "");
 
@@ -256,7 +277,9 @@ export function forYou(input: ForYouInput): ForYouView {
     const kindRaw = s(m.kind)?.toLowerCase();
     const kind: Kind = legacy ? "decision" : kindRaw === "choose" || kindRaw === "look" || kindRaw === "tell" ? kindRaw : tags.includes("decision") ? "choose" : "do";
     // a card not read yet (or unreadable) may be private: until it is read, its ask is counted, never shown (review 11-07)
-    if (place.private || card?.private || (cardPath && !card)) {
+    // an ask that names a private room (its reply_room, else its room) is that room's, wherever its node sits (as uni-tasks for_you.py reads it)
+    const named = (s(m.reply_room) ?? s(m.room))?.replace(/^#/, "") ?? null;
+    if (place.private || card?.private || (cardPath && !card) || (!!named && !!input.privateRoom?.(named))) {
       // (a private card's own area, wherever its ask is filed)
       const area = (card?.private ? card.area : null) ?? place.area ?? card?.area ?? "a private area";
       const p = privates.get(area) ?? { area, node: (card?.private ? card.areaNode : null) ?? node, areaPath: (card?.private ? card.areaNode : null) ?? place.areaPath ?? null, count: 0 };

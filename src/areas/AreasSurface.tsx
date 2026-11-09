@@ -22,7 +22,7 @@ import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { rolledNeeds } from "./sidebarState";
 import { useRailHidden, useWide } from "./homeLayout";
-import { isPrivatePath, isPrivateRoom, privateRoot, privateRootIn, privateRunIds, roomSlug, roomView, treeRows } from "./treeRooms";
+import { isPrivateName, isPrivatePath, isPrivateRoom, privateRoot, privateRootIn, privateRunIds, roomSlug, roomView, treeRows } from "./treeRooms";
 import { setWorkRooms } from "../projects/store";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
 import { approvalsAt, rolledUnread, unreadByPath, unreadByRoom } from "./roomUnread";
@@ -48,7 +48,7 @@ import { AllEmpty, FrontDoor, type Door, type NewRoom, type Scope } from "../pro
 import { scopeForYou } from "../foryou/scope";
 import { AreaCardList, CardPanel, ForYou, useCardBeside } from "../foryou/ForYou";
 import { useForYou } from "../foryou/useForYou";
-import { areaCards, cardItems, cardMark, cardMatcher, type CardMark, type CardView, type Item as ForYouItem, type Place } from "../foryou/forYouCore";
+import { areaCards, cardItems, cardMark, cardMatcher, DORMANT, placeDormant, type CardMark, type CardView, type Item as ForYouItem, type Place } from "../foryou/forYouCore";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
 import { plainWords } from "../projects/live";
@@ -115,8 +115,6 @@ const ASK_WAIT_MS = 8000;
  * room is shown in that focus and nowhere else; its details (what needs you, its summary, its projects and sessions, all of its work, its app)
  * are a step inside it. Without rooms (a vault whose profile has no chat): the tree of its places, and each place's work.
  */
-/** A place in one of these is not live (T-335 fresh): For you shows nothing of it. */
-const DORMANT = /^(archived|resting|done)$/i;
 
 export default function AreasSurface({ allPlace = null, identity, path, rooms: hostRooms, roomsPending = false, actions, roomFor, onOpenArea, onBackChange, onOverlayChange }: {
   /** T-335: this surface is the All place: every area's room at once, the room in focus over it, and the way back to Uni. */
@@ -317,18 +315,34 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const room = node ? roomOfNode(node) : null;
     const priv = node ? (data ? privateRoot(data.tree, node) : tasks.tree ? privateRootIn(tasks.tree, node) : null) : null;
     // 0.3.3 (T-335 fresh): a node, or the area it sits in, that is archived, resting or done is not live: its asks are not in For you
-    return { area: name, areaPath: top, room: room ? roomSlug(room.name) : null, private: !!priv, live: !(fyDormant(node) || fyDormant(top)) };
+    // (the root's own room is #Uni's, archived: its marked `room_fallback` stands in, as uni-tasks' steward reads it)
+    const rootAsk = !!node && (node === ROOT || !!tasks.tree?.rootRefs.has(node));
+    return { area: name, areaPath: top, room: room ? roomSlug(room.name) : rootAsk ? fyRootRoom : null, private: !!priv, live: !fyDormant(node) };
   }, [tasks.tree, data, roomRefs, uniRef]); // eslint-disable-line react-hooks/exhaustive-deps
-  /** A node (path or id) that is archived, resting or done. One the trees don't know at all is taken as live. */
+  /** The live room the root's work went to: the Uni node's `room_fallback` once its room is marked archived; else null. */
+  const fyRootRoom = useMemo(() => {
+    const r = (data?.areas ?? []).find((a) => !!tasks.tree?.rootRefs.has(a.id) || !!tasks.tree?.rootRefs.has(a.path));
+    const fb = r && /^(archived|missing)$/i.test(String(r.metadata.room_status ?? "")) && typeof r.metadata.room_fallback === "string" ? roomByName(roomRefs, r.metadata.room_fallback) : null;
+    return fb ? roomSlug(fb.name) : null;
+  }, [data?.areas, tasks.tree, roomRefs]);
+  /** A node (path or id) that isn't live: it is archived, resting or done, or every area it is linked to is (archived ones included: the trees
+   *  drop them), as uni-tasks for_you.dormant reads it. A node no list knows is taken as live. */
   function fyDormant(p: string | null): boolean {
     if (!p) return false;
     const path = tasks.tree?.idPath.get(p) ?? p;
-    const n = tasks.tree?.byPath.get(path);
-    if (n) return DORMANT.test(n.status);
-    const a = data?.tree.nodes.get(path);
-    if (a) return DORMANT.test(String(a.metadata.status ?? ""));
-    return !!data?.tree.archived.some((x) => x.path === path || x.id === p);
+    const known = placeDormant(data?.areas ?? [], path) ?? placeDormant(data?.areas ?? [], p);
+    if (known !== null) return known;
+    const t = tasks.tree?.byPath.get(path);
+    return !!t && DORMANT.test(t.status);
   }
+  /** A room's name that is a private place's: named privately, or named by a node in a private place (an archived room too). */
+  const fyPrivateRoom = useCallback((name: string): boolean => {
+    const key = roomSlug(name).toLowerCase();
+    if (key.split("/").some(isPrivateName)) return true;
+    const live = roomByName(roomRefs, name);
+    if (live && data && isPrivateRoom(data.tree, live.id, roomRefs, uniRef)) return true;
+    return !!data && (data.areas ?? []).some((a) => [a.metadata.room, a.metadata.room_was].some((r) => typeof r === "string" && roomSlug(r).toLowerCase() === key) && isPrivatePath(data.tree, a.path));
+  }, [data, roomRefs, uniRef]);
   /** 0.3.3 For you: a room's name as a live room's. An archived room (the relay lists only live ones) resolves through the `room_fallback` of a
    *  node that names it (tasks.py rooms-apply), when that room is live; else null, and the ask's node's room stands in. */
   const fyLiveRoom = useCallback((name: string): string | null => {
@@ -346,7 +360,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   /** 0.3.0 For you: the room an answer goes to: its `reply_room` (else its room, else its node's), by id or name. */
   // the room its footer names, exactly: a named room that isn't here is no room (the answer waits, owed), never another room
   const answerRoom = useCallback((item: ForYouItem) => askRoomOf({ room: item.replyRoom, node: item.node }, roomRefs, () => null), [roomRefs]);
-  const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.all ?? tasks.tasks : null, placeOf: fyPlaceOf, liveRoom: fyLiveRoom, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
+  const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.all ?? tasks.tasks : null, placeOf: fyPlaceOf, liveRoom: fyLiveRoom, privateRoom: fyPrivateRoom, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
   /** The stream's rooms by their place's path (set as the home draws): a message names a card of its own area. */
   const roomPaths = useRef(new Map<string, string>());
   // (the stream's rows redraw only when what a message could name changes: the cards, their marks, the posts their asks thread under)

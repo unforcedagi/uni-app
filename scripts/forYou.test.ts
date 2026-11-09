@@ -3,7 +3,7 @@
 process.env.TZ = "UTC";
 import assert from "node:assert/strict";
 import { buildTaskTree, isTaskRow, parseTask } from "../src/areas/taskCore.ts";
-import { answerBody, answerMeta, areaCards, awayLine, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
+import { answerBody, answerMeta, areaCards, awayLine, placeDormant, type PlaceNote, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -365,6 +365,34 @@ check("only live places: an ask on an archived or resting node (or area) is not 
   const v = view([task("s", "T-721 Shelved thing", { node: "Projects/Shelved", kind: "do", no_default: true }), task("k", "T-722 Kept", { node: "Areas/North Field", kind: "do", no_default: true })], [], { placeOf: placeOf2 });
   assert.deepEqual(v.yours.map((i) => i.id), ["k"]);
   assert.equal(v.away, 1);
+});
+
+check("review 11-08: an ask that names a private room is only counted, however public its node; its words never show", () => {
+  const privateRoom = (name: string) => name.toLowerCase() === "sanctum" || name.toLowerCase() === "old-cellar";
+  const v = view([task("pr", "T-731 Cellar words", { node: "Areas/North Field", kind: "do", no_default: true, room: "old-cellar", why_now: "inner words" }),
+    task("pk", "T-732 Kept", { node: "Areas/North Field", kind: "do", no_default: true })], [], { privateRoom });
+  assert.deepEqual(v.yours.map((i) => i.id), ["pk"]);
+  assert.equal(v.privates.reduce((n, p) => n + p.count, 0), 1);
+  assert.ok(!JSON.stringify(v).includes("inner words"));
+});
+
+check("review 11-08: a place isn't live when it, or every area it is linked to, is archived, resting or done (archived areas included)", () => {
+  const n = (id: string, path: string, kind: string, status: string, more: Partial<PlaceNote> = {}): PlaceNote => ({ id, path, kind, status: status === "resting" ? "background" : status, metadata: { status }, ...more });
+  const all = [n("a1", "Areas/Old Shed", "area", "archived"), n("a2", "Areas/North Field", "area", "foreground"), n("a3", "Areas/Quiet Wood", "area", "resting"),
+    n("p1", "Projects/Shed Work", "project", "foreground", { links: ["Areas/Old Shed"] }),
+    n("p2", "Projects/Both", "project", "foreground", { links: ["[[Areas/Old Shed]]", "a2"] }),
+    n("p3", "Projects/Wood Walk", "project", "foreground", { parent: "Areas/Quiet Wood" }),
+    n("p4", "Projects/Paused", "project", "resting"),
+    { ...n("a4", "Areas/Linker", "area", "archived"), links: ["p5"] }, n("p5", "Projects/Linked Back", "project", "foreground"),
+    n("p6", "Projects/Loose", "project", "foreground")];
+  assert.equal(placeDormant(all, "Projects/Shed Work"), true, "linked only to an archived area");
+  assert.equal(placeDormant(all, "p2"), false, "one live area keeps it live");
+  assert.equal(placeDormant(all, "Projects/Wood Walk"), true, "its area is resting");
+  assert.equal(placeDormant(all, "p4"), true);
+  assert.equal(placeDormant(all, "p5"), true, "an archived area that links to it");
+  assert.equal(placeDormant(all, "p6"), false, "no area at all: live");
+  assert.equal(placeDormant(all, "Areas/North Field"), false);
+  assert.equal(placeDormant(all, "Projects/Unknown"), null);
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
