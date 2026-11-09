@@ -2916,7 +2916,8 @@ async fn vault_note_decision(app: tauri::AppHandle, vault: Option<String>, id: S
     with_vault(&app, move |c| tauri::async_runtime::block_on(c.note_decision(&vault, &id, &text, &by, &at)).map_err(|e| e.to_string())).await
 }
 
-/// Merge `snoozed_until` into a task or decision, guarded by `if_updated_at` (the client refuses any other key or note).
+/// Merge a snooze (`snoozed_until`) or Seen on a do or choose ask into a task or decision, guarded by `if_updated_at` (the
+/// client refuses any other key or note: uni-core check_meta_patch).
 #[tauri::command]
 async fn vault_patch_meta(
     app: tauri::AppHandle,

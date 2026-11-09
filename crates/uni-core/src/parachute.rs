@@ -700,7 +700,8 @@ impl VaultClient {
         Err(Error::Conflict(format!("the decision kept changing while your note was saved; try again: {id}")))
     }
 
-    /// Merge `metadata` into a note, guarded by the `updated_at` the caller last read. Only the `snoozed_until` key,
+    /// Merge `metadata` into a note, guarded by the `updated_at` the caller last read. Only a snooze (`snoozed_until`) or
+    /// Seen on a do or choose ask (`seen_at`, `seen_by`, `needs_aaron` false, `needs_aaron_why` "seen": check_meta_patch),
     /// and only on notes tagged `task` or `decision` (checked against the stored note, not the caller's claim).
     pub async fn patch_metadata(
         &self,
@@ -717,6 +718,9 @@ impl VaultClient {
         let note = self.get_note(vault, id).await?;
         if !has_task_tag(&note) {
             return Err(Error::Invalid("snooze and seen apply only to task and decision notes".into()));
+        }
+        if metadata.get("seen_at").is_some() {
+            check_seen_kind(&note)?;
         }
         let v = self
             .rpc(
@@ -1265,7 +1269,7 @@ fn check_seen_patch(metadata: &Value) -> Result<()> {
     if o.len() != SEEN_KEYS.len() || !SEEN_KEYS.iter().all(|k| o.contains_key(*k)) {
         return refuse("seen writes `seen_at`, `seen_by`, `needs_aaron` and `needs_aaron_why`, and nothing else");
     }
-    let at_ok = o["seen_at"].as_str().is_some_and(|s| !s.trim().is_empty() && s.len() <= 100);
+    let at_ok = o["seen_at"].as_str().is_some_and(|s| s.len() <= 100 && crate::mail::accounts::rfc3339_seconds(s).is_some());
     let by_ok = o["seen_by"].as_str().is_some_and(|b| {
         b != "uni-default" && b.len() <= 64 && !b.is_empty() && b.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
     });
@@ -1275,6 +1279,16 @@ fn check_seen_patch(metadata: &Value) -> Result<()> {
     Ok(())
 }
 const SEEN_KEYS: [&str; 4] = ["seen_at", "seen_by", "needs_aaron", "needs_aaron_why"];
+
+/// Seen as a metadata patch keeps the ask open, so it is only for a do or choose ask: a tell or look ask closes with its Seen
+/// (`vault_transition`), never stays open marked seen.
+fn check_seen_kind(note: &Value) -> Result<()> {
+    let kind = note["metadata"]["kind"].as_str().unwrap_or("").trim().to_ascii_lowercase();
+    if kind == "tell" || kind == "look" {
+        return Err(Error::Invalid("a tell or look ask closes on Seen: mark it seen with the close, not a patch".into()));
+    }
+    Ok(())
+}
 
 /// What a metadata patch on a task may hold: a snooze (`snoozed_until` alone) or Seen on an ask that stays open (a do or choose ask).
 fn check_meta_patch(metadata: &Value) -> Result<()> {
@@ -1708,11 +1722,20 @@ mod tests {
             assert!(check_seen_patch(&m).is_err(), "{k}");
             assert!(check_meta_patch(&m).is_err(), "{k}");
         }
-        assert!(check_seen_patch(&json!({"seen_at": "x", "seen_by": "aaron", "needs_aaron": true, "needs_aaron_why": "seen"})).is_err());
-        assert!(check_seen_patch(&json!({"seen_at": "x", "seen_by": "aaron", "needs_aaron": false, "needs_aaron_why": "yes"})).is_err());
+        let t = "2026-11-11T12:00:00.000Z";
+        assert!(check_seen_patch(&json!({"seen_at": t, "seen_by": "aaron", "needs_aaron": true, "needs_aaron_why": "seen"})).is_err());
+        assert!(check_seen_patch(&json!({"seen_at": t, "seen_by": "aaron", "needs_aaron": false, "needs_aaron_why": "yes"})).is_err());
         assert!(check_seen_patch(&json!({"seen_at": "", "seen_by": "aaron", "needs_aaron": false, "needs_aaron_why": "seen"})).is_err());
-        assert!(check_seen_patch(&json!({"seen_at": "x", "seen_by": "uni-default", "needs_aaron": false, "needs_aaron_why": "seen"})).is_err());
-        assert!(check_seen_patch(&json!({"seen_at": "x", "seen_by": "a b", "needs_aaron": false, "needs_aaron_why": "seen"})).is_err());
+        // a time uni-tasks can read, or the sweep would quietly undo the Seen
+        assert!(check_seen_patch(&json!({"seen_at": "x", "seen_by": "aaron", "needs_aaron": false, "needs_aaron_why": "seen"})).is_err());
+        assert!(check_seen_patch(&json!({"seen_at": "2026-11-11T12:00:00Z", "seen_by": "aaron", "needs_aaron": false, "needs_aaron_why": "seen"})).is_ok());
+        assert!(check_seen_patch(&json!({"seen_at": t, "seen_by": "uni-default", "needs_aaron": false, "needs_aaron_why": "seen"})).is_err());
+        assert!(check_seen_patch(&json!({"seen_at": t, "seen_by": "a b", "needs_aaron": false, "needs_aaron_why": "seen"})).is_err());
+        // a metadata patch is Seen on an ask that stays open: never a tell or look ask (those close with it)
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "do"}})).is_ok());
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "choose"}})).is_ok());
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "Tell"}})).is_err());
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "look"}})).is_err());
         // the snooze patch is unchanged
         assert!(check_meta_patch(&json!({"snoozed_until": "2026-11-12"})).is_ok());
         assert!(check_meta_patch(&json!({"snoozed_until": "2026-11-12", "seen_at": "x"})).is_err());

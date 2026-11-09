@@ -209,7 +209,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
    * 0.3.0 For you: answer an ask (CONTRACT "Answering an ask"): one compare-and-set on `state` (`from` -> `done`) with `answer`, `answered_at`,
    * `answered_by` (and `decided*` for a pick) in the same write, guarded by the revision shown. Rust checks the keys (`check_answered_patch`).
    */
-  async function answer(taskId: string, from: AnyState, ifUpdatedAt: string, metadata: Record<string, string>): Promise<WriteResult> {
+  async function answer(taskId: string, from: AnyState, ifUpdatedAt: string, metadata: Record<string, unknown>): Promise<WriteResult> {
     if (!ifUpdatedAt) return { ok: false, kind: "conflict", message: "no revision: reload the ask first" };
     try {
       return ok(await call("vault_transition", { vault: name(), id: taskId, from, to: "done", ifUpdatedAt, metadata }));
@@ -251,13 +251,8 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
    */
   async function seen(taskId: string, from: AnyState, ifUpdatedAt: string, closes: boolean, metadata: Record<string, unknown>): Promise<WriteResult> {
     if (!ifUpdatedAt) return { ok: false, kind: "conflict", message: "no revision: reload the ask first" };
-    if (!closes) return patchMeta(taskId, metadata, ifUpdatedAt);
-    try {
-      return ok(await call("vault_transition", { vault: name(), id: taskId, from, to: "done", ifUpdatedAt, metadata }));
-    } catch (e) {
-      const message = String(e);
-      return { ok: false, kind: failureKind(message), message };
-    }
+    // (the close is the same compare-and-set as an answer's, with Seen's keys: Rust tells them apart)
+    return closes ? answer(taskId, from, ifUpdatedAt, metadata) : patchMeta(taskId, metadata, ifUpdatedAt);
   }
 
   /** Snooze: `snoozed_until` (a date); `null` clears it. */

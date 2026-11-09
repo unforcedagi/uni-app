@@ -131,9 +131,9 @@ function ItemView({ item, p, onCard, inCard = false }: { item: Item; p: ItemActi
       {item.action && <button type="button" className="fy-opt fy-act" disabled={busy} onClick={() => go(item.action!)}>{item.action}</button>}
       {item.link && <a className="fy-opt fy-open" href={item.link} target="_blank" rel="noreferrer">Open ↗</a>}
       {/* T-335 Seen: on every item. A tell or look ask closes; a do or choose ask stays open with its room (it says so) */}
-      <button type="button" className="fy-opt fy-seen" disabled={busy} onClick={() => void p.seen(item)}
+      {!item.legacy && <button type="button" className="fy-opt fy-seen" disabled={busy} onClick={() => void p.seen(item)}
         title={seenCloses(item.kind) ? "Seen: ends it; its room is told" : "Seen: out of For you; it stays with its room until it needs you"}
-        aria-label={`Seen: ${item.what} (${seenCloses(item.kind) ? "ends it; its room is told" : "out of For you; it stays with its room until it needs you"})`}>Seen</button>
+        aria-label={`Seen: ${item.what} (${seenCloses(item.kind) ? "ends it; its room is told" : "out of For you; it stays with its room until it needs you"})`}>Seen</button>}
       <HoldToTalk item={item} onSend={go} disabled={busy} />
     </div>
     {!item.default && item.band === "yours" && <p className="fy-nodefault">No default: waits for you</p>}
