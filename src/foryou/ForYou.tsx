@@ -254,8 +254,13 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
     if (!beside) return;
     const opener = document.activeElement instanceof HTMLElement && !ref.current?.contains(document.activeElement) ? document.activeElement : null;
     const k = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || dialogOpen() || holding()) return;
+      if (e.key !== "Escape" || e.defaultPrevented || dialogOpen()) return;
       const t = e.target instanceof HTMLElement ? e.target : null;
+      const inCard = !!t && !!ref.current?.contains(t);
+      // his words up in the card: the key is spent here (not passed to the stream or the room behind); in the box it only leaves the box
+      if (holding()) { if (!t?.closest(".fy-said")) e.preventDefault(); return; }
+      // a room in focus over the list, opened after the card: its own steps come first, unless he is in the card
+      if (!inCard && document.querySelector(".all-focus:not([data-leaving])")) return;
       if (t && !ref.current?.contains(t) && (t.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']"))) return;
       e.preventDefault(); e.stopPropagation(); closeRef.current();
     };
@@ -316,7 +321,7 @@ export function AreaCardList({ name, cards, onCard, compact = false }: { name: s
     <ul>
       {cards.active.map(row)}
       {cards.resting.length > 0 && (rest ? cards.resting.map(row)
-        : <li><button type="button" className="fy-ac fy-ac-rest" aria-expanded={false} onClick={() => setRest(true)}><Mark kind="rest" /><span className="fy-ac-name">{cards.resting.length} resting</span></button></li>)}
+        : <li><button type="button" className="fy-ac fy-ac-rest" onClick={() => setRest(true)}><Mark kind="rest" /><span className="fy-ac-name">{cards.resting.length} resting</span></button></li>)}
     </ul>
   </section>;
 }

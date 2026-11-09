@@ -342,21 +342,26 @@ export const waitsWords = (n: number) => `${n} thing${n === 1 ? " waits" : "s wa
  * area's rooms are not in the stream; this keeps it so).
  */
 export function cardOfMessage(view: Pick<ForYouView, "yours" | "more" | "look" | "cards" | "privateCards">, m: { ref: string; root?: string | null; body: string }, roomPath: string | null): CardView | null {
-  const items = [...view.yours, ...view.more, ...view.look];
-  for (const ref of [m.ref, m.root]) {
-    if (!ref) continue;
-    const it = items.find((i) => i.replyRoot === ref && i.where.cardPath);
-    const c = it ? view.cards.get(it.where.cardPath!) : null;
-    if (c && !c.private) return c;
+  return cardMatcher(view)(m, roomPath);
+}
+/** cardOfMessage, with its lookups built once (the stream asks for every message on every draw). */
+export function cardMatcher(view: Pick<ForYouView, "yours" | "more" | "look" | "cards" | "privateCards">): (m: { ref: string; root?: string | null; body: string }, roomPath: string | null) => CardView | null {
+  const byRoot = new Map<string, CardView>();
+  for (const i of [...view.yours, ...view.more, ...view.look]) {
+    const c = i.replyRoot && i.where.cardPath ? view.cards.get(i.where.cardPath) : null;
+    if (c && !c.private && !byRoot.has(i.replyRoot!)) byRoot.set(i.replyRoot!, c);
   }
-  if (!roomPath) return null;
-  const head = m.body.trimStart().replace(/^[#>*_\s]+/, "").toLowerCase();
-  let best: CardView | null = null;
-  for (const c of view.cards.values()) {
-    if (c.private || !c.name) continue;
-    const here = (!!c.areaNode && (roomPath === c.areaNode || roomPath.startsWith(`${c.areaNode}/`))) || (!!c.project && roomPath === c.project);
-    const n = c.name.toLowerCase();
-    if (here && head.startsWith(n) && /^[*_]*\s*(:|\n|$)/.test(head.slice(n.length)) && (!best || c.name.length > best.name.length)) best = c;
-  }
-  return best;
+  // the longest name first: "Glaze Tests" before "Glaze"
+  const named = [...view.cards.values()].filter((c) => !c.private && c.name).map((c) => ({ c, n: c.name.toLowerCase() })).sort((a, b) => b.n.length - a.n.length);
+  return (m, roomPath) => {
+    const hit = byRoot.get(m.ref) ?? (m.root ? byRoot.get(m.root) : undefined);
+    if (hit) return hit;
+    if (!roomPath || !named.length) return null;
+    const head = m.body.trimStart().replace(/^[#>*_\s]+/, "").toLowerCase();
+    for (const { c, n } of named) {
+      const here = (!!c.areaNode && (roomPath === c.areaNode || roomPath.startsWith(`${c.areaNode}/`))) || (!!c.project && roomPath === c.project);
+      if (here && head.startsWith(n) && /^[*_]*\s*(:|\n|$)/.test(head.slice(n.length))) return c;
+    }
+    return null;
+  };
 }

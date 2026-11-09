@@ -48,7 +48,7 @@ import { AllEmpty, FrontDoor, type Door, type NewRoom, type Scope } from "../pro
 import { scopeForYou } from "../foryou/scope";
 import { AreaCardList, CardPanel, ForYou, useCardBeside } from "../foryou/ForYou";
 import { useForYou } from "../foryou/useForYou";
-import { areaCards, cardItems, cardMark, cardOfMessage, type CardView, type Item as ForYouItem, type Place } from "../foryou/forYouCore";
+import { areaCards, cardItems, cardMark, cardMatcher, type CardMark, type CardView, type Item as ForYouItem, type Place } from "../foryou/forYouCore";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
 import { plainWords } from "../projects/live";
@@ -213,6 +213,14 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   useEffect(() => { setScopeGone(!!scopePath && !scopeShown.current); });
   useEffect(() => { if (!scopeGone) return; const t = setTimeout(() => { if (!scopeShown.current) setScope(null); }, 1500); return () => clearTimeout(t); }, [scopeGone, setScope]);
   const focusView: FocusView = focus?.view ?? "chat";
+  // 0.3.2: the card open now (one panel, wherever its name was tapped: For you, a message in the stream, an area's cards), and beside the list or over it
+  const [cardOpen, setCardOpen] = useState<string | null>(null);
+  const openCard = useCallback((path: string) => setCardOpen(path), []);
+  const cardBeside = useCardBeside();
+  /** Back and Alt+← close the card first (never over his dictated words: Send or Cancel decides); beside the list with a room in focus over
+   *  it, the room's own steps come first. */
+  const cardUp = !!cardOpen && chat && (!cardBeside || !allPlace?.focus);
+  const closeCard = () => { if (!document.querySelector(".fy-card .fy-said")) setCardOpen(null); };
   /** Without rooms, a place's page is its work; with rooms, the focus's "all of its work" step. */
   const workShown = !chat ? !!node : focusView === "work";
   const back = chat ? null : path ? () => {
@@ -220,12 +228,13 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     if (up && up.path !== ROOT) onOpenArea(up.path, up.name, null); else { setRootOpen(false); onOpenArea(null, "Uni", null); }
   } : rootOpen ? () => setRootOpen(false) : null;
   const overlay: Overlay | null = projectOpen ? { close: closeProject, modal: true, history: false } : sheetId ? { close: closeSheet, modal: true, history: false }
+    : cardUp ? { close: closeCard, modal: !cardBeside, history: cardBeside }
     : appOpen && !chat ? { close: () => setAppOpen(false), modal: false, history: true }
     // 0.2: the home's drawer is over the stream: Back, Alt+← and Escape put it away first
     : pulled && chat && allPlace && !allPlace.focus ? { close: () => setPulled(false), modal: false, history: true }
     // 0.3.1: an area's stream is a step in from All: Back, Alt+← and Escape go back to every room
     : scopePath && chat && allPlace && !allPlace.focus ? { close: () => setScope(null), modal: false, history: true } : null;
-  const overlayKey = `${projectOpen ? "project" : ""}${sheetId ? "sheet" : ""}${appOpen && !chat ? "app" : ""}${pulled && chat && allPlace && !allPlace.focus ? "pulled" : ""}${scopePath && chat && allPlace && !allPlace.focus ? `scope:${scopePath}` : ""}`;
+  const overlayKey = `${projectOpen ? "project" : ""}${sheetId ? "sheet" : ""}${cardUp ? `card:${cardBeside}` : ""}${appOpen && !chat ? "app" : ""}${pulled && chat && allPlace && !allPlace.focus ? "pulled" : ""}${scopePath && chat && allPlace && !allPlace.focus ? `scope:${scopePath}` : ""}`;
   // Escape at the home puts the drawer away (a room in focus over it has its own Escape; a field or a dialog keeps its own)
   const drawerUp = pulled && !!chat && !!allPlace && !allPlace.focus;
   const scopedUp = !!scopePath && !!chat && !!allPlace && !allPlace.focus;
@@ -242,7 +251,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   }, [drawerUp, scopedUp, setPulled, setScope]);
   // (layout effects: what is over the place is known to the host's Back before the first key can reach it)
   useLayoutEffect(() => {
-    onBackChange(projectOpen ? closeProject : sheetId ? closeSheet : appOpen && !chat ? () => setAppOpen(false) : pulled && chat && allPlace ? () => setPulled(false) : scopePath && chat && allPlace ? () => setScope(null) : back);
+    onBackChange(projectOpen ? closeProject : sheetId ? closeSheet : cardUp ? closeCard : appOpen && !chat ? () => setAppOpen(false) : pulled && chat && allPlace ? () => setPulled(false) : scopePath && chat && allPlace ? () => setScope(null) : back);
     return () => onBackChange(null);
   }, [path, data, onBackChange, overlayKey, rootOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => { onOverlayChange?.(overlay); }, [overlayKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -310,20 +319,22 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   // the room its footer names, exactly: a named room that isn't here is no room (the answer waits, owed), never another room
   const answerRoom = useCallback((item: ForYouItem) => askRoomOf({ room: item.replyRoom, node: item.node }, roomRefs, () => null), [roomRefs]);
   const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.all ?? tasks.tasks : null, placeOf: fyPlaceOf, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
-  // 0.3.2: the card open now (one panel, wherever its name was tapped: For you, a message in the stream, an area's cards), and beside the list or over it
-  const [cardOpen, setCardOpen] = useState<string | null>(null);
-  const openCard = useCallback((path: string) => setCardOpen(path), []);
-  const cardBeside = useCardBeside();
   /** The stream's rooms by their place's path (set as the home draws): a message names a card of its own area. */
   const roomPaths = useRef(new Map<string, string>());
   // (the stream's rows redraw only when what a message could name changes: the cards, their marks, the posts their asks thread under)
   const fyView = useRef(fy.view); fyView.current = fy.view;
   const cardsSig = useMemo(() => JSON.stringify([[...fy.view.cards.values()].map((c) => [c.path, c.name, c.private, c.areaNode, c.project, cardMark(fy.view, c)]),
     [...fy.view.yours, ...fy.view.more, ...fy.view.look].map((i) => [i.replyRoot, i.where.cardPath])]), [fy.view]);
-  const feedCards = useMemo<FeedCards>(() => ({ open: openCard, of: (m) => {
-    const v = fyView.current, c = cardOfMessage(v, m, roomPaths.current.get(m.channel) ?? null);
-    return c ? { path: c.path, name: c.name, mark: cardMark(v, c) } : null;
-  } }), [cardsSig, openCard]); // eslint-disable-line react-hooks/exhaustive-deps
+  const feedCards = useMemo<FeedCards>(() => {
+    // (the lookup is built once per change of what could match, not per message per draw)
+    const v = fyView.current, match = cardMatcher(v), marks = new Map<string, CardMark>();
+    return { open: openCard, of: (m) => {
+      const c = match(m, roomPaths.current.get(m.channel) ?? null);
+      if (!c) return null;
+      if (!marks.has(c.path)) marks.set(c.path, cardMark(v, c));
+      return { path: c.path, name: c.name, mark: marks.get(c.path)! };
+    } };
+  }, [cardsSig, openCard]); // eslint-disable-line react-hooks/exhaustive-deps
   // a card that is gone (retired, or another vault's, or the home left for the place pages) closes; it doesn't come back by itself later
   useEffect(() => { if (cardOpen && (!chat || !fy.view.cards.has(cardOpen))) setCardOpen(null); }, [cardOpen, fy.view.cards, chat]);
   useEffect(() => { setCardOpen(null); }, [profile.vault, identity]);
@@ -530,7 +541,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     scopeShown.current = !scopePath || !!scope || !data || !allRooms.length;
     roomPaths.current = new Map([...allRooms, ...(scope?.rooms ?? [])].flatMap((r) => (r.path ? [[r.id, r.path] as const] : [])));
     const all = allRooms.length ? { rooms: allRooms, onOpenAt: openRoomAt, scope, onScope: allPlace ? setScope : undefined, onOpenScope: (p: string) => openPlace(p),
-      scopeCards: scope ? <AreaCardList compact name={scope.name} cards={areaCards(fy.view, scope.path)} onCard={openCard} /> : null, cards: feedCards } : null;
+      scopeCards: scope ? <AreaCardList key={scope.path} compact name={scope.name} cards={areaCards(fy.view, scope.path)} onCard={openCard} /> : null, cards: feedCards } : null;
     // 0.3.0: For you is known once the tasks are read, fresh and whole
     const needsKnown = tasks.error || tasks.truncated || tasks.treeTruncated ? "failed" as const : !tasks.ready || tasks.savedAt ? "reading" as const : "known" as const;
     // an item's what opens its own sheet, in its own room (0.2.2's ask path); a private area's line opens that area's details

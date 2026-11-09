@@ -172,6 +172,25 @@ test.describe('the card', () => {
     await expect(focusSheet(page).locator('.all-focus-title')).toContainText('Kiln Studio');
     // beside: the card stays open by the room; a phone's sheet makes way for it
     if (wide()) await expect(card(page, 'Glaze Tests')).toBeVisible(); else await expect(card(page, 'Glaze Tests')).toHaveCount(0);
+    if (wide()) {
+      // the room came in after the card: Escape steps out of the room first (its thread, then the room), and the card stays beside the list
+      await focusSheet(page).locator('.all-focus-titles').focus().catch(() => {});
+      for (let i = 0; i < 3 && await focusSheet(page).count(); i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(400); }
+      await expect(focusSheet(page)).toHaveCount(0);
+      await expect(card(page, 'Glaze Tests')).toBeVisible();
+    }
+  });
+
+  test('Back (Android Back, Alt+Left) closes the card first, and only the card', async ({ page }) => {
+    await boot(page);
+    await chip(page, 'Kiln Studio').click();
+    await page.getByRole('region', { name: "Kiln Studio's cards" }).locator('.fy-ac', { hasText: 'Glaze Tests' }).click();
+    await expect(card(page, 'Glaze Tests')).toBeVisible();
+    if (wide()) await page.keyboard.press('Alt+ArrowLeft');
+    else await page.evaluate(() => { const w = window as any; w.__cbs[w.__backHandler.id]({ message: {}, index: 0 }); });
+    await expect(card(page, 'Glaze Tests')).toHaveCount(0);
+    // the area's stream is still chosen under it
+    await expect(chip(page, 'Kiln Studio')).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('keys: Escape is the top layer\'s (a dialog over the card closes first), focus goes back to what opened the card, a phone\'s sheet keeps Tab inside', async ({ page }) => {
@@ -205,8 +224,8 @@ test.describe('the card', () => {
 
   test("hold to talk on the card: Escape keeps the words and the card (Send or Cancel decides)", async ({ page }) => {
     await bootForYou(page, { more: true, transcript: 'Tenmoku, and keep two tiles back.' });
-    await openForYou(page);
-    await item(page, 'fy-glaze').locator('.fy-where').click();
+    await chip(page, 'Kiln Studio').click();
+    await page.getByRole('region', { name: "Kiln Studio's cards" }).locator('.fy-ac', { hasText: 'Glaze Tests' }).click();
     const c = card(page, 'Glaze Tests');
     const mic = c.locator('article.fy-item[data-id="fy-glaze"]').getByRole('button', { name: 'Hold to talk' });
     await mic.dispatchEvent('pointerdown');
@@ -220,6 +239,8 @@ test.describe('the card', () => {
     await page.keyboard.press('Escape');
     await expect(c).toBeVisible();
     await expect(box).toHaveValue('Tenmoku, and keep two tiles back.');
+    // and the key wasn't passed to the stream behind: the area is still chosen
+    await expect(chip(page, 'Kiln Studio')).toHaveAttribute('aria-pressed', 'true');
     await c.getByRole('button', { name: 'Cancel' }).click();
     await expect(box).toHaveCount(0);
     // the words gone, Escape is the card's again
