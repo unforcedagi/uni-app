@@ -49,6 +49,8 @@ test.beforeEach(async ({ page }) => {
           case 'get_members': return [{ pubkey: 'b'.repeat(64), name: 'Test member' }];
           case 'get_messages': return [];
           case 'vault_list': return [];
+          // the home behind the room reads the areas: an empty vault answers a list (Rust's Vec), never null, which the home would report as an alert
+          case 'vault_query': case 'vault_query_meta': case 'vault_paths': return [];
           case 'journal_config': return { hub: 'test', vault: 'test' };
           case 'journal_pending': case 'journal_list': return [];
           case 'journal_flush': return { sent: [], remaining: 0, error: null };

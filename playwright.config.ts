@@ -5,7 +5,10 @@ const DAYLIGHT_UA = 'Mozilla/5.0 (Linux; Android 13; DC-1 Build/TP1A; wv) AppleW
 export default defineConfig({
   outputDir: 'test-results/composer',
   testDir: './scripts/browser',
-  testIgnore: ['fluid.spec.ts', 'asAaron.spec.ts', 'vault-sidebar.spec.ts', 'rail.spec.ts', 'screens.spec.ts', 'areas.spec.ts', 'interface.spec.ts', 'areaRoom.spec.ts', 'lifeos.spec.ts', 'tasks.spec.ts', 'lifeosVault.spec.ts', 'secret.spec.ts', 'chatLive.spec.ts', 'chatCraft.spec.ts', 'sealedCards.spec.ts', 'sealedNeedsYou.spec.ts', 'publishedMedia.spec.ts', 'messages.spec.ts', 'approvalElsewhere.spec.ts', 'updateNotice.spec.ts', 'typing.spec.ts', 'motion.spec.ts', 'mail-live.spec.ts', 'glowup.spec.ts', 'chatfeel.spec.ts', 'arcade.spec.ts', 'askRoom.spec.ts'], // dedicated sidebar, rail, chat-craft, card, published-media and messages configs; T-335 typing has its own (playwright.typing.config.ts); T-335 mail-live is the live proof (playwright.maillive.config.ts); T-335 glow-up has its own (playwright.glowup.config.ts)
+  // Composer's suite (webkit greps four of its tests) and the specs no dedicated config runs; every other spec has its
+  // own playwright.<name>.config.ts. A list, not an ignore list: a new spec joins here or gets its own config, and an
+  // env-only spec (projectsLive, with PROJECTS_LIVE) can't break the listing.
+  testMatch: /\/(attachments|composer|journalAreas|note-download|noteFormat|notePane|recPause|splitSheet|vault-links|videoFullscreen)\.spec\.ts$/,
   reporter: 'list',
   use: { baseURL: `http://127.0.0.1:${port}`, trace: 'retain-on-failure', launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] } },
   projects: [
