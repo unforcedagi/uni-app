@@ -432,6 +432,18 @@ check("a seen ask leaves For you and its count at once, is never a card line of 
   assert.equal(stored.away, 0, "seen is his choice, not an ask that went back to its room");
 });
 
+check("a seen ask its room asks again shows again at once (the device's Seen hides only what was seen); an answer still hides its ask", () => {
+  const seen = { id: "d", what: "Do this", answer: "Seen", at: NOW - H, room: "north-field", post: "sent" as const, seen: true };
+  const reasked = task("d", "T-32 Do this", { node: "Areas/North Field", kind: "do", confirmed_at: iso(NOW - 10 * 60_000) });
+  assert.deepEqual(view([reasked], [], { answered: [seen] }).yours.map((i) => i.id), ["d"]);
+  // not asked since: still hidden
+  const same = task("d", "T-32 Do this", { node: "Areas/North Field", kind: "do", asked_at: iso(NOW - 2 * H) });
+  assert.deepEqual(view([same], [], { answered: [seen] }).yours.map((i) => i.id), []);
+  // an answer closes its ask: hidden whatever the stamps say until the list catches up
+  const answered = { ...seen, seen: undefined, answer: "Done" };
+  assert.deepEqual(view([reasked], [], { answered: [answered] }).yours.map((i) => i.id), []);
+});
+
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 console.log("\nall For you checks passed");
 

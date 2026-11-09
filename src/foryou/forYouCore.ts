@@ -260,7 +260,10 @@ export function forYou(input: ForYouInput): ForYouView {
   const today = localDay(now);
   // today's, and any still owed to its room (a failed post keeps its Retry past midnight)
   const answered = (input.answered ?? []).filter((a) => localDay(a.at) === today || a.post === "failed" || a.post === "sending");
-  const gone = new Set((input.answered ?? []).map((a) => a.id));
+  // answered or seen on this device: hidden at once, before the list catches up. A seen ask its room has asked again since (a newer asked_at or
+  // confirmed_at) is his again: it shows (an answer closed its ask, so that one stays hidden)
+  const gone = new Map((input.answered ?? []).map((a) => [a.id, a] as const));
+  const reasked = (a: Answered, m: Record<string, unknown>) => !!a.seen && Math.max(ms(s(m.asked_at)) ?? -Infinity, ms(s(m.confirmed_at)) ?? -Infinity) > a.at;
 
   const seen = new Set<string>();
   const items: Item[] = [];
@@ -271,8 +274,10 @@ export function forYou(input: ForYouInput): ForYouView {
   const live = (r: string | null): string | null => { const x = r?.replace(/^#/, "").trim(); return x ? (input.liveRoom ? input.liveRoom(x) : x) : null; };
   for (const n of input.asks) {
     const id = s(n.id), path = refPath(n.path);
-    if (!id || !path || seen.has(id) || gone.has(id)) continue;
+    if (!id || !path || seen.has(id)) continue;
     const tags = tagsOf(n), m = meta(n);
+    const mine = gone.get(id);
+    if (mine && !reasked(mine, m)) continue;
     // an old `Decisions/` note is the record, not an ask (T-335 one home): only tasks are asks
     if (!tags.includes("task")) continue;
     seen.add(id);

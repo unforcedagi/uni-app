@@ -28,7 +28,7 @@ export type Task = {
   /** T-335 one home: whether this needs Aaron now, as uni-tasks wrote it (`needs_aaron`, the one rule: an open ask owned by him, on a card,
    *  asked or confirmed by its room in 7 days, in a live place with a live room). Every count and list of what needs him reads this, nothing else. */
   needsAaron?: boolean;
-  /** Why (`needs_aaron_why`): yes; stale | no card | resting | no room (his ask, back with its room); answered | snoozed | someday | closed | not his. */
+  /** Why (`needs_aaron_why`): yes; stale | no card | resting | no room (his ask, back with its room); answered | snoozed | someday | closed | not his; seen (he marked it Seen: a do or choose ask stays with its room until it asks again). */
   needsAaronWhy?: string | null;
   /** The node it belongs to, as a node path (ROOT for the Uni root). */
   node: string;
