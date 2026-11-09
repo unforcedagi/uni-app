@@ -196,11 +196,11 @@ export function answerBody(item: Pick<Item, "tid" | "what">, answer: string): st
 }
 
 /** When its room last asked or confirmed the ask: the newer of `asked_at` and `confirmed_at` (a stamp in the future is a wrong date, passed
- *  over), else when it was created. The same rule as simpleCore.currentAt and uni-tasks surface.current_at. */
+ *  over, never "fresh forever"), else when it was created. The same rule as uni-tasks surface.current_at. */
 export function currentAt(m: Record<string, unknown>, createdAt: unknown, now: number): number | null {
   const ok = [s(m.asked_at), s(m.confirmed_at)].map(ms).filter((t): t is number => t !== null);
   const sane = ok.filter((t) => t <= now + SKEW);
-  if (sane.length || ok.length) return Math.max(...(sane.length ? sane : ok));
+  if (sane.length) return Math.max(...sane);
   return ms(s(m.created)) ?? ms(s(createdAt));
 }
 /** A place in one of these is not live (T-335 fresh): For you shows nothing of it. */
@@ -220,7 +220,17 @@ export function placeDormant(all: readonly PlaceNote[], ref: string): boolean | 
   if (n.kind === "area") return false;
   const mine = new Set([n.parent, ...(n.links ?? [])].map(refPath).filter((x): x is string => !!x));
   const areas = all.filter((a) => a.kind === "area" && a.id !== n.id && (mine.has(a.id) || mine.has(a.path) || (a.links ?? []).map(refPath).some((r) => r === n.id || r === n.path)));
-  return areas.length > 0 && areas.every(off);
+  if (areas.length) return areas.every(off);
+  // (no area linked: the nearest area up its `parent` chain, as uni-tasks' area_of walks it)
+  let up = refPath(n.parent);
+  for (let i = 0; up && i < 12; i++) {
+    const p = all.find((a) => a.id === up || a.path === up);
+    if (!p) break;
+    if (p.kind === "area") return off(p);
+    if (off(p)) return true;
+    up = refPath(p.parent);
+  }
+  return false;
 }
 /** placeDormant over a built tree: its live nodes and its archived and done ones (the tree keeps those apart, and a dormant place is often one). */
 export function treeDormant(tree: { nodes: ReadonlyMap<string, PlaceNote>; archived: readonly PlaceNote[] }, ref: string): boolean | null {
@@ -299,14 +309,15 @@ export function forYou(input: ForYouInput): ForYouView {
     const label = defValue ? [defValue, whenLabel(defAt, now)].filter(Boolean).join(" · ") : "";
     // its own reply room or room, as a live room (an archived one resolves to where its work went), else its node's live room; none: not shown
     const replyRoom = live(s(m.reply_room)) ?? live(s(m.room)) ?? live(place.room);
-    if (!replyRoom) { away++; continue; }
+    // (only once the live rooms are known: with no resolver, or none read yet, an ask isn't sent away for want of a room list)
+    if (!replyRoom && input.liveRoom) { away++; continue; }
     const replyRoot = s(m.reply_root);
     const cardName = card?.name ?? (cardPath ? leaf(cardPath) : null);
     // (the label and the path from one source: the card's area when it names one, else the node's)
     const area = card?.area ?? place.area;
     const areaPath = card?.area ? card.areaNode ?? null : place.areaPath ?? null;
     const where = cardName ? { label: [cardName, area].filter(Boolean).join(" · "), card: cardName, cardPath, area, areaPath } : { label: area ?? "Uni", card: null, cardPath: null, area, areaPath };
-    const footer = `Goes to #${replyRoom}${replyRoot ? (cardName ? `, under ${cardName}'s post` : ", in its thread") : ""}`;
+    const footer = replyRoom ? `Goes to #${replyRoom}${replyRoot ? (cardName ? `, under ${cardName}'s post` : ", in its thread") : ""}` : "No room to send it to";
     const choices = kind === "choose" || kind === "decision" ? options.filter((o) => o !== defValue) : [];
     items.push({
       id, tid, band: kind === "look" ? "look" : "yours", kind, legacy, where,

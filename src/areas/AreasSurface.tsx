@@ -340,12 +340,11 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   /** 0.3.3 For you: a room's name as a live room's. An archived room (the relay lists only live ones) resolves through the `room_fallback` of a
    *  node that names it (tasks.py rooms-apply), when that room is live; else null, and the ask's node's room stands in. */
   const fyLiveRoom = useCallback((name: string): string | null => {
-    const hit = roomByName(roomRefs, name);
+    const hit = roomRefs.find((r) => r.id === name.trim()) ?? roomByName(roomRefs, name);
     if (hit) return roomSlug(hit.name);
-    const key = name.replace(/^#/, "").trim().toLowerCase();
     for (const a of data?.areas ?? []) {
       const m = a.metadata;
-      if (String(m.room ?? "").toLowerCase() !== key || !/^(archived|missing)$/i.test(String(m.room_status ?? "")) || typeof m.room_fallback !== "string") continue;
+      if (typeof m.room !== "string" || !roomByName([{ id: "x", name: m.room }], name) || !/^(archived|missing)$/i.test(String(m.room_status ?? "")) || typeof m.room_fallback !== "string") continue;
       const fb = roomByName(roomRefs, m.room_fallback);
       if (fb) return roomSlug(fb.name);
     }
@@ -362,7 +361,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   /** 0.3.0 For you: the room an answer goes to: its `reply_room` (else its room, else its node's), by id or name. */
   // the room its footer names, exactly: a named room that isn't here is no room (the answer waits, owed), never another room
   const answerRoom = useCallback((item: ForYouItem) => askRoomOf({ room: item.replyRoom, node: item.node }, roomRefs, () => null), [roomRefs]);
-  const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.all ?? tasks.tasks : null, placeOf: fyPlaceOf, liveRoom: fyLiveRoom, privateRoom: fyPrivateRoom, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
+  const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.all ?? tasks.tasks : null, placeOf: fyPlaceOf, liveRoom: roomRefs.length ? fyLiveRoom : undefined, privateRoom: fyPrivateRoom, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
   /** The stream's rooms by their place's path (set as the home draws): a message names a card of its own area. */
   const roomPaths = useRef(new Map<string, string>());
   // (the stream's rows redraw only when what a message could name changes: the cards, their marks, the posts their asks thread under)

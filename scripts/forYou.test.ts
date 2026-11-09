@@ -70,7 +70,7 @@ check("no card: the node's area is where; no default: none shown, the plain acti
 check("the room an answer goes to: reply_room, else the ask's room, else its node's; with no live room at all it is not in For you", () => {
   assert.equal(view([task("a", "T-1 x", { node: "Areas/Kiln Studio", room: "glaze-tests" })]).yours[0].replyRoom, "glaze-tests");
   assert.equal(view([task("a", "T-1 x", { node: "Areas/Kiln Studio", room: "glaze-tests", reply_room: "north-field" })]).yours[0].replyRoom, "north-field");
-  const none = view([task("a", "T-1 x", { node: "Elsewhere" })]);
+  const none = view([task("a", "T-1 x", { node: "Elsewhere" })], [], { liveRoom: (r) => r });   // the live rooms are known
   assert.deepEqual(none.yours, []);
   assert.equal(none.away, 1);
   // a reply_root with no card still says whose post
@@ -405,6 +405,18 @@ check("review 11-08 (2): through the app's own tree: an archived project, and a 
   assert.equal(treeDormant(tree, "Projects/Shed Work"), true);
   assert.equal(treeDormant(tree, "p-gone"), true);
   assert.equal(treeDormant(tree, "Projects/Gate Path"), false);
+});
+
+check("code-review 11-08: no room list yet keeps the asks (never all away); a future stamp isn't fresh forever; a deep node under a resting area isn't live", () => {
+  const none = view([task("n", "T-741 No room known", { node: "Elsewhere", kind: "do", no_default: true })]);
+  assert.deepEqual(none.yours.map((i) => i.id), ["n"], "no resolver: shown, saying it has no room");
+  assert.equal(none.yours[0].footer, "No room to send it to");
+  const fut = view([task("f", "T-742 Typo date", { node: "Areas/North Field", kind: "do", no_default: true, asked_at: "2027-11-01T00:00:00Z" })]);
+  assert.deepEqual(fut.yours, [], "only a future stamp: read by its creation, 9 days ago");
+  const n = (id: string, path: string, kind: string, status: string, more: Partial<PlaceNote> = {}): PlaceNote => ({ id, path, kind, status, metadata: { status }, ...more });
+  const all = [n("a", "Areas/Quiet Wood", "area", "resting"), n("p", "Projects/Path", "project", "foreground", { parent: "Areas/Quiet Wood" }),
+    n("s", "Projects/Path/Sub", "project", "foreground", { parent: "Projects/Path" })];
+  assert.equal(placeDormant(all, "Projects/Path/Sub"), true);
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
