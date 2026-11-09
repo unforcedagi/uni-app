@@ -241,6 +241,8 @@ test.describe('the card', () => {
     await expect(box).toHaveValue('Tenmoku, and keep two tiles back.');
     // and the key wasn't passed to the stream behind: the area is still chosen
     await expect(chip(page, 'Kiln Studio')).toHaveAttribute('aria-pressed', 'true');
+    // a stray tap on the phone's scrim doesn't take the words away either
+    if (!wide()) { await page.locator('.fy-scrim').click({ position: { x: 20, y: 20 }, force: true }); await expect(box).toHaveValue('Tenmoku, and keep two tiles back.'); }
     await c.getByRole('button', { name: 'Cancel' }).click();
     await expect(box).toHaveCount(0);
     // the words gone, Escape is the card's again

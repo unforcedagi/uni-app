@@ -242,6 +242,8 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
   const ref = useRef<HTMLDivElement>(null);
   const layer = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose); closeRef.current = onClose;
+  /** What opened the card showing now (beside the list): focus goes back there on close. */
+  const opener = useRef<HTMLElement | null>(null);
   const [all, setAll] = useState(false);
   const now = Date.now();
   // over the list (a phone): the app's one dialog contract (focus in and back, Tab kept inside, the rest inert, Escape when it is on top)
@@ -252,7 +254,7 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
   // close, focus goes back to what opened it
   useEffect(() => {
     if (!beside) return;
-    const opener = document.activeElement instanceof HTMLElement && !ref.current?.contains(document.activeElement) ? document.activeElement : null;
+    opener.current = document.activeElement instanceof HTMLElement && !ref.current?.contains(document.activeElement) ? document.activeElement : null;
     const k = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented || dialogOpen()) return;
       const t = e.target instanceof HTMLElement ? e.target : null;
@@ -269,11 +271,17 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
     return () => {
       window.removeEventListener("keydown", k, true);
       const at = document.activeElement;
-      if (opener?.isConnected && (!at || at === document.body || !at.isConnected || !!box?.contains(at))) opener.focus({ preventScroll: true });
+      const o = opener.current;
+      if (o?.isConnected && (!at || at === document.body || !at.isConnected || !!box?.contains(at))) o.focus({ preventScroll: true });
     };
   }, [beside]);
   // a new card opened in the same panel: its top, its first lines (after the effects above have noted what opened it)
-  useEffect(() => { setAll(false); ref.current?.scrollTo?.({ top: 0 }); ref.current?.focus({ preventScroll: true }); }, [card.path]);
+  useEffect(() => {
+    // (beside the list: another card opened from the list makes that control the one focus goes back to)
+    const at = document.activeElement;
+    if (beside && at instanceof HTMLElement && !ref.current?.contains(at) && at !== document.body) opener.current = at;
+    setAll(false); ref.current?.scrollTo?.({ top: 0 }); ref.current?.focus({ preventScroll: true });
+  }, [card.path]); // eslint-disable-line react-hooks/exhaustive-deps
   // beside the list, the home makes room for it (the list stays in sight and in use)
   useEffect(() => {
     if (!beside) return;
@@ -285,7 +293,7 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
   const lines = cardLines(card, p.view.answered);
   const shown = all ? lines : lines.slice(0, LINES_SHOWN);
   return <div className="fy-card-layer" ref={layer}>
-    {!beside && <button type="button" className="fy-scrim" aria-label="Close the card" tabIndex={-1} onClick={onClose} />}
+    {!beside && <button type="button" className="fy-scrim" aria-label="Close the card" tabIndex={-1} onClick={() => { if (!holding()) onClose(); }} />}
     <div className="fy-card" data-beside={beside || undefined} data-card={card.path} role="dialog" aria-modal={beside ? undefined : true} aria-label={`${card.name} card`} ref={ref} tabIndex={-1}>
       <div className="fy-card-top">
         <span className="fy-card-kicker"><Mark kind={mark} /><span>{card.area ? `${card.area} · card` : "card"}<span className="fy-card-state"> · {MARK_WORDS[mark]}</span></span></span>
