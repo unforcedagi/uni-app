@@ -28,6 +28,8 @@ async function boot(page: Page, scenario: string) {
           case 'vault_note':
             // (the retired For you note: 0.2.2 never reads it; kept so an older build's read is answered)
             if (args.noteRef === '01M3ZQF7EM4ADC7HEY36D3DC3B') return { vault: 'uni', note: { id: args.noteRef, content: '' } };
+            // (0.3.5's rooms registry, read at launch and on focus: not published here, which the app takes as "use the last one")
+            if (args.noteRef === 'System/Rooms') throw `vault: note not found: ${args.noteRef}`;
             w.noteCalls.push(args);
             if (scenario === 'denied') throw 'vault: unauthorized';
             if (args.noteRef === 'Notes/Work plan' || args.noteRef === 'found-id' || args.noteRef === 'Notes/Title with spaces') return { hub: 'https://uni-1.example.ts.net', vault: args.vault, note: { id: 'found-id', path: 'Notes/Work plan', content: scenario === 'render' && args.vault === 'uni' ? '# Work plan\n\n[[parachute:Notes/Title with spaces#Heading|the proposal]]\n\n[remote](https://other.example/surface/parachute/v/uni/n/Notes/Work%20plan)' : '# Work plan\n\nPlan body', tags: [] } };
