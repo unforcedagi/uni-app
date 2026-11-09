@@ -10,6 +10,7 @@ import { transcribe } from "./useForYou";
 import { cardItems, cardLines, cardMark, MARK_WORDS, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine } from "./forYouCore";
 import { quietLine } from "../projects/FrontDoor";
 import { headWords } from "./scope";
+import { dialogOpen, openDialog } from "../areas/focusTrap";
 import "./foryou.css";
 
 export type ForYouProps = {
@@ -239,11 +240,33 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
   /** The room thread its answers land in (the card's post), when there is one: opens it. */ onThread?: { label: string; open: () => void } | null;
   /** Beside the list (wide screens), not over it. */ beside: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  const layer = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose); closeRef.current = onClose;
   const [all, setAll] = useState(false);
   const now = Date.now();
-  // a new card opened in the same panel: its top, its first lines
+  // over the list (a phone): the app's one dialog contract (focus in and back, Tab kept inside, the rest inert, Escape when it is on top)
+  useEffect(() => (!beside && ref.current && layer.current ? openDialog(ref.current, () => closeRef.current(), { root: layer.current, initial: ref.current }) : undefined), [beside]);
+  // beside the list: the list stays in use, so Escape is the card's only when no dialog is up over it and no field is being typed in; on
+  // close, focus goes back to what opened it
+  useEffect(() => {
+    if (!beside) return;
+    const opener = document.activeElement instanceof HTMLElement && !ref.current?.contains(document.activeElement) ? document.activeElement : null;
+    const k = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || dialogOpen()) return;
+      const t = e.target instanceof HTMLElement ? e.target : null;
+      if (t && !ref.current?.contains(t) && (t.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']"))) return;
+      e.preventDefault(); e.stopPropagation(); closeRef.current();
+    };
+    window.addEventListener("keydown", k, true);
+    const box = ref.current;
+    return () => {
+      window.removeEventListener("keydown", k, true);
+      const at = document.activeElement;
+      if (opener?.isConnected && (!at || at === document.body || !at.isConnected || !!box?.contains(at))) opener.focus({ preventScroll: true });
+    };
+  }, [beside]);
+  // a new card opened in the same panel: its top, its first lines (after the effects above have noted what opened it)
   useEffect(() => { setAll(false); ref.current?.scrollTo?.({ top: 0 }); ref.current?.focus({ preventScroll: true }); }, [card.path]);
-  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) { e.stopPropagation(); onClose(); } }; window.addEventListener("keydown", k, true); return () => window.removeEventListener("keydown", k, true); }, [onClose]);
   // beside the list, the home makes room for it (the list stays in sight and in use)
   useEffect(() => {
     if (!beside) return;
@@ -254,7 +277,7 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
   const items = cardItems(p.view, card);
   const lines = cardLines(card, p.view.answered);
   const shown = all ? lines : lines.slice(0, LINES_SHOWN);
-  return <>
+  return <div className="fy-card-layer" ref={layer}>
     {!beside && <button type="button" className="fy-scrim" aria-label="Close the card" tabIndex={-1} onClick={onClose} />}
     <div className="fy-card" data-beside={beside || undefined} data-card={card.path} role="dialog" aria-modal={beside ? undefined : true} aria-label={`${card.name} card`} ref={ref} tabIndex={-1}>
       <div className="fy-card-top">
@@ -265,7 +288,7 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
       {card.hill && <p className="fy-card-hill"><Hill pos={card.hill.pos} w={120} h={38} /><span><b>{card.hill.words}.</b>{card.hill.stuck ? " It hasn't moved in a while." : card.hill.pos >= 100 ? "" : card.hill.pos >= 50 ? " Past figuring out; now making." : " Still figuring it out."}</span></p>}
       {lines.length > 0 ? <ul className="fy-card-lines" aria-label="Its last lines, newest first">
         {shown.map((l, i) => <li key={i} data-mine={l.mine || undefined}><span className="fy-at">{lineDate(l.at, now)}</span>
-          <span className="fy-card-line">{l.mine && <b className="fy-you">You</b>}{l.mine ? `“${l.text}”` : l.text}</span></li>)}
+          <span className="fy-card-line">{l.mine && <b className="fy-you">You</b>}{l.mine && !card.private ? `“${l.text}”` : l.text}</span></li>)}
         {lines.length > shown.length && <li className="fy-card-earlier"><button type="button" className="fy-link-btn" onClick={() => setAll(true)}>{lines.length - shown.length} earlier</button></li>}
       </ul> : <p className="fy-none">No sessions on it yet.</p>}
       {card.private ? card.openAsks.length > 0 && <p className="fy-card-count"><Mark kind="yours" />{waitsWords(card.openAsks.length)}<small>Open its area to answer</small></p>
@@ -274,7 +297,7 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
       {card.threads.length > 0 && <p className="fy-card-threads"><span>Threads</span>{card.threads.map((t) => <i key={t}>{t}</i>)}</p>}
       {onThread && <p className="fy-card-room"><button type="button" className="fy-link-btn" onClick={onThread.open}>{onThread.label} ›</button></p>}
     </div>
-  </>;
+  </div>;
 }
 
 /** An area's cards (on its stream and in its details): the active ones, each with its mark and hill, and the resting ones folded under one line. */

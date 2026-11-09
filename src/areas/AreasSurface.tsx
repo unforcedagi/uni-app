@@ -316,10 +316,16 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const cardBeside = useCardBeside();
   /** The stream's rooms by their place's path (set as the home draws): a message names a card of its own area. */
   const roomPaths = useRef(new Map<string, string>());
+  // (the stream's rows redraw only when what a message could name changes: the cards, their marks, the posts their asks thread under)
+  const fyView = useRef(fy.view); fyView.current = fy.view;
+  const cardsSig = useMemo(() => JSON.stringify([[...fy.view.cards.values()].map((c) => [c.path, c.name, c.private, c.areaNode, c.project, cardMark(fy.view, c)]),
+    [...fy.view.yours, ...fy.view.more, ...fy.view.look].map((i) => [i.replyRoot, i.where.cardPath])]), [fy.view]);
   const feedCards = useMemo<FeedCards>(() => ({ open: openCard, of: (m) => {
-    const c = cardOfMessage(fy.view, m, roomPaths.current.get(m.channel) ?? null);
-    return c ? { path: c.path, name: c.name, mark: cardMark(fy.view, c) } : null;
-  } }), [fy.view, openCard]);
+    const v = fyView.current, c = cardOfMessage(v, m, roomPaths.current.get(m.channel) ?? null);
+    return c ? { path: c.path, name: c.name, mark: cardMark(v, c) } : null;
+  } }), [cardsSig, openCard]); // eslint-disable-line react-hooks/exhaustive-deps
+  // a card that is gone (retired, or another vault's) closes; it doesn't come back by itself later
+  useEffect(() => { if (cardOpen && fy.view.cards.size > 0 && !fy.view.cards.has(cardOpen)) setCardOpen(null); }, [cardOpen, fy.view.cards]);
   // r31: an ask is current because its task note says so (`asked_at` / `confirmed_at` within 3 days), resolved here before any row, count or dot shows it.
   const confirmNow = useMemo(() => Date.now(), [tasks.tasks, tasks.lastOk]); // eslint-disable-line react-hooks/exhaustive-deps
   const confirm = useMemo(() => ({ of: (t: Task): Resolved => confirmationOf(t, confirmNow) }), [confirmNow]);

@@ -148,16 +148,18 @@ function lineOf(o: Record<string, unknown>, me: string): CardLine | null {
 
 /** A card note as the view needs it. A private card keeps only its name, area, lines and thread names as stored (its stands and hill are never
  *  shown, and its open asks only as a count). */
-export function cardView(n: Note, me = "aaron"): CardView | null {
+export function cardView(n: Note, me = "aaron", inPrivate = false): CardView | null {
   const m = meta(n), path = refPath(n.path);
   if (!path) return null;
-  const priv = m.private === true;
+  // (private by its own flag, or by where it is filed: a card in a private area missing the flag is still private)
+  const priv = m.private === true || inPrivate;
   const hill = m.hill && typeof m.hill === "object" ? m.hill as Record<string, unknown> : null;
   const pos = hill && typeof hill.pos === "number" && Number.isFinite(hill.pos) ? Math.max(0, Math.min(100, hill.pos)) : null;
   const lines = (Array.isArray(m.lines) ? m.lines : []).flatMap((l) => {
     if (!l || typeof l !== "object") return [];
     const line = lineOf(l as Record<string, unknown>, me);
-    return line ? [line] : [];
+    // a private card's answer is marked as his, never in his words
+    return line ? [priv && line.mine ? { ...line, text: "answered." } : line] : [];
   }).sort((a, b) => (ms(b.at) ?? 0) - (ms(a.at) ?? 0));
   const strings = (v: unknown) => (Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x.trim() : x && typeof x === "object" ? s((x as Record<string, unknown>).name) ?? "" : "")).filter(Boolean) : []);
   return {
@@ -185,7 +187,7 @@ export function forYou(input: ForYouInput): ForYouView {
   const cap = input.cap ?? 5;
   const since = input.lastLooked ?? now - DAY;
   const cards = new Map<string, CardView>();
-  for (const n of input.cards) { const c = cardView(n, me); if (c && c.status !== "retired") cards.set(c.path, c); }
+  for (const n of input.cards) { const node = refPath(meta(n).area_node); const c = cardView(n, me, !!node && input.placeOf(node).private); if (c && c.status !== "retired") cards.set(c.path, c); }
   const today = localDay(now);
   // today's, and any still owed to its room (a failed post keeps its Retry past midnight)
   const answered = (input.answered ?? []).filter((a) => localDay(a.at) === today || a.post === "failed" || a.post === "sending");

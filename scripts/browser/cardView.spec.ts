@@ -174,6 +174,35 @@ test.describe('the card', () => {
     if (wide()) await expect(card(page, 'Glaze Tests')).toBeVisible(); else await expect(card(page, 'Glaze Tests')).toHaveCount(0);
   });
 
+  test('keys: Escape is the top layer\'s (a dialog over the card closes first), focus goes back to what opened the card, a phone\'s sheet keeps Tab inside', async ({ page }) => {
+    await boot(page);
+    const chipEl = stream(page).locator('article.all-msg[data-ref="k3"] .all-card');
+    await chipEl.click();
+    const c = card(page, 'Glaze Tests');
+    await expect(c).toBeVisible();
+    if (wide()) {
+      // Find over the card: Escape closes Find, not the card
+      await page.keyboard.press('Control+k');
+      await expect(page.locator('.search-view')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.search-view')).toHaveCount(0);
+      await expect(c).toBeVisible();
+      // typing in the stream's box: Escape is the box's, the card stays
+      await page.getByRole('textbox', { name: 'Message for your rooms' }).click();
+      await page.keyboard.press('Escape');
+      await expect(c).toBeVisible();
+      await c.getByRole('button', { name: 'Close' }).click();
+    } else {
+      // Tab never leaves the sheet
+      for (let i = 0; i < 25; i++) await page.keyboard.press('Tab');
+      expect(await page.evaluate(() => !!document.activeElement?.closest('.fy-card'))).toBe(true);
+      await page.keyboard.press('Escape');
+    }
+    await expect(c).toHaveCount(0);
+    // focus is back on the tag that opened it
+    expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-card'))).toBe('Cards/Kiln Studio/Glaze Tests');
+  });
+
   test('reads in greyscale: the marks by shape, his answer by its tag, every word dark enough', async ({ page }) => {
     await boot(page);
     await page.addStyleTag({ content: 'html { filter: grayscale(1) !important; }' });

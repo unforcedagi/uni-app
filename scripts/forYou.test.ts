@@ -289,6 +289,17 @@ check("which card a room's message is about: the post its asks thread under, a r
   assert.equal(of({ ref: "m6", body: "practice: done." }, "Areas/Sanctum"), null);
 });
 
+check("a card filed in a private area is private without its flag; a private card's answers are marked, never in his words", () => {
+  const stray = card("Sanctum", "evening walk", { area_node: "Areas/Sanctum", stands: "Words that must stay inside.", hill: { pos: 40 },
+    lines: [{ at: iso(NOW - H), text: "Aaron: my own private words." }, { at: iso(NOW - 2 * H), text: "A session on evening walk: completed." }] });
+  const c = view([], [stray]).cards.get("Cards/Sanctum/evening walk")!;
+  assert.equal(c.private, true);
+  assert.equal(c.stands, null);
+  assert.equal(c.hill, null);
+  assert.deepEqual(c.lines.map((l) => [l.text, l.mine]), [["answered.", true], ["A session on evening walk: completed.", false]]);
+  assert.ok(!JSON.stringify(c).includes("private words"));
+});
+
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 console.log("\nall For you checks passed");
 
