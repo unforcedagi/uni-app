@@ -65,7 +65,7 @@ test.describe('For you', () => {
     await expect(moving.locator('.fy-quiet')).toHaveText('2 cards quiet, 1 resting');
     // the head counts what is yours (0.3.1: For you's own head; the places' pull keeps the day's sentence as its label)
     await expect(forYou(page).locator('.fy-toggle')).toHaveText(/^7 for you · 1 to look at · 3 moving$/);
-    await expect(page.locator('[data-place="front-door"] .fd-pull')).toHaveAttribute('aria-label', /Seven things need you\./);
+    await expect(page.locator('[data-place="front-door"] .fd-pull')).toHaveAttribute('aria-label', /Eight things need you\./);
   });
 
   test('one tap takes the default: one compare-and-set with the answer, then the reply in its room under the card\'s post', async ({ page }) => {

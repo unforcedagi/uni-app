@@ -36,12 +36,23 @@ check("the asks the old rules split on: For you, the dots, the companion's feed 
   assert.deepEqual(tasks.filter(needsYou).map(tid).sort(), FIX.needs);
   const fy = forYou({ asks: tasks.map((t) => ({ id: t.id, path: t.path, tags: t.raw?.tags, metadata: t.raw?.metadata, createdAt: t.raw?.createdAt })), cards: FIX.cards, placeOf, me: "aaron", now: NOW, lastLooked: null });
   assert.equal(fy.count, want, "For you's count");
+  assert.equal(fy.total, want, "the home's number (no look asks here)");
   assert.equal(fy.away, FIX.away.length, "his asks back with their rooms: counted apart, never in the count");
   const dots = needsByRow(tasks, new Set([ROOT]), () => undefined);
   assert.equal([...dots.values()].reduce((a, b) => a + b, 0), want, "the tree's dots and the doors' badges");
   const feed = withWaiting(needsFeed(tasks, (n) => (placeOf(n).private ? { path: "Areas/Hearth", name: "Hearth" } : null)), []);
   assert.equal(feed.total, want, "the companion and the work view");
   assert.equal(feed.privates.reduce((k, p) => k + p.count, 0), 1, "the private room's ask is counted by place only");
+});
+
+check("an ask to look at counts in the home's number and in the badges alike (review 11-08: For you's head counts it apart)", () => {
+  const look = parseTask({ id: "lk", path: "Tasks/T-960 Look at the film", tags: ["task"], metadata: { state: "open", owner: "aaron", node: "n-lamp", card: "Cards/Glade/Lamp", kind: "look", needs_aaron: true, needs_aaron_why: "yes" } } as never, tree)!;
+  const all = [...tasks, look];
+  const fy = forYou({ asks: all.map((t) => ({ id: t.id, path: t.path, tags: t.raw?.tags, metadata: t.raw?.metadata, createdAt: t.raw?.createdAt })), cards: FIX.cards, placeOf, me: "aaron", now: NOW, lastLooked: null });
+  const dots = [...needsByRow(all, new Set([ROOT]), () => undefined).values()].reduce((a, b) => a + b, 0);
+  assert.equal(fy.look.length, 1);
+  assert.equal(fy.total, dots);
+  assert.equal(fy.total, FIX.needs.length + 1);
 });
 
 check("an ask the sweep hasn't reached, or one closed on this device since, is never counted by a rule of the app's own", () => {

@@ -640,7 +640,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     // the Unfiled sessions) is in the drawer under its head. 0.3.0: For you (what is his, ready to look at, moving) is over the stream
     // (an approval has a deadline: one waiting in a room All shows stays on the home, over its head, as it was over All's; the drawer lists them all)
     const home = <>{status}{!allPlace ? approvalRows : !pulled && all && <ApprovalRows approvals={approvalsAll.list.filter((x) => !privateChannel(x.channel))} className="cp-list cp-approvals th-approvals" />}
-      <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} forYou={forYou} yours={fy.view.count} onOpen={(p) => openPlace(p)} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
+      <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} forYou={forYou} yours={fy.view.total} onOpen={(p) => openPlace(p)} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
         otherRooms={others} noAreas={!!data && !error && !doorAreas.length ? (uniRef ? () => actions.openRoom(uniRef.id) : null) : undefined}
         toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} onOpenProject={setProjectOpen}
         pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.length > 0 ? approvalRows : null} />

@@ -949,7 +949,7 @@ test.describe('simple', () => {
     await expect(sheet.locator('.cp-opt')).toHaveCount(0);
   });
 
-  // T-335 one home: skipped: asserts a retired app rule (3-day recheck, step-text superseded, tidy outline, runs counted). What needs Aaron is uni-tasks' needs_aaron (needs.py; scripts/oneHome.test.ts).
+  // T-335 one home: skipped: its rows are old Decisions/ notes ("Your call:"), the record, not asks (never in Needs you); the device-cache paint itself is covered by lifeos.spec.ts.
   test.skip('r11: asks kept on the device paint on the first render, before any note is read', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     const who = 'a'.repeat(64);

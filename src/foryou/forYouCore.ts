@@ -94,6 +94,9 @@ export type ForYouView = {
   answered: Answered[];
   /** Everything waiting on him: Yours (shown and behind "N more") and the private ones. */
   count: number;
+  /** T-335 one home: everything that needs him, his to answer and his to look at (the count plus Ready to look at): the home's number, the
+   *  same as the places' badges and the tree's dots (which count every ask uni-tasks marked needs_aaron). */
+  total: number;
   /** Asks no longer his: not asked or confirmed by their room in FRESH_DAYS, or in a place that isn't live, or with no live room. Counted only. */
   away: number;
   cards: Map<string, CardView>;
@@ -343,6 +346,7 @@ export function forYou(input: ForYouInput): ForYouView {
     quiet: { quiet, resting, line: quietLine(quiet, resting) },
     answered: [...answered].sort((a, b) => b.at - a.at),
     count: yoursAll.length + priv.reduce((k, p) => k + p.count, 0),
+    total: yoursAll.length + priv.reduce((k, p) => k + p.count, 0) + look.length,
     away,
     cards, since, privateCards,
   };
