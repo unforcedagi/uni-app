@@ -11,6 +11,14 @@ main() {
   git fetch --quiet origin main --tags
   local sha; sha="$(git rev-parse origin/main)"
   if git tag --points-at "$sha" | grep -q '^uni-v'; then exit 0; fi
+  # T-335: publish.sh asked the owner to approve signing this commit and he did not (declined, expired, broker down).
+  # Don't rebuild and ask again every tick: wait for a new main commit, or run with UNI_RELEASE_ASK_AGAIN=1.
+  local asked_sha asked_version asked_at
+  if [[ ${UNI_RELEASE_ASK_AGAIN:-} != 1 && -s $HOME/.config/uni/updater/sign-asked ]] &&
+    read -r asked_sha asked_version asked_at <"$HOME/.config/uni/updater/sign-asked" && [[ $asked_sha == "$sha" ]]; then
+    echo "origin/main $sha: signing $asked_version was asked at $asked_at and not approved; not asking again (new commit or UNI_RELEASE_ASK_AGAIN=1 to retry)" >&2
+    exit 0
+  fi
   [[ -z $(git status --porcelain) ]] || { echo 'Release checkout is dirty; not building' >&2; exit 1; }
   git checkout --quiet --detach "$sha"
   echo "origin/main $sha is unreleased; publishing" >&2

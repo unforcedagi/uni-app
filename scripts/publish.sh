@@ -10,6 +10,8 @@ mkdir -p "$TMPDIR"
 cd "$(dirname "$0")/.."
 mkdir -p "$HOME/.config/uni/updater"
 LOCK="$HOME/.config/uni/updater/publish.lock"
+# T-335: "<sha> <version> <time>" of the commit whose signing card was asked and not (yet) approved; see the sign step.
+SIGN_ASKED="$HOME/.config/uni/updater/sign-asked"
 # watch-main already holds fd 9 before checkout. Inherit that same lock across exec;
 # direct invocations open it here instead. flocking a second FD would conflict.
 if [[ $(readlink "/proc/$$/fd/9" 2>/dev/null || :) != "$LOCK" ]]; then
@@ -44,6 +46,7 @@ python3 scripts/test_case_collisions.py
 python3 scripts/test_check_public.py
 python3 scripts/check-public.py
 python3 scripts/test_release_check.py
+python3 scripts/test_release_sign.py
 pnpm typecheck
 pnpm test
 cargo test --workspace
@@ -52,8 +55,8 @@ STAGE="$TMPDIR/uni-release-$VERSION"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
 # Build Android locally while the GitHub-hosted Mac runner builds the exact main commit.
 ( bash scripts/build-mac-hosted.sh "$SHA" "$VERSION" "$STAGE" >"$STAGE/mac.log" 2>&1 ) & MAC_PID=$!
-# Android: scripts/android-release-build.sh (release build, size flags, fresh APK; T-207, T-305).
-( bash scripts/android-release-build.sh "$VERSION" "$CODE" >"$STAGE/android.log" 2>&1 ) & ANDROID_PID=$!
+# Android: scripts/android-release-build.sh (release build, size flags, fresh APK; T-207, T-305), unsigned (T-335).
+( UNI_ANDROID_UNSIGNED=1 bash scripts/android-release-build.sh "$VERSION" "$CODE" >"$STAGE/android.log" 2>&1 ) & ANDROID_PID=$!
 MAC_RESULT=0; ANDROID_RESULT=0
 wait "$MAC_PID" || MAC_RESULT=$?
 wait "$ANDROID_PID" || ANDROID_RESULT=$?
@@ -63,19 +66,37 @@ if (( MAC_RESULT || ANDROID_RESULT )); then
   tail -25 "$STAGE/android.log" >&2
   exit 1
 fi
+# The Mac updater signature (Uni.app.tar.gz.sig) is not yet behind the owner's tap: build-mac-hosted.sh still signs it.
 for f in Uni-mac-arm64.zip Uni.app.tar.gz Uni.app.tar.gz.sig; do test -s "$STAGE/$f"; done
-cp "$(pwd)/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk" "$STAGE/uni.apk"
+cp "$(pwd)/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk" "$STAGE/uni-unsigned.apk"
 # T-305: every update is a full download over a phone's connection. A debug or unstripped build is ten times this.
-APK_BYTES="$(stat -c %s "$STAGE/uni.apk")"
+APK_BYTES="$(stat -c %s "$STAGE/uni-unsigned.apk")"
 (( APK_BYTES <= APK_MAX_BYTES )) || { echo "APK is $APK_BYTES bytes, over the $APK_MAX_BYTES limit: a debug or unstripped build?" >&2; exit 1; }
-BADGING="$("$HOME/Android/Sdk/build-tools/35.0.0/aapt" dump badging "$STAGE/uni.apk" | sed -n 1p)"
+BADGING="$("$HOME/Android/Sdk/build-tools/35.0.0/aapt" dump badging "$STAGE/uni-unsigned.apk" | sed -n 1p)"
 [[ $BADGING == *"versionCode='$CODE'"*"versionName='$VERSION'"* ]] || { echo "APK not stamped $VERSION/$CODE: $BADGING" >&2; exit 1; }
-# Installed apps trust only the original signing key (~/.config/.android/debug.keystore, set via ANDROID_USER_HOME
-# in android.env). An APK signed by any other key fails on every device with "conflicts with another package"
+# T-335: the signing key lives in the sealed broker, which signs only after the owner approves a card on his phone
+# ("Sign Uni X.Y.Z for Android", bound to this APK's sha256, the version, the code and the commit). Both builds are
+# done first, so an approval is never spent on a half release. Before asking, $SIGN_ASKED records this commit:
+# whatever happens next (declined, expired, broker down, killed mid-wait), watch-main.sh then skips the commit instead
+# of building and asking again every tick. Only a published-ready APK (signed and right key, below) clears it.
+# UNI_SEALED_CMD overrides the broker command (tests point it at a fake).
+read -ra SEALED <<<"${UNI_SEALED_CMD:-$HOME/REPOS/hermes-agent/.venv/bin/python -I $HOME/Code/uni-ops/sealed/cli.py --home $HOME/.config/uni-sealed}"
+printf '%s %s %s\n' "$SHA" "$VERSION" "$(date -Is)" >"$SIGN_ASKED"
+rm -f "$STAGE/uni.apk"
+SIGN_RESULT=0
+"${SEALED[@]}" release sign --apk "$STAGE/uni-unsigned.apk" --version "$VERSION" --code "$CODE" --commit "$SHA" \
+  --out "$STAGE/uni.apk" --purpose "Publish Uni $VERSION to every device (Android $CODE, main ${SHA:0:12})" --wait || SIGN_RESULT=$?
+if (( SIGN_RESULT )) || [[ ! -s $STAGE/uni.apk ]]; then
+  echo "Android signing not approved (sealed exit $SIGN_RESULT); nothing published. $SHA is not asked again until a new main commit or UNI_RELEASE_ASK_AGAIN=1" >&2
+  exit 1
+fi
+# Installed apps trust only the original signing key (once ~/.config/.android/debug.keystore; T-335 moves it into the
+# sealed broker). An APK signed by any other key fails on every device with "conflicts with another package"
 # (0.1.47, 10-16). Refuse to publish it.
 APK_SIGNER_SHA256="6e9f4f94ffbb86604e02ca97a1b7b764ae0cc341430e92b4c7a4a4f22246b63d"
 SIGNERS="$("$HOME/Android/Sdk/build-tools/36.1.0/apksigner" verify --print-certs "$STAGE/uni.apk" | sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p')"
 [[ $SIGNERS == "$APK_SIGNER_SHA256" ]] || { echo "APK signed by the wrong key: '$SIGNERS' (expected $APK_SIGNER_SHA256)" >&2; exit 1; }
+rm -f "$SIGN_ASKED"
 python3 scripts/write-release-manifest.py "$STAGE" "$VERSION" "$SHA" "$REPO_SLUG"
 # The tag is created last, so a failed build leaves nothing behind and the next tick retries.
 # A release may carry its own notes in plain words (docs/releases/<version>.md); the build line follows them.

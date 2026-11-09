@@ -6,4 +6,6 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/bash %h/Code/uni-app-pipeline/scripts/watch-main.sh
-TimeoutStartSec=10800
+# T-335: the build (up to about 3 h with the hosted Mac run) plus the wait for the owner's signing tap (the broker
+# decides how long; up to a day).
+TimeoutStartSec=28h

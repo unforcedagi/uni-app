@@ -56,6 +56,7 @@ The same ones `publish.sh` runs before it builds a release:
 python3 scripts/check-case-collisions.py && python3 scripts/test_case_collisions.py
 python3 scripts/test_check_public.py && python3 scripts/check-public.py
 python3 scripts/test_release_check.py
+python3 scripts/test_release_sign.py
 pnpm typecheck
 pnpm test
 cargo test --workspace
