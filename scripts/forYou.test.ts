@@ -300,6 +300,29 @@ check("a card filed in a private area is private without its flag; a private car
   assert.ok(!JSON.stringify(c).includes("private words"));
 });
 
+check("review: a named author rules; an old answer in the same words doesn't hide a new one; live private counts; a project in a private place", () => {
+  const c = cardView(card("Kiln Studio", "Glaze Tests", { lines: [
+    { at: iso(NOW - H), by: "maya", status: "answer", text: "Use the kiln on Friday." },
+    { at: iso(NOW - 2 * H), by: "uni", text: "Aaron: asked for blue." },
+    { at: iso(NOW - 7 * D), text: "Aaron: Done" },
+  ] }))!;
+  assert.deepEqual(c.lines.map((l) => l.mine), [false, false, true]);
+  const now = { id: "d", what: "Shelf", answer: "Done", at: NOW - 60_000, room: "kiln-studio", post: "sent" as const, card: "Cards/Kiln Studio/Glaze Tests" };
+  assert.deepEqual(cardLines(c, [now]).map((l) => l.text).slice(0, 1), ["Done"]);
+  assert.equal(cardLines(c, [now]).filter((l) => l.text === "Done").length, 2);
+  // a private card's mark and count follow the live asks, not the note's stored list
+  const priv = card("Sanctum", "practice", { private: true, area_node: "Areas/Sanctum", open_asks: ["T-3", "T-4"] });
+  const v0 = view([], [priv]);
+  assert.equal(cardMark(v0, v0.cards.get("Cards/Sanctum/practice")!), "moving");
+  const live = task("q", "T-3 Private words", { node: "Areas/Sanctum", kind: "tell", card: "Cards/Sanctum/practice", no_default: true });
+  const v1 = view([live], [priv]);
+  assert.equal(cardMark(v1, v1.cards.get("Cards/Sanctum/practice")!), "yours");
+  assert.equal(v1.privateCards.get("Cards/Sanctum/practice"), 1);
+  // a card whose project sits in a private place is private
+  const proj = card("Kiln Studio", "Quiet Project", { project: "Areas/Sanctum", stands: "Inside words." });
+  assert.equal(view([], [proj]).cards.get("Cards/Kiln Studio/Quiet Project")!.stands, null);
+});
+
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 console.log("\nall For you checks passed");
 

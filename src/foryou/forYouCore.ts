@@ -71,12 +71,12 @@ export type CardView = {
   lines: CardLine[];
   /** Its recent thread names, newest first (a private card's are topics, as stored). */
   threads: string[];
-  /** The open asks on it (T-NN ids, as the card note keeps them). */
+  /** The open asks on it (T-NN ids, as the card note keeps them; what the app counts is the live asks: privateAsks, cardItems). */
   openAsks: string[];
   /** When its newest session started (orders an area's cards). */
   lastAt: string | null;
 };
-export type MovingLine = { card: string; cardPath: string; area: string | null; text: string; at: string; private: boolean };
+export type MovingLine = { card: string; cardPath: string; area: string | null; text: string; at: string; private: boolean; /** his own answer */ mine?: boolean };
 export type ForYouView = {
   yours: Item[]; more: Item[]; privates: PrivateLine[]; look: Item[];
   moving: MovingLine[]; quiet: { quiet: number; resting: number; line: string };
@@ -84,6 +84,8 @@ export type ForYouView = {
   /** Everything waiting on him: Yours (shown and behind "N more") and the private ones. */
   count: number;
   cards: Map<string, CardView>;
+  /** 0.3.2: a private card's live asks, counted by card (never their words): its mark and its "N things wait on you". */
+  privateCards: Map<string, number>;
   since: number;
 };
 
@@ -107,7 +109,8 @@ function optionsOf(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v.map((o) => (typeof o === "string" ? o.trim() : o && typeof o === "object" ? s((o as Record<string, unknown>).label) ?? s((o as Record<string, unknown>).name) ?? s((o as Record<string, unknown>).title) ?? "" : "")).filter(Boolean);
 }
-const ms = (v: string | null): number | null => { if (!v) return null; const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00` : v); return Number.isFinite(t) ? t : null; };
+/** A stored date as ms, in the device's time: a date with no time is that local day's start (never UTC midnight, a day early in the west). */
+export const ms = (v: string | null): number | null => { if (!v) return null; const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00` : v); return Number.isFinite(t) ? t : null; };
 const localDay = (t: number) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -141,7 +144,8 @@ function lineOf(o: Record<string, unknown>, me: string): CardLine | null {
   const by = s(o.by) ?? s(o.who) ?? s(o.author);
   const colon = raw.indexOf(":");
   const said = colon > 0 && isMe(raw.slice(0, colon), me);
-  const mine = (by ? isMe(by, me) : false) || said || (s(o.status) ?? "").toLowerCase() === "answer";
+  // (a line that names its author is that author's, whatever its words say)
+  const mine = by ? isMe(by, me) : said || (s(o.status) ?? "").toLowerCase() === "answer";
   const text = said ? raw.slice(colon + 1).trim() || raw : raw;
   return { at: s(o.ended) ?? s(o.at), text, mine };
 }
@@ -161,12 +165,11 @@ export function cardView(n: Note, me = "aaron", inPrivate = false): CardView | n
     // a private card's answer is marked as his, never in his words
     return line ? [priv && line.mine ? { ...line, text: "answered." } : line] : [];
   }).sort((a, b) => (ms(b.at) ?? 0) - (ms(a.at) ?? 0));
-  const strings = (v: unknown) => (Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x.trim() : x && typeof x === "object" ? s((x as Record<string, unknown>).name) ?? "" : "")).filter(Boolean) : []);
   return {
     path, name: s(m.name) ?? leaf(path), area: s(m.area), areaNode: refPath(m.area_node), project: refPath(m.project), status: s(m.status) ?? "active", private: priv,
     stands: priv ? null : s(m.stands), standsAt: priv ? null : s(m.stands_at),
     hill: priv || pos === null ? null : { pos, words: hillWords(pos), stuck: hill?.stuck === true },
-    lines, threads: strings(m.threads).slice(0, 6), openAsks: strings(m.open_asks), lastAt: s(m.last_session_at) ?? lines[0]?.at ?? null,
+    lines, threads: optionsOf(m.threads).slice(0, 6), openAsks: optionsOf(m.open_asks), lastAt: s(m.last_session_at) ?? lines[0]?.at ?? null,
   };
 }
 
@@ -187,7 +190,7 @@ export function forYou(input: ForYouInput): ForYouView {
   const cap = input.cap ?? 5;
   const since = input.lastLooked ?? now - DAY;
   const cards = new Map<string, CardView>();
-  for (const n of input.cards) { const node = refPath(meta(n).area_node); const c = cardView(n, me, !!node && input.placeOf(node).private); if (c && c.status !== "retired") cards.set(c.path, c); }
+  for (const n of input.cards) { const inPrivate = [refPath(meta(n).area_node), refPath(meta(n).project)].some((p) => !!p && input.placeOf(p).private); const c = cardView(n, me, inPrivate); if (c && c.status !== "retired") cards.set(c.path, c); }
   const today = localDay(now);
   // today's, and any still owed to its room (a failed post keeps its Retry past midnight)
   const answered = (input.answered ?? []).filter((a) => localDay(a.at) === today || a.post === "failed" || a.post === "sending");
@@ -196,6 +199,7 @@ export function forYou(input: ForYouInput): ForYouView {
   const seen = new Set<string>();
   const items: Item[] = [];
   const privates = new Map<string, PrivateLine>();
+  const privateCards = new Map<string, number>();
   for (const n of input.asks) {
     const id = s(n.id), path = refPath(n.path);
     if (!id || !path || seen.has(id) || gone.has(id)) continue;
@@ -225,6 +229,7 @@ export function forYou(input: ForYouInput): ForYouView {
       const area = (card?.private ? card.area : null) ?? place.area ?? card?.area ?? "a private area";
       const p = privates.get(area) ?? { area, node: (card?.private ? card.areaNode : null) ?? node, areaPath: (card?.private ? card.areaNode : null) ?? place.areaPath ?? null, count: 0 };
       p.count++; privates.set(area, p);
+      if (cardPath) privateCards.set(cardPath, (privateCards.get(cardPath) ?? 0) + 1);
       continue;
     }
     const { tid, rest } = splitTitle(path);
@@ -263,7 +268,7 @@ export function forYou(input: ForYouInput): ForYouView {
   let quiet = 0, resting = 0;
   for (const c of cards.values()) {
     const fresh = c.lines.filter((l) => (ms(l.at) ?? 0) > since);
-    if (fresh.length) for (const l of fresh) moving.push({ card: c.name, cardPath: c.path, area: c.area, text: l.text, at: l.at!, private: c.private });
+    if (fresh.length) for (const l of fresh) moving.push({ card: c.name, cardPath: c.path, area: c.area, text: l.text, at: l.at!, private: c.private, mine: l.mine });
     else if (c.status === "resting") resting++;
     else quiet++;
   }
@@ -274,7 +279,7 @@ export function forYou(input: ForYouInput): ForYouView {
     quiet: { quiet, resting, line: quietLine(quiet, resting) },
     answered: [...answered].sort((a, b) => b.at - a.at),
     count: yoursAll.length + priv.reduce((k, p) => k + p.count, 0),
-    cards, since,
+    cards, since, privateCards,
   };
 }
 
@@ -293,13 +298,13 @@ export function answerMeta(item: Pick<Item, "kind" | "options" | "default">, ans
 export type CardMark = "yours" | "look" | "moving" | "rest";
 export const MARK_WORDS: Record<CardMark, string> = { yours: "waits on you", look: "ready to look at", moving: "moving", rest: "resting" };
 const onCard = (path: string) => (i: Item) => i.where.cardPath === path;
-export function cardMark(view: Pick<ForYouView, "yours" | "more" | "look">, card: CardView): CardMark {
+export function cardMark(view: Pick<ForYouView, "yours" | "more" | "look" | "privateCards">, card: CardView): CardMark {
   const on = onCard(card.path);
-  if (view.yours.some(on) || view.more.some(on) || (card.private && card.openAsks.length > 0)) return "yours";
+  if (view.yours.some(on) || view.more.some(on) || (card.private && privateAsks(view, card) > 0)) return "yours";
   if (view.look.some(on)) return "look";
   return card.status === "resting" ? "rest" : "moving";
 }
-/** The asks on a card that For you shows (his first, then the ones to look at). A private card's are never shown: they are counted (openAsks). */
+/** The asks on a card that For you shows (his first, then the ones to look at). A private card's are never shown: they are counted (privateAsks). */
 export function cardItems(view: Pick<ForYouView, "yours" | "more" | "look">, card: CardView): Item[] {
   const on = onCard(card.path);
   return card.private ? [] : [...view.yours, ...view.more, ...view.look].filter(on);
@@ -309,7 +314,7 @@ const RANK: Record<CardMark, number> = { yours: 0, look: 1, moving: 2, rest: 3 }
 export type AreaCard = { card: CardView; mark: CardMark };
 /** A place's cards (the card's area is this node, or the card is this project's face): the active ones first (his, then to look at, then moving;
  *  the newest session first), the resting ones apart (folded where they are shown). */
-export function areaCards(view: Pick<ForYouView, "yours" | "more" | "look" | "cards">, node: string): { active: AreaCard[]; resting: AreaCard[] } {
+export function areaCards(view: Pick<ForYouView, "yours" | "more" | "look" | "cards" | "privateCards">, node: string): { active: AreaCard[]; resting: AreaCard[] } {
   const all = [...view.cards.values()].filter((c) => c.areaNode === node || c.project === node).map((card) => ({ card, mark: cardMark(view, card) }));
   const order = (a: AreaCard, b: AreaCard) => RANK[a.mark] - RANK[b.mark] || (ms(b.card.lastAt) ?? 0) - (ms(a.card.lastAt) ?? 0) || a.card.name.localeCompare(b.card.name);
   return { active: all.filter((c) => c.mark !== "rest").sort(order), resting: all.filter((c) => c.mark === "rest").sort(order) };
@@ -319,11 +324,14 @@ const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").tri
 /** The card's lines, newest first: one per session, and his own answers marked. An answer given on this device shows at once, as his line, until
  *  the card's own line for it comes back (the same words). */
 export function cardLines(card: CardView, answered: readonly Answered[] = []): CardLine[] {
-  const have = new Set(card.lines.filter((l) => l.mine).map((l) => norm(l.text)));
-  const here = answered.filter((a) => a.card === card.path && !have.has(norm(a.answer))).map((a) => ({ at: new Date(a.at).toISOString(), text: a.answer, mine: true }));
+  // (only a line of his written since: the same words answered last week are another answer; 10 min of clock slack)
+  const back = (a: Answered) => card.lines.some((l) => l.mine && norm(l.text) === norm(a.answer) && (ms(l.at) ?? 0) >= a.at - 600_000);
+  const here = answered.filter((a) => a.card === card.path && !back(a)).map((a) => ({ at: new Date(a.at).toISOString(), text: a.answer, mine: true }));
   return [...here, ...card.lines].sort((a, b) => (ms(b.at) ?? 0) - (ms(a.at) ?? 0));
 }
 
+/** How many of a private card's asks are live now (For you's own count of them; never their words). */
+export const privateAsks = (view: Pick<ForYouView, "privateCards">, card: CardView): number => view.privateCards.get(card.path) ?? 0;
 /** "1 thing waits on you" / "3 things wait on you": a private card's asks, by count only. */
 export const waitsWords = (n: number) => `${n} thing${n === 1 ? " waits" : "s wait"} on you`;
 
@@ -332,7 +340,7 @@ export const waitsWords = (n: number) => `${n} thing${n === 1 ? " waits" : "s wa
  * opens with the card's name ("Glaze Tests: …", "**Glaze Tests**") in a room of the card's own area or project. Never a private card (a private
  * area's rooms are not in the stream; this keeps it so).
  */
-export function cardOfMessage(view: Pick<ForYouView, "yours" | "more" | "look" | "cards">, m: { ref: string; root?: string | null; body: string }, roomPath: string | null): CardView | null {
+export function cardOfMessage(view: Pick<ForYouView, "yours" | "more" | "look" | "cards" | "privateCards">, m: { ref: string; root?: string | null; body: string }, roomPath: string | null): CardView | null {
   const items = [...view.yours, ...view.more, ...view.look];
   for (const ref of [m.ref, m.root]) {
     if (!ref) continue;

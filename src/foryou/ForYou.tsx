@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRecorder } from "../recorder";
 import { transcribe } from "./useForYou";
-import { cardItems, cardLines, cardMark, MARK_WORDS, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine } from "./forYouCore";
+import { cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine } from "./forYouCore";
 import { quietLine } from "../projects/FrontDoor";
 import { headWords } from "./scope";
 import { dialogOpen, openDialog } from "../areas/focusTrap";
@@ -150,8 +150,8 @@ function MovingRow({ m, now, onCard }: { m: MovingLine; now: number; onCard: (pa
   return <li className="fy-mv">
     <Mark kind="moving" />
     {/* (a private card opens too: it shows only what its note already says, its lines as stored and its count) */}
-    {m.private ? <button type="button" className="fy-mv-t" onClick={() => onCard(m.cardPath)}>{m.text}</button>
-      : <button type="button" className="fy-mv-t" onClick={() => onCard(m.cardPath)}><b>{m.card}</b> · {m.text}</button>}
+    {m.private ? <button type="button" className="fy-mv-t" onClick={() => onCard(m.cardPath)}>{m.mine ? `You ${m.text}` : m.text}</button>
+      : <button type="button" className="fy-mv-t" onClick={() => onCard(m.cardPath)}><b>{m.card}</b> · {m.mine ? <>You: “{m.text}”</> : m.text}</button>}
     <span className="fy-at">{ago(m.at, now)}</span>
   </li>;
 }
@@ -224,9 +224,8 @@ export const useCardBeside = () => useSyncExternalStore(onWide, () => window.mat
 
 const LINES_SHOWN = 6;
 const lineDate = (at: string | null, now: number) => {
-  if (!at) return "";
-  const t = Date.parse(at);
-  if (!Number.isFinite(t)) return "";
+  const t = ms(at);
+  if (t === null) return "";
   if (now - t < 60 * 60_000) return "now";
   return new Date(t).toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
 };
@@ -284,14 +283,14 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
         <span className="fy-card-kicker"><Mark kind={mark} /><span>{card.area ? `${card.area} · card` : "card"}<span className="fy-card-state"> · {MARK_WORDS[mark]}</span></span></span>
         <button type="button" className="fy-link-btn fy-card-close" onClick={onClose}>Close</button></div>
       <h3 className="fy-card-name">{card.name}</h3>
-      {card.stands && <p className="fy-card-stands">{card.stands}{card.standsAt && <small>as of {new Date(card.standsAt).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}</small>}</p>}
+      {card.stands && <p className="fy-card-stands">{card.stands}{card.standsAt && <small>as of {new Date(ms(card.standsAt) ?? 0).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}</small>}</p>}
       {card.hill && <p className="fy-card-hill"><Hill pos={card.hill.pos} w={120} h={38} /><span><b>{card.hill.words}.</b>{card.hill.stuck ? " It hasn't moved in a while." : card.hill.pos >= 100 ? "" : card.hill.pos >= 50 ? " Past figuring out; now making." : " Still figuring it out."}</span></p>}
       {lines.length > 0 ? <ul className="fy-card-lines" aria-label="Its last lines, newest first">
         {shown.map((l, i) => <li key={i} data-mine={l.mine || undefined}><span className="fy-at">{lineDate(l.at, now)}</span>
           <span className="fy-card-line">{l.mine && <b className="fy-you">You</b>}{l.mine && !card.private ? `“${l.text}”` : l.text}</span></li>)}
         {lines.length > shown.length && <li className="fy-card-earlier"><button type="button" className="fy-link-btn" onClick={() => setAll(true)}>{lines.length - shown.length} earlier</button></li>}
       </ul> : <p className="fy-none">No sessions on it yet.</p>}
-      {card.private ? card.openAsks.length > 0 && <p className="fy-card-count"><Mark kind="yours" />{waitsWords(card.openAsks.length)}<small>Open its area to answer</small></p>
+      {card.private ? privateAsks(p.view, card) > 0 && <p className="fy-card-count"><Mark kind="yours" />{waitsWords(privateAsks(p.view, card))}<small>Open its area to answer</small></p>
         : items.length > 0 && <section className="fy-card-asks" aria-label="Open on this card"><h4>Open on this card <span className="fy-n">{items.length}</span></h4>
           {items.map((i) => <ItemView key={i.id} item={i} p={p} onCard={null} inCard />)}</section>}
       {card.threads.length > 0 && <p className="fy-card-threads"><span>Threads</span>{card.threads.map((t) => <i key={t}>{t}</i>)}</p>}

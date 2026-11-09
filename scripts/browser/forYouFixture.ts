@@ -28,7 +28,7 @@ export function asks(now: number) {
     { ...task('fy-paint', 'Choose the hive paint', { node: 'Areas/Bee Garden', options: ['White', 'Pale yellow'] }, ['decision']), path: 'Decisions/Choose the hive paint', createdAt: ago(now, 10 * D) },
     task('fy-look', 'T-510 Look at the glaze tile photos', { node: 'Areas/Kiln Studio', kind: 'look', no_default: true, card: 'Cards/Kiln Studio/Glaze Tests', why_now: 'Twelve tiles, photographed on the shelf.',
       link: 'https://example.com/kiln/tiles', reply_room: 'kiln-studio', asked_at: ago(now, 2 * H) }),
-    task('fy-quiet', 'T-520 Morning practice note', { node: 'Areas/Sanctum', kind: 'tell', no_default: true, why_now: 'Private words that never leave the area.', asked_at: ago(now, 1 * D) }),
+    task('fy-quiet', 'T-520 Morning practice note', { node: 'Areas/Sanctum', kind: 'tell', no_default: true, card: 'Cards/Sanctum/daily practice', why_now: 'Private words that never leave the area.', asked_at: ago(now, 1 * D) }),
     task('fy-room', 'T-530 Fire the second bisque load', { node: 'Areas/Kiln Studio', owner: 'room:kiln-studio', state: 'doing' }),
     task('fy-was', 'T-531 Answered from the phone already', { node: 'Areas/Kiln Studio', kind: 'tell', answered_at: ago(now, H), answer: 'Seen', no_default: true }),
   ];

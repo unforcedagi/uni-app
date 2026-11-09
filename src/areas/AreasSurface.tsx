@@ -324,8 +324,9 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const v = fyView.current, c = cardOfMessage(v, m, roomPaths.current.get(m.channel) ?? null);
     return c ? { path: c.path, name: c.name, mark: cardMark(v, c) } : null;
   } }), [cardsSig, openCard]); // eslint-disable-line react-hooks/exhaustive-deps
-  // a card that is gone (retired, or another vault's) closes; it doesn't come back by itself later
-  useEffect(() => { if (cardOpen && fy.view.cards.size > 0 && !fy.view.cards.has(cardOpen)) setCardOpen(null); }, [cardOpen, fy.view.cards]);
+  // a card that is gone (retired, or another vault's, or the home left for the place pages) closes; it doesn't come back by itself later
+  useEffect(() => { if (cardOpen && (!chat || !fy.view.cards.has(cardOpen))) setCardOpen(null); }, [cardOpen, fy.view.cards, chat]);
+  useEffect(() => { setCardOpen(null); }, [profile.vault, identity]);
   // r31: an ask is current because its task note says so (`asked_at` / `confirmed_at` within 3 days), resolved here before any row, count or dot shows it.
   const confirmNow = useMemo(() => Date.now(), [tasks.tasks, tasks.lastOk]); // eslint-disable-line react-hooks/exhaustive-deps
   const confirm = useMemo(() => ({ of: (t: Task): Resolved => confirmationOf(t, confirmNow) }), [confirmNow]);

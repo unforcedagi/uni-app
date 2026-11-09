@@ -8,6 +8,7 @@
 // match at once and the small model's route if it answers in time (modelRoute.ts).
 // T-335 one fluid surface: a long message opens where it is, whole, with its markdown, media and links; a room's label puts that room in focus over
 // this feed (AllFocus.tsx), and the feed keeps its place behind it. Nothing here makes you leave All to read.
+import type { CardMark } from "../foryou/forYouCore";
 import { keepSame } from "../keepSame";
 import { roomTint as tint } from "../glow/roomTint";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -352,7 +353,7 @@ const BAND_CLEAR = 52;
 const readBand = () => (document.documentElement.dataset.screen === "ink" ? 40 : 46);
 
 /** 0.3.2: which card a stream message is about (its name and its mark), and how to open it. */
-export type FeedCard = { path: string; name: string; mark: "yours" | "look" | "moving" | "rest" };
+export type FeedCard = { path: string; name: string; mark: CardMark };
 export type FeedCards = { of: (m: Message) => FeedCard | null; open: (path: string) => void };
 
 const FeedRow = memo(function FeedRow({ m, place, address, mine, me, run, named, targeted, open, onOpen, onTap, onRead, card = null, cardName = null, cardMark = null, onCard }: { m: Message; place: string; address: string; mine: boolean; me: string | null;
