@@ -20,7 +20,7 @@ test.describe('home layout', () => {
     await bootForYou(page);
     await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false');
     // the head: how many are his, to look at, moving; and the first ask, by itself
-    await expect(toggle(page)).toHaveText(/^8 for you · 1 to look at · 3 moving$/);
+    await expect(toggle(page)).toHaveText(/^7 for you · 1 to look at · 3 moving$/);
     await expect(forYou(page).locator('.fy-first')).toContainText('Bring the soup pot on Saturday');
     await expect(forYou(page).locator('article.fy-item')).toHaveCount(0);
     await expect(stream(page).locator('article.all-msg').first()).toBeVisible();
@@ -44,7 +44,7 @@ test.describe('home layout', () => {
     expect((await calls(page, 'post_message')).map((a: any) => [a.channel, a.replyTo, a.body])).toEqual([['ch-kiln', 'k3', 'T-501: Celadon']]);
     // folded again, the head counts one fewer
     await toggle(page).click();
-    await expect(toggle(page)).toHaveText(/^7 for you/);
+    await expect(toggle(page)).toHaveText(/^6 for you/);
   });
 
   test("an area's stream: its rooms by time, its For you; one tap on All for every room", async ({ page }) => {
@@ -66,7 +66,7 @@ test.describe('home layout', () => {
     await expect(chip(page, 'All')).toHaveAttribute('aria-pressed', 'true');
     await expect(stream(page).locator('article.all-msg[data-room="ch-north"]').first()).toBeVisible();
     expect(await roomsShown(page)).toEqual(['ch-bees', 'ch-choir', 'ch-kiln', 'ch-north', 'ch-table']);
-    await expect(toggle(page)).toHaveText(/^8 for you/);
+    await expect(toggle(page)).toHaveText(/^7 for you/);
     // Escape does the same
     await chip(page, 'Choir').click();
     expect(await roomsShown(page)).toEqual(['ch-choir']);

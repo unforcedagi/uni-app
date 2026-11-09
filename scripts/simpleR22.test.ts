@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { askedLine, firstOfSteps, needsFeed, privateAction, privateActionLabel, privateRestLabel, rowAction, rowForm, withHosts } from "../src/areas/simpleCore.ts";
 import { pairingFailure } from "../src/pairingCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
+import { swept } from "./swept.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -49,7 +50,7 @@ check("r28: an action is never shortened, however long: its brackets and its lin
 
 
 const tree = (() => { const { nodes, rootPath } = parseNodes([{ id: "u", path: "Uni", tags: ["uni"], metadata: {} }]); return buildTaskTree(nodes, rootPath); })();
-const task = (id: string, next: string, kind = "task"): Task => ({ ...parseTask({ id, path: `Tasks/T-9${id} Placeholder ${id}`, tags: [kind], updatedAt: "2026-10-14T06:00:00.000Z", metadata: { state: "open", owner: "aaron", priority: "now", next } }, tree)!, node: "Areas/Private" });
+const task = (id: string, next: string, kind = "task"): Task => ({ ...parseTask({ id, path: `Tasks/T-9${id} Placeholder ${id}`, tags: [kind], updatedAt: "2026-10-14T06:00:00.000Z", metadata: swept({ state: "open", owner: "aaron", priority: "now", next }, [kind]) }, tree)!, node: "Areas/Private" });
 
 check("private areas show the action (verb and object only), or one plain line when the words may be personal", () => {
   // a short work imperative: its verb and object only

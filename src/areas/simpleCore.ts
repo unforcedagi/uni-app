@@ -17,13 +17,12 @@ export function firstSentence(text: string | null | undefined): string {
 /** A task someone else holds that waits on the user (r17: `waiting_on` names them, whatever its owner): their part is the step it asks for. */
 export const waitsOnMe = (t: Pick<Task, "owner" | "waitingOn">): boolean => isMe(t.waitingOn) && !isMe(t.owner);
 /**
- * Whether a task belongs in Needs you: the companion's list, the work view and the tree's dots use this one rule (r12). Every open decision,
- * the user's own tasks, and (r17) any task whose `waiting_on` names the user whatever its owner, at Now or Soon (unsorted is Soon); live,
- * never Someday. A room's or Uni's own drafting that waits on no one is not theirs (r16). Snoozed and finished tasks are dropped before.
+ * Whether a task needs the user: its `needs_aaron` field, nothing else (T-335 one home). uni-tasks decides it once (needs.py: an open ask owned by
+ * him, on a card, asked or confirmed by its room in 7 days, in a live place with a live room) and writes it on the task; For you, the companion,
+ * the work view, the tree's dots and the doors' badges all read it, so their counts agree. An old `Decisions/` note is the record, not an ask.
  */
-export function needsYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state"> & Partial<Pick<Task, "title" | "next" | "options" | "ask" | "askAt" | "updatedAt" | "askFailed" | "check" | "supersededBy">>): boolean {
-  // r19: a record that isn't a real request is Uni's to tidy, listed apart and never counted here. r20: nor is a decision not read yet
-  return wouldNeedYou(t) && !tidyReason(t) && !unknownDecision(t);
+export function needsYou(t: Partial<Pick<Task, "needsAaron">>): boolean {
+  return t.needsAaron === true;
 }
 /**
  * A decision whose full record isn't read yet (r20, Codex P1-2): its title was cut and its note's question isn't read at this revision, the
@@ -63,7 +62,7 @@ export function needsByNode(tasks: readonly Task[]): Map<string, number> {
  * The tree's dots (r13): each item that needs you counts on its node's row or, when that node has no row in the tree, on its nearest
  * ancestor's (else Uni's), so the dots under a level add up to that level's feed.
  */
-export function needsByRow(tasks: readonly Task[], rows: ReadonlySet<string>, parentOf: (path: string) => string | undefined, confOf?: ConfOf, runs: readonly Pick<Run, "node" | "task" | "state">[] = []): Map<string, number> {
+export function needsByRow(tasks: readonly Task[], rows: ReadonlySet<string>, parentOf: (path: string) => string | undefined): Map<string, number> {
   const m = new Map<string, number>();
   const place = (node: string) => {
     let at: string | undefined = node;
@@ -71,15 +70,8 @@ export function needsByRow(tasks: readonly Task[], rows: ReadonlySet<string>, pa
     const key = at !== undefined && rows.has(at) ? at : ROOT;
     m.set(key, (m.get(key) ?? 0) + 1);
   };
-  const counted = new Set<string>();
-  for (const t of tasks) {
-    // r28 (Codex P2-6): only confirmed asks count; a recheck or a held-back ask lights no dot
-    if (!needsYou(t) || (confOf && confOf(t).state !== "confirmed")) continue;
-    const id = taskIdOf(t); if (id) counted.add(id);
-    place(t.node);
-  }
-  // a run waiting on the user's answer is counted once: not when its task is already counted
-  for (const r of runs) if (waitingOnYou(r) && !(r.task && counted.has(r.task.toUpperCase()))) place(r.node);
+  // T-335 one home: what needs you is the field (needsYou), the same set For you counts; a run waiting on an answer goes to its room
+  for (const t of tasks) if (needsYou(t)) place(t.node);
   return m;
 }
 /** The task's id as a run names it ("T-07"), upper-cased; null when its title has none. */
@@ -130,9 +122,11 @@ export function rankNeeds(list: readonly Task[], today = localDay()): Task[] {
  */
 export type ConfOf = (t: Task) => Resolved;
 export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => PrivatePlace | null, self: PrivatePlace | null = null, today = localDay(), confOf?: ConfOf): NeedsFeed {
+  // T-335 one home: the field already holds the freshness rule (asked or confirmed in 7 days), so nothing owed is "to recheck" here
   const owed = rankNeeds(tasks.filter(needsYou), today);
-  const stateOf = (t: Task): Confirm => (confOf ? confOf(t).state : "confirmed");
-  const all = owed.filter((t) => stateOf(t) === "confirmed");
+  const stateOf = (_t: Task): Confirm => "confirmed";
+  void confOf;
+  const all = owed;
   const rows: Task[] = [];
   const recheck: Task[] = [];
   const recheckWhy: Record<string, RecheckWhy | null> = {};
@@ -151,7 +145,7 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
     if (a) g.actions.push(a); else g.others++;
   }
   const here = (t: Task) => !privateOf(t.node) || privateOf(t.node)?.path === self?.path;
-  const tidy = tasks.filter((t) => toTidy(t) && here(t));
+  const tidy = tasks.filter((t) => toTidy(t) && !needsYou(t) && here(t));     // (listed apart only when not counted)
   const pending = rankNeeds(tasks.filter((t) => wouldNeedYou(t) && unknownDecision(t) && here(t)), today);
   return { rows, privates: [...by.values()], total: all.length, tidy, pending, recheck, recheckWhy, waiting: [] };
 }
@@ -170,7 +164,8 @@ export function withWaiting(feed: NeedsFeed, runs: readonly Run[]): NeedsFeed {
     return true;
   });
   const names = new Set(waiting.map((r) => r.task?.toUpperCase()).filter(Boolean) as string[]);
-  return { ...feed, waiting, total: feed.total + waiting.length, recheck: (feed.recheck ?? []).filter((t) => { const id = taskIdOf(t); return !(id && names.has(id)); }) };
+  // T-335 one home: listed, never counted: a blocked run goes to its room; what needs him is his asks (the one rule)
+  return { ...feed, waiting, total: feed.total, recheck: (feed.recheck ?? []).filter((t) => { const id = taskIdOf(t); return !(id && names.has(id)); }) };
 }
 
 /** T-161: the approval prompts waiting here join the feed, counted like every other ask (Uni's level holds every room's; a room's level, its own). */
@@ -195,7 +190,7 @@ export function uniPanel(feed: NeedsFeed, max = UNI_ROWS): NeedsFeed & { rest: n
   // r20: a decision still being read fills a row only where nothing owed is left to show; it is never counted
   const pending = (feed.pending ?? []).slice(0, Math.max(0, max - rows.length));
   // r28: the waiting runs are shown in the panel itself, so they are not in "Show N more"; T-161: nor are the approval prompts
-  return { ...feed, rows, privates: [], total: feed.total, rest: Math.max(0, feed.total - rows.length - (feed.waiting?.length ?? 0) - (feed.approvals?.length ?? 0)), privateCount, pending };
+  return { ...feed, rows, privates: [], total: feed.total, rest: Math.max(0, feed.total - rows.length - (feed.approvals?.length ?? 0)), privateCount, pending };
 }
 /** "Includes 1 in a private area": the "N more ›" link's tooltip, when private items are folded into its count. */
 export const privateNote = (n: number): string | null => (n <= 0 ? null : n === 1 ? "Includes 1 item in a private area" : `Includes ${n} items in private areas`);

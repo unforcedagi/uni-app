@@ -1,0 +1,276 @@
+{
+ "about": "T-335 one home: written by uni-tasks test_one_home.py --app-fixture from fixtures/needs_disagree.json (synthetic). The notes as the vault holds them after the sweep wrote needs_aaron; every count in the app must equal `needs`.",
+ "now": "2026-11-08T12:00:00-07:00",
+ "nodes": [
+  {
+   "id": "n-glade",
+   "path": "Areas/Glade",
+   "tags": [
+    "area",
+    "node"
+   ],
+   "metadata": {
+    "room": "commons"
+   }
+  },
+  {
+   "id": "n-hearth",
+   "path": "Areas/Hearth",
+   "tags": [
+    "area",
+    "node"
+   ],
+   "metadata": {
+    "room": "hearth",
+    "private": true
+   }
+  },
+  {
+   "id": "n-lamp",
+   "path": "Projects/Lamp",
+   "tags": [
+    "project",
+    "node"
+   ],
+   "metadata": {
+    "links": [
+     "n-glade"
+    ]
+   }
+  },
+  {
+   "id": "n-quiet",
+   "path": "Projects/Quiet",
+   "tags": [
+    "project",
+    "node"
+   ],
+   "metadata": {
+    "links": [
+     "n-hearth"
+    ]
+   }
+  }
+ ],
+ "cards": [
+  {
+   "id": "c-lamp",
+   "path": "Cards/Glade/Lamp",
+   "tags": [
+    "card"
+   ],
+   "metadata": {
+    "name": "Lamp",
+    "area": "Glade",
+    "area_node": "Areas/Glade",
+    "status": "active"
+   }
+  },
+  {
+   "id": "c-quiet",
+   "path": "Cards/Hearth/Quiet",
+   "tags": [
+    "card"
+   ],
+   "metadata": {
+    "name": "Quiet",
+    "area": "Hearth",
+    "area_node": "Areas/Hearth",
+    "status": "active",
+    "private": true
+   }
+  }
+ ],
+ "tasks": [
+  {
+   "id": "t-a",
+   "path": "Tasks/T-901 Pick the lamp glaze",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-11-01T10:00:00Z",
+   "metadata": {
+    "legacy_id": "T-901",
+    "state": "open",
+    "owner": "Aaron",
+    "node": "n-lamp",
+    "card": "Cards/Glade/Lamp",
+    "kind": "choose",
+    "options": [
+     "amber",
+     "slate"
+    ],
+    "default": "amber",
+    "default_at": "2026-11-12",
+    "asked_at": "2026-11-07T17:00:00Z",
+    "needs_aaron": true,
+    "needs_aaron_why": "yes"
+   }
+  },
+  {
+   "id": "t-b",
+   "path": "Tasks/T-902 Sign the hall form",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-11-01T10:00:00Z",
+   "metadata": {
+    "legacy_id": "T-902",
+    "state": "waiting",
+    "owner": "room:commons",
+    "waiting_on": "aaron",
+    "node": "n-lamp",
+    "card": "Cards/Glade/Lamp",
+    "kind": "do",
+    "no_default": true,
+    "asked_at": "2026-11-08T09:00:00Z",
+    "needs_aaron": true,
+    "needs_aaron_why": "yes"
+   }
+  },
+  {
+   "id": "t-c",
+   "path": "Tasks/T-903 Name the shelf",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-11-01T10:00:00Z",
+   "metadata": {
+    "legacy_id": "T-903",
+    "state": "open",
+    "owner": "aaron",
+    "node": "n-lamp",
+    "card": "Cards/Glade/Lamp",
+    "kind": "do",
+    "no_default": true,
+    "asked_at": "2026-11-07T09:00:00Z",
+    "answer": "the cedar one",
+    "needs_aaron": false,
+    "needs_aaron_why": "answered"
+   }
+  },
+  {
+   "id": "t-d",
+   "path": "Tasks/T-904 Choose the wick",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-11-01T10:00:00Z",
+   "metadata": {
+    "legacy_id": "T-904",
+    "state": "open",
+    "owner": "aaron",
+    "node": "n-lamp",
+    "card": "Cards/Glade/Lamp",
+    "kind": "do",
+    "no_default": true,
+    "asked_at": "2026-11-04T09:00:00Z",
+    "needs_aaron": true,
+    "needs_aaron_why": "yes"
+   }
+  },
+  {
+   "id": "t-e",
+   "path": "Tasks/T-905 Read the lease",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-11-01T10:00:00Z",
+   "metadata": {
+    "legacy_id": "T-905",
+    "state": "open",
+    "owner": "aaron",
+    "node": "n-lamp",
+    "kind": "do",
+    "no_default": true,
+    "asked_at": "2026-11-08T08:00:00Z",
+    "needs_aaron": false,
+    "needs_aaron_why": "no card"
+   }
+  },
+  {
+   "id": "t-f",
+   "path": "Tasks/T-906 Approve the old plan",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-20T10:00:00Z",
+   "metadata": {
+    "legacy_id": "T-906",
+    "state": "open",
+    "owner": "aaron",
+    "node": "n-lamp",
+    "card": "Cards/Glade/Lamp",
+    "kind": "do",
+    "no_default": true,
+    "asked_at": "2026-10-31T09:00:00Z",
+    "needs_aaron": false,
+    "needs_aaron_why": "stale"
+   }
+  },
+  {
+   "id": "t-g",
+   "path": "Tasks/T-907 Someday tidy the shed",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-11-01T10:00:00Z",
+   "metadata": {
+    "legacy_id": "T-907",
+    "state": "open",
+    "owner": "aaron",
+    "node": "n-lamp",
+    "card": "Cards/Glade/Lamp",
+    "kind": "do",
+    "no_default": true,
+    "asked_at": "2026-11-08T08:00:00Z",
+    "priority": "someday",
+    "needs_aaron": false,
+    "needs_aaron_why": "someday"
+   }
+  },
+  {
+   "id": "t-h",
+   "path": "Decisions/2026-11-06 Which venue",
+   "tags": [
+    "decision"
+   ],
+   "createdAt": "2026-11-06T10:00:00Z",
+   "metadata": {
+    "state": "open",
+    "node": "n-lamp"
+   }
+  },
+  {
+   "id": "t-i",
+   "path": "Tasks/T-909 Words for the quiet room",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-11-01T10:00:00Z",
+   "metadata": {
+    "legacy_id": "T-909",
+    "state": "open",
+    "owner": "aaron",
+    "node": "n-quiet",
+    "card": "Cards/Hearth/Quiet",
+    "reply_room": "hearth",
+    "kind": "do",
+    "no_default": true,
+    "asked_at": "2026-11-08T07:00:00Z",
+    "needs_aaron": true,
+    "needs_aaron_why": "yes"
+   }
+  }
+ ],
+ "needs": [
+  "T-901",
+  "T-902",
+  "T-904",
+  "T-909"
+ ],
+ "away": [
+  "T-905",
+  "T-906"
+ ]
+}

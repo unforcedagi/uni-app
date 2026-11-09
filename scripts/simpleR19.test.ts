@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { CHECK_TTL, checkOf, needsFeed, needsYou, stepAudience, taskDeps, tidyReason, toTidy, withHosts, wouldNeedYou } from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
+import { swept } from "./swept.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
 
 let failed = 0;
@@ -13,7 +14,7 @@ async function check(name: string, fn: () => void | Promise<void>) {
 
 const tree = (() => { const { nodes, rootPath } = parseNodes([{ id: "u", path: "Uni", tags: ["uni"], metadata: {} }]); return buildTaskTree(nodes, rootPath); })();
 const task = (id: string, title: string, meta: Record<string, unknown>, tag = "task", updatedAt = "2026-10-14T06:00:00.000Z"): Task =>
-  parseTask({ id, path: `${tag === "decision" ? "Decisions" : "Tasks"}/${title}`, tags: [tag], updatedAt, metadata: { state: "open", owner: "aaron", ...meta } }, tree)!;
+  parseTask({ id, path: `${tag === "decision" ? "Decisions" : "Tasks"}/${title}`, tags: [tag], updatedAt, metadata: swept({ state: "open", owner: "aaron", ...meta }, [tag]) }, tree)!;
 
 type N = { id: string; path: string; content?: string; metadata?: Record<string, unknown>; updatedAt?: string; vault?: string };
 /** A fake vault whose notes can be changed between reads, and whose reads can fail (`fail` ids throw a transport error). */
@@ -190,11 +191,13 @@ await check("P1-3 tidy records leave Needs you and its count, and are listed apa
     task("m", "Mail: approve a test week, not an immediate cutover", {}, "decision"),
     task("o", "T-11 RegenHub site + newsletter systems", { owner: "room:boulder", next: "Run /restart after the merge" }),
   ];
-  assert.deepEqual(rows.map((t) => [t.id, needsYou(t), wouldNeedYou(t), toTidy(t)]), [["a", true, true, null], ["f", false, true, "outline"], ["m", false, true, "proposal"], ["o", false, false, null]]);
+  // T-335 one home: whether it needs him is uni-tasks' field, so an ask that reads like an outline still counts while it is marked (its room
+  // rewords it); the tidy list holds only records that aren't counted (here the old decision)
+  assert.deepEqual(rows.map((t) => [t.id, needsYou(t), wouldNeedYou(t), toTidy(t)]), [["a", true, true, null], ["f", true, true, "outline"], ["m", false, true, "proposal"], ["o", false, false, null]]);
   const feed = needsFeed(rows, () => null);
-  assert.equal(feed.total, 1);
-  assert.deepEqual(feed.rows.map((t) => t.id), ["a"]);
-  assert.deepEqual(feed.tidy!.map((t) => t.id), ["f", "m"]);
+  assert.equal(feed.total, 2);
+  assert.deepEqual(feed.rows.map((t) => t.id), ["a", "f"]);
+  assert.deepEqual(feed.tidy!.map((t) => t.id), ["m"]);
   // inside another private area: never listed by title outside it
   const priv = rows.map((t) => ({ ...t, node: "Areas/Sanctum/X" }));
   assert.equal(needsFeed(priv, () => ({ path: "Areas/Sanctum", name: "Sanctum" })).tidy!.length, 0);

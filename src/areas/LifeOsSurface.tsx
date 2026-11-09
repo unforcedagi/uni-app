@@ -9,7 +9,6 @@ import { VaultProfileProvider } from "./ProfileContext";
 import { defaultProfile, effectiveLifeVault, UNI_VAULT, vaultChoices } from "./profile";
 import { discover, type Found } from "./discover";
 import { chooseLifeOsVault, useLifeOsVault } from "./useLifeOsVault";
-import { UNI_CHANNEL } from "./treeCore";
 import { findUniRoom } from "../uniActions";
 import { SLOW_MS } from "./useTasks";
 
@@ -39,7 +38,7 @@ export default function LifeOsSurface({ vaults, identity, ...rest }: { vaults: s
     <select value={chosen} onChange={(e) => pick(e.target.value)}>{choices.map((v) => <option key={v} value={v}>{v}</option>)}</select></label> : null;
   // r15: the ways on, said as actions: ask Uni (the old #Uni's composer where an account still has it, filled in, never sent; else in words),
   // look again, or go back to Uni's own vault
-  const uniRoom = rest.rooms.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rest.rooms)?.id ?? null;
+  const uniRoom = findUniRoom(rest.rooms)?.id ?? null;
   if (ready && !ready.hasPack) return <div className="areas-home lifeos-nopack">{picker}
     <h1>“{chosen}” isn't set up for Uni yet</h1>
     <p className="empty">It has no areas or projects for Uni to show yet.</p>

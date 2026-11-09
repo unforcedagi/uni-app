@@ -13,7 +13,8 @@ function check(name: string, fn: () => void) {
 const NOW = Date.parse("2026-11-11T12:00:00Z");
 const H = 3600_000, D = 24 * H;
 const iso = (t: number) => new Date(t).toISOString();
-const task = (id: string, m: Record<string, unknown>): Note => ({ id, path: `Tasks/${id}`, tags: ["task"], updatedAt: iso(NOW - H), createdAt: iso(NOW - 9 * D), metadata: { state: "open", owner: "aaron", kind: "do", no_default: true, ...m } });
+// T-335 one home: these asks are fresh and open, so uni-tasks wrote needs_aaron true (a test that wants otherwise says so)
+const task = (id: string, m: Record<string, unknown>): Note => ({ id, path: `Tasks/${id}`, tags: ["task"], updatedAt: iso(NOW - H), createdAt: iso(NOW - 9 * D), metadata: { state: "open", owner: "aaron", kind: "do", no_default: true, needs_aaron: true, needs_aaron_why: "yes", ...m } });
 const card = (area: string, name: string, m: Record<string, unknown> = {}): Note => ({ id: `c-${name}`, path: `Cards/${area}/${name}`, tags: ["card"], metadata: { schema: "card/1", name, area, area_node: `Areas/${area}`, status: "active", private: false, lines: [], ...m } });
 const PLACES: Record<string, Place> = {
   "Areas/Kiln Studio": { area: "Kiln Studio", areaPath: "Areas/Kiln Studio", room: "kiln-studio", private: false },

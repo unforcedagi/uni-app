@@ -6,7 +6,7 @@ import { refreshDraft, nowLine, parseBrief, parseToday, rankNeeds, todayNeeds, u
 import { createAreasCache, CACHE_KEY } from "../src/areas/areasCache.ts";
 import { pickRoom } from "../src/areas/areaLayout.ts";
 import { parseArea, parseProject, parentOf } from "../src/areas/areasCore.ts";
-import { buildTree, childrenOf, parentPath, rootNode, ROOT, trail, UNI_CHANNEL } from "../src/areas/treeCore.ts";
+import { buildTree, childrenOf, parentPath, rootNode, ROOT, trail } from "../src/areas/treeCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -266,8 +266,9 @@ check("buildTree: a parent whose rooms are all claimed keeps them, and duplicate
   assert.equal(buildTree(nodes(a, b)).nodes.get("Areas/Techne")!.id, "newer");
 });
 check("the Uni root is a node on the Uni channel, and refresh drafts name the node and its Brief", () => {
-  const r = rootNode([UNI_CHANNEL]);
-  assert.equal(r.path, ROOT); assert.deepEqual(r.rooms, [UNI_CHANNEL]); assert.equal(UNI_CHANNEL, "1b667c1f-95c8-45e5-a7cc-1df13b7d0e2a");
+  const UNI_ROOM = "c-uni-example";     // (T-335 one home: the app keeps no room ids; the rooms registry does)
+  const r = rootNode([UNI_ROOM]);
+  assert.equal(r.path, ROOT); assert.deepEqual(r.rooms, [UNI_ROOM]);
   assert.match(refreshDraft("Techne", "Areas/Techne"), /^@Uni .*Areas\/Techne\/Brief/);
   assert.match(refreshDraft("COhere 2026", "Projects/COhere/COhere 2026"), /Projects\/COhere\/COhere 2026\/Brief/);
   assert.match(refreshDraft("Uni", ""), /Areas\/Today/);

@@ -14,6 +14,7 @@ import { taskTitle, whereWeAre } from "../src/areas/whereCore.ts";
 import { decideLine, firstWords, isMine, NEXT_CAP, stepText, stripRoom, wholeWords } from "../src/areas/simpleCore.ts";
 import { createSavedTasks, SAVED_MAX_TASKS } from "../src/areas/savedTasks.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
+import { swept } from "./swept.ts";
 
 let failed = 0;
 async function check(name: string, fn: () => void | Promise<void>) {
@@ -116,7 +117,7 @@ const { nodes, rootPath } = parseNodes([nd("u", "Uni", null, ["uni"]), nd("a-x",
 const tree = buildTaskTree(nodes, rootPath);
 const AT = 1_000_000;
 const mk = (id: string, extra: Record<string, unknown> = {}, tags = ["task"]): Task =>
-  parseTask({ id, path: `Tasks/${id} Do the thing`, tags, updatedAt: new Date(AT).toISOString(), metadata: { node: "Projects/ATLAS", state: "open", owner: "aaron", ...extra } }, tree)!;
+  parseTask({ id, path: `Tasks/${id} Do the thing`, tags, updatedAt: new Date(AT).toISOString(), metadata: swept({ node: "Projects/ATLAS", state: "open", owner: "aaron", ...extra }, tags) }, tree)!;
 const feed = (tasks: Task[], today = "2026-10-01") => topNeeds(whereWeAre({ tasks, hidden: () => false, nowMs: AT }), undefined, Infinity, today).map((t) => t.id);
 check("needs-you feed: Aaron's own, Now and Soon (unsorted is Soon), open decisions, and (r17) whatever waits on him; Someday and a room's own task are not there", () => {
   const list = [mk("soon1", { priority: "soon" }), mk("none1"), mk("now1", { priority: "now" }), mk("some1", { priority: "someday" }),
@@ -125,14 +126,14 @@ check("needs-you feed: Aaron's own, Now and Soon (unsorted is Soon), open decisi
   const ids = feed(list);
   assert.ok(!ids.includes("some1"), "someday task hidden"); assert.ok(!ids.includes("room1"), "a room's task is not Aaron's");
   assert.ok(ids.includes("wait1") && ids.includes("uni1"), "r17: a room's or Uni's task that waits on Aaron is in Needs you, whatever its owner");
-  assert.ok(ids.includes("none1") && ids.includes("dec1") && ids.includes("mine-wait"));
-  assert.equal(ids.indexOf("dec1"), ids.length - 1, "a someday decision sorts last");
+  assert.ok(ids.includes("none1") && ids.includes("mine-wait"));
+  assert.ok(!ids.includes("dec1"), "T-335 one home: an old Decisions/ note is the record, not an ask");
 });
 check("r12 dots and the companion share one rule: Now, Soon and decisions of Aaron's, never Someday; a node's dot is its own", () => {
   const list = [mk("soon1", { priority: "soon" }), mk("some1", { priority: "someday" }), mk("room1", { owner: "room:atlas", priority: "now" }),
     mk("dec1", { priority: "someday", options: ["a"] }, ["decision"]), mk("done1", { state: "done", priority: "now" }), mk("up1", { node: "Areas/Atlas", priority: "someday" })];
-  assert.deepEqual(list.filter(needsYou).map((t) => t.id), ["soon1", "dec1"]);
-  assert.deepEqual([...needsByNode(list)], [["Projects/ATLAS", 2]], "Someday lights nothing; a parent never lights for a child");
+  assert.deepEqual(list.filter(needsYou).map((t) => t.id), ["soon1"], "T-335 one home: an old Decisions/ note is the record, not an ask");
+  assert.deepEqual([...needsByNode(list)], [["Projects/ATLAS", 1]], "Someday lights nothing; a parent never lights for a child");
   assert.deepEqual(feed(list).sort(), list.filter(needsYou).map((t) => t.id).sort(), "the companion lists exactly what the dots count");
 });
 check("r12 Uni's own panel: Uni's own items, then at most three from the areas; the rest is in All of Uni's work", () => {
@@ -147,10 +148,10 @@ check("r13 one feed, one count: private items are counted and named by place onl
     mk("dec1", { options: ["a"] }, ["decision"]), mk("room1", { owner: "room:atlas", priority: "now" })];
   const priv = (n: string) => (n.startsWith("Areas/Sanctum") ? { path: "Areas/Sanctum", name: "Sanctum" } : null);
   const f = needsFeed(list, priv);
-  assert.deepEqual(f.rows.map((t) => t.id), ["n1", "dec1"]);
+  assert.deepEqual(f.rows.map((t) => t.id), ["n1"]);
   // r22: each item's short action, or (as here, no action) one "N things for you" line; still by place, never a title
   assert.deepEqual(f.privates.map(({ actions: _a, others: _o, ...p }) => p), [{ key: "Areas/Sanctum", count: 2, place: "Sanctum", open: { path: "Areas/Sanctum" } }]);
-  assert.equal(f.total, 4, "two named, two private; never Someday or someone else's");
+  assert.equal(f.total, 3, "one named, two private; never Someday, someone else's or an old decision");
   assert.equal(f.total, list.filter(needsYou).length);
   assert.equal(privateLabel(f.privates[0]), "Sanctum: 2 for you");
   // r14: inside the private area Aaron opened, its items are ordinary rows (titles, actions, the sheet); another private area stays one line

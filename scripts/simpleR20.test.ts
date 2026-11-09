@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import * as core from "../src/areas/simpleCore.ts";
 import { checkOf, dueLine, needsByRow, needsFeed, needsYou, rowAction, rowSub, stepAudience, taskDeps, unknownDecision, verbPhrase } from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
+import { swept } from "./swept.ts";
 import { createVaultTasks, pool, prioritize } from "../src/areas/vaultTasks.ts";
 
 let failed = 0;
@@ -14,7 +15,7 @@ async function check(name: string, fn: () => void | Promise<void>) {
 
 const tree = (() => { const { nodes, rootPath } = parseNodes([{ id: "u", path: "Uni", tags: ["uni"], metadata: {} }]); return buildTaskTree(nodes, rootPath); })();
 const task = (id: string, title: string, meta: Record<string, unknown>, tag = "task", updatedAt = "2026-10-14T06:00:00.000Z"): Task =>
-  parseTask({ id, path: `${tag === "decision" ? "Decisions" : "Tasks"}/${title}`, tags: [tag], updatedAt, metadata: { state: "open", owner: "aaron", ...meta } }, tree)!;
+  parseTask({ id, path: `${tag === "decision" ? "Decisions" : "Tasks"}/${title}`, tags: [tag], updatedAt, metadata: swept({ state: "open", owner: "aaron", ...meta }, [tag]) }, tree)!;
 
 type N = { id: string; path: string; content?: string; metadata?: Record<string, unknown>; updatedAt?: string };
 function fakeVault(list: N[], delay = 0) {
@@ -112,9 +113,8 @@ await check("P1-1 decisions get the same dependency contract: a closed `source` 
   const closed = fakeVault([{ id: SRC, path: "Projects/Boulder Votes/Chat plan", metadata: { state: "done" }, updatedAt: "r1" }]);
   const s = (await closed.vt.loadChecks([d], () => [])).get("bv")!;
   assert.deepEqual(s.rec!.result, { kind: "closed", how: "closed", from: { vault: "uni", id: SRC, title: "Chat plan" } });
-  // while it is checked the decision is not owed
-  assert.equal(needsYou({ ...d, check: { kind: "checking" } }), false);
-  assert.equal(needsYou({ ...d, check: s.rec!.result }), true);
+  // (T-335 one home: an old Decisions/ note is the record, not an ask: its check is shown, it is never owed)
+  assert.equal(needsYou({ ...d, check: s.rec!.result }), false);
   const gone = fakeVault([]);
   assert.equal((await gone.vt.loadChecks([d], () => [])).get("bv")!.rec!.result.kind, "missing");
 });
@@ -142,7 +142,7 @@ await check("P1-2 a cold list with three statement-only decisions owes 0 until t
   assert.equal(needsYou(failedRead), false);
   const empty = { ...cold[0], ask: "", askAt: cold[0].updatedAt };
   assert.equal(unknownDecision(empty), false);
-  assert.equal(needsYou(empty), true);
+  assert.equal(needsYou(empty), false, "T-335 one home: an old Decisions/ note is the record, not an ask");
 });
 
 await check("P2 checking finishes: 45 dependent tasks all resolve, six reads at a time, every reference read (none dropped after six)", async () => {

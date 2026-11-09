@@ -1,6 +1,7 @@
 // T-145: an ask's stamp vouches for the words it was written with (`ask_sig`). Run: node --experimental-strip-types scripts/simpleT145.test.ts
 import assert from "node:assert/strict";
 import { askSig, buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
+import { swept } from "./swept.ts";
 import { ASK_SIG_VERSION } from "../src/areas/taskCore.ts";
 import { confirmationOf, needsFeed, reasonShort, unconfirmedLine, type ConfOf } from "../src/areas/simpleCore.ts";
 
@@ -16,7 +17,7 @@ const DETAIL = "The labels: A · B · C";
 const NOW = Date.parse("2026-10-15T12:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
 const mk = (n: number, extra: Record<string, unknown> = {}): Task =>
-  parseTask({ id: `id${n}`, path: `Tasks/T-${n} Do thing ${n}`, tags: ["task"], updatedAt: "2026-10-14T08:00:00.000Z", metadata: { node: "Projects/Lantern", state: "open", owner: "aaron", next: NEXT, detail: DETAIL, asked_at: hoursAgo(5), ...extra } } as never, tree)!;
+  parseTask({ id: `id${n}`, path: `Tasks/T-${n} Do thing ${n}`, tags: ["task"], updatedAt: "2026-10-14T08:00:00.000Z", metadata: swept({ node: "Projects/Lantern", state: "open", owner: "aaron", next: NEXT, detail: DETAIL, asked_at: hoursAgo(5), ...extra }) } as never, tree)!;
 
 await check("the signature is the one tasks.py writes (the vectors in the proposed uni-tasks test_ask_sig.py)", () => {
   // change these only together with tasks.py's ask_sig and its test
@@ -68,10 +69,10 @@ await check("a changed ask is out of Needs you and its count, and in the list th
   const ts = [mk(11, { ask_sig: sig }), mk(12, { ask_sig: sig, next: "Send Robin something else" })];
   const conf: ConfOf = (t) => confirmationOf(t, NOW);
   const f = needsFeed(ts, () => null, null, "2026-10-15", conf);
-  assert.deepEqual(f.rows.map((t) => t.id), ["id11"]);
-  assert.equal(f.total, 1);
-  assert.deepEqual(f.recheck?.map((t) => t.id), ["id12"]);
-  assert.equal(f.recheckWhy?.id12, "changed");
+  // T-335 one home: whether a changed ask still needs him is uni-tasks' needs_aaron (its room re-asks or confirms); the app counts the field
+  assert.deepEqual(f.rows.map((t) => t.id), ["id11", "id12"]);
+  assert.equal(f.total, 2);
+  assert.deepEqual(f.recheck?.map((t) => t.id), []);
   assert.match(reasonShort(ts[1], "2026-10-15", "changed"), /^changed since asked (today|Oct 15)$/);
   assert.equal(reasonShort(ts[1], "2026-10-15", "old"), reasonShort(ts[1], "2026-10-15"));
   assert.equal(unconfirmedLine("asked Oct 11", "changed"), "Asked Oct 11 · changed since, not confirmed");

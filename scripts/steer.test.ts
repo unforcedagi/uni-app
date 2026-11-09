@@ -2,6 +2,7 @@
 // Run: node --experimental-strip-types scripts/steer.test.ts
 import assert from "node:assert/strict";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
+import { swept } from "./swept.ts";
 import { changedLine, dayLabel, diffDrafts, diffTasks, draftsUnder, marksById, parseDrafts, parseRuns, runsUnder, valueLabel } from "../src/areas/steerCore.ts";
 import { ROOT } from "../src/areas/treeCore.ts";
 import { chatPlaceholder, firstSentence, quietAgo, standsLine, topNeeds } from "../src/areas/simpleCore.ts";
@@ -17,7 +18,7 @@ const tree = buildTaskTree(nodes, rootPath);
 const AT = 1_000_000;
 const iso = (ms: number) => new Date(ms).toISOString();
 const task = (id: string, node: string, extra: Record<string, unknown> = {}, at = AT - 60_000): Task =>
-  parseTask({ id, path: `Tasks/${id} Title`, tags: ["task"], updatedAt: iso(at), metadata: { node, state: "open", owner: "aaron", ...extra } }, tree)!;
+  parseTask({ id, path: `Tasks/${id} Title`, tags: ["task"], updatedAt: iso(at), metadata: swept({ node, state: "open", owner: "aaron", ...extra }) }, tree)!;
 
 check("dayLabel: a due date as a weekday, anything else untouched", () => {
   assert.equal(dayLabel("2026-10-13"), "Tue 10-13");
@@ -121,7 +122,7 @@ check("companion feed: Now before Soon, then due date; Someday is not shown; no 
   assert.equal(top[0].id, "t4", "the dated Now first");
   const d = decision("d1", "Projects/ATLAS"), far = decision("d2", "Areas/Atlas");
   const mixed = topNeeds(whereWeAre({ tasks: [...rows, far, d], hidden: () => false, nowMs: AT }), "Projects/ATLAS");
-  assert.equal(mixed.length, 6, "open decisions are added");
+  assert.equal(mixed.length, 4, "T-335 one home: an old Decisions/ note is the record, not an ask: never added");
   assert.deepEqual(mixed.slice(0, 2).map((t) => t.priority), ["now", "now"]);
   assert.equal(topNeeds(whereWeAre({ tasks: rows.slice(0, 2), hidden: () => false, nowMs: AT }), "Projects/ATLAS").length, 2);
 });

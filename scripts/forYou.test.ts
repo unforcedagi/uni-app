@@ -16,7 +16,8 @@ function check(name: string, fn: () => void) {
 const NOW = Date.parse("2026-11-11T12:00:00Z");
 const H = 3600_000, D = 24 * H;
 const iso = (t: number) => new Date(t).toISOString();
-const task = (id: string, title: string, m: Record<string, unknown>, tags = ["task"]): Note => ({ id, path: `Tasks/${title}`, tags, updatedAt: iso(NOW - H), createdAt: iso(NOW - 9 * D), metadata: { state: "open", owner: "aaron", asked_at: iso(NOW - H), ...m } });
+// T-335 one home: an ask's needs_aaron is uni-tasks' word (the one rule); these asks are fresh and open, so it wrote true, unless a test says
+const task = (id: string, title: string, m: Record<string, unknown>, tags = ["task"]): Note => ({ id, path: `Tasks/${title}`, tags, updatedAt: iso(NOW - H), createdAt: iso(NOW - 9 * D), metadata: { state: "open", owner: "aaron", asked_at: iso(NOW - H), needs_aaron: true, needs_aaron_why: "yes", ...m } });
 const card = (area: string, name: string, m: Record<string, unknown>): Note => ({ id: `c-${name}`, path: `Cards/${area}/${name}`, tags: ["card"], metadata: { schema: "card/1", name, area, status: "active", private: false, lines: [], ...m } });
 const PLACES: Record<string, Place> = {
   "Areas/Kiln Studio": { area: "Kiln Studio", room: "kiln-studio", private: false },
@@ -67,12 +68,12 @@ check("no card: the node's area is where; no default: none shown, the plain acti
   assert.equal(c.action, "Got it");
 });
 
-check("the room an answer goes to: reply_room, else the ask's room, else its node's; with no live room at all it is not in For you", () => {
+check("the room an answer goes to: reply_room, else the ask's room, else its node's; with none found here, the footer says so", () => {
   assert.equal(view([task("a", "T-1 x", { node: "Areas/Kiln Studio", room: "glaze-tests" })]).yours[0].replyRoom, "glaze-tests");
   assert.equal(view([task("a", "T-1 x", { node: "Areas/Kiln Studio", room: "glaze-tests", reply_room: "north-field" })]).yours[0].replyRoom, "north-field");
-  const none = view([task("a", "T-1 x", { node: "Elsewhere" })], [], { liveRoom: (r) => r });   // the live rooms are known
-  assert.deepEqual(none.yours, []);
-  assert.equal(none.away, 1);
+  // (an ask with no live room anywhere is uni-tasks' "no room": needs_aaron false, so it never reaches here; one this device can't place yet still shows)
+  const none = view([task("a", "T-1 x", { node: "Elsewhere" })], [], { liveRoom: () => null });
+  assert.equal(none.yours[0].footer, "No room to send it to");
   // a reply_root with no card still says whose post
   assert.equal(view([task("a", "T-1 x", { node: "Areas/Kiln Studio", reply_root: "ev" })]).yours[0].footer, "Goes to #kiln-studio, in its thread");
 });
@@ -95,19 +96,27 @@ check("Yours: earliest default first, then the oldest asked; five shown, the res
   assert.equal(view(asks, [], { cap: 3 }).more.length, 4);
 });
 
-check("only Aaron's live, unanswered asks: a room's own task, a done one, an answered one, a snoozed or someday one stay out", () => {
+check("T-335 one home: For you is what uni-tasks marked needs_aaron; his asks it handed back are only counted; nothing else is decided here", () => {
+  const no = (why: string) => ({ needs_aaron: false, needs_aaron_why: why });
   const v = view([
     task("mine", "T-1 mine", { node: "Areas/North Field" }),
     task("waits", "T-2 waits on me", { node: "Areas/North Field", owner: "room:north-field", waiting_on: "person:Aaron" }),
-    task("room", "T-3 the room's", { node: "Areas/North Field", owner: "room:north-field" }),
-    task("done", "T-4 done", { node: "Areas/North Field", state: "done" }),
-    task("ans", "T-5 answered", { node: "Areas/North Field", answered_at: iso(NOW - H) }),
-    task("snz", "T-6 snoozed", { node: "Areas/North Field", snoozed_until: "2026-11-20" }),
-    task("snz0", "T-7 snooze over", { node: "Areas/North Field", snoozed_until: "2026-11-10" }),
-    task("some", "T-8 someday", { node: "Areas/North Field", priority: "someday" }),
-    task("sup", "T-9 replaced", { node: "Areas/North Field", superseded_by: "T-10" }),
+    task("room", "T-3 the room's", { node: "Areas/North Field", owner: "room:north-field", ...no("not his") }),
+    task("ans", "T-5 answered", { node: "Areas/North Field", answered_at: iso(NOW - H), ...no("answered") }),
+    task("snz", "T-6 snoozed", { node: "Areas/North Field", snoozed_until: "2026-11-20", ...no("snoozed") }),
+    task("some", "T-8 someday", { node: "Areas/North Field", priority: "someday", ...no("someday") }),
+    task("stale", "T-11 old", { node: "Areas/North Field", asked_at: iso(NOW - 8 * D), ...no("stale") }),
+    task("nocard", "T-12 on no card", { node: "Areas/North Field", ...no("no card") }),
+    task("rest", "T-13 resting place", { node: "Areas/North Field", ...no("resting") }),
+    task("noroom", "T-14 no room", { node: "Areas/North Field", ...no("no room") }),
+    task("unswept", "T-15 not swept yet", { node: "Areas/North Field", needs_aaron: undefined, needs_aaron_why: undefined }),
   ]);
-  assert.deepEqual(v.yours.map((i) => i.id).sort(), ["mine", "snz0", "waits"]);
+  assert.deepEqual(v.yours.map((i) => i.id).sort(), ["mine", "waits"]);
+  assert.equal(v.away, 4, "stale, on no card, in a resting place, with no room: back with their rooms");
+  assert.equal(v.count, 2);
+  assert.equal(awayLine(v.away), "4 waiting on their rooms");
+  assert.equal(awayLine(1), "1 waiting on its room");
+  assert.equal(awayLine(0), "");
 });
 
 check("look asks are Ready to look at, not Yours; their action is Seen it, their link kept", () => {
@@ -119,18 +128,11 @@ check("look asks are Ready to look at, not Yours; their action is Seen it, their
   assert.equal(v.count, 1, "the count is what is yours");
 });
 
-check("old decisions: open ones are Yours with no default, their area as where, their options; a decision-only note under tag task is kept once", () => {
+check("T-335 one home: an old Decisions/ note is the record, not an ask: never in For you, whatever it says", () => {
   const dec: Note = { ...task("dq", "Choose the hive paint", { node: "Areas/North Field", options: ["White", { label: "Pale yellow" }], owner: "room:x" }, ["decision"]), path: "Decisions/Choose the hive paint" };
   const v = view([dec, dec, task("decided", "Old one", { node: "Areas/North Field", state: "decided" }, ["decision"])]);
-  assert.equal(v.yours.length, 1);
-  const i = v.yours[0];
-  assert.equal(i.legacy, true);
-  assert.equal(i.kind, "decision");
-  assert.equal(i.default, null);
-  assert.deepEqual(i.options, ["White", "Pale yellow"]);
-  assert.equal(i.where.label, "North Field");
-  assert.equal(i.tid, null);
-  assert.equal(answerBody(i, "White"), "Choose the hive paint: White");
+  assert.deepEqual([v.yours.length, v.count, v.away], [0, 0, 0]);
+  assert.equal(answerBody({ tid: null, what: "Choose the hive paint" }, "White"), "Choose the hive paint: White");
 });
 
 check("a new-style decision (task + decision) is a choose ask, answered as one", () => {
@@ -339,34 +341,8 @@ check("an ask naming an archived room resolves to the live one: its footer and i
   assert.equal(by("a")?.replyRoom, "north-field");
   assert.equal(by("a")?.footer, "Goes to #north-field");
   assert.equal(by("b")?.replyRoom, "kiln-studio", "a dead reply_room falls to the node's live room");
-  assert.equal(by("c"), undefined, "no live room anywhere: not in For you");
+  assert.equal(by("c")?.footer, "No room to send it to", "none found here: said, never a dead room named");
   assert.ok(!JSON.stringify([...v.yours, ...v.more, ...v.look]).match(/old-hall|gone-room/i));
-  assert.equal(v.away, 1);
-});
-
-check("an 8-day-old unconfirmed ask is not in Yours, only counted as waiting on its room; a re-confirmed one shows", () => {
-  const v = view([
-    task("old", "T-711 Asked long ago", { node: "Areas/North Field", kind: "do", no_default: true, asked_at: iso(NOW - 8 * D) }),
-    task("conf", "T-712 Asked long ago, confirmed", { node: "Areas/North Field", kind: "do", no_default: true, asked_at: iso(NOW - 20 * D), confirmed_at: iso(NOW - 2 * D) }),
-    task("look", "T-713 Old film", { node: "Areas/North Field", kind: "look", no_default: true, asked_at: iso(NOW - 10 * D) }),
-    task("nodate", "T-714 Never stamped", { node: "Areas/North Field", kind: "do", no_default: true, asked_at: null }),
-    task("priv", "T-715 Old private", { node: "Areas/Sanctum", kind: "do", no_default: true, asked_at: iso(NOW - 9 * D) }),
-  ]);
-  assert.deepEqual([...v.yours, ...v.more].map((i) => i.id), ["conf"]);
-  assert.deepEqual(v.look, []);
-  assert.deepEqual(v.privates, []);
-  assert.equal(v.away, 4, "the old ask, the old look, the never-stamped one (created 9 days ago) and the old private one");
-  assert.equal(v.count, 1, "the head counts only what is his now");
-  assert.equal(awayLine(v.away), "4 waiting on their rooms");
-  assert.equal(awayLine(1), "1 waiting on its room");
-  assert.equal(awayLine(0), "");
-});
-
-check("only live places: an ask on an archived or resting node (or area) is not in For you", () => {
-  const placeOf2 = (n: string): Place => n === "Projects/Shelved" ? { area: "North Field", room: "north-field", private: false, live: false } : placeOf(n);
-  const v = view([task("s", "T-721 Shelved thing", { node: "Projects/Shelved", kind: "do", no_default: true }), task("k", "T-722 Kept", { node: "Areas/North Field", kind: "do", no_default: true })], [], { placeOf: placeOf2 });
-  assert.deepEqual(v.yours.map((i) => i.id), ["k"]);
-  assert.equal(v.away, 1);
 });
 
 check("review 11-08: an ask that names a private room is only counted, however public its node; its words never show", () => {
@@ -407,12 +383,10 @@ check("review 11-08 (2): through the app's own tree: an archived project, and a 
   assert.equal(treeDormant(tree, "Projects/Gate Path"), false);
 });
 
-check("code-review 11-08: no room list yet keeps the asks (never all away); a future stamp isn't fresh forever; a deep node under a resting area isn't live", () => {
+check("code-review 11-08: no room list yet keeps the asks (never all away); a deep node under a resting area isn't live", () => {
   const none = view([task("n", "T-741 No room known", { node: "Elsewhere", kind: "do", no_default: true })]);
   assert.deepEqual(none.yours.map((i) => i.id), ["n"], "no resolver: shown, saying it has no room");
   assert.equal(none.yours[0].footer, "No room to send it to");
-  const fut = view([task("f", "T-742 Typo date", { node: "Areas/North Field", kind: "do", no_default: true, asked_at: "2027-11-01T00:00:00Z" })]);
-  assert.deepEqual(fut.yours, [], "only a future stamp: read by its creation, 9 days ago");
   const n = (id: string, path: string, kind: string, status: string, more: Partial<PlaceNote> = {}): PlaceNote => ({ id, path, kind, status, metadata: { status }, ...more });
   const all = [n("a", "Areas/Quiet Wood", "area", "resting"), n("p", "Projects/Path", "project", "foreground", { parent: "Areas/Quiet Wood" }),
     n("s", "Projects/Path/Sub", "project", "foreground", { parent: "Projects/Path" })];

@@ -686,7 +686,10 @@ Two proposals wait on a scope decision.
     w.__elsewhere = (id: string, state: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.state = state; t.updatedAt = new Date().toISOString(); t.lastUpdatedVia = 'mcp'; };
     for (const n of notes) if (d.nodeStatuses[n.id]) n.metadata = { ...n.metadata, status: d.nodeStatuses[n.id] };
     /** r28: the vault's answer for a task note: a task with no `asked_at` key at all reads as the older specs meant it: a fixture task asked 2.9 days before the clock (a current ask, older than any summary), a task a spec wrote asked an hour before the page's clock (a current ask); an explicit `asked_at` (null included) is kept */
-    const asked = (t: any) => { const c = JSON.parse(JSON.stringify(t)); if (c.metadata && !('asked_at' in c.metadata)) c.metadata.asked_at = c.fixtureTask ? new Date((d.now - 2.9 * 86400) * 1000).toISOString() : new Date(Date.now() - 3600_000).toISOString(); return c; };
+    // T-335 one home: the vault as uni-tasks' sweep leaves it: `needs_aaron` on each task (scripts/swept.ts's stamp, inline here: this runs in the page)
+    const swept = (c: any) => { const m = c.metadata; if (!m || 'needs_aaron' in m) return c; const his = [m.owner, m.waiting_on].some((v: any) => /^(person:|@)?aaron$/i.test(String(v ?? '').trim()));
+      m.needs_aaron = (c.tags ?? []).includes('task') && ['open', 'doing', 'waiting'].includes(String(m.state)) && his && String(m.priority ?? '').toLowerCase() !== 'someday' && !m.superseded_by && !m.answered_at; return c; };
+    const asked = (t: any) => { const c = JSON.parse(JSON.stringify(t)); if (c.metadata && !('asked_at' in c.metadata)) c.metadata.asked_at = c.fixtureTask ? new Date((d.now - 2.9 * 86400) * 1000).toISOString() : new Date(Date.now() - 3600_000).toISOString(); return swept(c); };
     const rowOf = (n: any) => ({ id: n.id, path: n.path, extension: n.extension, updatedAt: n.updatedAt });
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } }, transformCallback: (cb: any) => { w.__cbs.push(cb); return w.__cbs.length - 1; },

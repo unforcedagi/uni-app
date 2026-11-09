@@ -9,7 +9,7 @@ const H = 3600_000, D = 24 * H;
 const at = (now: number, days: number, hour: number) => { const d = new Date(now + days * D); d.setHours(hour, 0, 0, 0); return d.toISOString(); };
 const ago = (now: number, ms: number) => new Date(now - ms).toISOString();
 
-/** The asks: seven of Aaron's (one an old decision), one to look at, one in the private area, one a room's own, one already answered. */
+/** The asks: six of Aaron's (and an old decision, the record, never an ask: T-335 one home), one to look at, one in the private area, one a room's own, one already answered. */
 export function asks(now: number) {
   const T0 = ago(now, 2 * D);
   const task = (id: string, title: string, meta: Record<string, unknown>, tags = ['task']) => ({ id, path: `Tasks/${title}`, extension: 'md', tags, fy: true, createdAt: T0, updatedAt: ago(now, 3 * H),
@@ -28,7 +28,7 @@ export function asks(now: number) {
     // an old-style decision: tagged `decision` only, open, no card and no default (the vault may soon return it for `tag: task` too)
     { ...task('fy-paint', 'Choose the hive paint', { node: 'Areas/Bee Garden', options: ['White', 'Pale yellow'] }, ['decision']), path: 'Decisions/Choose the hive paint', createdAt: ago(now, 6 * D) },
     // 0.3.3: asked nine days ago and never confirmed by its room since: it went back to that room, so For you only counts it
-    task('fy-stale', 'T-507 Mend the old fence', { node: 'Areas/North Field', kind: 'do', no_default: true, why_now: 'Asked a long time ago.', asked_at: ago(now, 9 * D) }),
+    task('fy-stale', 'T-507 Mend the old fence', { node: 'Areas/North Field', kind: 'do', no_default: true, why_now: 'Asked a long time ago.', asked_at: ago(now, 9 * D), needs_aaron: false, needs_aaron_why: 'stale' }),   // (uni-tasks' sweep: back with its room)
     task('fy-look', 'T-510 Look at the glaze tile photos', { node: 'Areas/Kiln Studio', kind: 'look', no_default: true, card: 'Cards/Kiln Studio/Glaze Tests', why_now: 'Twelve tiles, photographed on the shelf.',
       link: 'https://example.com/kiln/tiles', reply_room: 'kiln-studio', asked_at: ago(now, 2 * H) }),
     task('fy-quiet', 'T-520 Morning practice note', { node: 'Areas/Sanctum', kind: 'tell', no_default: true, card: 'Cards/Sanctum/daily practice', why_now: 'Private words that never leave the area.', asked_at: ago(now, 1 * D) }),
@@ -73,7 +73,10 @@ export async function bootForYou(page: Page, opts: { postFails?: number; transcr
       if (cmd === 'vault_query_meta' && (args.tag === 'task' || args.tag === 'decision')) {
         const st = args.metadata?.state?.in as string[] | undefined;
         const rows = (w.__tasks as any[]).filter((t) => t.fy && (args.tag === 'task' ? t.tags.some((x: string) => x === 'task' || x === 'decision') : t.tags.includes('decision')) && (!st || st.includes(t.metadata.state)));
-        return JSON.parse(JSON.stringify(rows.slice(args.offset ?? 0, (args.offset ?? 0) + (args.limit ?? 200))));
+        // T-335 one home: as uni-tasks' sweep leaves them: `needs_aaron` on each task (scripts/swept.ts's stamp, inline: this runs in the page)
+        const swept = (c: any) => { const m = c.metadata; if (!m || 'needs_aaron' in m) return c; const his = [m.owner, m.waiting_on].some((v: any) => /^(person:|@)?aaron$/i.test(String(v ?? '').trim()));
+          m.needs_aaron = (c.tags ?? []).includes('task') && ['open', 'doing', 'waiting'].includes(String(m.state)) && his && String(m.priority ?? '').toLowerCase() !== 'someday' && !m.superseded_by && !m.answered_at; return c; };
+        return JSON.parse(JSON.stringify(rows.slice(args.offset ?? 0, (args.offset ?? 0) + (args.limit ?? 200)))).map(swept);
       }
       if (cmd === 'vault_query' && args.tag === 'card') return JSON.parse(JSON.stringify(deck));
       if (cmd === 'voice_transcribe') return { text: w.__transcript ?? 'Made-up words.', language: 'en', duration: 1 };

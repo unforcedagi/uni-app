@@ -17,7 +17,8 @@ import { currentUserAgent, gateMode, platformName } from "../interface/selftest/
 import { useAppVersion, useWebviewRuntime } from "../interface/selftest/useAppVersion";
 import { useAreas } from "./useAreas";
 import { pickRoom } from "./areaLayout";
-import { childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./treeCore";
+import { childrenOf, parentPath, ROOT, rootNode, trail } from "./treeCore";
+import { isPrivateRoomName, noneIds, parseRegistry, REGISTRY_NOTE, successorOf, type RoomsRegistry } from "./roomsRegistry";
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { rolledNeeds } from "./sidebarState";
@@ -161,7 +162,24 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const stored = useStoredSelfTest();
   // Live: a self-test pass (or a revoke) updates an already-open area without a remount.
   const mode = useMemo(() => gateMode(PLATFORM, version, stored, USER_AGENT, undefined, runtime), [version, stored, runtime]);
-  const uniRoom = useMemo(() => (rooms.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rooms)?.id ?? null), [rooms]);
+  // T-335 one home: the rooms registry (uni-tasks rooms.json, published to the vault note System/Rooms): private rooms, old names, the old
+  // main room. Read once a launch and when the app comes back into view; the last one read is kept for the next launch
+  const registryKey = `uni.rooms.registry.v1:${profile.vault}`;
+  const [registry, setRegistry] = useState<RoomsRegistry | null>(() => { try { return parseRegistry(JSON.parse(localStorage.getItem(registryKey) ?? "null")); } catch { return null; } });
+  useEffect(() => {
+    if (!chat) return;
+    let gone = false;
+    const load = () => invoke<{ note?: { metadata?: unknown } }>("vault_note", { vault: profile.vault, noteRef: REGISTRY_NOTE }).then((r) => {
+      const reg = parseRegistry(r?.note?.metadata);
+      if (gone || !reg) return;
+      setRegistry(reg);
+      try { localStorage.setItem(registryKey, JSON.stringify((r?.note?.metadata as { registry?: unknown })?.registry ?? r?.note?.metadata)); } catch { /* private storage */ }
+    }).catch(() => { /* not published yet, or offline: the last one read stands */ });
+    void load();
+    window.addEventListener("focus", load);
+    return () => { gone = true; window.removeEventListener("focus", load); };
+  }, [chat, profile.vault, registryKey]);
+  const uniRoom = useMemo(() => { const none = noneIds(registry); return rooms.find((r) => none.has(r.id.toLowerCase()))?.id ?? findUniRoom(rooms)?.id ?? null; }, [rooms, registry]);
   const root = useMemo(() => rootNode(uniRoom ? [uniRoom] : []), [uniRoom]);
   // the rooms list is new, and reordered, with every message; these only change with a room's id or name, so nothing read from them is read again
   const roomRefsKey = useMemo(() => rooms.map((r) => `${r.id}\0${r.name}`).sort().join("\n"), [rooms]);
@@ -317,8 +335,11 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     // 0.3.3 (T-335 fresh): a node, or the area it sits in, that is archived, resting or done is not live: its asks are not in For you
     // (the root's own room is #Uni's, archived: its marked `room_fallback` stands in, as uni-tasks' steward reads it)
     const rootAsk = !!node && (node === ROOT || !!tasks.tree?.rootRefs.has(node));
-    return { area: name, areaPath: top, room: room ? roomSlug(room.name) : rootAsk ? fyRootRoom : null, private: !!priv, live: !fyDormant(node) };
-  }, [tasks.tree, data, roomRefs, uniRef]); // eslint-disable-line react-hooks/exhaustive-deps
+    // T-335 one home: private too when its room, or its area's, is private in the rooms registry (as uni-tasks for_you.place reads it)
+    const areaRoom = top ? data?.tree.nodes.get(top)?.metadata?.room : null;
+    const regPrivate = !!registry && [room?.name, typeof areaRoom === "string" ? areaRoom : null].some((r) => !!r && isPrivateRoomName(registry, r));
+    return { area: name, areaPath: top, room: room ? roomSlug(room.name) : rootAsk ? fyRootRoom : null, private: !!priv || regPrivate, live: !fyDormant(node) };
+  }, [tasks.tree, data, roomRefs, uniRef, registry]); // eslint-disable-line react-hooks/exhaustive-deps
   /** A node (path or id) that isn't live: it is archived, resting or done, or every area it is linked to is (archived ones included: the trees
    *  drop them), as uni-tasks for_you.dormant reads it. A node no list knows is taken as live. */
   function fyDormant(p: string | null): boolean {
@@ -331,17 +352,22 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   }
   /** A room's name that is a private place's: named privately, or named by a node in a private place (an archived room too). */
   const fyPrivateRoom = useCallback((name: string): boolean => {
+    if (registry && isPrivateRoomName(registry, name)) return true;      // the registry's private rooms (T-335 one home)
     const key = roomSlug(name).toLowerCase();
     if (key.split("/").some(isPrivateName)) return true;
     const live = roomByName(roomRefs, name);
     if (live && data && isPrivateRoom(data.tree, live.id, roomRefs, uniRef)) return true;
     return !!data && (data.areas ?? []).some((a) => [a.metadata.room, a.metadata.room_was].some((r) => typeof r === "string" && roomSlug(r).toLowerCase() === key) && isPrivatePath(data.tree, a.path));
-  }, [data, roomRefs, uniRef]);
+  }, [data, roomRefs, uniRef, registry]);
   /** 0.3.3 For you: a room's name as a live room's. An archived room (the relay lists only live ones) resolves through the `room_fallback` of a
    *  node that names it (tasks.py rooms-apply), when that room is live; else null, and the ask's node's room stands in. */
   const fyLiveRoom = useCallback((name: string): string | null => {
     const hit = roomRefs.find((r) => r.id === name.trim()) ?? roomByName(roomRefs, name);
     if (hit) return roomSlug(hit.name);
+    // an old name, or a retired room whose work went to a live one: the registry's word (T-335 one home)
+    const next = registry ? successorOf(registry, name) : null;
+    const moved = next ? roomByName(roomRefs, next) : null;
+    if (moved) return roomSlug(moved.name);
     for (const a of data?.areas ?? []) {
       const m = a.metadata;
       if (typeof m.room !== "string" || !roomByName([{ id: "x", name: m.room }], name) || !/^(archived|missing)$/i.test(String(m.room_status ?? "")) || typeof m.room_fallback !== "string") continue;
@@ -349,7 +375,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
       if (fb) return roomSlug(fb.name);
     }
     return null;
-  }, [roomRefs, data?.areas]);
+  }, [roomRefs, data?.areas, registry]);
   /** The live room the root's work went to: the Uni node's `room_fallback` once its room is marked archived; else null. */
   const fyRootRoom = useMemo(() => {
     const r = (data?.areas ?? []).find((a) => !!tasks.tree?.rootRefs.has(a.id) || !!tasks.tree?.rootRefs.has(a.path));
@@ -361,7 +387,9 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   /** 0.3.0 For you: the room an answer goes to: its `reply_room` (else its room, else its node's), by id or name. */
   // the room its footer names, exactly: a named room that isn't here is no room (the answer waits, owed), never another room
   const answerRoom = useCallback((item: ForYouItem) => askRoomOf({ room: item.replyRoom, node: item.node }, roomRefs, () => null), [roomRefs]);
-  const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.all ?? tasks.tasks : null, placeOf: fyPlaceOf, liveRoom: roomRefs.length ? fyLiveRoom : undefined, privateRoom: fyPrivateRoom, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
+  // T-335 one home: For you reads the same list as the dots and the doors (live, not snoozed or done on this device), so its count and theirs
+  // are one number; what needs him in it is the field uni-tasks writes (needs_aaron)
+  const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.tasks : null, placeOf: fyPlaceOf, liveRoom: roomRefs.length ? fyLiveRoom : undefined, privateRoom: fyPrivateRoom, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
   /** The stream's rooms by their place's path (set as the home draws): a message names a card of its own area. */
   const roomPaths = useRef(new Map<string, string>());
   // (the stream's rows redraw only when what a message could name changes: the cards, their marks, the posts their asks thread under)
@@ -419,8 +447,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   // the sessions read the rooms' names too, for a run note that holds only a room's id (a profile with no chat has no rooms to wait for)
   useEffect(() => { setWorkRooms(chat && roomsPending ? null : roomRefs); }, [chat, roomsPending, roomRefs]);
   // a private run filed on a public row lights no dot there: that row's Needs you doesn't list it
-  const dotRuns = useMemo(() => tasks.runs.filter((r) => !privateRuns.has(r.id) || !!(data ? privateRoot(data.tree, r.node) : tasks.tree ? privateRootIn(tasks.tree, r.node) : null)), [tasks.runs, tasks.tree, privateRuns, data]);
-  const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), confirm.of, dotRuns), [tasks.tasks, dotRuns, rowPaths, tasks.tree, data?.tree, confirm.of]); // eslint-disable-line react-hooks/exhaustive-deps
+  // T-335 one home: the dots and the doors' badges count what needs him by the field (needsYou), the same set For you counts
+  const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p)), [tasks.tasks, rowPaths, tasks.tree, data?.tree]); // eslint-disable-line react-hooks/exhaustive-deps
   // T-335: what is new in each room (the rooms list's counts; opening a room marks it read, which clears them), and the approvals waiting in each
   const newByRoom = useMemo(() => unreadByRoom(rooms), [rooms]);
   const newByPath = useMemo(() => unreadByPath(newByRoom, owned ?? new Map()), [newByRoom, owned]);

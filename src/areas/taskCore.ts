@@ -25,6 +25,11 @@ export const priorityOf = (t: Pick<Task, "priority">): Priority => t.priority ??
 
 export type Task = {
   id: string; path: string; title: string; kind: "task" | "decision";
+  /** T-335 one home: whether this needs Aaron now, as uni-tasks wrote it (`needs_aaron`, the one rule: an open ask owned by him, on a card,
+   *  asked or confirmed by its room in 7 days, in a live place with a live room). Every count and list of what needs him reads this, nothing else. */
+  needsAaron?: boolean;
+  /** Why (`needs_aaron_why`): yes; stale | no card | resting | no room (his ask, back with its room); answered | snoozed | someday | closed | not his. */
+  needsAaronWhy?: string | null;
   /** The node it belongs to, as a node path (ROOT for the Uni root). */
   node: string;
   state: AnyState; owner: string; waitingOn: string | null; due: string | null; next: string; room: string | null;
@@ -245,7 +250,7 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
   const ref = refKey(m.node);
   const node = !ref || tree.rootRefs.has(ref) ? ROOT : tree.byPath.has(ref) ? ref : tree.idPath.get(ref) ?? ref;
   return {
-    id, path, kind, title: leaf(path).replace(/[\u2044\u2215]/g, "/"), node, state: state as AnyState, owner: str(m.owner) ?? "", waitingOn: str(m.waiting_on),
+    id, path, kind, needsAaron: m.needs_aaron === true, needsAaronWhy: str(m.needs_aaron_why), title: leaf(path).replace(/[\u2044\u2215]/g, "/"), node, state: state as AnyState, owner: str(m.owner) ?? "", waitingOn: str(m.waiting_on),
     due: str(m.due)?.slice(0, 10) ?? null, next: str(m.next) ?? "", room: str(m.room)?.replace(/^#/, "") ?? null,
     snoozedUntil: str(m.snoozed_until)?.slice(0, 10) ?? null,
     priority: PRIORITIES.find((p) => p === str(m.priority)?.toLowerCase()) ?? null,

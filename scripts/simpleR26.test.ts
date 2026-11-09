@@ -107,10 +107,11 @@ check("the quiet title line drops a trailing '(…)' that repeats the heading", 
 // ---- 3. closed tasks
 check("an archived task whose title says 'approved' is not in Needs you; neither is a superseded one", () => {
   const base = { kind: "task" as const, owner: "aaron", waitingOn: "aaron", priority: "now" as const };
-  assert.equal(needsYou({ ...base, state: "archived", title: "T-13 Self-hosted mail: approved 10-02", next: "Superseded by T-136 (Aaron, 10-14)" }), false);
-  assert.equal(needsYou({ ...base, state: "waiting", title: "T-13 Self-hosted mail: approved 10-02", next: "Superseded by T-136 (Aaron, 10-14)" }), false, "state still open, step says superseded");
-  assert.equal(needsYou({ ...base, state: "done", title: "T-5 x", next: "Say go" }), false);
-  assert.equal(needsYou({ ...base, state: "waiting", title: "T-113 Look", next: "Say go" }), true);
+  // T-335 one home: Needs you is the task's needs_aaron (uni-tasks writes false for a closed or superseded one); nothing here re-reads it
+  void base;
+  assert.equal(needsYou({ needsAaron: false }), false);
+  assert.equal(needsYou({}), false, "not swept yet: not owed");
+  assert.equal(needsYou({ needsAaron: true }), true);
   assert.equal(closedTask({ state: "archived" }), true);
   assert.equal(closedTask({ state: "open", next: "Superseded by T-136" }), true);
   assert.equal(closedTask({ state: "open", next: "Say go" }), false);

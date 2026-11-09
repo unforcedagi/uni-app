@@ -24,7 +24,6 @@ import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/LifeOsSurface";
 import type { Overlay } from "./areas/AreasSurface";
 import { setRootOpenMemory } from "./areas/rootMemory";
-import { UNI_CHANNEL } from "./areas/treeCore";
 import type { NoteRef } from "./areas/noteRefsCore";
 import AreaSelfTest from "./interface/selftest/SelfTest";
 import LifeOsVaultSetting from "./areas/LifeOsVaultSetting";
@@ -1051,7 +1050,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       try { place = readUniPlace(localStorage.getItem(UNI_PLACE_KEY), ids); } catch { /* private storage */ }
       if (place) { uniPlace.current = place.target; returnSpot.current = place.spot ? { ...place.spot, seq: -1 } : null; }
       if (!activeTab(next)) {
-        const uni = rows.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rows)?.id;
+        const uni = findUniRoom(rows)?.id;     // (T-335 one home: by name; the app keeps no room ids, the rooms registry does)
         // The app opens to Uni: the home (T-302: the archived Uni room is no longer the home, so none is attached).
         // 0.2.2: #Uni is archived (10-26), so the relay lists no Uni room: with the Uni glue the home is All, whatever the rooms are. Only an
         // account without the glue and without a Uni room opens its first room.

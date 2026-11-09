@@ -102,7 +102,8 @@ export type ForYouView = {
   since: number;
 };
 
-const LIVE = new Set(["open", "doing", "waiting"]);
+/** needs_aaron_why for his asks that went back to their rooms (For you's "N waiting on their rooms"). */
+export const AWAY = new Set(["stale", "resting", "no card", "no room"]);
 const DAY = 86_400_000;
 /** An ask stays in For you this many days after its room last asked or confirmed it (T-335 fresh, 11-08). */
 export const FRESH_DAYS = 7;
@@ -268,24 +269,16 @@ export function forYou(input: ForYouInput): ForYouView {
     const id = s(n.id), path = refPath(n.path);
     if (!id || !path || seen.has(id) || gone.has(id)) continue;
     const tags = tagsOf(n), m = meta(n);
-    const isTask = tags.includes("task");
-    const legacy = !isTask && tags.includes("decision");
-    if (!isTask && !legacy) continue;
-    const state = s(m.state) ?? "";
-    if (legacy ? state !== "open" : !LIVE.has(state)) continue;
-    // Aaron's: he owns it or it waits on him (an old decision is his by being open)
-    if (!legacy && !isMe(m.owner, me) && !isMe(m.waiting_on, me)) continue;
-    // already answered (the close may not have landed), replaced, put off, or parked for someday
-    if (s(m.answered_at) || s(m.answer) || s(m.superseded_by)) continue;
-    const snoozed = s(m.snoozed_until);
-    if (snoozed && snoozed.slice(0, 10) > today) continue;
-    if (s(m.priority)?.toLowerCase() === "someday") continue;
+    // an old `Decisions/` note is the record, not an ask (T-335 one home): only tasks are asks
+    if (!tags.includes("task")) continue;
     seen.add(id);
+    // T-335 one home: whether it needs him is the task's needs_aaron, as uni-tasks wrote it (the one rule: an open ask owned by him, on a card,
+    // asked or confirmed by its room in FRESH_DAYS, in a live place with a live room); his asks that went back to their rooms are only counted
+    if (m.needs_aaron !== true) { if (m.needs_aaron === false && AWAY.has(s(m.needs_aaron_why) ?? "")) away++; continue; }
+    const legacy = false;
+    const state = s(m.state) ?? "";
     const node = refPath(m.node) ?? "";
     const place = input.placeOf(node);
-    // T-335 fresh: a place that isn't live, or an ask its room hasn't asked or confirmed in FRESH_DAYS, is its room's again: counted, never shown
-    const askedAt = currentAt(m, n.createdAt, now);
-    if (place.live === false || askedAt === null || now - askedAt >= FRESH_DAYS * DAY) { away++; continue; }
     const cardPath = refPath(m.card);
     const card = cardPath ? cards.get(cardPath) ?? null : null;
     const kindRaw = s(m.kind)?.toLowerCase();
@@ -307,10 +300,9 @@ export function forYou(input: ForYouInput): ForYouView {
     const defAt = noDefault ? null : s(m.default_at);
     const defValue = noDefault ? null : s(m.default)!;
     const label = defValue ? [defValue, whenLabel(defAt, now)].filter(Boolean).join(" · ") : "";
-    // its own reply room or room, as a live room (an archived one resolves to where its work went), else its node's live room; none: not shown
+    // its own reply room or room, as a live room (an archived one resolves to where its work went), else its node's live room (uni-tasks
+    // checked it has one; if this device can't find it yet, the footer says so)
     const replyRoom = live(s(m.reply_room)) ?? live(s(m.room)) ?? live(place.room);
-    // (only once the live rooms are known: with no resolver, or none read yet, an ask isn't sent away for want of a room list)
-    if (!replyRoom && input.liveRoom) { away++; continue; }
     const replyRoot = s(m.reply_root);
     const cardName = card?.name ?? (cardPath ? leaf(cardPath) : null);
     // (the label and the path from one source: the card's area when it names one, else the node's)

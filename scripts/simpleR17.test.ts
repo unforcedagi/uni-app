@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { answerChoices, answerLabel, decideLine, firstWords, isMine, wholeWords, linkedRefs, needsByRow, needsFeed, needsYou, privateNote, questionCount, questionsFrom, stepAudience, uniPanel, waitsOnMe } from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
+import { swept } from "./swept.ts";
 import { decisionIn } from "../src/decisionLinks.ts";
 import { appendDraft } from "../src/areas/composeDraft.ts";
 import { isMaintenance } from "../src/chatMarkers.ts";
@@ -19,7 +20,7 @@ const nd = (id: string, path: string, parent: string | null, tags = ["project"])
 const { nodes, rootPath } = parseNodes([nd("u", "Uni", null, ["uni"]), nd("a-x", "Areas/Atlas", "Uni", ["area"]), nd("p-at", "Projects/ATLAS", "Areas/Atlas")]);
 const tree = buildTaskTree(nodes, rootPath);
 const mk = (id: string, extra: Record<string, unknown> = {}, tags = ["task"], title = "Do the thing"): Task =>
-  parseTask({ id, path: `Tasks/${id} ${title}`, tags, updatedAt: "2026-10-14T08:00:00.000Z", metadata: { node: "Projects/ATLAS", state: "open", owner: "aaron", ...extra } }, tree)!;
+  parseTask({ id, path: `Tasks/${id} ${title}`, tags, updatedAt: "2026-10-14T08:00:00.000Z", metadata: swept({ node: "Projects/ATLAS", state: "open", owner: "aaron", ...extra }, tags) }, tree)!;
 
 await check("P1-1 a task that waits on Aaron is in Needs you whatever its owner, and lights its node's dot", () => {
   for (const owner of ["uni", "room:atlas/teach", "person:leonardo", "aaron"]) {

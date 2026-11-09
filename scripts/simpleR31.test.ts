@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import * as core from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
+import { swept } from "./swept.ts";
 import { parseRuns, type Run } from "../src/areas/steerCore.ts";
 import { askedShown, askStamp, taskIdOf, UNRESOLVED, confirmationOf, currentAt, daysSince, needsByRow, needsFeed, needsYou, reasonShort, summaryLine, unconfirmedLine, withWaiting, type ConfOf } from "../src/areas/simpleCore.ts";
 
@@ -14,7 +15,7 @@ const { nodes, rootPath } = parseNodes([nd("u", "Uni", null, ["uni"]), nd("a-x",
 const tree = buildTaskTree(nodes, rootPath);
 const NEXT = "Send Harper the new site labels from the board, then say it is done";
 const mk = (n: number, extra: Record<string, unknown> = {}, node = "Projects/ATLAS"): Task =>
-  parseTask({ id: `id${n}`, path: `Tasks/T-${n} Do thing ${n}`, tags: ["task"], updatedAt: "2026-10-14T08:00:00.000Z", metadata: { node, state: "open", owner: "aaron", next: NEXT, ...extra } } as never, tree)!;
+  parseTask({ id: `id${n}`, path: `Tasks/T-${n} Do thing ${n}`, tags: ["task"], updatedAt: "2026-10-14T08:00:00.000Z", metadata: swept({ node, state: "open", owner: "aaron", next: NEXT, ...extra }) } as never, tree)!;
 const NOW = Date.parse("2026-10-15T12:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
 const resolver = (): ConfOf => (t) => confirmationOf(t, NOW);
@@ -60,15 +61,17 @@ await check("1: cancelled or superseded is the note's own state, never chat", ()
 });
 
 await check("1: the same stored request classifies the same on a cold home and a warm one (P2-2)", () => {
-  const tasks = [mk(30, { asked_at: hoursAgo(5) }), mk(31, { asked_at: hoursAgo(24 * 6) }), mk(32, { asked_at: hoursAgo(24 * 5), confirmed_at: hoursAgo(2) }), mk(33)];
+  // (T-335 one home: freshness is uni-tasks' word, in needs_aaron: an old one or one with no date is marked stale there)
+  const stale = { needs_aaron: false, needs_aaron_why: "stale" };
+  const tasks = [mk(30, { asked_at: hoursAgo(5) }), mk(31, { asked_at: hoursAgo(24 * 9), ...stale }), mk(32, { asked_at: hoursAgo(24 * 5), confirmed_at: hoursAgo(2) }), mk(33, stale)];
   const cold = needsFeed(tasks, () => null, null, "2026-10-15", resolver());
   const warm = needsFeed([...tasks].reverse(), () => null, null, "2026-10-15", resolver());
   const ids = (xs?: Task[]) => (xs ?? []).map((t) => t.id).sort();
   assert.deepEqual(ids(cold.rows), ["id30", "id32"]);
   assert.deepEqual(ids(warm.rows), ids(cold.rows));
   assert.deepEqual(ids(warm.recheck), ids(cold.recheck));
-  assert.deepEqual(ids(cold.recheck), ["id31", "id33"]);
-  assert.equal(cold.total, 2, "the recheck list is never counted");
+  assert.deepEqual(ids(cold.recheck), [], "nothing to recheck here: the field already says");
+  assert.equal(cold.total, 2);
 });
 
 await check("1: a confirmed row says it was asked on the date of the newer stamp; the reason of one that is not is that date", () => {
@@ -86,11 +89,12 @@ await check("1: a confirmed row says it was asked on the date of the newer stamp
 
 await check("1: waiting runs and dots still add up with the record-only resolver", () => {
   const confirmed = [mk(50, { asked_at: hoursAgo(2) }), mk(51, { asked_at: hoursAgo(2) })];
-  const f0 = needsFeed([...confirmed, mk(52)], () => null, null, "2026-10-15", resolver());
+  const stale = mk(52, { needs_aaron: false, needs_aaron_why: "stale" });
+  const f0 = needsFeed([...confirmed, stale], () => null, null, "2026-10-15", resolver());
   const run = (id: string, task: string | null): Run => ({ id, path: `Runs/${id}`, node: "Projects/ATLAS", task, what: "Waiting on your answer in #Uni: Ship it?", by: "uni", state: "decision", started: null, updated: null, result: null, room: null });
   const f = withWaiting(f0, [run("r1", null), run("r2", "T-50")]);
-  assert.equal(f.total, 3);
-  const m = needsByRow([...confirmed, mk(52)], new Set(["Projects/ATLAS", "Areas/Atlas", "Uni"]), () => undefined, resolver(), []);
+  assert.equal(f.total, 2, "T-335 one home: a waiting run is listed, never counted");
+  const m = needsByRow([...confirmed, stale], new Set(["Projects/ATLAS", "Areas/Atlas", "Uni"]), () => undefined);
   assert.equal([...m.values()].reduce((a, b) => a + b, 0), 2);
 });
 

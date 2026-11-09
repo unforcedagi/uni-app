@@ -25,10 +25,10 @@ test.describe('For you', () => {
     // Yours: the earliest default first, then the oldest asked; five shown
     const yours = band(page, 'Yours');
     await expect(yours.locator('article.fy-item')).toHaveCount(5);
-    expect(await yours.locator('article.fy-item').evaluateAll((els) => els.map((e) => e.getAttribute('data-id')))).toEqual(['fy-soup', 'fy-glaze', 'fy-jars', 'fy-hall', 'fy-paint']);
-    await yours.getByRole('button', { name: '2 more' }).click();
-    await expect(yours.locator('article.fy-item')).toHaveCount(7);
-    expect(await yours.locator('article.fy-item').evaluateAll((els) => els.slice(5).map((e) => e.getAttribute('data-id')))).toEqual(['fy-hedge', 'fy-gate']);
+    expect(await yours.locator('article.fy-item').evaluateAll((els) => els.map((e) => e.getAttribute('data-id')))).toEqual(['fy-soup', 'fy-glaze', 'fy-jars', 'fy-hall', 'fy-hedge']);
+    await yours.getByRole('button', { name: '1 more' }).click();
+    await expect(yours.locator('article.fy-item')).toHaveCount(6);
+    expect(await yours.locator('article.fy-item').evaluateAll((els) => els.slice(5).map((e) => e.getAttribute('data-id')))).toEqual(['fy-gate']);
     // the item's anatomy: where (card · area), what, why now, the default with its date, the other options, hold to talk, where it goes
     const glaze = item(page, 'fy-glaze');
     await expect(glaze.locator('.fy-where')).toHaveText('Glaze Tests · Kiln Studio');
@@ -49,11 +49,8 @@ test.describe('For you', () => {
     await expect(item(page, 'fy-stale')).toHaveCount(0);
     await expect(forYou(page)).not.toContainText('Mend the old fence');
     await expect(yours.locator('.fy-away')).toHaveText('1 waiting on its room');
-    // the old decision: once (never twice, though the vault returns it for `tag: task` too), with no default, its area as where, its options
-    await expect(forYou(page).locator('article.fy-item[data-id="fy-paint"]')).toHaveCount(1);
-    await expect(item(page, 'fy-paint').locator('.fy-where')).toHaveText('Bee Garden');
-    await expect(item(page, 'fy-paint').locator('.fy-nodefault')).toHaveText('No default: waits for you');
-    await expect(item(page, 'fy-paint').locator('.fy-opt')).toHaveText(['White', 'Pale yellow']);
+    // T-335 one home: an old Decisions/ note is the record, not an ask: never in For you (though the vault returns it for `tag: task` too)
+    await expect(forYou(page).locator('article.fy-item[data-id="fy-paint"]')).toHaveCount(0);
     // Ready to look at: the look ask
     await expect(band(page, 'Ready to look at').locator('article.fy-item')).toHaveCount(1);
     await expect(item(page, 'fy-look').locator('.fy-what')).toHaveText('Look at the glaze tile photos');
@@ -67,8 +64,8 @@ test.describe('For you', () => {
     await expect(moving.locator('.fy-mv .fy-mv-t')).toHaveText(['A session on daily practice: completed.', /Glaze Tests.*The test tiles came out of the kiln\./, /Honey Harvest.*Hive two was weighed/]);
     await expect(moving.locator('.fy-quiet')).toHaveText('2 cards quiet, 1 resting');
     // the head counts what is yours (0.3.1: For you's own head; the places' pull keeps the day's sentence as its label)
-    await expect(forYou(page).locator('.fy-toggle')).toHaveText(/^8 for you · 1 to look at · 3 moving$/);
-    await expect(page.locator('[data-place="front-door"] .fd-pull')).toHaveAttribute('aria-label', /Eight things need you\./);
+    await expect(forYou(page).locator('.fy-toggle')).toHaveText(/^7 for you · 1 to look at · 3 moving$/);
+    await expect(page.locator('[data-place="front-door"] .fd-pull')).toHaveAttribute('aria-label', /Seven things need you\./);
   });
 
   test('one tap takes the default: one compare-and-set with the answer, then the reply in its room under the card\'s post', async ({ page }) => {
@@ -103,8 +100,8 @@ test.describe('For you', () => {
     await bootForYou(page);
     await item(page, 'fy-glaze').locator('.fy-opt', { hasText: 'Shino' }).click();
     await expect(item(page, 'fy-glaze')).toHaveCount(0);
-    // one fewer: the line now says one more
-    await band(page, 'Yours').getByRole('button', { name: '1 more' }).click();
+    // one fewer: all five now show, with no "more" line
+    await expect(band(page, 'Yours').getByRole('button', { name: /more/ })).toHaveCount(0);
     await item(page, 'fy-gate').getByRole('button', { name: 'Done' }).click();
     await expect(item(page, 'fy-gate')).toHaveCount(0);
     const cas = (await calls(page, 'vault_transition')).map((c: any) => c.args);
@@ -128,21 +125,9 @@ test.describe('For you', () => {
     expect((await calls(page, 'vault_transition')).length).toBe(1);
   });
 
-  test('an old decision keeps its pick path (open -> decided), then says the pick in its room', async ({ page }) => {
-    await bootForYou(page);
-    await item(page, 'fy-paint').locator('.fy-opt', { hasText: 'White' }).click();
-    await expect(item(page, 'fy-paint')).toHaveCount(0);
-    const d = (await calls(page, 'vault_decide')).map((c: any) => c.args);
-    expect(d).toHaveLength(1);
-    expect(d[0]).toMatchObject({ id: 'fy-paint', from: 'open', to: 'decided', metadata: { decided: 'White', decided_by: 'aaron' } });
-    expect(await calls(page, 'vault_transition')).toHaveLength(0);
-    const posts = (await calls(page, 'post_message')).map((c: any) => c.args);
-    expect(posts.map((p: any) => [p.channel, p.body])).toEqual([['ch-bees', 'Choose the hive paint: White']]);
-  });
-
   test('hold to talk: the transcript becomes the answer', async ({ page }) => {
     await bootForYou(page, { transcript: 'Leave the far corner wild.' });
-    await band(page, 'Yours').getByRole('button', { name: '2 more' }).click();
+    await band(page, 'Yours').getByRole('button', { name: '1 more' }).click();
     const mic = item(page, 'fy-hedge').getByRole('button', { name: 'Hold to talk' });
     await mic.dispatchEvent('pointerdown');
     await expect(item(page, 'fy-hedge').locator('.fy-rec')).toContainText(/Listening/);
