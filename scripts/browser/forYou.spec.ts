@@ -44,6 +44,11 @@ test.describe('For you', () => {
     await expect(gate.locator('.fy-nodefault')).toHaveText('No default: waits for you');
     await expect(gate.getByRole('button', { name: 'Done' })).toBeVisible();
     await expect(gate.locator('.fy-goes')).toHaveText('Goes to #north-field');
+    // 0.3.3: the archived room it names is never named; what its room hasn't asked again in a week is a count, never an item
+    await expect(forYou(page)).not.toContainText(/old-barn/i);
+    await expect(item(page, 'fy-stale')).toHaveCount(0);
+    await expect(forYou(page)).not.toContainText('Mend the old fence');
+    await expect(yours.locator('.fy-away')).toHaveText('1 waiting on its room');
     // the old decision: once (never twice, though the vault returns it for `tag: task` too), with no default, its area as where, its options
     await expect(forYou(page).locator('article.fy-item[data-id="fy-paint"]')).toHaveCount(1);
     await expect(item(page, 'fy-paint').locator('.fy-where')).toHaveText('Bee Garden');

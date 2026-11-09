@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRecorder } from "../recorder";
 import { transcribe } from "./useForYou";
-import { cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine } from "./forYouCore";
+import { awayLine, cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine } from "./forYouCore";
 import { quietLine } from "../projects/FrontDoor";
 import { headWords } from "./scope";
 import { dialogOpen, openDialog } from "../areas/focusTrap";
@@ -204,6 +204,8 @@ export function ForYou(p: ForYouProps & { /** The head says this place's name: F
       {yours.map((i) => <ItemView key={i.id} item={i} p={p} onCard={setCardOpen} />)}
       {view.privates.map((x) => <button key={x.area} type="button" className="fy-private" onClick={() => p.onOpenPrivate?.(x)}><Mark kind="yours" />{x.area}: {x.count} thing{x.count === 1 ? "" : "s"} for you ›</button>)}
       {view.more.length > 0 && !more && <button type="button" className="fy-more" onClick={() => setMore(true)}>{view.more.length} more</button>}
+      {/* 0.3.3: what its room hasn't asked again in a week went back to that room: a count, never the items */}
+      {view.away > 0 && <p className="fy-away"><Mark kind="rest" />{awayLine(view.away)}</p>}
     </Band>
     {view.look.length > 0 && <Band name="Ready to look at" n={view.look.length}>{view.look.map((i) => <ItemView key={i.id} item={i} p={p} onCard={setCardOpen} />)}</Band>}
     {(view.moving.length > 0 || view.quiet.line) && <Band name="Moving" n={view.moving.length ? `since ${view.since >= now - 86_400_000 + 60_000 ? "you last looked" : "yesterday"}` : undefined}>

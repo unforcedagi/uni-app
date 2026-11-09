@@ -6,7 +6,7 @@ import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder, type Run } from "./steerCore";
 import { CompanionBody, Stands, type CompanionProps, type TaskLoad } from "./Companion";
 import { chatPlaceholder, confirmationOf, type Resolved, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, withApprovals, standsHeading, standsLine, asOfDate, daysSince, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
-import { askRoom as askRoomOf, ownRoom, type Steward } from "./talkCore";
+import { askRoom as askRoomOf, ownRoom, roomByName, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
 import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
 import type { RoomInfo } from "./TodayView";
@@ -115,6 +115,9 @@ const ASK_WAIT_MS = 8000;
  * room is shown in that focus and nowhere else; its details (what needs you, its summary, its projects and sessions, all of its work, its app)
  * are a step inside it. Without rooms (a vault whose profile has no chat): the tree of its places, and each place's work.
  */
+/** A place in one of these is not live (T-335 fresh): For you shows nothing of it. */
+const DORMANT = /^(archived|resting|done)$/i;
+
 export default function AreasSurface({ allPlace = null, identity, path, rooms: hostRooms, roomsPending = false, actions, roomFor, onOpenArea, onBackChange, onOverlayChange }: {
   /** T-335: this surface is the All place: every area's room at once, the room in focus over it, and the way back to Uni. */
   allPlace?: { backTo: string; from?: { path?: string; channel?: string } | null; onBack: () => void;
@@ -313,12 +316,37 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const name = top ? data?.tree.nodes.get(top)?.name ?? tasks.tree?.byPath.get(top)?.name ?? top.split("/").pop() ?? null : null;
     const room = node ? roomOfNode(node) : null;
     const priv = node ? (data ? privateRoot(data.tree, node) : tasks.tree ? privateRootIn(tasks.tree, node) : null) : null;
-    return { area: name, areaPath: top, room: room ? roomSlug(room.name) : null, private: !!priv };
+    // 0.3.3 (T-335 fresh): a node, or the area it sits in, that is archived, resting or done is not live: its asks are not in For you
+    return { area: name, areaPath: top, room: room ? roomSlug(room.name) : null, private: !!priv, live: !(fyDormant(node) || fyDormant(top)) };
   }, [tasks.tree, data, roomRefs, uniRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** A node (path or id) that is archived, resting or done. One the trees don't know at all is taken as live. */
+  function fyDormant(p: string | null): boolean {
+    if (!p) return false;
+    const path = tasks.tree?.idPath.get(p) ?? p;
+    const n = tasks.tree?.byPath.get(path);
+    if (n) return DORMANT.test(n.status);
+    const a = data?.tree.nodes.get(path);
+    if (a) return DORMANT.test(String(a.metadata.status ?? ""));
+    return !!data?.tree.archived.some((x) => x.path === path || x.id === p);
+  }
+  /** 0.3.3 For you: a room's name as a live room's. An archived room (the relay lists only live ones) resolves through the `room_fallback` of a
+   *  node that names it (tasks.py rooms-apply), when that room is live; else null, and the ask's node's room stands in. */
+  const fyLiveRoom = useCallback((name: string): string | null => {
+    const hit = roomByName(roomRefs, name);
+    if (hit) return roomSlug(hit.name);
+    const key = name.replace(/^#/, "").trim().toLowerCase();
+    for (const a of data?.areas ?? []) {
+      const m = a.metadata;
+      if (String(m.room ?? "").toLowerCase() !== key || !/^(archived|missing)$/i.test(String(m.room_status ?? "")) || typeof m.room_fallback !== "string") continue;
+      const fb = roomByName(roomRefs, m.room_fallback);
+      if (fb) return roomSlug(fb.name);
+    }
+    return null;
+  }, [roomRefs, data?.areas]);
   /** 0.3.0 For you: the room an answer goes to: its `reply_room` (else its room, else its node's), by id or name. */
   // the room its footer names, exactly: a named room that isn't here is no room (the answer waits, owed), never another room
   const answerRoom = useCallback((item: ForYouItem) => askRoomOf({ room: item.replyRoom, node: item.node }, roomRefs, () => null), [roomRefs]);
-  const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.all ?? tasks.tasks : null, placeOf: fyPlaceOf, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
+  const fy = useForYou({ identity, vault: profile.vault, tasks: tasks.ready ? tasks.all ?? tasks.tasks : null, placeOf: fyPlaceOf, liveRoom: fyLiveRoom, roomOf: answerRoom, refresh: tasks.refresh, enabled: chat });
   /** The stream's rooms by their place's path (set as the home draws): a message names a card of its own area. */
   const roomPaths = useRef(new Map<string, string>());
   // (the stream's rows redraw only when what a message could name changes: the cards, their marks, the posts their asks thread under)

@@ -7,11 +7,17 @@
 // no_default, options, reply_room, reply_root, answer, answered_at), `decision` (the old ones: state open, options) and `card` (name, area,
 // area_node, project, private, status, stands, stands_at, hill, lines[], threads[], open_asks[], last_session_at), as declared in the vault's
 // tag schemas. Nothing else. 0.3.2: the card itself is drawn from here too (its marks, an area's cards, which card a room's message is about).
+//
+// 0.3.3 (T-335 fresh): For you shows only what is live and fresh. An ask's room is a live room (an archived one, #Uni or any other, resolves
+// to where its work went, else its node's room; with none it is not shown); an ask in a place that is archived or resting is not shown; and
+// an ask its room hasn't asked or confirmed (`asked_at` / `confirmed_at`) for FRESH_DAYS has gone back to its room. Those are counted in
+// one quiet line, "N waiting on their rooms", never listed. The daily read (uni-tasks for_you.py) and the rooms' handback use the same rule.
 
 /** A vault note as the query returns it (metadata only). */
 export type Note = { id?: unknown; path?: unknown; tags?: unknown; metadata?: unknown; updatedAt?: unknown; createdAt?: unknown };
 /** Where a node sits: its area's name, the node's room name (no `#`), and whether it is in a private area. */
-export type Place = { area: string | null; room: string | null; private: boolean; /** the area's node path (the home's door it belongs to) */ areaPath?: string | null };
+export type Place = { area: string | null; room: string | null; private: boolean; /** the area's node path (the home's door it belongs to) */ areaPath?: string | null;
+  /** false: the node, or the area it sits in, is archived, resting or done (nothing of it is in For you) */ live?: boolean };
 export type Kind = "do" | "choose" | "look" | "tell" | "decision";
 /** An answer given on this device today, kept until midnight (the vault's own record is the ask's `answer`). */
 export type Answered = { id: string; what: string; answer: string; at: number; room: string | null; post: "sending" | "sent" | "failed" | "none"; error?: string | null;
@@ -32,6 +38,9 @@ export type ForYouInput = {
   answered?: readonly Answered[];
   /** At most this many in Yours before "N more" (5). */
   cap?: number;
+  /** A room's name as a live room's name (an archived room's name: the live room its work went to); null: no live room by that name.
+   *  Absent: every named room counts as live (tests, a vault with no rooms). */
+  liveRoom?: (name: string) => string | null;
 };
 
 export type Item = {
@@ -83,6 +92,8 @@ export type ForYouView = {
   answered: Answered[];
   /** Everything waiting on him: Yours (shown and behind "N more") and the private ones. */
   count: number;
+  /** Asks no longer his: not asked or confirmed by their room in FRESH_DAYS, or in a place that isn't live, or with no live room. Counted only. */
+  away: number;
   cards: Map<string, CardView>;
   /** 0.3.2: a private card's live asks, counted by card (never their words): its mark and its "N things wait on you". */
   privateCards: Map<string, number>;
@@ -91,6 +102,9 @@ export type ForYouView = {
 
 const LIVE = new Set(["open", "doing", "waiting"]);
 const DAY = 86_400_000;
+/** An ask stays in For you this many days after its room last asked or confirmed it (T-335 fresh, 11-08). */
+export const FRESH_DAYS = 7;
+const SKEW = 5 * 60_000;
 const s = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 const meta = (n: Note): Record<string, unknown> => (n.metadata && typeof n.metadata === "object" ? n.metadata as Record<string, unknown> : {});
 const tagsOf = (n: Note): string[] => (Array.isArray(n.tags) ? n.tags.filter((t): t is string => typeof t === "string") : []);
@@ -179,6 +193,17 @@ export function answerBody(item: Pick<Item, "tid" | "what">, answer: string): st
   return `${item.tid ?? item.what}: ${answer.trim()}`;
 }
 
+/** When its room last asked or confirmed the ask: the newer of `asked_at` and `confirmed_at` (a stamp in the future is a wrong date, passed
+ *  over), else when it was created. The same rule as simpleCore.currentAt and uni-tasks surface.current_at. */
+export function currentAt(m: Record<string, unknown>, createdAt: unknown, now: number): number | null {
+  const ok = [s(m.asked_at), s(m.confirmed_at)].map(ms).filter((t): t is number => t !== null);
+  const sane = ok.filter((t) => t <= now + SKEW);
+  if (sane.length || ok.length) return Math.max(...(sane.length ? sane : ok));
+  return ms(s(m.created)) ?? ms(s(createdAt));
+}
+/** The quiet line for what went back: "3 waiting on their rooms" ("" for none). */
+export const awayLine = (n: number): string => (n ? `${n} waiting on ${n === 1 ? "its room" : "their rooms"}` : "");
+
 /** The quiet line: "9 cards quiet, 6 resting" (or the part there is). */
 export function quietLine(quiet: number, resting: number): string {
   const parts = [quiet ? `${quiet} card${quiet === 1 ? "" : "s"} quiet` : "", resting ? `${resting} resting` : ""].filter(Boolean);
@@ -201,6 +226,9 @@ export function forYou(input: ForYouInput): ForYouView {
   const items: Item[] = [];
   const privates = new Map<string, PrivateLine>();
   const privateCards = new Map<string, number>();
+  let away = 0;
+  // a room's name as the live room (no resolver: every named room counts)
+  const live = (r: string | null): string | null => { const x = r?.replace(/^#/, "").trim(); return x ? (input.liveRoom ? input.liveRoom(x) : x) : null; };
   for (const n of input.asks) {
     const id = s(n.id), path = refPath(n.path);
     if (!id || !path || seen.has(id) || gone.has(id)) continue;
@@ -220,6 +248,9 @@ export function forYou(input: ForYouInput): ForYouView {
     seen.add(id);
     const node = refPath(m.node) ?? "";
     const place = input.placeOf(node);
+    // T-335 fresh: a place that isn't live, or an ask its room hasn't asked or confirmed in FRESH_DAYS, is its room's again: counted, never shown
+    const askedAt = currentAt(m, n.createdAt, now);
+    if (place.live === false || askedAt === null || now - askedAt >= FRESH_DAYS * DAY) { away++; continue; }
     const cardPath = refPath(m.card);
     const card = cardPath ? cards.get(cardPath) ?? null : null;
     const kindRaw = s(m.kind)?.toLowerCase();
@@ -239,14 +270,16 @@ export function forYou(input: ForYouInput): ForYouView {
     const defAt = noDefault ? null : s(m.default_at);
     const defValue = noDefault ? null : s(m.default)!;
     const label = defValue ? [defValue, whenLabel(defAt, now)].filter(Boolean).join(" · ") : "";
-    const replyRoom = (s(m.reply_room) ?? s(m.room) ?? place.room)?.replace(/^#/, "") ?? null;
+    // its own reply room or room, as a live room (an archived one resolves to where its work went), else its node's live room; none: not shown
+    const replyRoom = live(s(m.reply_room)) ?? live(s(m.room)) ?? live(place.room);
+    if (!replyRoom) { away++; continue; }
     const replyRoot = s(m.reply_root);
     const cardName = card?.name ?? (cardPath ? leaf(cardPath) : null);
     // (the label and the path from one source: the card's area when it names one, else the node's)
     const area = card?.area ?? place.area;
     const areaPath = card?.area ? card.areaNode ?? null : place.areaPath ?? null;
     const where = cardName ? { label: [cardName, area].filter(Boolean).join(" · "), card: cardName, cardPath, area, areaPath } : { label: area ?? "Uni", card: null, cardPath: null, area, areaPath };
-    const footer = replyRoom ? `Goes to #${replyRoom}${replyRoot ? (cardName ? `, under ${cardName}'s post` : ", in its thread") : ""}` : "No room to send it to";
+    const footer = `Goes to #${replyRoom}${replyRoot ? (cardName ? `, under ${cardName}'s post` : ", in its thread") : ""}`;
     const choices = kind === "choose" || kind === "decision" ? options.filter((o) => o !== defValue) : [];
     items.push({
       id, tid, band: kind === "look" ? "look" : "yours", kind, legacy, where,
@@ -280,6 +313,7 @@ export function forYou(input: ForYouInput): ForYouView {
     quiet: { quiet, resting, line: quietLine(quiet, resting) },
     answered: [...answered].sort((a, b) => b.at - a.at),
     count: yoursAll.length + priv.reduce((k, p) => k + p.count, 0),
+    away,
     cards, since, privateCards,
   };
 }

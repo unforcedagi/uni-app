@@ -15,8 +15,9 @@ export function scopeForYou(view: ForYouView, areaPath: string): ForYouView {
     privates,
     look: view.look.filter((i) => i.where.areaPath === areaPath),
     moving: view.moving.filter((m) => view.cards.get(m.cardPath)?.areaNode === areaPath),
-    // the quiet line counts every card: it belongs to All
+    // the quiet line counts every card, and what went back to the rooms every room: both belong to All
     quiet: { quiet: 0, resting: 0, line: "" },
+    away: 0,
     count: mine.length + privates.reduce((n, p) => n + p.count, 0),
   };
 }

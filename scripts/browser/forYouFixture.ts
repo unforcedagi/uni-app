@@ -17,7 +17,8 @@ export function asks(now: number) {
   return [
     task('fy-glaze', 'T-501 Pick the glaze for the test tiles', { node: 'Areas/Kiln Studio', kind: 'choose', options: ['Celadon', 'Tenmoku', 'Shino'], default: 'Celadon', default_at: at(now, 2, 17),
       card: 'Cards/Kiln Studio/Glaze Tests', why_now: 'The tiles go in the kiln on Friday.', reply_room: 'kiln-studio', reply_root: 'k3', asked_at: ago(now, 1 * D) }),
-    task('fy-gate', 'T-502 Sign the gravel delivery note', { node: 'Areas/North Field', kind: 'do', no_default: true, why_now: 'The lorry comes Wednesday and needs your name.', asked_at: ago(now, 3 * D) }),
+    // (its `room` names a room that was archived: the relay doesn't list it, so its answer goes to its node's live room, 0.3.3)
+    task('fy-gate', 'T-502 Sign the gravel delivery note', { node: 'Areas/North Field', kind: 'do', no_default: true, why_now: 'The lorry comes Wednesday and needs your name.', asked_at: ago(now, 3 * D), room: 'Old-Barn' }),
     task('fy-hall', 'T-503 Keep the hall on Tuesdays?', { node: 'Areas/Choir', kind: 'choose', options: ['Keep Tuesdays', 'Move to Thursdays'], default: 'Keep Tuesdays', default_at: at(now, 4, 9),
       card: 'Cards/Choir/Winter Set', why_now: 'The hall wants an answer for the new term.', reply_room: 'choir', asked_at: ago(now, 2 * D) }),
     task('fy-soup', 'T-504 Bring the soup pot on Saturday', { node: 'Areas/Long Table', kind: 'do', default: 'Uni asks Rowan instead', default_at: at(now, 1, 12), why_now: 'Nine people said yes.', asked_at: ago(now, 1 * D) }),
@@ -25,7 +26,9 @@ export function asks(now: number) {
       why_now: 'The harvest is on Saturday.', reply_room: 'bee-garden', asked_at: ago(now, 1 * D) }),
     task('fy-hedge', 'T-506 Say which corner stays wild', { node: 'Areas/North Field', kind: 'tell', no_default: true, why_now: 'The hedge cutters come on Thursday.', asked_at: ago(now, 5 * D) }),
     // an old-style decision: tagged `decision` only, open, no card and no default (the vault may soon return it for `tag: task` too)
-    { ...task('fy-paint', 'Choose the hive paint', { node: 'Areas/Bee Garden', options: ['White', 'Pale yellow'] }, ['decision']), path: 'Decisions/Choose the hive paint', createdAt: ago(now, 10 * D) },
+    { ...task('fy-paint', 'Choose the hive paint', { node: 'Areas/Bee Garden', options: ['White', 'Pale yellow'] }, ['decision']), path: 'Decisions/Choose the hive paint', createdAt: ago(now, 6 * D) },
+    // 0.3.3: asked nine days ago and never confirmed by its room since: it went back to that room, so For you only counts it
+    task('fy-stale', 'T-507 Mend the old fence', { node: 'Areas/North Field', kind: 'do', no_default: true, why_now: 'Asked a long time ago.', asked_at: ago(now, 9 * D) }),
     task('fy-look', 'T-510 Look at the glaze tile photos', { node: 'Areas/Kiln Studio', kind: 'look', no_default: true, card: 'Cards/Kiln Studio/Glaze Tests', why_now: 'Twelve tiles, photographed on the shelf.',
       link: 'https://example.com/kiln/tiles', reply_room: 'kiln-studio', asked_at: ago(now, 2 * H) }),
     task('fy-quiet', 'T-520 Morning practice note', { node: 'Areas/Sanctum', kind: 'tell', no_default: true, card: 'Cards/Sanctum/daily practice', why_now: 'Private words that never leave the area.', asked_at: ago(now, 1 * D) }),

@@ -61,6 +61,7 @@ const noteOf = (t: Task): Note => ({ id: t.id, path: t.path, tags: t.raw?.tags ?
   metadata: { ...(t.raw?.metadata ?? {}), node: t.node, state: t.state, ...(t.snoozedUntil ? { snoozed_until: t.snoozedUntil } : {}) } });
 
 export function useForYou(o: { identity: string | null; vault: string; tasks: readonly Task[] | null; placeOf: (node: string) => Place;
+  /** A room's name as a live room's (an archived room's: where its work went); null: none. */ liveRoom?: (name: string) => string | null;
   /** The room an item's answer goes to (its `reply_room`, else its room, else its node's), by id. */ roomOf: (item: Item) => RoomRef | null;
   /** Read the task list again (after an answer). */ refresh: () => void; enabled?: boolean }) {
   const owner = `${o.identity ?? ""}|${o.vault}`;
@@ -106,8 +107,8 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
   const change = (id: string, f: (e: Entry) => Entry) => setEntries((list) => keep(list.map((e) => (e.id === id ? f(e) : e))));
 
   const asks = useMemo(() => (o.tasks ?? []).map(noteOf), [o.tasks]);
-  const view: ForYouView = useMemo(() => forYou({ asks, cards, placeOf: o.placeOf, me: activeProfile().me, now, lastLooked: since, answered: entries }),
-    [asks, cards, o.placeOf, since, entries, Math.floor(now / POLL_MS)]); // eslint-disable-line react-hooks/exhaustive-deps
+  const view: ForYouView = useMemo(() => forYou({ asks, cards, placeOf: o.placeOf, liveRoom: o.liveRoom, me: activeProfile().me, now, lastLooked: since, answered: entries }),
+    [asks, cards, o.placeOf, o.liveRoom, since, entries, Math.floor(now / POLL_MS)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const post = useCallback(async (e: Entry) => {
     let channel = e.channel;

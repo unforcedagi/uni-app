@@ -85,6 +85,7 @@ button.fy-mv-t { cursor: pointer; }
 .fy-done-fail { flex-basis: 100%; margin-left: 21px; font: 500 13px/1.35 var(--g-font-ui); color: var(--g-ink); }
 .fy-done { flex-wrap: wrap; }
 .fy-quiet { font: 400 13.5px/1.4 var(--g-font-ui); color: var(--g-ink-2); }
+.fy-away { display: flex; gap: 10px; align-items: center; margin: 2px 0 6px; font: 400 13.5px/1.4 var(--g-font-ui); color: var(--g-ink-2); }
 
 /* the card: a sheet from the bottom on a phone, a panel at the side on a wide screen */
 .fy-scrim { position: fixed; inset: 0; z-index: 40; border: 0; background: var(--g-scrim, rgba(20, 16, 10, .28)); }

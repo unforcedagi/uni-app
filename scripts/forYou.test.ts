@@ -3,7 +3,7 @@
 process.env.TZ = "UTC";
 import assert from "node:assert/strict";
 import { buildTaskTree, isTaskRow, parseTask } from "../src/areas/taskCore.ts";
-import { answerBody, answerMeta, areaCards, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
+import { answerBody, answerMeta, areaCards, awayLine, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -14,7 +14,7 @@ function check(name: string, fn: () => void) {
 const NOW = Date.parse("2026-11-11T12:00:00Z");
 const H = 3600_000, D = 24 * H;
 const iso = (t: number) => new Date(t).toISOString();
-const task = (id: string, title: string, m: Record<string, unknown>, tags = ["task"]): Note => ({ id, path: `Tasks/${title}`, tags, updatedAt: iso(NOW - H), createdAt: iso(NOW - 9 * D), metadata: { state: "open", owner: "aaron", ...m } });
+const task = (id: string, title: string, m: Record<string, unknown>, tags = ["task"]): Note => ({ id, path: `Tasks/${title}`, tags, updatedAt: iso(NOW - H), createdAt: iso(NOW - 9 * D), metadata: { state: "open", owner: "aaron", asked_at: iso(NOW - H), ...m } });
 const card = (area: string, name: string, m: Record<string, unknown>): Note => ({ id: `c-${name}`, path: `Cards/${area}/${name}`, tags: ["card"], metadata: { schema: "card/1", name, area, status: "active", private: false, lines: [], ...m } });
 const PLACES: Record<string, Place> = {
   "Areas/Kiln Studio": { area: "Kiln Studio", room: "kiln-studio", private: false },
@@ -65,12 +65,12 @@ check("no card: the node's area is where; no default: none shown, the plain acti
   assert.equal(c.action, "Got it");
 });
 
-check("the room an answer goes to: reply_room, else the ask's room, else its node's; none at all says so", () => {
+check("the room an answer goes to: reply_room, else the ask's room, else its node's; with no live room at all it is not in For you", () => {
   assert.equal(view([task("a", "T-1 x", { node: "Areas/Kiln Studio", room: "glaze-tests" })]).yours[0].replyRoom, "glaze-tests");
   assert.equal(view([task("a", "T-1 x", { node: "Areas/Kiln Studio", room: "glaze-tests", reply_room: "north-field" })]).yours[0].replyRoom, "north-field");
-  const none = view([task("a", "T-1 x", { node: "Elsewhere" })]).yours[0];
-  assert.equal(none.replyRoom, null);
-  assert.equal(none.footer, "No room to send it to");
+  const none = view([task("a", "T-1 x", { node: "Elsewhere" })]);
+  assert.deepEqual(none.yours, []);
+  assert.equal(none.away, 1);
   // a reply_root with no card still says whose post
   assert.equal(view([task("a", "T-1 x", { node: "Areas/Kiln Studio", reply_root: "ev" })]).yours[0].footer, "Goes to #kiln-studio, in its thread");
 });
@@ -78,7 +78,7 @@ check("the room an answer goes to: reply_room, else the ask's room, else its nod
 check("Yours: earliest default first, then the oldest asked; five shown, the rest behind N more", () => {
   const at = (d: number) => iso(NOW + d * D);
   const asks = [
-    task("n1", "T-11 no default, asked long ago", { node: "Areas/North Field", no_default: true, asked_at: at(-9) }),
+    task("n1", "T-11 no default, asked long ago", { node: "Areas/North Field", no_default: true, asked_at: at(-6) }),
     task("d3", "T-12 default in three days", { node: "Areas/North Field", default: "x", default_at: at(3) }),
     task("d1", "T-13 default tomorrow", { node: "Areas/North Field", default: "x", default_at: at(1) }),
     task("n2", "T-14 no default, asked lately", { node: "Areas/North Field", no_default: true, asked_at: at(-1) }),
@@ -322,6 +322,49 @@ check("review: a named author rules; an old answer in the same words doesn't hid
   // a card whose project sits in a private place is private
   const proj = card("Kiln Studio", "Quiet Project", { project: "Areas/Sanctum", stands: "Inside words." });
   assert.equal(view([], [proj]).cards.get("Cards/Kiln Studio/Quiet Project")!.stands, null);
+});
+
+// T-335 fresh (11-08): For you shows only what is live and fresh
+check("an ask naming an archived room resolves to the live one: its footer and its answer never name the dead room", () => {
+  // the relay lists only live rooms; an archived room's work went to its fallback (a node's room_fallback)
+  const liveRoom = (name: string) => ({ "north-field": "north-field", "kiln-studio": "kiln-studio", "old-hall": "north-field" } as Record<string, string>)[name.toLowerCase()] ?? null;
+  const v = view([
+    task("a", "T-701 Old hall ask", { node: "Areas/North Field", kind: "do", no_default: true, room: "Old-Hall" }),
+    task("b", "T-702 Dead reply room", { node: "Areas/Kiln Studio", kind: "do", no_default: true, reply_room: "gone-room" }),
+    task("c", "T-703 Root ask", { node: "", kind: "do", no_default: true, room: "gone-room" }),
+  ], [], { liveRoom });
+  const by = (id: string) => [...v.yours, ...v.more].find((i) => i.id === id);
+  assert.equal(by("a")?.replyRoom, "north-field");
+  assert.equal(by("a")?.footer, "Goes to #north-field");
+  assert.equal(by("b")?.replyRoom, "kiln-studio", "a dead reply_room falls to the node's live room");
+  assert.equal(by("c"), undefined, "no live room anywhere: not in For you");
+  assert.ok(!JSON.stringify([...v.yours, ...v.more, ...v.look]).match(/old-hall|gone-room/i));
+  assert.equal(v.away, 1);
+});
+
+check("an 8-day-old unconfirmed ask is not in Yours, only counted as waiting on its room; a re-confirmed one shows", () => {
+  const v = view([
+    task("old", "T-711 Asked long ago", { node: "Areas/North Field", kind: "do", no_default: true, asked_at: iso(NOW - 8 * D) }),
+    task("conf", "T-712 Asked long ago, confirmed", { node: "Areas/North Field", kind: "do", no_default: true, asked_at: iso(NOW - 20 * D), confirmed_at: iso(NOW - 2 * D) }),
+    task("look", "T-713 Old film", { node: "Areas/North Field", kind: "look", no_default: true, asked_at: iso(NOW - 10 * D) }),
+    task("nodate", "T-714 Never stamped", { node: "Areas/North Field", kind: "do", no_default: true, asked_at: null }),
+    task("priv", "T-715 Old private", { node: "Areas/Sanctum", kind: "do", no_default: true, asked_at: iso(NOW - 9 * D) }),
+  ]);
+  assert.deepEqual([...v.yours, ...v.more].map((i) => i.id), ["conf"]);
+  assert.deepEqual(v.look, []);
+  assert.deepEqual(v.privates, []);
+  assert.equal(v.away, 4, "the old ask, the old look, the never-stamped one (created 9 days ago) and the old private one");
+  assert.equal(v.count, 1, "the head counts only what is his now");
+  assert.equal(awayLine(v.away), "4 waiting on their rooms");
+  assert.equal(awayLine(1), "1 waiting on its room");
+  assert.equal(awayLine(0), "");
+});
+
+check("only live places: an ask on an archived or resting node (or area) is not in For you", () => {
+  const placeOf2 = (n: string): Place => n === "Projects/Shelved" ? { area: "North Field", room: "north-field", private: false, live: false } : placeOf(n);
+  const v = view([task("s", "T-721 Shelved thing", { node: "Projects/Shelved", kind: "do", no_default: true }), task("k", "T-722 Kept", { node: "Areas/North Field", kind: "do", no_default: true })], [], { placeOf: placeOf2 });
+  assert.deepEqual(v.yours.map((i) => i.id), ["k"]);
+  assert.equal(v.away, 1);
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
