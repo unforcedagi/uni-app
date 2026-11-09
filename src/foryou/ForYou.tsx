@@ -10,7 +10,7 @@ import { transcribe } from "./useForYou";
 import { cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine } from "./forYouCore";
 import { quietLine } from "../projects/FrontDoor";
 import { headWords } from "./scope";
-import { dialogOpen, holdTop, openDialog } from "../areas/focusTrap";
+import { dialogOpen, openDialog } from "../areas/focusTrap";
 import "./foryou.css";
 
 export type ForYouProps = {
@@ -93,9 +93,7 @@ function HoldToTalk({ item, onSend, disabled }: { item: Item; onSend: (text: str
 /** What he said, to read and fix before it goes. */
 function Said({ text, footer, onSend, onCancel }: { text: string; footer: string; onSend: (t: string) => void; onCancel: () => void }) {
   const [t, setT] = useState(text);
-  // while his words are up to read, Escape never closes the card around them (they would be lost with it): Send or Cancel decides; in the
-  // box, Escape only leaves it
-  useEffect(() => holdTop(), []);
+  // in the box, Escape only leaves it (the card around it never closes over his words: CardPanel; Send or Cancel decides)
   return <div className="fy-said">
     <textarea aria-label="Your answer" value={t} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.currentTarget.blur(); } }} rows={Math.min(5, Math.max(2, Math.ceil(t.length / 40)))} onChange={(e) => setT(e.target.value)} />
     <div className="fy-said-row">
@@ -247,14 +245,16 @@ export function CardPanel({ card, p, onClose, onThread, beside }: { card: CardVi
   const [all, setAll] = useState(false);
   const now = Date.now();
   // over the list (a phone): the app's one dialog contract (focus in and back, Tab kept inside, the rest inert, Escape when it is on top)
-  useEffect(() => (!beside && ref.current && layer.current ? openDialog(ref.current, () => closeRef.current(), { root: layer.current, initial: ref.current }) : undefined), [beside]);
+  /** His dictated words are up to read in the card: Escape never closes it over them (they would be lost with it); Send or Cancel decides. */
+  const holding = () => !!ref.current?.querySelector(".fy-said");
+  useEffect(() => (!beside && ref.current && layer.current ? openDialog(ref.current, () => { if (!holding()) closeRef.current(); }, { root: layer.current, initial: ref.current }) : undefined), [beside]);
   // beside the list: the list stays in use, so Escape is the card's only when no dialog is up over it and no field is being typed in; on
   // close, focus goes back to what opened it
   useEffect(() => {
     if (!beside) return;
     const opener = document.activeElement instanceof HTMLElement && !ref.current?.contains(document.activeElement) ? document.activeElement : null;
     const k = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || dialogOpen()) return;
+      if (e.key !== "Escape" || e.defaultPrevented || dialogOpen() || holding()) return;
       const t = e.target instanceof HTMLElement ? e.target : null;
       if (t && !ref.current?.contains(t) && (t.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']"))) return;
       e.preventDefault(); e.stopPropagation(); closeRef.current();
