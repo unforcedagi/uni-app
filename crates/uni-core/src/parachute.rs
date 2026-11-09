@@ -563,6 +563,10 @@ impl VaultClient {
         let mut args = transition_args(vault, id, field, &from, &to, if_updated_at)?;
         if let Some(m) = metadata {
             check_transition_meta(&m, &to)?;
+            if m.get("seen_at").is_some() {
+                // Seen closes only a tell or look ask; a do or choose ask stays open with its room (a patch)
+                check_seen_kind(&self.get_note(vault, id).await?, true)?;
+            }
             args["metadata"] = m;
         }
         let v = self.call("update-note", args).await?;
@@ -720,7 +724,7 @@ impl VaultClient {
             return Err(Error::Invalid("snooze and seen apply only to task and decision notes".into()));
         }
         if metadata.get("seen_at").is_some() {
-            check_seen_kind(&note)?;
+            check_seen_kind(&note, false)?;
         }
         let v = self
             .rpc(
@@ -1280,11 +1284,15 @@ fn check_seen_patch(metadata: &Value) -> Result<()> {
 }
 const SEEN_KEYS: [&str; 4] = ["seen_at", "seen_by", "needs_aaron", "needs_aaron_why"];
 
-/// Seen as a metadata patch keeps the ask open, so it is only for a do or choose ask: a tell or look ask closes with its Seen
-/// (`vault_transition`), never stays open marked seen.
-fn check_seen_kind(note: &Value) -> Result<()> {
+/// Which way Seen goes, by the stored ask's kind: a tell or look ask closes with it (`closes`, `vault_transition`); a do or
+/// choose ask stays open with its room (a metadata patch). Anything else is refused.
+fn check_seen_kind(note: &Value, closes: bool) -> Result<()> {
     let kind = note["metadata"]["kind"].as_str().unwrap_or("").trim().to_ascii_lowercase();
-    if kind == "tell" || kind == "look" {
+    let closing_kind = kind == "tell" || kind == "look";
+    if closes && !closing_kind {
+        return Err(Error::Invalid("Seen closes only a tell or look ask; a do or choose ask stays open with its room".into()));
+    }
+    if !closes && closing_kind {
         return Err(Error::Invalid("a tell or look ask closes on Seen: mark it seen with the close, not a patch".into()));
     }
     Ok(())
@@ -1732,10 +1740,15 @@ mod tests {
         assert!(check_seen_patch(&json!({"seen_at": t, "seen_by": "uni-default", "needs_aaron": false, "needs_aaron_why": "seen"})).is_err());
         assert!(check_seen_patch(&json!({"seen_at": t, "seen_by": "a b", "needs_aaron": false, "needs_aaron_why": "seen"})).is_err());
         // a metadata patch is Seen on an ask that stays open: never a tell or look ask (those close with it)
-        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "do"}})).is_ok());
-        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "choose"}})).is_ok());
-        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "Tell"}})).is_err());
-        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "look"}})).is_err());
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "do"}}), false).is_ok());
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "choose"}}), false).is_ok());
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "Tell"}}), false).is_err());
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "look"}}), false).is_err());
+        // and the close is only for a tell or look ask: a do or choose ask is never closed by Seen
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "look"}}), true).is_ok());
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "tell"}}), true).is_ok());
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "do"}}), true).is_err());
+        assert!(check_seen_kind(&json!({"tags": ["task"], "metadata": {"kind": "choose"}}), true).is_err());
         // the snooze patch is unchanged
         assert!(check_meta_patch(&json!({"snoozed_until": "2026-11-12"})).is_ok());
         assert!(check_meta_patch(&json!({"snoozed_until": "2026-11-12", "seen_at": "x"})).is_err());
