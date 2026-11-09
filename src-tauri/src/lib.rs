@@ -2705,8 +2705,8 @@ async fn vault_paths(
     .await
 }
 
-/// Every note tagged `tag` in one request, with content and metadata: the Today view's areas,
-/// briefs and Today note.
+/// Every note tagged `tag` in one request, with content and metadata: the areas, projects and
+/// their briefs.
 #[tauri::command]
 async fn vault_query(
     app: tauri::AppHandle,

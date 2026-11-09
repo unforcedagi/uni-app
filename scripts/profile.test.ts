@@ -60,8 +60,8 @@ check("review: the device cache keeps one slot per vault; uni keeps the original
   const m = new Map<string, string>(); const store = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), key: (i: number) => [...m.keys()][i] ?? null, get length() { return m.size; } };
   const c = createAreasCache(store); const area = { id: "a", path: "Areas/A", name: "A", purpose: "", status: "foreground", channels: [], rooms: [], kind: "area", parent: null, since: null, title: "A", body: "", metadata: {}, updatedAt: null } as never;
   const uni = { identity: "i", vault: "uni" }, other = { identity: "i", vault: "scratch" };
-  c.write({ areas: [area], briefs: {}, today: null }, uni);
-  c.write({ areas: [area, area], briefs: {}, today: null }, other);
+  c.write({ areas: [area], briefs: {} }, uni);
+  c.write({ areas: [area, area], briefs: {} }, other);
   assert.equal(cacheKeyFor("uni"), CACHE_KEY);
   assert.equal(c.read(uni)?.areas.length, 1, "uni's slot survives opening another vault");
   assert.equal(c.read(other)?.areas.length, 2);
@@ -110,10 +110,10 @@ check("PR2: the device cache accepts every status the parser can produce (active
   const m = new Map<string, string>(); const store = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) };
   const c = createAreasCache(store); const owner = { identity: "i", vault: "s" };
   const area = (status: string) => ({ id: status, path: "Areas/" + status, name: status, purpose: "", status: nodeStatus(status), channels: [], since: null, title: status, body: "", metadata: {}, updatedAt: null, kind: "area", parent: null, rooms: [] }) as never;
-  c.write({ areas: ["active", "dormant", "incubating", "done"].map(area), briefs: {}, today: null }, owner);
+  c.write({ areas: ["active", "dormant", "incubating", "done"].map(area), briefs: {} }, owner);
   assert.equal(c.read(owner)?.areas.length, 4);
   // a raw pack status that slipped through unnormalised is also accepted
-  c.write({ areas: [{ ...(area("x") as object), status: "active" } as never, { ...(area("y") as object), status: "dormant" } as never], briefs: {}, today: null }, owner);
+  c.write({ areas: [{ ...(area("x") as object), status: "active" } as never, { ...(area("y") as object), status: "dormant" } as never], briefs: {} }, owner);
   assert.equal(c.read(owner)?.areas.length, 2);
 });
 

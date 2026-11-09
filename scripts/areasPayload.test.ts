@@ -8,12 +8,15 @@ const file = new URL('../.areas-payload-test.mjs', import.meta.url);
 await writeFile(file, output[0].code);
 try {
   const mod = await import(file.href);
-  (globalThis as any).window = { __TAURI_INTERNALS__: { invoke: async (_cmd: string, args: any) => args.tag === 'area' ? [{ id: 'techne', path: 'Areas/Techne', tags: ['area'] }] : args.tag === 'area-brief' ? [{ path: 'Notes/stray', metadata: { area: 'Techne' }, content: 'STRAY' }] : args.tag === 'area-today' ? [{ path: 'Notes/today', metadata: { area: 'Today' }, content: 'STRAY TODAY' }] : [] } };
+  const asked: string[] = [];
+  (globalThis as any).window = { __TAURI_INTERNALS__: { invoke: async (cmd: string, args: any) => { if (cmd === 'vault_query') asked.push(args.tag); return args.tag === 'area' ? [{ id: 'techne', path: 'Areas/Techne', tags: ['area'] }] : args.tag === 'area-brief' ? [{ path: 'Notes/stray', metadata: { area: 'Techne' }, content: 'STRAY' }] : args.tag === 'area-today' ? [{ id: 'today', path: 'Areas/Today', tags: ['area-today'], content: '## Needs you today\n- old' }] : []; } } };
   const p = await mod.fetchPayload();
+  // T-335 (11-09): the Areas/Today roll-up is retired; the loader reads only the areas, the projects and their briefs
+  assert.deepEqual([...asked].sort(), ['area', 'area-brief', 'project'], 'the areas load must never ask for the retired area-today tag');
+  assert.equal('today' in p, false, 'the payload carries no Today note');
   assert.equal(p.areas[0].path, 'Areas/Techne');
   assert.equal(mod.toView(p, false).briefs['Areas/Techne'], undefined);
   assert.deepEqual(p.briefs, {}, 'metadata-only brief must not belong to Techne');
-  assert.equal(p.today, null, 'Today must match its path');
   // Project bodies must refresh without a revision, while known revisions reuse reads.
   const bodyResult = await build({ configFile: false, logLevel: 'silent', build: { write: false, minify: false, lib: { entry: 'src/areas/projectBody.ts', formats: ['es'] }, rollupOptions: { external: ['@tauri-apps/api/core'] } } });
   const bodyFile = new URL('../.project-body-test.mjs', import.meta.url);

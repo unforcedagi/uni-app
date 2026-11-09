@@ -139,7 +139,7 @@ await check("steward on a cycle of legacy parents terminates: the ring is broken
   }
 });
 
-await check("brief by id: trusted only when it resolves to a note whose path is <node path>/Brief (Areas/Today for the root)", () => {
+await check("brief by id: trusted only when it resolves to a note whose path is <node path>/Brief; the root has none (Areas/Today retired, T-335)", () => {
   const briefs = [{ id: "b-t", path: "Areas/Techne/Brief" }, { id: "b-c", path: "Projects/COhere/COhere 2026/Brief" }, { id: "b-today", path: "Areas/Today.md" }];
   assert.equal(trustedBrief("Areas/Techne", "b-t", briefs)?.id, "b-t");
   assert.equal(trustedBrief("Areas/Techne", "[[Areas/Techne/Brief]]", briefs)?.id, "b-t");
@@ -147,7 +147,7 @@ await check("brief by id: trusted only when it resolves to a note whose path is 
   assert.equal(trustedBrief("Areas/Techne", "b-c", briefs), null, "another node's brief is refused");
   assert.equal(trustedBrief("Areas/Techne", "b-unknown", briefs), null);
   assert.equal(trustedBrief("Areas/Techne", null, briefs), null);
-  assert.equal(trustedBrief("", "b-today", briefs)?.id, "b-today");
+  assert.equal(trustedBrief("", "b-today", briefs), null, "the root adopts no brief, not even the retired Today note");
   assert.equal(trustedBrief("Areas/Boulder", "b-today", briefs), null, "a node cannot adopt Today");
   assert.equal(trustedBrief("Areas/Tech", "b-t", briefs), null, "a prefix is not enough");
 });

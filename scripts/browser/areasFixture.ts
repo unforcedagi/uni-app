@@ -168,7 +168,7 @@ export type BootOpts = {
   tree?: boolean;
   /** T-86: `task` and `decision` notes on the nodes, answered by vault_query_meta / vault_transition / vault_patch_meta; `node` notes by vault_query. */
   tasks?: boolean;
-  /** Fixture Brief notes (Techne, Unforced Development) and an `Areas/Today` note, as the briefs writer produces them. */
+  /** Fixture Brief notes (Techne, Unforced Development), as the briefs writer produces them (the `Areas/Today` roll-up was retired, T-335). */
   briefs?: boolean;
   /** Every vault_query answers after this many ms (to show the device cache paint first). */
   queryDelay?: number;
@@ -374,22 +374,6 @@ Two proposals wait on a scope decision.
 
 ## Suggested next
 - nothing recent
-` },
-        { id: 'today', path: 'Areas/Today', extension: 'md', tags: ['area-today'], metadata: {}, updatedAt: iso(2 * 3600), content: `# Today
-
-## Needs you today
-- **Techne** Reply to Leonardo about the grant, due 2026-10-10 [[Areas/Techne/Plan|the plan]]
-- **Unforced Development** Send the Q4 invoice, overdue since 2026-10-05
-
-## Moved since yesterday
-- **Techne** coop papers signed
-
-## Quiet areas
-- Sanctum
-
-## Areas
-- [[Areas/Techne/Brief|Techne]]: Coop papers signed, COhere next.
-- [[Areas/Unforced Development/Brief|Unforced Development]]: Two proposals wait on a scope decision.
 ` },
       );
     }

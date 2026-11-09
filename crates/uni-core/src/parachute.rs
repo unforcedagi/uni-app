@@ -429,8 +429,8 @@ impl VaultClient {
     }
 
     /// Every note with `tag` in one request (inheriting descendants), content and metadata
-    /// included: the Today view reads the areas and their briefs this way instead of paging
-    /// the whole vault.
+    /// included: the app reads the areas and their briefs this way instead of paging the whole
+    /// vault.
     pub async fn query_tagged(
         &self,
         vault: &str,

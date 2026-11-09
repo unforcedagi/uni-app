@@ -2,7 +2,7 @@
 // Run: node --experimental-strip-types scripts/lifeos.test.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { refreshDraft, nowLine, parseBrief, parseToday, rankNeeds, todayNeeds, updatedLabel, inlineTokens } from "../src/areas/briefCore.ts";
+import { refreshDraft, nowLine, parseBrief, updatedLabel, inlineTokens } from "../src/areas/briefCore.ts";
 import { createAreasCache, CACHE_KEY } from "../src/areas/areasCache.ts";
 import { pickRoom } from "../src/areas/areaLayout.ts";
 import { parseArea, parseProject, parentOf } from "../src/areas/areasCore.ts";
@@ -77,59 +77,6 @@ check("nowLine is the first sentence, capped", () => {
   assert.equal(nowLine(parseBrief("")), "");
 });
 
-const TODAY = `# Today
-
-## Needs you today
-- **Techne** Reply to Leonardo about the grant, due 2026-10-10 [[Projects/Techne/Grant|Grant draft]]
-- **Sanctum** Book the retreat
-- **Unforced Development** Send the Q4 invoice, overdue since 2026-10-05
-- **Relationships** Call Mom on 2026-10-09
-
-## Moved since yesterday
-- **Techne** coop papers signed
-
-## Quiet areas
-- Atlas
-
-## Areas
-- [[Areas/Techne/Brief|Techne]]: Coop paperwork done, COhere next.
-- [[Areas/Sanctum/Brief|Sanctum]]: nothing recent
-`;
-check("parseToday reads needs with their area, moved, quiet and the per-area lines", () => {
-  const t = parseToday(TODAY);
-  assert.equal(t.needs.length, 4);
-  assert.equal(t.needs[0].area, "Techne");
-  assert.equal(t.needs[0].text, "Reply to Leonardo about the grant, due 2026-10-10 Grant draft");
-  assert.equal(t.needs[2].area, "Unforced Development");
-  assert.equal(t.moved.length, 1);
-  assert.equal(t.quiet[0].text, "Atlas");
-  assert.deepEqual(t.areas.map((a) => [a.name, a.path, a.now]), [["Techne", "Areas/Techne/Brief", "Coop paperwork done, COhere next."], ["Sanctum", "Areas/Sanctum/Brief", ""]]);
-});
-check("rankNeeds: overdue, then due today, then soon, then undated; foreground breaks ties; the writer's order breaks the rest", () => {
-  const t = parseToday(TODAY);
-  const ranked = rankNeeds(t.needs, { now: NOW, foreground: ["Techne"] });
-  assert.deepEqual(ranked.map((n) => n.area), ["Unforced Development", "Relationships", "Techne", "Sanctum"]);
-  // no dates anywhere: foreground first, then the writer's order
-  const flat = rankNeeds([{ text: "b", tokens: [], area: "Sanctum" }, { text: "a", tokens: [], area: "Techne" }, { text: "c", tokens: [], area: "Atlas" }], { now: NOW, foreground: ["Techne"] });
-  assert.deepEqual(flat.map((n) => n.text), ["a", "b", "c"]);
-  // the input is not mutated
-  assert.equal(t.needs[0].area, "Techne");
-});
-check("rankNeeds understands 'Oct 12'-style dates", () => {
-  const r = rankNeeds([{ text: "later Oct 20", tokens: [], area: "A" }, { text: "soon Oct 10", tokens: [], area: "B" }], { now: NOW, foreground: [] });
-  assert.equal(r[0].area, "B");
-});
-check("todayNeeds falls back to the area briefs when there is no Today note, and carries the area name", () => {
-  const briefs = { Techne: parseBrief(BRIEF), Sanctum: parseBrief("## Needs you\n- Book the retreat\n") };
-  const none = todayNeeds(null, briefs, ["Techne"], NOW);
-  assert.deepEqual(none.map((n) => n.area), ["Techne", "Techne", "Sanctum"]);
-  assert.equal(none[0].text.startsWith("Reply to Leonardo"), true);
-  const withNote = todayNeeds(parseToday(TODAY), briefs, ["Techne"], NOW);
-  assert.equal(withNote.length, 4, "Today's own list wins when it has items");
-  const emptyToday = todayNeeds(parseToday("## Needs you today\n- nothing recent\n"), briefs, ["Techne"], NOW);
-  assert.equal(emptyToday.length, 3, "an empty Today note still falls back to the briefs");
-});
-
 check("updatedLabel: freshness in words", () => {
   const ago = (ms: number) => new Date(NOW - ms).toISOString();
   assert.equal(updatedLabel(ago(20_000), NOW), "updated just now");
@@ -147,18 +94,28 @@ function memStore(init: Record<string, string> = {}) {
   const m = new Map(Object.entries(init));
   return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); }, removeItem: (k: string) => { m.delete(k); }, raw: m };
 }
-const DATA = { areas: [{ id: "a", path: "Areas/Techne", name: "Techne", purpose: "p", status: "foreground" as const, channels: ["c1", "c2"], rooms: ["c1", "c2"], kind: "area" as const, parent: null, since: null, title: "Techne", body: "# Techne", metadata: {}, updatedAt: null }], briefs: { "Areas/Techne": { content: BRIEF, generatedAt: "2026-10-09T15:00:00Z", updatedAt: "2026-10-09T15:01:00Z" } }, today: { content: TODAY, updatedAt: "2026-10-09T15:02:00Z" } };
+const DATA = { areas: [{ id: "a", path: "Areas/Techne", name: "Techne", purpose: "p", status: "foreground" as const, channels: ["c1", "c2"], rooms: ["c1", "c2"], kind: "area" as const, parent: null, since: null, title: "Techne", body: "# Techne", metadata: {}, updatedAt: null }], briefs: { "Areas/Techne": { content: BRIEF, generatedAt: "2026-10-09T15:00:00Z", updatedAt: "2026-10-09T15:01:00Z" } } };
 check("cache round-trips what the home paints from", () => {
   const s = memStore(); const c = createAreasCache(s, () => NOW);
   assert.equal(c.read(OWNER), null);
   c.write(DATA, OWNER);
   const back = c.read(OWNER)!;
-  assert.deepEqual(back.areas, DATA.areas); assert.deepEqual(back.briefs, DATA.briefs); assert.deepEqual(back.today, DATA.today);
+  assert.deepEqual(back.areas, DATA.areas); assert.deepEqual(back.briefs, DATA.briefs);
   assert.equal(back.savedAt, NOW);
   assert.ok(s.raw.has(CACHE_KEY));
 });
+check("a cache saved by an older app (with the retired Areas/Today note) still paints, and the next write drops it (T-335)", () => {
+  const old = JSON.stringify({ v: 2, owner: OWNER, truncated: [], savedAt: 7, areas: DATA.areas, briefs: DATA.briefs, today: { content: "# Today\n\n## Needs you today\n- **Techne** old", updatedAt: null } });
+  const s = memStore({ [CACHE_KEY]: old }); const c = createAreasCache(s, () => NOW);
+  const back = c.read(OWNER)!;
+  assert.deepEqual(back.areas, DATA.areas); assert.deepEqual(back.briefs, DATA.briefs); assert.equal(back.savedAt, 7);
+  assert.equal("today" in back, false, "the retired note is not carried into the payload");
+  // (a payload still carrying it, as an older app's in-memory copy would, is written without it)
+  c.write({ ...back, today: { content: "old", updatedAt: null } } as typeof back, OWNER);
+  assert.equal("today" in JSON.parse(s.raw.get(CACHE_KEY)!), false, "the next write no longer stores it");
+});
 check("cache ignores garbage, a wrong version and a broken shape; a failing store never throws", () => {
-  for (const bad of ["{", "null", "[]", JSON.stringify({ v: 99, owner: OWNER, areas: [] }), JSON.stringify({ v: 1, owner: OWNER, savedAt: 1, areas: [], briefs: {}, today: null }), JSON.stringify({ v: 2, owner: OWNER, areas: "x" }), JSON.stringify({ v: 2, owner: OWNER, savedAt: 1, areas: [{ nope: 1 }], briefs: {}, today: null })]) {
+  for (const bad of ["{", "null", "[]", JSON.stringify({ v: 99, owner: OWNER, areas: [] }), JSON.stringify({ v: 1, owner: OWNER, savedAt: 1, areas: [], briefs: {} }), JSON.stringify({ v: 2, owner: OWNER, areas: "x" }), JSON.stringify({ v: 2, owner: OWNER, savedAt: 1, areas: [{ nope: 1 }], briefs: {} })]) {
     assert.equal(createAreasCache(memStore({ [CACHE_KEY]: bad })).read(OWNER), null, bad);
   }
   const boom = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("quota"); }, removeItem: () => {} };

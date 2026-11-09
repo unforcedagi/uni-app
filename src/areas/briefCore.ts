@@ -1,7 +1,6 @@
-// The life OS view's pure core (unit-tested in scripts/lifeos.test.ts): parse an area's Brief and the
-// cross-area Today note, rank what needs Aaron, word the freshness, and draft the "Ask Uni" messages.
-// The contract is the vault note "Uni as a life OS": `Areas/<Name>/Brief` has seven fixed sections and
-// `Areas/Today` has "Needs you today", "Moved since yesterday", "Quiet areas" and "Areas". No React, no Tauri.
+// The life OS view's pure core (unit-tested in scripts/lifeos.test.ts): parse a node's Brief, word the freshness, and
+// draft the "Ask Uni" messages. The contract is the vault note "Uni as a life OS": `Areas/<Name>/Brief` has seven fixed
+// sections. (The cross-area `Areas/Today` roll-up was retired 11-09, T-335: what needs you comes from the asks.) No React, no Tauri.
 
 export type Inline =
   | { t: "text"; text: string }
@@ -9,7 +8,6 @@ export type Inline =
   | { t: "link"; target: string; label: string }
   | { t: "url"; href: string; label: string };
 export type BriefItem = { text: string; tokens: Inline[] };
-export type Need = BriefItem & { area: string | null };
 
 export type SectionKey = "now" | "needsYou" | "moving" | "people" | "recent" | "quiet" | "suggested";
 export type Brief = {
@@ -18,7 +16,6 @@ export type Brief = {
   /** The sections the note actually has, in note order. */
   present: SectionKey[];
 };
-export type Today = { needs: Need[]; moved: BriefItem[]; quiet: BriefItem[]; areas: { name: string; path: string; now: string }[] };
 
 const SECTIONS: Record<string, SectionKey> = {
   "now": "now", "needs you": "needsYou", "moving": "moving", "people": "people", "recent": "recent", "quiet": "quiet", "suggested next": "suggested",
@@ -92,75 +89,6 @@ export function parseBrief(content: string): Brief {
 export function nowLine(brief: Brief, max = 160): string {
   const first = /^.*?[.!?](?=\s|$)/.exec(brief.now)?.[0] ?? brief.now;
   return first.length > max ? first.slice(0, max).trimEnd() + "…" : first;
-}
-
-const needOf = (line: string): Need => {
-  const i = item(line);
-  const lead = i.tokens[0];
-  if (lead?.t !== "bold") return { ...i, area: null };
-  const tokens = i.tokens.slice(1);
-  if (tokens[0]?.t === "text") tokens[0] = { t: "text", text: tokens[0].text.replace(/^[\s:–—-]+/, "") };
-  return { text: plain(tokens), tokens: tokens.filter((t) => t.t !== "text" || t.text), area: lead.text.trim() };
-};
-
-export function parseToday(content: string): Today {
-  const today: Today = { needs: [], moved: [], quiet: [], areas: [] };
-  const body = (content ?? "").replace(/^\s*---\n[\s\S]*?\n---\n/, "");
-  let cur: string | null = null;
-  const lines: Record<string, string[]> = {};
-  for (const line of body.split("\n")) {
-    const h = /^##\s+(.+?)\s*#*\s*$/.exec(line);
-    if (h) { cur = h[1].trim().toLowerCase(); lines[cur] = []; continue; }
-    if (cur) lines[cur].push(line);
-  }
-  const list = (k: string) => (lines[k] ?? []).map((l) => BULLET.exec(l)?.[1]).filter((s): s is string => !!s && !EMPTY.test(s.trim()));
-  today.needs = list("needs you today").map(needOf);
-  today.moved = list("moved since yesterday").map(item);
-  today.quiet = list("quiet areas").map(item);
-  for (const raw of list("areas")) {
-    const i = item(raw);
-    const link = i.tokens.find((t): t is Extract<Inline, { t: "link" }> => t.t === "link");
-    if (!link) continue;
-    const name = /^Areas\/([^/]+)\//.exec(link.target)?.[1] ?? link.label;
-    const rest = raw.slice(raw.indexOf("]]") + 2).replace(/^\s*[:–—-]\s*/, "").trim();
-    today.areas.push({ name, path: link.target, now: EMPTY.test(rest) ? "" : plain(inlineTokens(rest)) });
-  }
-  return today;
-}
-
-// --------------------------------------------------------------------------- ranking
-const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-const DAY = 86_400_000;
-
-/** The earliest date a line mentions (ISO `2026-10-10` or `Oct 12`), in days from today; null when it has none. */
-function dueDay(text: string, now: number): number | null {
-  const d = new Date(now);
-  const y = d.getFullYear();
-  const today = Date.UTC(y, d.getMonth(), d.getDate());
-  const days: number[] = [];
-  for (const m of text.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) days.push(Date.UTC(+m[1], +m[2] - 1, +m[3]));
-  for (const m of text.matchAll(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\b/gi)) {
-    const mon = MONTHS.indexOf(m[1].toLowerCase());
-    let t = Date.UTC(y, mon, +m[2]);
-    if (today - t > 180 * DAY) t = Date.UTC(y + 1, mon, +m[2]);
-    days.push(t);
-  }
-  return days.length ? Math.round((Math.min(...days) - today) / DAY) : null;
-}
-
-const urgency = (days: number | null) => (days === null ? 4 : days < 0 ? 0 : days === 0 ? 1 : days <= 3 ? 2 : days <= 7 ? 3 : 4);
-
-/** What needs Aaron first: overdue, due today, due soon, then the rest; foreground areas first within a tier; the writer's order after that. */
-export function rankNeeds<T extends Need>(needs: readonly T[], ctx: { now: number; foreground: readonly string[] }): T[] {
-  return needs.map((n, i) => ({ n, i, u: urgency(dueDay(n.text, ctx.now)), f: n.area && ctx.foreground.includes(n.area) ? 0 : 1 }))
-    .sort((a, b) => a.u - b.u || a.f - b.f || a.i - b.i).map((x) => x.n);
-}
-
-/** Today's own list, ranked — or, when the note is missing or empty, the areas' briefs gathered and ranked. */
-export function todayNeeds(today: Today | null, briefs: Record<string, Brief>, foreground: readonly string[], now: number): Need[] {
-  const own = today?.needs ?? [];
-  const all: Need[] = own.length ? own : Object.entries(briefs).flatMap(([area, b]) => b.needsYou.map((i) => ({ ...i, area })));
-  return rankNeeds(all, { now, foreground });
 }
 
 // --------------------------------------------------------------------------- freshness

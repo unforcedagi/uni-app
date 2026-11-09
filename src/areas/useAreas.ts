@@ -2,7 +2,7 @@ import { clearProjectBodies } from "./projectBody";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { parseArea, parseProject, sortAreas, trustedBrief, type Area, type AreaNoteLike, type PathRow } from "./areasCore";
-import { parseBrief, parseToday, type Brief, type Today } from "./briefCore";
+import { parseBrief, type Brief } from "./briefCore";
 import { deviceCache, type AreasPayload, type BriefRaw, type CacheOwner } from "./areasCache";
 import { buildTree, type Tree } from "./treeCore";
 import { forgetSavedTasks, forgetTasks } from "./useTasks";
@@ -17,7 +17,6 @@ export type AreasData = {
   tree: Tree;
   /** Each node's Brief by node path. */
   briefs: Record<string, AreaBrief>;
-  today: { today: Today; updatedAt: string | null; generatedAt: string | null } | null;
   /** True for device-cache data or a snapshot whose refresh failed. */
   stale: boolean;
   savedAt: number | null;
@@ -46,12 +45,13 @@ const pathOwner = (n: AreaNoteLike) => /^(.+)\/Brief$/.exec((n.path ?? "").repla
 const newest = <T extends { updatedAt?: string | null }>(a: T | undefined, b: T) => (!a || (b.updatedAt ?? "") >= (a.updatedAt ?? "") ? b : a);
 
 /**
- * Four tag queries in parallel (areas, projects, briefs, Today) — never the whole vault, and no per-node fetches. Projects come
+ * Three tag queries in parallel (areas, projects, briefs) — never the whole vault, and no per-node fetches. Projects come
  * without content (only their metadata names the parent). Failed optional queries retain their previous data and mark the entire snapshot stale.
  */
 export async function fetchPayload(prev: AreasPayload | null = null): Promise<AreasPayload & { refreshError: string | null }> {
   const noBriefs = activeProfile().briefs.mode === "none"; // a vault without Uni-written briefs never asks for them
-  const [areas, projects, briefs, today] = await Promise.allSettled([query("area"), query("project", false), noBriefs ? Promise.resolve([]) : query("area-brief"), noBriefs ? Promise.resolve([]) : query("area-today")]);
+  // (no `area-today` read: the Areas/Today roll-up was retired 11-09, T-335; what needs you comes from the asks)
+  const [areas, projects, briefs] = await Promise.allSettled([query("area"), query("project", false), noBriefs ? Promise.resolve([]) : query("area-brief")]);
   if (areas.status === "rejected") throw areas.reason;
   const found = areas.value.map(parseArea).filter((a): a is Area => !!a);
   const kept = projects.status === "fulfilled" ? projects.value.map(parseProject).filter((a): a is Area => !!a)
@@ -68,16 +68,11 @@ export async function fetchPayload(prev: AreasPayload | null = null): Promise<Ar
     for (const a of parsed) { const pinned = trustedBrief(a.path, a.metadata.brief, briefs.value); if (pinned) latest[a.path] = pinned; }
     briefRaw = Object.fromEntries(Object.entries(latest).map(([name, n]) => [name, { content: n.content ?? "", updatedAt: n.updatedAt ?? null, generatedAt: typeof n.metadata?.generated_at === "string" ? n.metadata.generated_at : null }]));
   }
-  let todayRaw = prev?.today ?? null;
-  if (today.status === "fulfilled") {
-    const t = today.value.filter((n) => (n.path ?? "").replace(/\.md$/i, "") === "Areas/Today").reduce<AreaNoteLike | undefined>((best, n) => newest(best, n), undefined);
-    todayRaw = t ? { content: t.content ?? "", updatedAt: t.updatedAt ?? null, generatedAt: typeof t.metadata?.generated_at === "string" ? t.metadata.generated_at : null } : null;
-  }
-  const results = [areas, projects, briefs, today];
-  const tags = ["area", "project", "area-brief", "area-today"];
+  const results = [areas, projects, briefs];
+  const tags = ["area", "project", "area-brief"];
   const errors = results.flatMap((r, i) => r.status === "rejected" ? [`${tags[i]}: ${String(r.reason)}`] : []);
   const truncated = results.flatMap((r, i) => r.status === "fulfilled" ? (r.value.length >= 200 ? [tags[i]] : []) : (prev?.truncated ?? []).filter((tag) => tag === tags[i]));
-  return { areas: parsed, briefs: briefRaw, today: todayRaw, truncated, refreshError: errors.length ? errors.join("; ") : null };
+  return { areas: parsed, briefs: briefRaw, truncated, refreshError: errors.length ? errors.join("; ") : null };
 }
 
 export function toView(p: AreasPayload, stale: boolean, savedAt: number | null = null): AreasData {
@@ -85,7 +80,6 @@ export function toView(p: AreasPayload, stale: boolean, savedAt: number | null =
   return {
     areas: [...tree.nodes.values()], tree, stale, savedAt, truncated: p.truncated ?? [],
     briefs: Object.fromEntries(Object.entries(p.briefs).map(([path, b]) => [path, { brief: parseBrief(b.content), generatedAt: b.generatedAt, updatedAt: b.updatedAt }])),
-    today: p.today ? { today: parseToday(p.today.content), updatedAt: p.today.updatedAt, generatedAt: p.today.generatedAt ?? null } : null,
   };
 }
 

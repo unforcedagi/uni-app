@@ -74,7 +74,7 @@ test.describe('device cache', () => {
     await expect(focusSheet(page).locator('.areas-status')).toContainText("couldn't refresh");
   });
 
-  for (const tag of ['project', 'area-brief', 'area-today']) test(`failed ${tag} refresh retains savedAt and labels old data`, async ({ page }) => {
+  for (const tag of ['project', 'area-brief']) test(`failed ${tag} refresh retains savedAt and labels old data`, async ({ page }) => {
     await bootAreas(page, 'seed', { briefs: true, queryFails: [tag], deviceCache: cached });
     await openAreasHome(page);
     await expect(page.locator('.areas-status')).toContainText("couldn't refresh");
@@ -239,17 +239,17 @@ test('failed project refresh retains previous projects and stale marker', async 
   });
   await page.clock.install(); await page.clock.fastForward(31000);
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-  // r13: the four area queries and the task tree's (re-read with every refresh); r16: the run and draft reads start beside it;
-  // T-302: and the front door's work read (its node notes; its run reads are metadata queries)
-  await expect.poll(() => page.evaluate(() => (window as any).__pendingAreas.length)).toBe(8);
+  // r13: the three area queries (T-335: no area-today) and the task tree's (re-read with every refresh); r16: the run and draft reads
+  // start beside it; T-302: and the front door's work read (its node notes; its run reads are metadata queries)
+  await expect.poll(() => page.evaluate(() => (window as any).__pendingAreas.length)).toBe(7);
   await expect(page.locator('.areas-status')).toHaveCount(0);
   await page.evaluate(async () => { for (const resolve of (window as any).__pendingAreas) await resolve(); });
  });
 
  test('forgetAreas discards an in-flight result while the hook remains mounted', async ({ page }) => {
   await bootAreas(page, 'seed', { queryDelay: 3000 });
-  // the four area queries (the task list's and the home's own reads, tasks and posts, are theirs)
-  await expect.poll(async () => (await calls(page, 'vault_query')).filter((c: any) => ['area', 'project', 'area-brief', 'area-today'].includes(c.args.tag)).length).toBe(4);
+  // the three area queries (the task list's and the home's own reads, tasks and posts, are theirs); T-335: never the retired area-today
+  await expect.poll(async () => (await calls(page, 'vault_query')).filter((c: any) => ['area', 'project', 'area-brief', 'area-today'].includes(c.args.tag)).length).toBe(3);
   await page.evaluate(() => (window as any).__forgetAreas());
   await page.waitForTimeout(3500);
   expect(await page.evaluate(() => localStorage.getItem('uni.areas.cache.v2'))).toBeNull();
