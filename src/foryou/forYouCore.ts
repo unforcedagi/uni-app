@@ -21,7 +21,8 @@ export type Place = { area: string | null; room: string | null; private: boolean
 export type Kind = "do" | "choose" | "look" | "tell" | "decision";
 /** An answer given on this device today, kept until midnight (the vault's own record is the ask's `answer`). */
 export type Answered = { id: string; what: string; answer: string; at: number; room: string | null; post: "sending" | "sent" | "failed" | "none"; error?: string | null;
-  /** 0.3.2: the card the ask was on: the card shows the answer as his line until its own line comes back from the vault. */ card?: string | null };
+  /** 0.3.2: the card the ask was on: the card shows the answer as his line until its own line comes back from the vault. */ card?: string | null;
+  /** T-335 Seen: he marked it seen (no words of his: never a line on the card). */ seen?: boolean };
 
 export type ForYouInput = {
   /** Live `task` notes (any owner: only Aaron's are kept) and open old `decision` notes. A note may come twice (both queries): it is kept once. */
@@ -60,7 +61,7 @@ export type Item = {
   default: { value: string; at: string | null; label: string } | null;
   /** The choices other than the default (a `choose` ask or an old decision). */
   options: string[];
-  /** The plain action when there is no option to pick: Done, Got it, Seen it. */
+  /** The plain action when there is no option to pick: Done (a do ask). A tell or look ask's one tap is Seen (T-335 Seen), drawn for every item. */
   action: string | null;
   link: string | null;
   /** The room the answer goes to (a name, no `#`) and the post it threads under. */
@@ -319,7 +320,7 @@ export function forYou(input: ForYouInput): ForYouView {
       what: rest, why: s(m.why_now),
       default: defValue ? { value: defValue, at: defAt, label } : null,
       options: choices,
-      action: choices.length ? null : kind === "tell" ? "Got it" : kind === "look" ? "Seen it" : kind === "decision" ? null : "Done",
+      action: choices.length || kind === "tell" || kind === "look" || kind === "decision" ? null : "Done",
       link: s(m.link) ?? s(m.url),
       replyRoom, replyRoot, footer, node, state, updatedAt: s(n.updatedAt), defaultAt: defAt,
       asked: s(m.asked_at) ?? s(m.asked) ?? s(m.created) ?? s(n.createdAt),
@@ -360,6 +361,21 @@ export function answerMeta(item: Pick<Item, "kind" | "options" | "default">, ans
   return m;
 }
 
+// ------------------------------------------------------------------ T-335 Seen (11-09): "I should really be able to just mark it as seen... to note that I'm aware of it"
+
+/** A tell or look ask closes on Seen; a do or choose ask stays open with its room (it still needs his steer later: the room asks again). */
+export const seenCloses = (kind: Kind): boolean => kind === "tell" || kind === "look";
+/** What Seen writes (uni-tasks `tasks.py seen` writes the same): who and when, and out of For you by the one rule's field, never an answer. A
+ *  tell or look ask's write closes it too (one compare-and-set on `state`); a do or choose ask's is a metadata patch on the revision shown. */
+export function seenMeta(by: string, at: string): { seen_at: string; seen_by: string; needs_aaron: false; needs_aaron_why: "seen" } {
+  return { seen_at: at, seen_by: by, needs_aaron: false, needs_aaron_why: "seen" };
+}
+/** The one quiet line its room is told (posted to the room, not addressed to its Uni: it wakes nobody; uni-tasks seen_words). */
+export function seenBody(item: Pick<Item, "tid" | "what" | "kind">): string {
+  const id = item.tid ?? item.what;
+  return seenCloses(item.kind) ? `${id}: seen.` : `${id}: seen. It stays open here until it needs my steer; ask again then.`;
+}
+
 // ------------------------------------------------------------------ 0.3.2: the card itself (tap a card's name anywhere: For you, the stream, an area)
 
 /** What a card is to him now, by shape (Daylight is greyscale): ● something on it is his, ◐ something on it is ready to look at, ○ it is moving,
@@ -395,7 +411,7 @@ const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").tri
 export function cardLines(card: CardView, answered: readonly Answered[] = []): CardLine[] {
   // (only a line of his written since: the same words answered last week are another answer; 10 min of clock slack)
   const back = (a: Answered) => card.lines.some((l) => l.mine && norm(l.text) === norm(a.answer) && (ms(l.at) ?? 0) >= a.at - 600_000);
-  const here = answered.filter((a) => a.card === card.path && !back(a)).map((a) => ({ at: new Date(a.at).toISOString(), text: a.answer, mine: true }));
+  const here = answered.filter((a) => a.card === card.path && !a.seen && !back(a)).map((a) => ({ at: new Date(a.at).toISOString(), text: a.answer, mine: true }));
   return [...here, ...card.lines].sort((a, b) => (ms(b.at) ?? 0) - (ms(a.at) ?? 0));
 }
 

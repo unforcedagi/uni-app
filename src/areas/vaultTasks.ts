@@ -245,6 +245,21 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     }
   }
 
+  /**
+   * T-335 Seen: he is aware of an ask. A tell or look ask closes (one compare-and-set on `state`, `from` -> `done`, with `seen_at`, `seen_by`
+   * and needs_aaron false); a do or choose ask stays open with its room (a metadata patch on the revision shown). Rust checks the keys.
+   */
+  async function seen(taskId: string, from: AnyState, ifUpdatedAt: string, closes: boolean, metadata: Record<string, unknown>): Promise<WriteResult> {
+    if (!ifUpdatedAt) return { ok: false, kind: "conflict", message: "no revision: reload the ask first" };
+    if (!closes) return patchMeta(taskId, metadata, ifUpdatedAt);
+    try {
+      return ok(await call("vault_transition", { vault: name(), id: taskId, from, to: "done", ifUpdatedAt, metadata }));
+    } catch (e) {
+      const message = String(e);
+      return { ok: false, kind: failureKind(message), message };
+    }
+  }
+
   /** Snooze: `snoozed_until` (a date); `null` clears it. */
   const snooze = (taskId: string, until: string | null, updatedAt: string) => patchMeta(taskId, { snoozed_until: until }, updatedAt);
   /** Priority: now, soon or someday; `null` clears it (back to unsorted). */
@@ -389,7 +404,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     askCache.clear(); checkCache.clear(); askOwner = ""; checkOwner = "\u0000";
     try { for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && /^uni\.(asks|checks|support)\.v\d+:/.test(k)) localStorage.removeItem(k); } } catch { /* nothing kept */ }
   }
-  return { prioritize, forgetKept, setAskOwner, loadTree, loadTagged, loadClosed, loadAsks, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, answer, decide, snooze, setPriority };
+  return { prioritize, forgetKept, setAskOwner, loadTree, loadTagged, loadClosed, loadAsks, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, answer, seen, decide, snooze, setPriority };
 }
 
 export const vaultTasks = createVaultTasks();

@@ -562,7 +562,7 @@ impl VaultClient {
         check_vault(vault)?;
         let mut args = transition_args(vault, id, field, &from, &to, if_updated_at)?;
         if let Some(m) = metadata {
-            check_answered_patch(&m, &to)?;
+            check_transition_meta(&m, &to)?;
             args["metadata"] = m;
         }
         let v = self.call("update-note", args).await?;
@@ -713,10 +713,10 @@ impl VaultClient {
         if id.trim().is_empty() || if_updated_at.is_empty() || !metadata.is_object() {
             return Err(Error::Invalid("metadata patch needs an id, an object and if_updated_at".into()));
         }
-        check_snooze_patch(&metadata)?;
+        check_meta_patch(&metadata)?;
         let note = self.get_note(vault, id).await?;
         if !has_task_tag(&note) {
-            return Err(Error::Invalid("snooze applies only to task and decision notes".into()));
+            return Err(Error::Invalid("snooze and seen apply only to task and decision notes".into()));
         }
         let v = self
             .rpc(
@@ -1257,6 +1257,42 @@ fn check_snooze_patch(metadata: &Value) -> Result<()> {
     }
 }
 
+/// T-335 Seen: what may be written by `seen`: `seen_at` (a time), `seen_by` (a short name, never `uni-default`), and out of For you by the
+/// one rule's field (`needs_aaron: false`, `needs_aaron_why: "seen"`), all four and nothing else. Never an answer: Seen has no words of his.
+fn check_seen_patch(metadata: &Value) -> Result<()> {
+    let refuse = |why: &str| Err(Error::Invalid(why.into()));
+    let Some(o) = metadata.as_object() else { return refuse("seen takes an object of metadata") };
+    if o.len() != SEEN_KEYS.len() || !SEEN_KEYS.iter().all(|k| o.contains_key(*k)) {
+        return refuse("seen writes `seen_at`, `seen_by`, `needs_aaron` and `needs_aaron_why`, and nothing else");
+    }
+    let at_ok = o["seen_at"].as_str().is_some_and(|s| !s.trim().is_empty() && s.len() <= 100);
+    let by_ok = o["seen_by"].as_str().is_some_and(|b| {
+        b != "uni-default" && b.len() <= 64 && !b.is_empty() && b.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
+    });
+    if !at_ok || !by_ok || o["needs_aaron"] != json!(false) || o["needs_aaron_why"] != json!("seen") {
+        return refuse("seen: `seen_at` a time, `seen_by` a short name (not `uni-default`), `needs_aaron` false, `needs_aaron_why` \"seen\"");
+    }
+    Ok(())
+}
+const SEEN_KEYS: [&str; 4] = ["seen_at", "seen_by", "needs_aaron", "needs_aaron_why"];
+
+/// What a metadata patch on a task may hold: a snooze (`snoozed_until` alone) or Seen on an ask that stays open (a do or choose ask).
+fn check_meta_patch(metadata: &Value) -> Result<()> {
+    if metadata.get("seen_at").is_some() { check_seen_patch(metadata) } else { check_snooze_patch(metadata) }
+}
+
+/// What may ride with a state compare-and-set: Seen closing a tell or look ask (only to `done`), else an answer (check_answered_patch).
+fn check_transition_meta(metadata: &Value, to: &Value) -> Result<()> {
+    if metadata.get("seen_at").is_none() {
+        return check_answered_patch(metadata, to);
+    }
+    check_seen_patch(metadata)?;
+    if to.as_str() != Some("done") {
+        return Err(Error::Invalid("seen closes a tell or look ask: `to` must be `done`".into()));
+    }
+    Ok(())
+}
+
 /// The update-note arguments for a state change (r16): the compare-and-set on `state` and the revision whose
 /// instruction the user saw, in one conditional update (the vault checks both or writes nothing).
 fn transition_args(vault: &str, id: &str, field: &str, from: &Value, to: &Value, if_updated_at: &str) -> Result<Value> {
@@ -1650,6 +1686,36 @@ mod tests {
         assert!(decide_args("uni", "N1", &json!("open"), &json!("decided"), md.clone(), "").is_err());
         assert!(decide_args("uni", "N1", &json!("open"), &json!("archived"), md.clone(), "x").is_err());
         assert!(decide_args("uni", "N1", &json!("decided"), &json!("open"), md, "x").is_err());
+    }
+
+    #[test]
+    fn seen_writes_who_and_when_and_takes_it_out_of_for_you_and_nothing_else() {
+        let ok = json!({"seen_at": "2026-11-11T12:00:00.000Z", "seen_by": "aaron", "needs_aaron": false, "needs_aaron_why": "seen"});
+        // a do or choose ask: a metadata patch; a tell or look ask: with the close (to done), never to another state
+        assert!(check_seen_patch(&ok).is_ok());
+        assert!(check_meta_patch(&ok).is_ok());
+        assert!(check_transition_meta(&ok, &json!("done")).is_ok());
+        assert!(check_transition_meta(&ok, &json!("doing")).is_err());
+        // all four, exactly: no answer rides with it (no words of his for the card sync to relay), no other field
+        for k in ["seen_at", "seen_by", "needs_aaron", "needs_aaron_why"] {
+            let mut m = ok.clone();
+            m.as_object_mut().unwrap().remove(k);
+            assert!(check_seen_patch(&m).is_err(), "{k}");
+        }
+        for (k, v) in [("answer", json!("Seen")), ("state", json!("done")), ("owner", json!("room:x"))] {
+            let mut m = ok.clone();
+            m[k] = v;
+            assert!(check_seen_patch(&m).is_err(), "{k}");
+            assert!(check_meta_patch(&m).is_err(), "{k}");
+        }
+        assert!(check_seen_patch(&json!({"seen_at": "x", "seen_by": "aaron", "needs_aaron": true, "needs_aaron_why": "seen"})).is_err());
+        assert!(check_seen_patch(&json!({"seen_at": "x", "seen_by": "aaron", "needs_aaron": false, "needs_aaron_why": "yes"})).is_err());
+        assert!(check_seen_patch(&json!({"seen_at": "", "seen_by": "aaron", "needs_aaron": false, "needs_aaron_why": "seen"})).is_err());
+        assert!(check_seen_patch(&json!({"seen_at": "x", "seen_by": "uni-default", "needs_aaron": false, "needs_aaron_why": "seen"})).is_err());
+        assert!(check_seen_patch(&json!({"seen_at": "x", "seen_by": "a b", "needs_aaron": false, "needs_aaron_why": "seen"})).is_err());
+        // the snooze patch is unchanged
+        assert!(check_meta_patch(&json!({"snoozed_until": "2026-11-12"})).is_ok());
+        assert!(check_meta_patch(&json!({"snoozed_until": "2026-11-12", "seen_at": "x"})).is_err());
     }
 
     #[test]

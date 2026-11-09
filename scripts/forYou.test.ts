@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { buildTaskTree, isTaskRow, parseTask } from "../src/areas/taskCore.ts";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree } from "../src/areas/treeCore.ts";
-import { answerBody, answerMeta, areaCards, awayLine, placeDormant, treeDormant, type PlaceNote, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
+import { seenBody, seenCloses, seenMeta, answerBody, answerMeta, areaCards, awayLine, placeDormant, treeDormant, type PlaceNote, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -65,7 +65,7 @@ check("no card: the node's area is where; no default: none shown, the plain acti
   assert.equal(b.action, "Done");
   assert.equal(b.footer, "Goes to #north-field");
   assert.equal(c.default, null, "no_default wins over a stray default");
-  assert.equal(c.action, "Got it");
+  assert.equal(c.action, null, "T-335 Seen: a tell ask's one tap is Seen (it closes), not a second Got it");
 });
 
 check("the room an answer goes to: reply_room, else the ask's room, else its node's; with none found here, the footer says so", () => {
@@ -119,11 +119,11 @@ check("T-335 one home: For you is what uni-tasks marked needs_aaron; his asks it
   assert.equal(awayLine(0), "");
 });
 
-check("look asks are Ready to look at, not Yours; their action is Seen it, their link kept", () => {
+check("look asks are Ready to look at, not Yours; their one tap is Seen (no second action), their link kept", () => {
   const v = view([task("l", "T-20 Look at the photos", { node: "Areas/Kiln Studio", kind: "look", no_default: true, link: "https://example.com/p" }), task("y", "T-21 x", { node: "Areas/Kiln Studio" })]);
   assert.deepEqual(v.look.map((i) => i.id), ["l"]);
   assert.deepEqual(v.yours.map((i) => i.id), ["y"]);
-  assert.equal(v.look[0].action, "Seen it");
+  assert.equal(v.look[0].action, null);
   assert.equal(v.look[0].link, "https://example.com/p");
   assert.equal(v.count, 1, "the count is what is yours");
 });
@@ -391,6 +391,45 @@ check("code-review 11-08: no room list yet keeps the asks (never all away); a de
   const all = [n("a", "Areas/Quiet Wood", "area", "resting"), n("p", "Projects/Path", "project", "foreground", { parent: "Areas/Quiet Wood" }),
     n("s", "Projects/Path/Sub", "project", "foreground", { parent: "Projects/Path" })];
   assert.equal(placeDormant(all, "Projects/Path/Sub"), true);
+});
+
+// T-335 Seen (11-09): "I should really be able to just mark it as seen... to note that I'm aware of it"
+check("Seen: a tell or look ask closes; a do or choose ask stays open with its room", () => {
+  assert.equal(seenCloses("tell"), true);
+  assert.equal(seenCloses("look"), true);
+  assert.equal(seenCloses("do"), false);
+  assert.equal(seenCloses("choose"), false);
+  assert.equal(seenCloses("decision"), false);
+});
+
+check("Seen writes seen_at and seen_by and takes it out of For you (needs_aaron false, why seen); never an answer", () => {
+  const m = seenMeta("aaron", "2026-11-11T12:00:00.000Z");
+  assert.deepEqual(m, { seen_at: "2026-11-11T12:00:00.000Z", seen_by: "aaron", needs_aaron: false, needs_aaron_why: "seen" });
+  assert.ok(!("answer" in m), "no answer: the card sync has no words of his to relay");
+});
+
+check("Seen tells its room in one quiet line, the same words uni-tasks prints", () => {
+  const v = view([task("t", "T-31 Know this", { node: "Areas/North Field", kind: "tell" }), task("d", "T-32 Do this", { node: "Areas/North Field", kind: "do" })]);
+  const [t, d] = [v.yours.find((x) => x.id === "t")!, v.yours.find((x) => x.id === "d")!];
+  assert.equal(seenBody(t), "T-31: seen.");
+  assert.equal(seenBody(d), "T-32: seen. It stays open here until it needs my steer; ask again then.");
+});
+
+check("a seen ask leaves For you and its count at once, is never a card line of his, and isn't 'waiting on its room'", () => {
+  const asks = [task("d", "T-32 Do this", { node: "Projects/Glaze Tests", kind: "do", card: "Cards/Kiln Studio/Glaze Tests" }), task("y", "T-33 Other", { node: "Areas/North Field" })];
+  const before = view(asks, [GLAZE]);
+  assert.equal(before.total, 2);
+  const seen = { id: "d", what: "Do this", answer: "Seen", at: NOW, room: "glaze-tests", post: "sent" as const, card: "Cards/Kiln Studio/Glaze Tests", seen: true };
+  const after = view(asks, [GLAZE], { answered: [seen] });
+  assert.deepEqual([...after.yours, ...after.more].map((i) => i.id), ["y"]);
+  assert.equal(after.total, 1);
+  assert.equal(after.away, 0);
+  const c = after.cards.get("Cards/Kiln Studio/Glaze Tests")!;
+  assert.ok(!cardLines(c, after.answered).some((l) => l.mine), "Seen is not his words on the card");
+  // as the vault holds it after the write (and after the sweep): not counted anywhere
+  const stored = view([task("d", "T-32 Do this", { node: "Areas/North Field", kind: "do", seen_at: iso(NOW), needs_aaron: false, needs_aaron_why: "seen" })]);
+  assert.equal(stored.total, 0);
+  assert.equal(stored.away, 0, "seen is his choice, not an ask that went back to its room");
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

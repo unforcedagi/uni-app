@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRecorder } from "../recorder";
 import { transcribe } from "./useForYou";
-import { awayLine, cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine } from "./forYouCore";
+import { seenCloses, awayLine, cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine } from "./forYouCore";
 import { quietLine } from "../projects/FrontDoor";
 import { headWords } from "./scope";
 import { dialogOpen, openDialog } from "../areas/focusTrap";
@@ -16,6 +16,8 @@ import "./foryou.css";
 export type ForYouProps = {
   view: ForYouView;
   answer: (item: Item, text: string) => void | Promise<void>;
+  /** T-335 Seen: he is aware of it (a tell or look ask closes; a do or choose ask stays open with its room, out of For you). */
+  seen: (item: Item) => void | Promise<void>;
   retry: (id: string) => void;
   errors: Record<string, string>;
   busy: ReadonlySet<string>;
@@ -105,7 +107,7 @@ function Said({ text, footer, onSend, onCancel }: { text: string; footer: string
 }
 
 /** What an item needs to be answered from wherever it is drawn (For you, or the card). */
-export type ItemActions = Pick<ForYouProps, "view" | "answer" | "retry" | "errors" | "busy" | "onOpenAsk">;
+export type ItemActions = Pick<ForYouProps, "view" | "answer" | "seen" | "retry" | "errors" | "busy" | "onOpenAsk">;
 
 function ItemView({ item, p, onCard, inCard = false }: { item: Item; p: ItemActions; onCard: ((path: string) => void) | null; inCard?: boolean }) {
   const busy = p.busy.has(item.id);
@@ -128,6 +130,10 @@ function ItemView({ item, p, onCard, inCard = false }: { item: Item; p: ItemActi
       {item.options.map((o) => <button key={o} type="button" className="fy-opt" disabled={busy} onClick={() => go(o)}>{o}</button>)}
       {item.action && <button type="button" className="fy-opt fy-act" disabled={busy} onClick={() => go(item.action!)}>{item.action}</button>}
       {item.link && <a className="fy-opt fy-open" href={item.link} target="_blank" rel="noreferrer">Open ↗</a>}
+      {/* T-335 Seen: on every item. A tell or look ask closes; a do or choose ask stays open with its room (it says so) */}
+      <button type="button" className="fy-opt fy-seen" disabled={busy} onClick={() => void p.seen(item)}
+        title={seenCloses(item.kind) ? "Seen: ends it; its room is told" : "Seen: out of For you; it stays with its room until it needs you"}
+        aria-label={`Seen: ${item.what} (${seenCloses(item.kind) ? "ends it; its room is told" : "out of For you; it stays with its room until it needs you"})`}>Seen</button>
       <HoldToTalk item={item} onSend={go} disabled={busy} />
     </div>
     {!item.default && item.band === "yours" && <p className="fy-nodefault">No default: waits for you</p>}
@@ -139,7 +145,7 @@ function ItemView({ item, p, onCard, inCard = false }: { item: Item; p: ItemActi
 function DoneLine({ a, retry }: { a: Answered; retry: (id: string) => void }) {
   return <li className="fy-done" data-post={a.post}>
     <Mark kind="moving" />
-    <span className="fy-done-t"><b>{a.what}</b> · “{a.answer}”{a.room ? ` → #${a.room}` : ""}</span>
+    <span className="fy-done-t"><b>{a.what}</b> · {a.seen ? "seen" : `“${a.answer}”`}{a.room ? ` → #${a.room}` : ""}</span>
     {a.post === "failed" ? <span className="fy-done-fail" role="alert">Couldn't post in #{a.room}{a.error ? `: ${a.error}` : ""} <button type="button" className="fy-link-btn" onClick={() => retry(a.id)}>Retry</button></span>
       : a.post === "sending" ? <span className="fy-at">sending…</span>
       : a.post === "none" ? <span className="fy-done-fail" role="alert">Not posted yet: {a.error ?? "no room to post in"} <button type="button" className="fy-link-btn" onClick={() => retry(a.id)}>Retry</button></span>

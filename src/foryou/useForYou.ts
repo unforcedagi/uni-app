@@ -10,7 +10,7 @@ import type { RawNote, Task } from "../areas/taskCore";
 import { activeProfile } from "../areas/profile";
 import { findUniMember } from "../uniActions";
 import { relayAccepted } from "../voiceOutbox";
-import { answerBody, answerMeta, forYou, type Answered, type ForYouView, type Item, type Note, type Place } from "./forYouCore";
+import { answerBody, answerMeta, seenBody, seenCloses, seenMeta, forYou, type Answered, type ForYouView, type Item, type Note, type Place } from "./forYouCore";
 
 type Member = { pubkey: string; name: string };
 /** A room as the app knows it: its channel id and name. */
@@ -35,10 +35,11 @@ const looked = new Map<string, number | null>();
 const sinceOf = (owner: string) => { if (!looked.has(owner)) looked.set(owner, read<number | null>(lookedKey(owner), null)); return looked.get(owner)!; };
 
 /** Aaron's message in a room, addressed to the room's Uni when it is there (as every message to it is). A reply whose root this device
- *  hasn't cached yet reads the rooms once and tries again. */
-async function postIn(channel: string, body: string, root: string | null): Promise<void> {
+ *  hasn't cached yet reads the rooms once and tries again. `quiet` (T-335 Seen): addressed to no one and threaded under nothing, so it wakes
+ *  no room's Uni (rooms answer only when addressed or replied to); the line sits in the room for whoever reads it next. */
+async function postIn(channel: string, body: string, root: string | null, quiet = false): Promise<void> {
   const send = async () => {
-    const uni = findUniMember(await invoke<Member[]>("get_members", { channel }).catch(() => [] as Member[]));
+    const uni = quiet ? null : findUniMember(await invoke<Member[]>("get_members", { channel }).catch(() => [] as Member[]));
     try { await invoke("post_message", { channel, body, replyTo: root, recipients: uni ? [uni.pubkey] : [], media: [] }); }
     catch (e) { if (!relayAccepted(e)) throw e; }
   };
@@ -121,7 +122,7 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
       change(e.id, (x) => ({ ...x, channel: room.id }));
     }
     change(e.id, (x) => ({ ...x, post: "sending", error: null }));
-    try { await postIn(channel, e.body, e.root); change(e.id, (x) => ({ ...x, post: "sent", error: null })); }
+    try { await postIn(channel, e.body, e.seen ? null : e.root, !!e.seen); change(e.id, (x) => ({ ...x, post: "sent", error: null })); }
     catch (err) { change(e.id, (x) => ({ ...x, post: "failed", error: words(err) })); }
   }, [o.roomOf]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -157,8 +158,37 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
     void readCards();
   }, [o.roomOf, o.refresh, post, readCards]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** T-335 Seen: he is aware of it. The write first (a tell or look ask closes; a do or choose ask stays open with its room, out of For you);
+   *  only once it is written is the room told, in one quiet line. Kept on the "Answered today" line like an answer (with Retry if the line
+   *  didn't go), never as his words on the card. */
+  const seen = useCallback(async (item: Item) => {
+    if (item.legacy || inFlight.current.has(item.id)) return;
+    inFlight.current.add(item.id);
+    setBusy((b) => new Set(b).add(item.id));
+    setErrors(({ [item.id]: _, ...rest }) => rest);
+    const closes = seenCloses(item.kind);
+    let r: Awaited<ReturnType<typeof vaultTasks.seen>>;
+    try { r = await vaultTasks.seen(item.id, item.state as Task["state"], item.updatedAt ?? "", closes, seenMeta(activeProfile().me, new Date().toISOString())); }
+    catch (e) { r = { ok: false, kind: "error", message: words(e) }; }
+    finally {
+      setBusy((b) => { const n = new Set(b); n.delete(item.id); return n; });
+      inFlight.current.delete(item.id);
+    }
+    if (!r.ok) {
+      setErrors((x) => ({ ...x, [item.id]: r.kind === "conflict" ? "It changed elsewhere. Showing the latest." : `Couldn't mark it seen: ${words(r.message)}` }));
+      o.refresh();
+      return;
+    }
+    const room = o.roomOf(item);
+    const entry: Entry = { id: item.id, what: item.what, answer: "Seen", seen: true, at: Date.now(), room: room?.name.replace(/^#/, "") ?? item.replyRoom, post: room ? "sending" : "none",
+      channel: room?.id ?? null, root: null, body: seenBody(item), card: item.where.cardPath };
+    setEntries((list) => keep([...list.filter((e) => e.id !== item.id), entry]));
+    await post(entry);
+    o.refresh();
+  }, [o.roomOf, o.refresh, post]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const retry = useCallback((id: string) => { const e = entries.find((x) => x.id === id); if (e) void post(e); }, [entries, post]);
-  return { view, answer, retry, errors, busy, cardsFailed };
+  return { view, answer, seen, retry, errors, busy, cardsFailed };
 }
 
 /** Speech to text on the hub (the app's transcription path), for hold-to-talk. */
