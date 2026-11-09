@@ -222,6 +222,10 @@ export function placeDormant(all: readonly PlaceNote[], ref: string): boolean | 
   const areas = all.filter((a) => a.kind === "area" && a.id !== n.id && (mine.has(a.id) || mine.has(a.path) || (a.links ?? []).map(refPath).some((r) => r === n.id || r === n.path)));
   return areas.length > 0 && areas.every(off);
 }
+/** placeDormant over a built tree: its live nodes and its archived and done ones (the tree keeps those apart, and a dormant place is often one). */
+export function treeDormant(tree: { nodes: ReadonlyMap<string, PlaceNote>; archived: readonly PlaceNote[] }, ref: string): boolean | null {
+  return placeDormant([...tree.nodes.values(), ...tree.archived], ref);
+}
 /** The quiet line for what went back: "3 waiting on their rooms" ("" for none). */
 export const awayLine = (n: number): string => (n ? `${n} waiting on ${n === 1 ? "its room" : "their rooms"}` : "");
 

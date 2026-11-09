@@ -3,7 +3,9 @@
 process.env.TZ = "UTC";
 import assert from "node:assert/strict";
 import { buildTaskTree, isTaskRow, parseTask } from "../src/areas/taskCore.ts";
-import { answerBody, answerMeta, areaCards, awayLine, placeDormant, type PlaceNote, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
+import { parseArea, parseProject } from "../src/areas/areasCore.ts";
+import { buildTree } from "../src/areas/treeCore.ts";
+import { answerBody, answerMeta, areaCards, awayLine, placeDormant, treeDormant, type PlaceNote, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -393,6 +395,16 @@ check("review 11-08: a place isn't live when it, or every area it is linked to, 
   assert.equal(placeDormant(all, "p6"), false, "no area at all: live");
   assert.equal(placeDormant(all, "Areas/North Field"), false);
   assert.equal(placeDormant(all, "Projects/Unknown"), null);
+});
+
+check("review 11-08 (2): through the app's own tree: an archived project, and a project linked only to an archived area, aren't live", () => {
+  const a = (id: string, name: string, meta: Record<string, unknown> = {}) => parseArea({ id, path: `Areas/${name}`, tags: ["area"], content: `# ${name}`, metadata: { status: "foreground", ...meta } })!;
+  const p = (id: string, name: string, meta: Record<string, unknown> = {}) => parseProject({ id, path: `Projects/${name}`, tags: ["project"], content: `# ${name}`, metadata: meta })!;
+  const tree = buildTree([a("a-shed", "Old Shed", { status: "archived" }), a("a-field", "North Field"),
+    p("p-shed", "Shed Work", { links: ["a-shed"] }), p("p-gone", "Gone Project", { status: "archived", links: ["a-field"] }), p("p-gate", "Gate Path", { links: ["a-field"] })]);
+  assert.equal(treeDormant(tree, "Projects/Shed Work"), true);
+  assert.equal(treeDormant(tree, "p-gone"), true);
+  assert.equal(treeDormant(tree, "Projects/Gate Path"), false);
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

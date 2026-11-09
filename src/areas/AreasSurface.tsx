@@ -48,7 +48,7 @@ import { AllEmpty, FrontDoor, type Door, type NewRoom, type Scope } from "../pro
 import { scopeForYou } from "../foryou/scope";
 import { AreaCardList, CardPanel, ForYou, useCardBeside } from "../foryou/ForYou";
 import { useForYou } from "../foryou/useForYou";
-import { areaCards, cardItems, cardMark, cardMatcher, DORMANT, placeDormant, type CardMark, type CardView, type Item as ForYouItem, type Place } from "../foryou/forYouCore";
+import { areaCards, cardItems, cardMark, cardMatcher, DORMANT, treeDormant, type CardMark, type CardView, type Item as ForYouItem, type Place } from "../foryou/forYouCore";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
 import { plainWords } from "../projects/live";
@@ -319,18 +319,12 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const rootAsk = !!node && (node === ROOT || !!tasks.tree?.rootRefs.has(node));
     return { area: name, areaPath: top, room: room ? roomSlug(room.name) : rootAsk ? fyRootRoom : null, private: !!priv, live: !fyDormant(node) };
   }, [tasks.tree, data, roomRefs, uniRef]); // eslint-disable-line react-hooks/exhaustive-deps
-  /** The live room the root's work went to: the Uni node's `room_fallback` once its room is marked archived; else null. */
-  const fyRootRoom = useMemo(() => {
-    const r = (data?.areas ?? []).find((a) => !!tasks.tree?.rootRefs.has(a.id) || !!tasks.tree?.rootRefs.has(a.path));
-    const fb = r && /^(archived|missing)$/i.test(String(r.metadata.room_status ?? "")) && typeof r.metadata.room_fallback === "string" ? roomByName(roomRefs, r.metadata.room_fallback) : null;
-    return fb ? roomSlug(fb.name) : null;
-  }, [data?.areas, tasks.tree, roomRefs]);
   /** A node (path or id) that isn't live: it is archived, resting or done, or every area it is linked to is (archived ones included: the trees
    *  drop them), as uni-tasks for_you.dormant reads it. A node no list knows is taken as live. */
   function fyDormant(p: string | null): boolean {
     if (!p) return false;
     const path = tasks.tree?.idPath.get(p) ?? p;
-    const known = placeDormant(data?.areas ?? [], path) ?? placeDormant(data?.areas ?? [], p);
+    const known = data ? treeDormant(data.tree, path) ?? treeDormant(data.tree, p) : null;
     if (known !== null) return known;
     const t = tasks.tree?.byPath.get(path);
     return !!t && DORMANT.test(t.status);
@@ -357,6 +351,14 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     }
     return null;
   }, [roomRefs, data?.areas]);
+  /** The live room the root's work went to: the Uni node's `room_fallback` once its room is marked archived; else null. */
+  const fyRootRoom = useMemo(() => {
+    const r = (data?.areas ?? []).find((a) => !!tasks.tree?.rootRefs.has(a.id) || !!tasks.tree?.rootRefs.has(a.path));
+    const fb = r && /^(archived|missing)$/i.test(String(r.metadata.room_status ?? "")) && typeof r.metadata.room_fallback === "string" ? roomByName(roomRefs, r.metadata.room_fallback) : null;
+    // (the app reads area and project notes; the Uni node itself may not be among them: then #Uni's own marked fallback, through the project
+    // that names #Uni, as fyLiveRoom resolves any archived room)
+    return fb ? roomSlug(fb.name) : fyLiveRoom("uni");
+  }, [data?.areas, tasks.tree, roomRefs, fyLiveRoom]);
   /** 0.3.0 For you: the room an answer goes to: its `reply_room` (else its room, else its node's), by id or name. */
   // the room its footer names, exactly: a named room that isn't here is no room (the answer waits, owed), never another room
   const answerRoom = useCallback((item: ForYouItem) => askRoomOf({ room: item.replyRoom, node: item.node }, roomRefs, () => null), [roomRefs]);
