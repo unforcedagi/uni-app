@@ -91,7 +91,8 @@ test.describe('r30', () => {
 
 
 test.describe('r30 words', () => {
-  test('1: every sample ask shows its whole stored next in its row, word for word (work view)', async ({ page }) => {
+  // T-335 one home: skipped: asserts a retired app rule (3-day recheck, step-text superseded, tidy outline, runs counted). What needs Aaron is uni-tasks' needs_aaron (needs.py; scripts/oneHome.test.ts).
+  test.skip('1: every sample ask shows its whole stored next in its row, word for word (work view)', async ({ page }) => {
     test.skip(!wide(page), 'work view');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
@@ -168,7 +169,8 @@ test.describe('r30 sheet', () => {
 
 test.describe('r30 confirming', () => {
   const NEXT = (w: string) => `Say go on the ${w} ledger from the placeholder books`;
-  test('4: the line says requests, and where it counts; each list row its reason; no Answer anyway on a row; the sheet has it after the reason', async ({ page }) => {
+  // T-335 one home: skipped: asserts a retired app rule (3-day recheck, step-text superseded, tidy outline, runs counted). What needs Aaron is uni-tasks' needs_aaron (needs.py; scripts/oneHome.test.ts).
+  test.skip('4: the line says requests, and where it counts; each list row its reason; no Answer anyway on a row; the sheet has it after the reason', async ({ page }) => {
     test.skip(!wide(page), 'one wide window');
     await boot(page);
     await add(page, { id: 'r1', title: 'T-901 Placeholder chat after', node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT('amber') } });

@@ -135,7 +135,7 @@ test('the same run, with the rooms read: the id says it is private, so it never 
   await expect.poll(() => page.evaluate(() => Object.entries(localStorage).filter(([k]) => k.startsWith('uni.work.')).map(([, v]) => v as string).join(''))).toContain('A session in a private place');
 });
 
-test("a private run waiting on its decision lights no public door; a public one does", async ({ page }) => {
+test("a run waiting on a decision lights no door, private or public: a blocked run is its room's (T-335 one home), only an ask needs you", async ({ page }) => {
   const asking = (now: number, id: string, room: string) => run(now, id, 'A choice to make', { node: 'area-guild', state: 'decision', room });
   await bootProjects(page, { moreRuns: (now) => [asking(now, 'run-ask-private', 'sanctum')] });
   await home(page);
@@ -144,7 +144,8 @@ test("a private run waiting on its decision lights no public door; a public one 
   await expect(door(page, 'Guild').locator('.fd-need-n')).toHaveCount(0);
   await bootProjects(page, { moreRuns: (now) => [asking(now, 'run-ask-public', 'guild')] });
   await home(page);
-  await expect(door(page, 'Guild').locator('.fd-need-n')).toHaveText(/1 for you/);
+  await page.waitForTimeout(800);
+  await expect(door(page, 'Guild').locator('.fd-need-n')).toHaveCount(0);
 });
 
 test('nothing unfiled: the home says nothing about it, and a room with only projects has no extra tab', async ({ page }) => {

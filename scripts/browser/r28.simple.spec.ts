@@ -59,7 +59,8 @@ async function rowsWhole(rows: Locator) {
 }
 
 test.describe('r28', () => {
-  test('line 1+2: Needs you holds only confirmed asks; the rest is one quiet line, a plain list, never counted, and never a dot', async ({ page }) => {
+  // T-335 one home: skipped: asserts a retired app rule (3-day recheck, step-text superseded, tidy outline, runs counted). What needs Aaron is uni-tasks' needs_aaron (needs.py; scripts/oneHome.test.ts).
+  test.skip('line 1+2: Needs you holds only confirmed asks; the rest is one quiet line, a plain list, never counted, and never a dot', async ({ page }) => {
     test.skip(!wide(page), 'work view');
     await boot(page);
     await add(page, { id: 'c1', title: 'T-601 Placeholder alpha', node: 'Areas/Techne', meta: { next: 'Say go on alpha' } });                                   // confirmed
@@ -120,7 +121,8 @@ test.describe('r28', () => {
     await doorSays(page, 'Techne', rowCount);
   });
 
-  test('line 1: an unrelated edit never confirms an ask: a fresh updated_at with no asked_at is a recheck', async ({ page }) => {
+  // T-335 one home: skipped: asserts a retired app rule (3-day recheck, step-text superseded, tidy outline, runs counted). What needs Aaron is uni-tasks' needs_aaron (needs.py; scripts/oneHome.test.ts).
+  test.skip('line 1: an unrelated edit never confirms an ask: a fresh updated_at with no asked_at is a recheck', async ({ page }) => {
     test.skip(!wide(page), 'work view');
     await boot(page);
     await add(page, { id: 'e1', title: 'T-611 Placeholder edited', node: 'Areas/Techne', asked_at: null, updatedAt: '2026-10-14T08:59:00.000Z', meta: { next: 'Say go on edited' } });
@@ -132,7 +134,8 @@ test.describe('r28', () => {
     await expect(section(page, 'Needs you').locator('.cp-recheck-item').filter({ hasText: 'Say go on edited' })).toHaveCount(1);
   });
 
-  test('line 3: a run waiting on the user\'s answer is a row whose step is the question; "in #Uni" is its place; counted once with the asks, deduplicated by task', async ({ page }) => {
+  // T-335 one home: skipped: an old Decisions/ note is the record, not an ask (never in Needs you); this row/sheet is unreachable. Retire the UI with the app-internals piece.
+  test.skip('line 3: a run waiting on the user\'s answer is a row whose step is the question; "in #Uni" is its place; counted once with the asks, deduplicated by task', async ({ page }) => {
     test.skip(!wide(page), 'work view');
     await boot(page);
     await add(page, { id: 'w1', title: 'T-631 Placeholder go', node: 'Areas/Techne', meta: { next: 'Say go on placeholder go' } });

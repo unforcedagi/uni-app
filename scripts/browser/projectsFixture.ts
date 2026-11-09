@@ -85,7 +85,10 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
     const rooms = () => notes.rooms.map((r: any) => { const list = msgs[r.id] ?? []; const last = list[list.length - 1]; return { id: r.id, name: r.name, unread: 0, mentions: false, last_message: last?.body ?? null, last_ts: last?.ts ?? null }; });
     const byTag = (tag: string) => tag === 'node' ? notes.nodes : tag === 'area' ? notes.nodes.filter((x: any) => x.tags.includes('area')) : tag === 'project' ? notes.nodes.filter((x: any) => x.tags.includes('project'))
       : tag === 'run' ? notes.runs : tag === 'task' ? notes.tasks : [];
-    const page = (rows: any[], a: any) => JSON.parse(JSON.stringify(rows.slice(a.offset ?? 0, (a.offset ?? 0) + (a.limit ?? 100))));
+    // T-335 one home: tasks as uni-tasks' sweep leaves them, `needs_aaron` on each (scripts/swept.ts's stamp, inline: this runs in the page)
+    const swept = (c: any) => { const m = c.metadata; if (!m || !(c.tags ?? []).includes('task') || 'needs_aaron' in m) return c; const his = [m.owner, m.waiting_on].some((v: any) => /^(person:|@)?aaron$/i.test(String(v ?? '').trim()));
+      m.needs_aaron = ['open', 'doing', 'waiting'].includes(String(m.state)) && his && String(m.priority ?? '').toLowerCase() !== 'someday' && !m.superseded_by && !m.answered_at; return c; };
+    const page = (rows: any[], a: any) => JSON.parse(JSON.stringify(rows.slice(a.offset ?? 0, (a.offset ?? 0) + (a.limit ?? 100)))).map(swept);
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
       transformCallback: (cb: any) => { cbs.push(cb); return cbs.length - 1; },

@@ -48,10 +48,11 @@ for (const nearOff of [false, true]) {
     test('the tree and the counts are the same with ids as with paths', async ({ page }) => {
       await open(page, 'Techne');
       await work(page);
-      await expect.poll(() => total(page)).toBe('7');
+      // (T-335 one home: an old Decisions/ note is the record, not an ask: Techne's open one is no longer in its work)
+      await expect.poll(() => total(page)).toBe('6');
       await open(page, 'COhere 2026');
       await work(page);
-      await expect.poll(() => total(page)).toBe('4');
+      await expect.poll(() => total(page)).toBe('3');     // (its old Decisions/ note too)
       // the Brief named by id is the one shown
       await expect(page.getByText('Venue is held for Oct 15')).toBeVisible();
       expect(await fits(page)).toBe(true);
@@ -60,7 +61,8 @@ for (const nearOff of [false, true]) {
     test('r12: the whole tree\'s tasks are one read at the root (no per-node subtree query), with ids or paths', async ({ page }) => {
       await open(page, 'Techne');
       await work(page);
-      await expect.poll(() => total(page)).toBe('7');
+      // (T-335 one home: an old Decisions/ note is the record, not an ask: Techne's open one is no longer in its work)
+      await expect.poll(() => total(page)).toBe('6');
       expect(await calls(page, 'vault_subtree_tasks')).toEqual([]);
       for (const a of await calls(page, 'vault_query_meta')) expect(a.metadata.node).toBeUndefined();
     });

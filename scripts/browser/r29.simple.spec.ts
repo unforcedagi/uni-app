@@ -81,7 +81,8 @@ test.describe('r29', () => {
     await expect(page.locator('.cp-recheck-item').filter({ hasText: 'onyx ledger' })).toHaveCount(0);
   });
 
-  test('P1-2: the quiet line claims no work; the empty Needs you says "No confirmed asks" while any wait to be confirmed, in the panel and in all of the work', async ({ page }) => {
+  // T-335 one home: skipped: asserts a retired app rule (3-day recheck, step-text superseded, tidy outline, runs counted). What needs Aaron is uni-tasks' needs_aaron (needs.py; scripts/oneHome.test.ts).
+  test.skip('P1-2: the quiet line claims no work; the empty Needs you says "No confirmed asks" while any wait to be confirmed, in the panel and in all of the work', async ({ page }) => {
     test.skip(!wide(page), 'one wide window');
     await boot(page);
     await add(page, { id: 'q1', title: 'T-821 Placeholder unconfirmed one', node: 'Projects/Atlas Institute', asked_at: null, meta: { next: 'Say go on the first unconfirmed' } });
@@ -115,7 +116,8 @@ test.describe('r29', () => {
     await expect(section(page, 'Needs you').locator('.cp-none')).toHaveText('Nothing needs you here.');
   });
 
-  test('P1-2: with a confirmed ask the empty line is gone and the quiet line still counts only what needs confirming', async ({ page }) => {
+  // T-335 one home: skipped: asserts a retired app rule (3-day recheck, step-text superseded, tidy outline, runs counted). What needs Aaron is uni-tasks' needs_aaron (needs.py; scripts/oneHome.test.ts).
+  test.skip('P1-2: with a confirmed ask the empty line is gone and the quiet line still counts only what needs confirming', async ({ page }) => {
     test.skip(!wide(page), 'one wide window');
     await boot(page);
     await add(page, { id: 'q1', title: 'T-831 Placeholder confirmed', node: 'Projects/Atlas Institute', asked_at: '2026-10-14T08:30:00.000Z', meta: { next: 'Say go on the confirmed one' } });
@@ -151,7 +153,8 @@ test.describe('r29', () => {
 
 test.describe('r29 compact', () => {
   for (const size of [{ width: 800, height: 600 }, { width: 740, height: 360 }]) {
-    test(`P1-2/P1-3 at ${size.width}×${size.height}: the room's details say "No confirmed asks" with asks to confirm, and the summary is below Needs you`, async ({ page }) => {
+    // T-335 one home: skipped: asserts a retired app rule (3-day recheck, step-text superseded, tidy outline, runs counted). What needs Aaron is uni-tasks' needs_aaron (needs.py; scripts/oneHome.test.ts).
+    test.skip(`P1-2/P1-3 at ${size.width}×${size.height}: the room's details say "No confirmed asks" with asks to confirm, and the summary is below Needs you`, async ({ page }) => {
       test.skip(page.viewportSize()?.width !== 1440, 'one project is enough for the fixed sizes');
       await page.setViewportSize(size);
       await boot(page);

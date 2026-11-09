@@ -59,7 +59,8 @@ const DETAIL = 'The ledger lines: rent · tools · travel';
 function suite(label: string, only: (page: Page) => string | null) {
   test.describe(`t145 ${label}`, () => {
     test.describe.configure({ timeout: 120_000 });
-    test('1: an ask whose words were changed by another write is no longer current: it needs confirming, says why, and comes back when its room asks again', async ({ page }) => {
+    // T-335 one home: skipped: asserts a retired app rule (3-day recheck, step-text superseded, tidy outline, runs counted). What needs Aaron is uni-tasks' needs_aaron (needs.py; scripts/oneHome.test.ts).
+    test.skip('1: an ask whose words were changed by another write is no longer current: it needs confirming, says why, and comes back when its room asks again', async ({ page }) => {
       const skip = only(page); test.skip(!!skip, skip ?? '');
       await boot(page);
       await add(page, { id: 't145k1', title: 'T-901 Placeholder amber ledger', next: NEXT1, detail: DETAIL });
@@ -154,7 +155,8 @@ function suite(label: string, only: (page: Page) => string | null) {
       expect((await calls(page, 'vault_transition')).filter((c: any) => c.id === 't145k3' || c.id === 't145k4')).toEqual([]);
     });
 
-    test('4: an answer records the revision it answered: "I did this" and a decision both carry answered_rev in the same write', async ({ page }) => {
+    // T-335 one home: skipped: an old Decisions/ note is the record, not an ask (never in Needs you); this row/sheet is unreachable. Retire the UI with the app-internals piece.
+    test.skip('4: an answer records the revision it answered: "I did this" and a decision both carry answered_rev in the same write', async ({ page }) => {
       const skip = only(page); test.skip(!!skip, skip ?? '');
       await boot(page);
       await add(page, { id: 't145k5', title: 'T-906 Placeholder slate ledger', next: 'Say go on the slate ledger for the placeholder books' });
@@ -177,7 +179,8 @@ function suite(label: string, only: (page: Page) => string | null) {
       expect(d).toMatchObject({ id: 't145k6', from: 'open', to: 'decided', ifUpdatedAt: rev6, metadata: { decided: 'Teal', answered_rev: rev6 } });
     });
 
-    test('5: a decision answered against a revision that changed is refused and offers Reload; the answer after it records that revision', async ({ page }) => {
+    // T-335 one home: skipped: an old Decisions/ note is the record, not an ask (never in Needs you); this row/sheet is unreachable. Retire the UI with the app-internals piece.
+    test.skip('5: a decision answered against a revision that changed is refused and offers Reload; the answer after it records that revision', async ({ page }) => {
       const skip = only(page); test.skip(!!skip, skip ?? '');
       await boot(page);
       await add(page, { id: 't145k7', title: 'Decide the placeholder shelf colour', tag: 'decision', next: 'Pick the placeholder shelf colour', meta: { options: ['Teal', 'Rust'] } });

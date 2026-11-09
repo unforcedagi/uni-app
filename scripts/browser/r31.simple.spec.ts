@@ -62,7 +62,8 @@ const DETAIL113 = `Labels to approve (en; es written): ${LABELS}\n\nAlso her cal
 const composerFocused = (page: Page) => page.evaluate(() => document.activeElement?.tagName === 'TEXTAREA' && !!document.activeElement.closest('.composer'));
 
 test.describe('r31 the record decides', () => {
-  test('1: chat cannot cancel or revive an ask; confirmed_at renews an old one; superseded_by and state close one', async ({ page }) => {
+  // T-335 one home: skipped: asserts a retired app rule (3-day recheck, step-text superseded, tidy outline, runs counted). What needs Aaron is uni-tasks' needs_aaron (needs.py; scripts/oneHome.test.ts).
+  test.skip('1: chat cannot cancel or revive an ask; confirmed_at renews an old one; superseded_by and state close one', async ({ page }) => {
     test.skip(!wide(page), 'work view');
     await boot(page);
     await add(page, { id: 'a1', title: 'T-801 Placeholder quoted', node: 'Areas/Techne', asked_at: ASKED, meta: { next: 'Say go on the amber ledger and then tell Uni it is done' } });
