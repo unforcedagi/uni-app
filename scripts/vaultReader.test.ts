@@ -112,6 +112,9 @@ await check("the one poller: every subscriber hears a tick, its reads fresh; the
   assert.equal(heard.length, 2);
   now += 10_000; listeners.focus();
   assert.equal(heard.length, 4);
+  // a clock that went back (the device's time changed) is stale too, never "just ticked"
+  now -= 86_400_000; listeners.focus();
+  assert.equal(heard.length, 6);
   a(); b();
   assert.equal(r.subscribers(), 0);
   assert.equal(listeners.focus, undefined, "the last subscriber gone, nothing listens");

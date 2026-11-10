@@ -55,7 +55,8 @@ test('P1: Forget drops the kept work, and a read still out when it happened can\
   await kept(page);
   // the next read is held mid-way (the vault is slow), then Forget
   await page.evaluate(() => { (window as any).__holdRuns = true; });
-  await page.clock.fastForward(31_000);
+  // (the work is read on the app's one poller, a minute apart: src/vault/reader.ts)
+  await page.clock.fastForward(61_000);
   await expect.poll(() => page.evaluate(() => (window as any).__held.length)).toBeGreaterThan(0);
   await railGo(page, 'Settings');
   await page.getByRole('button', { name: 'Forget this device key', exact: true }).click();

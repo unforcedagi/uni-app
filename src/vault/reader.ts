@@ -142,7 +142,8 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
     invalidate();
     for (const f of [...subs]) { try { f(); } catch { /* one screen part's failure is its own */ } }
   }
-  const onBack = () => { if (visible() && (lastTick === null || clock() - lastTick >= FOCUS_GAP_MS)) tick(); };
+  // (a clock that went back, a device's time changed, reads as stale too: never "ticked a moment ago" for good)
+  const onBack = () => { const now = clock(); if (visible() && (lastTick === null || now - lastTick >= FOCUS_GAP_MS || now < lastTick)) tick(); };
   /**
    * Keep something fresh: `f` runs on every tick (a minute apart while the window is visible, and on coming back to it). The first
    * subscriber starts the one timer, the last one stops it. Returns the unsubscribe.
