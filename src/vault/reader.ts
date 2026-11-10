@@ -64,8 +64,12 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
   // ---- sharing within a tick ----
   let generation = 0;
   const shared = new Map<string, { gen: number; at: number; p: Promise<unknown> }>();
-  /** The next read of anything goes to the vault (after a write, a Retry, a manual refresh, another vault or identity). */
-  function invalidate() { generation++; shared.clear(); }
+  /** The next read goes to the vault (after a write, a Retry, a manual refresh, another vault or identity): of everything, or of these
+   *  kinds only (`run`, `node`, `task-all`…: what a work view's follow-up read wants fresh, leaving the rest of the tick shared). */
+  function invalidate(...kinds: string[]) {
+    if (!kinds.length) { generation++; shared.clear(); return; }
+    for (const k of [...shared.keys()]) if (kinds.includes(JSON.parse(k)[0])) shared.delete(k);
+  }
   function share<T>(key: string, read: () => Promise<T>): Promise<T> {
     const now = clock();
     const had = shared.get(key);
@@ -118,11 +122,21 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
       p.catch(() => { if (old.get(vault) === entry) old.delete(vault); });
       old.set(vault, o = entry);
     }
-    const [running, recent, windows] = await Promise.all([
+    // eslint-disable-next-line prefer-const
+    let [running, recent, windows] = await Promise.all([
       allPages(where(vault, "run", { state: { in: [...LIVE_RUNS] } })),
       allPages(where(vault, "run", { started_at: { gte: iso(o.at, RUN_WINDOWS[0][1]) } })),
       o.p,
     ]);
+    // a run the older read saw live that the live read no longer lists has ended since: read the older windows again now, so it is never
+    // shown live from a five-minute-old copy
+    const liveNow = new Set(running.rows.map((r) => r.id));
+    const ended = (rows: Note<"run">[]) => rows.some((r) => LIVE_RUNS.includes((r.metadata as { state?: never } | undefined)?.state ?? ("" as never)) && !liveNow.has(r.id));
+    if (running.complete && o.at !== now && windows.some((w) => ended(w.rows))) {
+      old.delete(vault);
+      windows = await (old.set(vault, o = { at: now, p: Promise.all(RUN_WINDOWS.slice(1).map(([to, from]) => allPages(where(vault, "run", { started_at: { gte: iso(now, from), lt: iso(now, to) } })))) }), o.p);
+      recent = await allPages(where(vault, "run", { started_at: { gte: iso(now, RUN_WINDOWS[0][1]) } }));
+    }
     const seen = new Set<unknown>();
     const rows = [running, recent, ...windows].flatMap((r) => r.rows).filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
     const partial = !running.complete || !recent.complete ? ["Some sessions aren't loaded"] : windows.some((w) => !w.complete) ? ["Some older sessions aren't loaded"] : [];
@@ -152,7 +166,8 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
     subs.add(f);
     if (subs.size === 1 && typeof window !== "undefined") {
       lastTick = clock();
-      timer = setInterval(() => { if (visible()) tick(); }, POLL_MS);
+      // (a tick on coming back to the window counts: the timer's next one waits until a minute has passed since it)
+      timer = setInterval(() => { const now = clock(); if (visible() && (lastTick === null || now - lastTick >= POLL_MS - 1000 || now < lastTick)) tick(); }, POLL_MS);
       window.addEventListener("focus", onBack);
       document.addEventListener("visibilitychange", onBack);
     }

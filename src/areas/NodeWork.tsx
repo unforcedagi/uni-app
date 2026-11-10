@@ -4,7 +4,7 @@ import { cleanText } from "../interface/contract";
 import { isMe, ownerLabel, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { ActResult, TaskAction, Undo } from "./useTasks";
-import { isOverdue, ANSWER_ANYWAY, CHANGED_SINCE, answersReady, notWrittenDown, CONFIRMED, type Resolved, referencedItems, repeatsHeading, revisionMoved, stepNotes, unconfirmedLine, actionLead, actionOf, askedLine, titleSays, checkingBanner, currentStep, unresolvedBlock, withoutIntro, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
+import { isOverdue, ANSWER_ANYWAY, CHANGED_SINCE, answersReady, notWrittenDown, confirmationOf, type Resolved, referencedItems, repeatsHeading, revisionMoved, stepNotes, unconfirmedLine, actionLead, actionOf, askedLine, titleSays, checkingBanner, currentStep, unresolvedBlock, withoutIntro, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 import { taskTitle } from "./whereCore";
 import { DecisionAnswer, NextText, decisionAsk, rowLinkLabel, supportOf } from "./Companion";
@@ -194,7 +194,8 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   /** r31: an overdue task says "was due Oct 13" and not when it was asked: one date, as on its row */
   const overdue = !!task.due && isOverdue(task.due);
   const gated = !gone && !unsure;
-  const conf: Resolved = confirmation ?? CONFIRMED;
+  // (no confirmation given: the task's own needs_aaron decides, as it does for the feed)
+  const conf: Resolved = confirmation ?? confirmationOf(task);
   const [anyway, setAnyway] = useState(false);
   // (a check that comes back different, Retry for one, takes the answers back behind "Answer anyway")
   useEffect(() => { setAnyway(false); }, [task.id, conf.state, conf.why]);

@@ -4,7 +4,7 @@ import { vaultTasks, type AskRead } from "./vaultTasks";
 import { localDay } from "./simpleCore";
 import { ROOT } from "./treeCore";
 import { shouldReload } from "./pathCache";
-import { reader } from "../vault/reader";
+import { FOCUS_GAP_MS, reader } from "../vault/reader";
 import { useVaultProfile } from "./ProfileContext";
 import { parseDrafts, parseRuns } from "./steerCore";
 import { activeProfile } from "./profile";
@@ -18,8 +18,8 @@ export type TaskAction = "done" | "archive" | "snooze";
 export type ActResult = { ok: true } | { ok: false; kind: FailureKind | "refused"; message: string };
 export type Undo = { id: string; label: string; run: () => Promise<void> };
 export const UNDO_MS = 5000;
-/** How stale a list may be when a room is opened (the window's own re-reads are the one poller's: src/vault/reader.ts). */
-export const FOCUS_GAP_MS = 10_000;
+/** How stale a list may be when a room is opened (the window's own re-reads are the one poller's): src/vault/reader.ts. */
+export { FOCUS_GAP_MS } from "../vault/reader";
 /** r19: the event a row's or a sheet's Retry sends ("Couldn't check · Retry"): every open list reads its sources again. */
 export const RECHECK = "uni:recheck";
 export const requestRecheck = () => { try { window.dispatchEvent(new Event(RECHECK)); } catch { /* no window */ } };

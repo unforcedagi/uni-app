@@ -257,7 +257,8 @@ export function noteAsked(key: string, kind: Action["kind"]) {
   const asked = new Map(state.asked);
   asked.set(key, { kind, at: Date.now(), state: now(key, state.work) });
   set({ asked });
-  for (const ms of [4000, 15000, 45000]) { const t = setTimeout(() => { later.delete(t); void refreshWork(); }, ms); later.add(t); }
+  // (the work's own reads only are read fresh: the rest of the tick stays shared)
+  for (const ms of [4000, 15000, 45000]) { const t = setTimeout(() => { later.delete(t); reader.invalidate("run", "node", "task-all"); void refreshWork(false); }, ms); later.add(t); }
 }
 
 /** "as of 10:32" when the work on screen isn't a fresh read (a failed one, or a saved copy not read again yet); null when it is fresh. */

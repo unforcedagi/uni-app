@@ -70,6 +70,7 @@ test.describe('For you', () => {
   });
 
   test('T-335: an ask shows its context in place, folded: from its own body, or an older ask\'s context note; read once per revision', async ({ page }) => {
+    await page.clock.install();
     await bootForYou(page);
     const glaze = item(page, 'fy-glaze');
     const ctx = glaze.locator('details.fy-ctx');
@@ -89,11 +90,12 @@ test.describe('For you', () => {
     await expect(hall.locator('.fy-ctx-steps li')).toHaveText(['Say which night suits the choir']);
     // an ask with neither has nothing to open
     await expect(item(page, 'fy-soup').locator('details.fy-ctx')).toHaveCount(0);
-    // each ask's note is read once for its revision: a minute of polling reads none of them again
+    // each ask's note is read once for its revision: two polls (the lists are read again) read none of them again
     const reads = async () => (await calls(page, 'vault_note')).filter((c: any) => /^(fy-|ctx-)/.test(c.args.noteRef)).length;
-    const before = await reads();
-    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await page.waitForTimeout(500);
+    const lists = async () => (await calls(page, 'vault_query')).filter((c: any) => c.args.tag === 'card').length;
+    const before = await reads(), cardsBefore = await lists();
+    await page.clock.runFor(2 * 60_000 + 5_000);
+    expect(await lists(), 'the poller ticked').toBeGreaterThan(cardsBefore);
     expect(await reads()).toBe(before);
   });
 

@@ -10,10 +10,9 @@ import { askFromContent, askOrder, closedBy, hasDeps, isListLine, linkedRefs, qu
 /** A supporting note couldn't be read (r19): the row says "Couldn't check · Retry", never "nothing there". */
 export class Unavailable extends Error {}
 import { activeProfile } from "./profile.ts";
-import { allPages, createReader, reader as appReader, type Reader } from "../vault/reader.ts";
+import { allPages, createReader, LIMIT, reader as appReader, type Call, type Reader } from "../vault/reader.ts";
 
-export type Call = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
-const LIMIT = 200;
+export type { Call } from "../vault/reader.ts";
 
 // (the paging read lives with the one reader now: src/vault/reader.ts)
 export { allPages };

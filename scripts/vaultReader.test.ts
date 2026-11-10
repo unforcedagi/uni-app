@@ -85,6 +85,31 @@ await check("runs: the older windows are read once in five minutes, and the fres
   assert.equal(windows(), 3 * (RUN_WINDOWS.length - 1));
 });
 
+await check("runs: a run the older windows saw live that has since ended is read again at once, never shown live from the older copy", async () => {
+  let now = Date.parse("2026-11-10T12:00:00Z");
+  let state = "running";
+  const run = () => ({ id: "r3", metadata: { state, started_at: "2026-11-07T10:00:00Z" } });
+  const d = door((c) => {
+    const m = c.args.metadata ?? {};
+    if (m.state) return m.state.in.includes(state) ? [run()] : [];
+    const at = m.started_at;
+    return at && at.lt && "2026-11-07T10:00:00Z" >= at.gte && "2026-11-07T10:00:00Z" < at.lt ? [run()] : [];
+  });
+  const r = createReader(d.call, () => now);
+  assert.equal((await r.runs("uni")).rows[0].metadata!.state, "running");
+  state = "done"; now += 60_000; r.invalidate();
+  const got = await r.runs("uni");
+  assert.equal((got.rows[0].metadata as any).state, "done", "a minute later it is done, not running from the older copy");
+});
+
+await check("invalidate by kind: the work's follow-up read is fresh, the rest of the tick stays shared", async () => {
+  const d = door(); const r = createReader(d.call, () => 0);
+  await r.nodes("uni"); await r.cards("uni");
+  r.invalidate("node");
+  await r.nodes("uni"); await r.cards("uni");
+  assert.deepEqual(d.calls.map((c) => c.args.tag), ["node", "card", "node"]);
+});
+
 await check("runs: one run in two windows is listed once; a short read says which part is missing", async () => {
   const run = { id: "r1", metadata: { state: "running" } };
   const d = door((c) => (c.args.metadata?.state ? [run] : c.args.metadata?.started_at && !c.args.metadata.started_at.lt ? [run] : []));

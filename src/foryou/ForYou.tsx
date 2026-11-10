@@ -7,10 +7,11 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRecorder } from "../recorder";
 import { transcribe } from "./useForYou";
-import { contextLine, seenCloses, awayLine, cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine, type AskContext } from "./forYouCore";
+import { contextLine, linkParts, seenCloses, awayLine, cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine, type AskContext } from "./forYouCore";
 import { RefText } from "../areas/noteRefs";
 import { hostOf } from "../areas/simpleCore";
 import { useVaultProfile } from "../areas/ProfileContext";
+import { invoke } from "@tauri-apps/api/core";
 import { quietLine } from "../projects/FrontDoor";
 import { headWords } from "./scope";
 import { dialogOpen, openDialog } from "../areas/focusTrap";
@@ -114,16 +115,19 @@ function Said({ text, footer, onSend, onCancel }: { text: string; footer: string
 /** What an item needs to be answered from wherever it is drawn (For you, or the card). */
 export type ItemActions = Pick<ForYouProps, "view" | "answer" | "seen" | "retry" | "errors" | "busy" | "onOpenAsk" | "contexts">;
 
-/** Text with its links: a web address opens outside (by its host), a note id reads as its title. */
+/** A web link opens in the system browser through the app (`open_link`: web and mail only), never in the webview. */
+const openOut = (e: React.MouseEvent, url: string) => { e.preventDefault(); void invoke("open_link", { url }).catch(() => {}); };
+/** Text with its links: a web address (bare or `[words](address)`) opens outside, by its words or its host; a note id reads as its title. */
 function CtxText({ text, vault }: { text: string; vault: string }) {
-  const parts = text.split(/(https?:\/\/[^\s)<>]+)/g);
-  return <>{parts.map((t, i) => (i % 2 ? <a key={i} href={t} target="_blank" rel="noreferrer">{hostOf(t)}</a> : <RefText key={i} text={t} vault={vault} />))}</>;
+  return <>{linkParts(text).map((p, i) => (p.url ? <a key={i} href={p.url} onClick={(e) => openOut(e, p.url!)}>{p.label ?? hostOf(p.url)}</a> : <RefText key={i} text={p.text} vault={vault} />))}</>;
 }
 
 /** T-335: the ask's context, folded in place under its why: "Steps and links · about 5 minutes", opening to the steps, the links, why it
  *  matters and what he already said. Nothing to open when the ask carries none. */
 function Context({ c }: { c: AskContext }) {
   const vault = useVaultProfile().vault;
+  // only how long it takes: one quiet line, nothing to open
+  if (!c.why && !c.steps.length && !c.links.length && !c.answered) return <p className="fy-ctx fy-ctx-only">{contextLine(c)}</p>;
   return <details className="fy-ctx">
     <summary>{contextLine(c)}</summary>
     {c.why && <p className="fy-ctx-why"><CtxText text={c.why} vault={vault} /></p>}
@@ -155,7 +159,7 @@ function ItemView({ item, p, onCard, inCard = false }: { item: Item; p: ItemActi
         {item.default.label}</button>}
       {item.options.map((o) => <button key={o} type="button" className="fy-opt" disabled={busy} onClick={() => go(o)}>{o}</button>)}
       {item.action && <button type="button" className="fy-opt fy-act" disabled={busy} onClick={() => go(item.action!)}>{item.action}</button>}
-      {item.link && <a className="fy-opt fy-open" href={item.link} target="_blank" rel="noreferrer">Open ↗</a>}
+      {item.link && <a className="fy-opt fy-open" href={item.link} onClick={(e) => openOut(e, item.link!)}>Open ↗</a>}
       {/* T-335 Seen: on every item. A tell or look ask closes; a do or choose ask stays open with its room (it says so) */}
       {!item.legacy && <button type="button" className="fy-opt fy-seen" disabled={busy} onClick={() => void p.seen(item)}
         title={seenCloses(item.kind) ? "Seen: ends it; its room is told" : "Seen: out of For you; it stays with its room until it needs you"}
