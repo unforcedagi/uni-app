@@ -5,7 +5,7 @@ import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
 import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder, type Run } from "./steerCore";
 import { CompanionBody, Stands, type CompanionProps, type TaskLoad } from "./Companion";
-import { chatPlaceholder, confirmationOf, type Resolved, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, withApprovals, standsHeading, standsLine, asOfDate, daysSince, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
+import { chatPlaceholder, confirmationOf, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, withApprovals, standsHeading, standsLine, asOfDate, daysSince, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
 import { askRoom as askRoomOf, ownRoom, roomByName, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
 import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
@@ -84,8 +84,6 @@ const pulledMemory = { open: false };
 /** 0.3.1: the home's stream scoped to one area (its path), kept while the home is up (a room in focus over it, a redraw); leaving the home ends it. */
 const scopeMemory = { path: null as string | null };
 
-/** r28: the rechecks are logged once per launch (the module lives as long as the app does) */
-const recheckLogged = { done: false };
 /** After this long a conversation still opening says so, with a way to try again (r21, Codex 9). */
 const CHAT_SLOW_MS = 8000;
 /**
@@ -409,16 +407,6 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   // a card that is gone (retired, or another vault's, or the home left for the place pages) closes; it doesn't come back by itself later
   useEffect(() => { if (cardOpen && (!chat || !fy.view.cards.has(cardOpen))) setCardOpen(null); }, [cardOpen, fy.view.cards, chat]);
   useEffect(() => { setCardOpen(null); }, [profile.vault, identity]);
-  // r31: an ask is current because its task note says so (`asked_at` / `confirmed_at` within 3 days), resolved here before any row, count or dot shows it.
-  const confirmNow = useMemo(() => Date.now(), [tasks.tasks, tasks.lastOk]); // eslint-disable-line react-hooks/exhaustive-deps
-  const confirm = useMemo(() => ({ of: (t: Task): Resolved => confirmationOf(t, confirmNow) }), [confirmNow]);
-  // r28: the asks Uni must recheck are told to the rooms once per launch, as task ids in the app's log (the app never writes them to the vault)
-  useEffect(() => {
-    if (!tasks.ready || tasks.savedAt || recheckLogged.done) return;
-    const ids = tasks.tasks.filter((t) => needsYou(t) && confirm.of(t).state === "recheck").map((t) => taskTitle(t.title).id).filter(Boolean) as string[];
-    recheckLogged.done = true;
-    void invoke("log_line", { line: `recheck: ${ids.join(" ") || "none"}` }).catch(() => {});
-  }, [tasks.ready, tasks.tasks, tasks.savedAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const decide = (t: Task, o: string) => void tasks.decide(t, o);
   /**
    * A place, from anywhere (the home's places, what needs you there, a place inside another, a crumb): with rooms, the room it talks in, in focus
@@ -485,7 +473,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const hidden = (p: string) => { const r = privateOf(p); return !!r && r.path !== selfPrivate?.path; };
   // r23: each row knows the room that stewards it, as its sheet does ("Ask #techne for the message")
   const drafted = new Set(tasks.drafts.map((d) => d.task?.toUpperCase()).filter(Boolean));
-  const feed0 = needsFeed(levelTasks.map((t) => ({ ...t, stewardRoom: roomOfAsk(t)?.name ?? null, hasDraft: drafted.has(taskTitle(t.title).id?.toUpperCase()) })), privateOf, selfPrivate, undefined, confirm.of);
+  const feed0 = needsFeed(levelTasks.map((t) => ({ ...t, stewardRoom: roomOfAsk(t)?.name ?? null, hasDraft: drafted.has(taskTitle(t.title).id?.toUpperCase()) })), privateOf, selfPrivate);
   const taskTree = tasks.tree;
   // a run from a private room may sit on the root or a public node: its room keeps it private too, unless this level is that private place
   const runs = taskTree && node ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node) && (!!selfPrivate || !privateRuns.has(r.id))) : [];
@@ -547,12 +535,12 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   /** r18: a draft note written for the task (its `task` field names it): its text is the message the sheet copies. */
   const draftOf = (t: Task) => { const tid = taskTitle(t.title).id?.toUpperCase(); const d = tid ? tasks.drafts.find((x) => x.task?.toUpperCase() === tid) : null; return d ? { vault: t.vault ?? profile.vault, id: d.id } : null; };
   const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfAsk(sheetTask)} roomNamed={(n) => rooms.find((r) => r.name.replace(/^#/, "").toLowerCase() === n.replace(/^#/, "").toLowerCase()) ?? null} inRoom={focus?.room ?? target?.id} onClose={closeSheet}
-    draft={draftOf(sheetTask)} confirmation={confirm.of(sheetTask)}
+    draft={draftOf(sheetTask)} confirmation={confirmationOf(sheetTask)}
     onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={(t, o) => tasks.decide(t, o)} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
   /** r20: a row's area when it is shown outside it (Uni's list holds every area's): its subtitle names it when its title can't say where it is. */
   const placeOf = (t: Task) => (t.node !== here ? nodeName(t.node) : null);
   const toWork = () => { closeSheet(); allPlace?.onView("work"); };
-  const companionProps: CompanionProps | null = node ? { stands, ready: tasks.ready && privacyKnown, load, feed: panel, rest: panel.rest, moreTitle: privateNote(panel.privateCount), onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onRun: openRun, runMissing, scopeAll: isRoot, onNote: actions.openNote, onDecide: decide, placeOf, onEverything: chat ? toWork : null } : null;
+  const companionProps: CompanionProps | null = node ? { stands, ready: tasks.ready && privacyKnown, load, feed: panel, rest: panel.rest, moreTitle: privateNote(panel.privateCount), onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onRun: openRun, runMissing, onNote: actions.openNote, onDecide: decide, placeOf, onEverything: chat ? toWork : null } : null;
   const othersHere = levelTasks.filter((t) => !isMine(t) && !hidden(t.node)).map((t) => ({ task: t, meta: [stateLine(t, (w) => isMe(w), ownerLabel), isMe(t.owner) ? null : `with ${ownerLabel(t.owner)}`, t.node !== here ? `in ${nodeName(t.node)}` : null].filter(Boolean).join(" · ") }));
   const later = levelTasks.filter((t) => isMine(t) && t.kind !== "decision" && priorityOf(t) === "someday" && !hidden(t.node));
   // r19: everything in another private area that isn't in its "N for you" line (a record to tidy there included)
@@ -565,7 +553,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const foot = node?.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;
   const workTop = !node || isRoot || (tree && privateRoot(tree, node.path)) ? top : <>{top}{postsLine(node.path)}</>;
   const workMain = node ? <><WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready && privacyKnown} load={load} activity={tasks.activity}
-    onTask={openSheet} onRun={openRun} runMissing={runMissing} scopeAll={isRoot} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} placeOf={placeOf} top={workTop} foot={foot} />{!isRoot && <ProjectGaps areaPath={node.path} />}</> : null;
+    onTask={openSheet} onRun={openRun} runMissing={runMissing} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} placeOf={placeOf} top={workTop} foot={foot} />{!isRoot && <ProjectGaps areaPath={node.path} />}</> : null;
   // T-301/T-302: the area's projects (and their sessions), each opened in place over the room
   const strip = node && !isRoot ? <ProjectStrip areaPath={node.path} onOpen={(id) => { closeSheet(); setProjectOpen(id); }} /> : null;
   // the timeline's talk is the area's own room only (never a borrowed one's)

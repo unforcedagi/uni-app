@@ -10,7 +10,7 @@ import { parseDrafts, parseRuns } from "./steerCore";
 import { activeProfile } from "./profile";
 import { forgetTitles, setTitleOwner, warmTitles } from "./noteRefs";
 import { savedTasks } from "./savedTasks";
-import { checkOf, liveRuns, retryState, wouldNeedYou, type CheckState } from "./simpleCore";
+import { checkOf, liveRuns, needsYou, retryState, type CheckState } from "./simpleCore";
 import type { FailureKind } from "./taskCore";
 
 export type TaskAction = "done" | "archive" | "snooze";
@@ -218,7 +218,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     // layout walks only (`VITE_ASSUME_ASKED=1`, never in a release build): a vault whose tasks carry no `asked_at` yet reads as asked just now, so the
     // panel can be looked at with confirmed asks in it. The confirmation's chat lookup still applies.
     const assume = import.meta.env.VITE_ASSUME_ASKED === "1" ? new Date(at - 3600_000).toISOString() : null;
-    return list && list.map((t0) => { const t = assume && !t0.askedAt ? { ...t0, askedAt: assume } : t0; return wouldNeedYou(t) ? { ...t, check: checkOf(t, checks.get(t.id), at) } : t; });
+    return list && list.map((t0) => { const t = assume && !t0.askedAt ? { ...t0, askedAt: assume } : t0; return needsYou(t) ? { ...t, check: checkOf(t, checks.get(t.id), at) } : t; });
   }, [list, checks, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
   const visible = useMemo(() => (checked ?? []).filter((t) => isLive(t) && !gone.has(t.id) && !snoozed(t, new Date())), [checked, gone, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
   const counts: Map<string, Counts> = useMemo(() => (tree ? rollUp(tree, tasksUnder(tree, nodePath, visible)) : new Map()), [tree, nodePath, visible]);

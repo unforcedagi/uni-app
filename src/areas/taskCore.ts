@@ -81,14 +81,6 @@ export type Task = {
   confirmedAt?: string | null;
   /** r31: `superseded_by`: the task or note that replaces this one; a superseded ask is not owed. */
   supersededBy?: string | null;
-  /**
-   * T-145: `ask_sig`, the signature of the ask's words (`next` and `detail`) that its writer stamped together with `asked_at` or `confirmed_at`
-   * (`askSig()`, the same in tasks.py). With `sig`, the signature of the words the note holds now, it binds a stamp to one revision of the ask:
-   * words changed by any other write leave the stamp vouching for words that are gone. Absent on records written before it.
-   */
-  askSig?: string | null;
-  /** T-145: `askSig()` of the `next` and `detail` this copy of the note holds (computed only when there is an `ask_sig` to hold it to). */
-  sig?: string;
   /** r28: `closed`, the day a done or archived task was closed (tasks.py): a closure after a summary was written dims it. */
   closed?: string | null;
   /** r23: `detail`, the content an ask carries (T-131: the questions, the message, the draft): the sheet shows it under the step. */
@@ -213,31 +205,6 @@ function askedOf(m: Record<string, unknown>): string | null {
   return Number.isFinite(ms(c)) && !(Number.isFinite(ms(a)) && ms(a) >= ms(c)) ? c : a;
 }
 
-/**
- * T-145: the signature of an ask's words, `v1:` and 16 hex digits: FNV-1a (64-bit) over the UTF-8 of `<bytes of next>:`, `next`, U+001F, `detail`. Each field as
- * stored, with CR LF / CR read as LF and spaces, tabs and line breaks at its ends dropped (a store that re-ends lines or trims must not flip
- * an ask to changed); a missing or non-text field is empty; a lone surrogate is U+FFFD. Not a secret and not a guard against forgery: it tells
- * a stamp's words from words written since. tasks.py computes the same (`ask_sig`, proposed in T-145) in the same write as the stamp;
- * `scripts/simpleT145.test.ts` holds both to shared vectors. 16-bit limbs, so a parse costs no BigInt per byte.
- */
-export const ASK_SIG_VERSION = "v1:";
-const sigPart = (v: unknown): string => (typeof v === "string" ? v.replace(/\r\n?/g, "\n").replace(/^[ \t\n]+|[ \t\n]+$/g, "") : "");
-export function askSig(next: unknown, detail: unknown): string {
-  // the length of `next` in bytes leads, so no edit can move words across the boundary between the two fields
-  const enc = new TextEncoder(), n = enc.encode(sigPart(next)), d = enc.encode(sigPart(detail));
-  // h = h3:h2:h1:h0 (16 bits each), the offset basis 0xcbf29ce484222325; × 0x100000001b3 is × 0x1b3 plus the value shifted left 40 bits
-  let h0 = 0x2325, h1 = 0x8422, h2 = 0x9ce4, h3 = 0xcbf2;
-  const eat = (bytes: ArrayLike<number>) => {
-    for (let i = 0; i < bytes.length; i++) {
-      h0 ^= bytes[i];
-      const t0 = h0 * 0x1b3, t1 = h1 * 0x1b3 + (t0 >>> 16), t2 = h2 * 0x1b3 + (h0 << 8) + (t1 >>> 16), t3 = h3 * 0x1b3 + (h1 << 8) + (t2 >>> 16);
-      h0 = t0 & 0xffff; h1 = t1 & 0xffff; h2 = t2 & 0xffff; h3 = t3 & 0xffff;
-    }
-  };
-  eat(enc.encode(`${n.length}:`)); eat(n); eat([0x1f]); eat(d);
-  return ASK_SIG_VERSION + [h3, h2, h1, h0].map((x) => x.toString(16).padStart(4, "0")).join("");
-}
-
 export function parseTask(n: RawNote, tree: TaskTree): Task | null {
   const id = str(n.id), path = str(n.path) && stripExt(str(n.path)!);
   if (!id || !path) return null;
@@ -268,7 +235,6 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
     ...(str(m.asked_at) ? { askedAt: str(m.asked_at) } : {}),
     ...(str(m.confirmed_at) ? { confirmedAt: str(m.confirmed_at) } : {}),
     ...(str(m.superseded_by) ? { supersededBy: str(m.superseded_by) } : {}),
-    ...(str(m.ask_sig) ? { askSig: str(m.ask_sig), sig: askSig(m.next, m.detail) } : {}),
     ...(str(m.closed) ? { closed: str(m.closed) } : {}),
     ...(str(m.created) ?? str(n.createdAt) ? { added: str(m.created) ?? str(n.createdAt) } : {}),
     ...(str(m.detail) ? { detail: str(m.detail) } : {}),

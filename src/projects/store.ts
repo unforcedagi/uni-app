@@ -174,8 +174,9 @@ export function refreshWork(fromVault = true): Promise<void> {
 /** The work of a new owner (or none): what this device kept for that owner, never another's. Reads still out are dropped. */
 function adopt(owner: string | null, notify = true) {
   generation++;
-  // another owner (identity or vault): nothing read for the last one is shared with this one's reads
-  reader.invalidate();
+  // another owner (identity or vault) after one: nothing read for the last one is shared with this one's reads (the first owner of a launch
+  // shares what the tasks already read for it)
+  if (loadedFor !== null) reader.invalidate();
   loadedFor = owner; tasks = null; inflight = null; lastRead = null;
   // T-304: a session's steps are the same owner's, and go with the work
   setFeedOwner(owner, owner ? activeProfile().vault : "");
@@ -192,7 +193,7 @@ onVaultChange(() => {
   const owner = currentOwner();
   if (owner === loadedFor) return;
   adopt(owner, false);
-  queueMicrotask(() => { emit(); if (owner && users > 0 && owner === currentOwner()) void refreshWork(); });
+  queueMicrotask(() => { emit(); if (owner && users > 0 && owner === currentOwner()) void refreshWork(false); });
 });
 
 /** The app's identity (null when signed out or not read yet). Called on every change; another identity sees none of this one's work. */
@@ -205,7 +206,7 @@ export function setWorkOwner(id: string | null) {
   identity = id;
   const owner = ownerOf(id, activeProfile().vault);
   if (owner !== loadedFor) adopt(owner);
-  if (owner && users > 0) void refreshWork();
+  if (owner && users > 0) void refreshWork(false);
 }
 
 /** The account's rooms, which say what a room's id on a run note is. New rooms place the last read again, at once. */
@@ -284,7 +285,7 @@ const tick = () => set({ work: freshen(state.work) });
 export function useWork(): WorkState {
   useEffect(() => {
     if (users++ === 0) {
-      void refreshWork();
+      void refreshWork(false);
       // the app's one poller (and coming back to the window) reads it again
       stopPoll = reader.onPoll(() => void refreshWork(false));
       clock = setInterval(tick, CLOCK_MS);

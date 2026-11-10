@@ -111,15 +111,18 @@ await check("P1-1 decisions get the same dependency contract: a closed `source` 
   // a decision with no `source` or `depends_on` stands on nothing
   assert.deepEqual(taskDeps(task("x", "Which opening hours should we publish?", {}, "decision")), { refs: [], questions: null });
   const closed = fakeVault([{ id: SRC, path: "Projects/Boulder Votes/Chat plan", metadata: { state: "done" }, updatedAt: "r1" }]);
-  const s = (await closed.vt.loadChecks([d], () => [])).get("bv")!;
+  // only a task marked needs_aaron is checked (T-335 one home), so the check machinery is run on the marked copy
+  const marked = { ...d, needsAaron: true };
+  const s = (await closed.vt.loadChecks([marked], () => [])).get("bv")!;
+  assert.equal((await fakeVault([]).vt.loadChecks([d], () => [])).size, 0, "an unmarked record is never checked");
   assert.deepEqual(s.rec!.result, { kind: "closed", how: "closed", from: { vault: "uni", id: SRC, title: "Chat plan" } });
   // (T-335 one home: an old Decisions/ note is the record, not an ask: its check is shown, it is never owed)
   assert.equal(needsYou({ ...d, check: s.rec!.result }), false);
   const gone = fakeVault([]);
-  assert.equal((await gone.vt.loadChecks([d], () => [])).get("bv")!.rec!.result.kind, "missing");
+  assert.equal((await gone.vt.loadChecks([marked], () => [])).get("bv")!.rec!.result.kind, "missing");
 });
 
-await check("P1-2 a cold list with three statement-only decisions owes 0 until they are classified (then they are Uni's to tidy)", async () => {
+await check("P1-2 a cold list with three statement-only decisions owe 0, before and after their questions are read", async () => {
   const titles = ["Uni adds Lenny's missing feature 4, the…", "A daily email of the calendar at 7, with…", "Texting Uni: a number that reaches…"];
   const notes: N[] = titles.map((t, i) => ({ id: `d${i}`, path: `Decisions/${t}`, content: `Decision (needs your yes): ${t.replace(/…$/, "")} and more of the proposal.`, updatedAt: "2026-10-14T06:00:00.000Z" }));
   const cold = titles.map((t, i) => task(`d${i}`, t, { options: [] }, "decision"));
@@ -127,16 +130,13 @@ await check("P1-2 a cold list with three statement-only decisions owes 0 until t
   const feed = needsFeed(cold, () => null);
   assert.equal(feed.total, 0, "nothing owed before the questions are read");
   assert.equal(feed.rows.length, 0);
-  assert.equal(feed.pending!.length, 3);
   assert.equal(needsByRow(cold, new Set([""]), () => undefined).size, 0, "no dots");
-  // read: statements, so Uni's to tidy, and still nothing owed
+  // read: statements, and still nothing owed (an old decision is never marked needs_aaron)
   const { vt } = fakeVault(notes);
   const asks = await vt.loadAsks(cold);
   const warm = cold.map((d) => ({ ...d, ask: asks.get(d.id)!.ask, askAt: asks.get(d.id)!.at }));
   const after = needsFeed(warm, () => null);
   assert.equal(after.total, 0);
-  assert.equal(after.pending!.length, 0);
-  assert.equal(after.tidy!.length, 3);
   // a read that fails is not owed either, and a note with no question in it is classified (owed, opened to read)
   const failedRead = { ...cold[0], askFailed: true };
   assert.equal(needsYou(failedRead), false);

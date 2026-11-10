@@ -12,10 +12,9 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { ROOM_NOT_FOUND, actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, askedShown, requestDate, currentStep, actionOf, rowAction, rowSubParts, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, lastWritten, summaryLine, SUMMARY_LONG, recheckLine, reasonShort, noneLine, type RecheckScope, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { ROOM_NOT_FOUND, actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, askedShown, requestDate, currentStep, actionOf, rowAction, rowSubParts, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, NOTHING_NEEDS_YOU, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, lastWritten, summaryLine, SUMMARY_LONG, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 import { ApprovalRows } from "./ApprovalRows";
-import type { RecheckWhy } from "./simpleCore";
 
 
 
@@ -42,8 +41,6 @@ export type CompanionProps = {
   onRun?: (r: Run) => void;
   /** r31: a waiting run whose room (by its `channel` id) is not among the rooms: its row says "Room not found" */
   runMissing?: (r: Run) => boolean;
-  /** r30: this is Uni's own room: what it counts is across all rooms (any other room's counts are its own) */
-  scopeAll?: boolean;
   /** "All of X's work" (null: none, for a room no node owns). */
   onEverything: (() => void) | null;
   /** Opens a linked note (in its own vault) from a title or next step. */
@@ -484,16 +481,13 @@ export const moreLabel = (n: number): string => `Show ${n} more`;
  * Only whole rows are shown: in the side panel (`fit`) the rows that don't fit above the footer wait behind "+N more ›" rather than being
  * cut or faded at the panel's bottom. Every row is drawn once to be measured (before paint), then the ones that fit stay.
  */
-export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, onNote, placeOf, onMore, extra = 0, moreTitle = null, keepOne = false, wholeFirst = false }: Pick<CompanionProps, "onTask" | "onDecide" | "onNote" | "placeOf"> & { needs: readonly Task[]; fit: boolean; /** "+N more" opens elsewhere (the strip's sheet) instead of in place */ onMore?: () => void;
-  /** r20: decisions still being read: shown after the rows that are owed, never counted in "+N more" */
-  pending?: readonly Task[];
+export function NeedsList({ needs, fit, onTask, onDecide, onNote, placeOf, onMore, extra = 0, moreTitle = null, keepOne = false, wholeFirst = false }: Pick<CompanionProps, "onTask" | "onDecide" | "onNote" | "placeOf"> & { needs: readonly Task[]; fit: boolean; /** "+N more" opens elsewhere (the strip's sheet) instead of in place */ onMore?: () => void;
   /** The phone's inline strip always shows its first row (its body was sized to the room left beside the conversation). */
   keepOne?: boolean;
   /** r28 (Codex P2-5): the compact panel starts with one whole request: the first row's inline items are lowered until the row fits in what scrolls (none, when none fit) */
   wholeFirst?: boolean;
   /** r17, Uni's panel: items past these rows (private ones included): they and any row that doesn't fit are one "N more ›" (`onMore`, the work view). */
   extra?: number; moreTitle?: string | null }) {
-  const needs = pending.length ? [...owed, ...pending] : owed;
   const [limit, setLimit] = useState(Infinity);
   const [measuring, setMeasuring] = useState(fit);
   const [all, setAll] = useState(false);
@@ -580,8 +574,7 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
   });
   useLayoutEffect(() => { if (wholeFirst) setItemCap(ROW_ITEMS); }, [wholeFirst, key]);
   const shown = fit && !measuring && !all ? needs.slice(0, limit) : needs;
-  // r20: only what is owed counts in "+N more"; a decision still being read is never a count
-  const hidden = Math.max(0, owed.length - Math.min(shown.length, owed.length));
+  const hidden = Math.max(0, needs.length - shown.length);
   return <>
     <ul ref={listRef} className="cp-list">{shown.map((t) => <NeedRow key={t.id} t={t} onTask={onTask} onDecide={onDecide} onNote={onNote} area={placeOf?.(t) ?? null} compact itemCap={itemCap} />)}</ul>
     {extra > 0
@@ -604,43 +597,8 @@ export function WaitingRuns({ runs, className = "cp-list cp-waiting", onRun, mis
       </button></li>;
   })}</ul> : null;
 }
-/** An ask's whole step, wrapped, never ending at a colon (the recheck list shows nothing less). */
-export function wholeStep(t: Task): string {
-  const r = rowLead(t);
-  const text = t.kind === "decision" ? (() => { const d = decisionAsk(t); return d.answerable ? d.text : r.text; })() : r.text;
-  return text.replace(/[\s:;,—–-]+$/, "");
-}
-/**
- * r28 (Codex P1-2), r30: requests that aren't confirmed (no `asked_at` or `confirmed_at` within 3 days) are not in Needs you and not counted. One quiet
- * line says how many need confirming and where it counts ("in this room", "across all rooms"); it opens to a plain list: each request's whole step,
- * its reason in a few words ("asked Oct 11"), and one tap to its sheet. "Answer anyway"
- * is not here: it is in the sheet, after the reason.
- */
-export function Rechecks({ tasks, why, scope = "room", onTask, placeOf }: { tasks: readonly Task[]; why?: Record<string, RecheckWhy | null>; scope?: RecheckScope; onTask: (t: Task) => void; /** the area an ask belongs to when it is listed outside it */ placeOf?: (t: Task) => string | null }) {
-  const [open, setOpen] = useState(false);
-  const vault = useVaultProfile().vault;
-  if (!tasks.length) return null;
-  return <div className="cp-recheck" data-count={tasks.length} data-scope={scope}>
-    <button type="button" className="cp-recheck-line" aria-expanded={open} onClick={() => setOpen(!open)}>{recheckLine(tasks.length, scope)}<i aria-hidden="true">{open ? "–" : "+"}</i></button>
-    {open && <ul className="cp-recheck-list" aria-label="Requests that need confirming">{tasks.map((t) => {
-      const place = placeOf?.(t) ?? null;
-      const w = why?.[t.id] ?? null;
-      const reason = [reasonShort(t, undefined, w), place ? `in ${place}` : null].filter(Boolean).join(" · ");
-      // a request whose row leads with its title (no action in its step) shows the step under it, whole: no word of it is left out of the list
-      const under = t.kind !== "decision" && rowLead(t).mode === "title" ? t.next.trim() : "";
-      return <li key={t.id} className="cp-recheck-item" data-id={taskTitle(t.title).id ?? undefined} data-why={w ?? undefined}>
-        <button type="button" className="cp-rc-open" aria-label={`${wholeStep(t)}${under ? `. ${under}` : ""}. ${reason}`} onClick={() => onTask(t)}>
-          <span className="cp-recheck-step"><RefText text={wholeStep(t)} vault={t.vault ?? vault} /></span>
-          {under && <span className="cp-recheck-next"><RefText text={under} vault={t.vault ?? vault} /></span>}
-          <small className="cp-recheck-asked">{reason}</small>
-        </button>
-      </li>;
-    })}</ul>}
-  </div>;
-}
-
 /** T-335 one surface: what a room's details say (in its focus): what needs you, what is running, the dated summary, and the way to all of its work. */
-export function CompanionBody({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onRun, runMissing, scopeAll, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false, compact = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean;
+export function CompanionBody({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onRun, runMissing, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false, compact = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean;
   /** r28 (Codex P2-5): the one compact panel: the summary is its date line, the footer is outside what scrolls */
   compact?: boolean }) {
   const live = runs.filter(isActiveRun);
@@ -676,7 +634,7 @@ export function CompanionBody({ stands, ready, note, load, feed, rest = 0, moreT
    */
   const [standsAt, setStandsAt] = useState<"whole" | "folded" | "foot">("whole");
   const [panelSize, setPanelSize] = useState("");
-  const standsKey = `${stands?.text ?? ""}|${feed.rows.length}|${feed.recheck?.length ?? 0}|${waiting.length}|${active.length}|${fit}|${compact}|${panelSize}`;
+  const standsKey = `${stands?.text ?? ""}|${feed.rows.length}|${waiting.length}|${active.length}|${fit}|${compact}|${panelSize}`;
   const standsSeen = useRef("");
   /** how many times a summary folded while the panel settled has been tried whole again */
   const retries = useRef(0);
@@ -735,12 +693,11 @@ export function CompanionBody({ stands, ready, note, load, feed, rest = 0, moreT
       <h3 className="cp-h">Needs you</h3>
       <ApprovalRows approvals={feed.approvals ?? []} />
       {/* r17: Uni's panel is at most three rows and one "Show N more" (private items folded in) to the work view, which keeps the full list */}
-      {(feed.rows.length > 0 || !!feed.pending?.length) && <NeedsList needs={feed.rows} pending={feed.pending} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} placeOf={placeOf} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} keepOne={keepOne} wholeFirst={compact} />}
+      {feed.rows.length > 0 && <NeedsList needs={feed.rows} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} placeOf={placeOf} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} keepOne={keepOne} wholeFirst={compact} />}
       {feed.rows.length === 0 && rest > 0 && onEverything && <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={onEverything}>{moreLabel(rest)}</button>}
       {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
       <WaitingRuns runs={waiting} onRun={onRun} missing={runMissing} />
-      {feed.total === 0 && !feed.pending?.length && !waiting.length && <p className="cp-none">{noneLine(feed)}</p>}
-      <Rechecks tasks={feed.recheck ?? []} why={feed.recheckWhy} scope={scopeAll ? "all" : "room"} onTask={onTask} placeOf={placeOf} />
+      {feed.total === 0 && !waiting.length && <p className="cp-none">{NOTHING_NEEDS_YOU}</p>}
       {health}
     </section>}
     {/* r29 (Codex P1-3): the summary is a dated account, below what needs you, never leading */}

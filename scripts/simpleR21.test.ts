@@ -3,6 +3,7 @@
 // Run: node --experimental-strip-types scripts/simpleR21.test.ts
 import assert from "node:assert/strict";
 import { actionOf, checkOf, retryState, rowAction, withoutBrackets, type CheckState } from "../src/areas/simpleCore.ts";
+import { swept } from "./swept.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
 
@@ -12,7 +13,7 @@ async function check(name: string, fn: () => void | Promise<void>) {
 }
 const tree = (() => { const { nodes, rootPath } = parseNodes([{ id: "u", path: "Uni", tags: ["uni"], metadata: {} }]); return buildTaskTree(nodes, rootPath); })();
 const task = (id: string, title: string, meta: Record<string, unknown>, updatedAt = "2026-10-14T06:00:00.000Z"): Task =>
-  parseTask({ id, path: `Tasks/${title}`, tags: ["task"], updatedAt, metadata: { state: "open", owner: "aaron", ...meta } }, tree)!;
+  parseTask({ id, path: `Tasks/${title}`, tags: ["task"], updatedAt, metadata: swept({ state: "open", owner: "aaron", ...meta }) }, tree)!;
 
 const ATLAS = "Edit and send the ATLAS follow-up to Theo and Dominic from your account; fill the opening, sign-off and next-review date.";
 const WOVEN = "Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.";

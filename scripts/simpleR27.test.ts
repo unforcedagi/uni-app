@@ -2,7 +2,7 @@
 // Run: node --experimental-strip-types scripts/simpleR27.test.ts
 import assert from "node:assert/strict";
 import {
-  answersReady, asOfDate, lastWritten, checkingBanner, detailLists, confirmationOf, itemForms, askStamp, referencedItems,
+  answersReady, asOfDate, lastWritten, checkingBanner, detailLists, confirmationOf, itemForms, referencedItems,
   repeatsHeading, runStateLabel, standsHeading, unconfirmedLine, waitingOnYou, } from "../src/areas/simpleCore.ts";
 
 let failed = 0;

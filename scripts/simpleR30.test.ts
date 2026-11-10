@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { buildTaskTree, parseTask } from "../src/areas/taskCore.ts";
 import { parseRuns } from "../src/areas/steerCore.ts";
-import { currentStep, detailLists, NEXT_CAP, reasonShort, recheckLine, referencedItems, rowAction, stepText, unconfirmedLine } from "../src/areas/simpleCore.ts";
+import { currentStep, detailLists, NEXT_CAP, referencedItems, rowAction, stepText } from "../src/areas/simpleCore.ts";
 
 let failed = 0;
 async function check(name: string, fn: () => void | Promise<void>) {
@@ -81,14 +81,6 @@ await check("2: a middle-dot run of items under a label is a list (at least thre
   assert.deepEqual(l[0].items, ["Ann", "Bo", "Cy"]);
   assert.equal(l[0].rest, "Then nothing else.");
   assert.equal(detailLists("One · two").length, 0);
-});
-
-// ---- 4. requests that need confirming
-await check("4: the line says it counts requests, and which rooms", () => {
-  assert.equal(recheckLine(1), "1 request needs confirming in this room");
-  assert.equal(recheckLine(3, "room"), "3 requests need confirming in this room");
-  assert.equal(recheckLine(13, "all"), "13 requests need confirming across all rooms");
-  assert.ok(!/older/i.test(recheckLine(13, "all")));
 });
 
 // ---- 6. a waiting run carries its message

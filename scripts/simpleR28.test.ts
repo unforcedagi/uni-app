@@ -5,8 +5,7 @@ import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/ta
 import { swept } from "./swept.ts";
 import type { Run } from "../src/areas/steerCore.ts";
 import {
-  askStamp, confirmationOf, needsByRow, needsFeed, uniPanel, waitingRunParts, withWaiting, ROW_ITEMS, itemForms, taskIdOf, UNRESOLVED,
-  type ConfOf, type Resolved,
+  needsByRow, needsFeed, uniPanel, waitingRunParts, withWaiting, ROW_ITEMS, itemForms,
 } from "../src/areas/simpleCore.ts";
 import { ROOT } from "../src/areas/treeCore.ts";
 
@@ -22,8 +21,6 @@ const mk = (n: number, extra: Record<string, unknown> = {}, node = "Projects/ATL
   parseTask({ id: `id${n}`, path: `Tasks/T-${n} Do thing ${n}`, tags: ["task"], updatedAt: "2026-10-14T08:00:00.000Z", metadata: swept({ node, state: "open", owner: "aaron", next: `Say go on thing ${n}`, ...extra }) }, tree)!;
 const NOW = Date.parse("2026-10-15T12:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
-/** the feed's own resolver: the record alone (r31) */
-const resolver = (): ConfOf => (t) => confirmationOf(t, NOW);
 
 await check("asked_at is read as itself: the field is askedAt, apart from updated_at", () => {
   const t = mk(1, { asked_at: "2026-10-14T10:00:00+00:00" });
@@ -38,30 +35,24 @@ await check("asked_at is read as itself: the field is askedAt, apart from update
 await check("one count, once: asks and waiting runs, deduplicated by task", () => {
   const confirmed = [mk(10, { asked_at: hoursAgo(2) }), mk(11, { asked_at: hoursAgo(2) })];
   const old = mk(12);
-  const f0 = needsFeed([...confirmed, old], () => null, null, "2026-10-15", resolver());
+  const f0 = needsFeed([...confirmed, old], () => null, null, "2026-10-15");
   const run = (id: string, task: string | null, state = "decision"): Run => ({ id, path: `Runs/${id}`, node: "Projects/ATLAS", task, what: "Waiting on your answer in #Uni: Ship 0.1.46?", by: "uni", state: state as Run["state"], started: null, updated: null, result: null, room: null });
   const f = withWaiting(f0, [run("r1", null), run("r2", "T-10"), run("r3", "T-12"), run("r4", "T-12")]);
   // T-335 one home: the count is his asks by the field (T-12 too: uni-tasks marked it); a waiting run is listed, never counted (it is its room's)
   assert.equal(f.total, 3, "the three asks; no run adds to it");
   assert.deepEqual((f.waiting ?? []).map((r) => r.id), ["r1"], "a run whose task is already a row isn't listed again");
-  assert.deepEqual((f.recheck ?? []).map((t) => t.id), []);
   const p = uniPanel({ ...f, rows: f.rows }, 1);
   assert.equal(p.rows.length, 1);
   assert.equal(p.rows.length + p.rest, f.total, "what is shown plus 'Show N more' is exactly the count");
 });
 
-await check("the dots add up to the count: confirmed asks and waiting runs, once each", () => {
+await check("the dots add up to the count: each needs-you task once, on its own row; an unmarked one has no dot", () => {
   const rows = new Set(["Projects/ATLAS", "Areas/Atlas", ROOT]);
-  const tasks = [mk(20, { asked_at: hoursAgo(2) }), mk(21), mk(22, { asked_at: hoursAgo(2) }, "Areas/Atlas")];
-  const runs = [
-    { node: "Projects/ATLAS", task: null, state: "decision" },
-    { node: "Projects/ATLAS", task: "T-20", state: "decision" },
-    { node: "Areas/Atlas", task: null, state: "running" },
-  ];
-  const m = needsByRow(tasks, rows, () => undefined, resolver(), runs);
-  assert.equal(m.get("Projects/ATLAS"), 2, "T-20 once (its run is the same item), the unnamed run once; T-21 is a recheck: no dot");
+  const tasks = [mk(20, { asked_at: hoursAgo(2) }), mk(21, { needs_aaron: false, needs_aaron_why: "stale" }), mk(22, { asked_at: hoursAgo(2) }, "Areas/Atlas")];
+  const m = needsByRow(tasks, rows, () => undefined);
+  assert.equal(m.get("Projects/ATLAS"), 1, "T-20 once; T-21 is back with its room: no dot");
   assert.equal(m.get("Areas/Atlas"), 1);
-  assert.equal([...m.values()].reduce((a, b) => a + b, 0), 3);
+  assert.equal([...m.values()].reduce((a, b) => a + b, 0), needsFeed(tasks, () => null, null, "2026-10-15").total);
 });
 
 await check("the waiting run's step is the question, never the lead-in with a colon", () => {

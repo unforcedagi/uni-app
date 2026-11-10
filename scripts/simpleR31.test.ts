@@ -4,7 +4,7 @@ import * as core from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import { swept } from "./swept.ts";
 import { parseRuns, type Run } from "../src/areas/steerCore.ts";
-import { askedShown, askStamp, taskIdOf, UNRESOLVED, confirmationOf, currentAt, daysSince, needsByRow, needsFeed, needsYou, reasonShort, summaryLine, unconfirmedLine, withWaiting, type ConfOf } from "../src/areas/simpleCore.ts";
+import { askedShown, taskIdOf, CONFIRMED, confirmationOf, daysSince, needsByRow, needsFeed, needsYou, summaryLine, unconfirmedLine, withWaiting } from "../src/areas/simpleCore.ts";
 
 let failed = 0;
 async function check(name: string, fn: () => void | Promise<void>) {
@@ -18,38 +18,22 @@ const mk = (n: number, extra: Record<string, unknown> = {}, node = "Projects/ATL
   parseTask({ id: `id${n}`, path: `Tasks/T-${n} Do thing ${n}`, tags: ["task"], updatedAt: "2026-10-14T08:00:00.000Z", metadata: swept({ node, state: "open", owner: "aaron", next: NEXT, ...extra }) } as never, tree)!;
 const NOW = Date.parse("2026-10-15T12:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
-const resolver = (): ConfOf => (t) => confirmationOf(t, NOW);
 
 await check("1: the chat-scan path is gone: nothing in the core reads a room's messages", () => {
   for (const gone of ["chatAbout", "checkInResult", "checkInCue", "couldntRead", "gateOf", "quotes", "requestKeys", "ANNOUNCE_GRACE_MS", "QUOTE_WORDS", "chatMovedOn", "needsRead", "CONFIRM_WAIT_MS", "checkingAsks", "checkingRoom"])
     assert.equal((core as Record<string, unknown>)[gone], undefined, gone);
-  assert.equal(confirmationOf.length, 1, "the answer takes the task's record and the time: no chat, no room, no roster");
+  assert.equal(confirmationOf.length, 1, "the answer takes the task's record alone: no chat, no room, no roster, no clock");
 });
 
-await check("1: an ask is current when asked_at or confirmed_at (the newer) is within 3 days", () => {
-  assert.equal(confirmationOf(mk(1, { asked_at: hoursAgo(5) }), NOW).state, "confirmed");
-  assert.equal(confirmationOf(mk(2, { asked_at: hoursAgo(24 * 5) }), NOW).why, "old");
-  assert.equal(confirmationOf(mk(3, { asked_at: hoursAgo(24 * 5), confirmed_at: hoursAgo(3) }), NOW).state, "confirmed", "confirmed_at renews an old ask");
-  assert.equal(confirmationOf(mk(4, { asked_at: hoursAgo(3), confirmed_at: hoursAgo(24 * 9) }), NOW).state, "confirmed", "an old confirmation does not demote a recent ask");
-  assert.equal(confirmationOf(mk(5), NOW).why, "no-date", "no stamp, no confirmation: updated_at is never a fallback");
-  assert.equal(confirmationOf(mk(6, { asked_at: hoursAgo(-48) }), NOW).why, "future");
-  assert.equal(confirmationOf(mk(7, { asked_at: hoursAgo(5), confirmed_at: hoursAgo(-48) }), NOW).state, "confirmed", "a wrong (future) confirmed_at is passed over for a good asked_at");
-  assert.equal(confirmationOf(mk(8, { asked_at: hoursAgo(-1 / 60) }), NOW).state, "confirmed", "a clock a minute ahead is skew");
-  assert.equal(askStamp("2026-10-15", NOW), "recent");
-  assert.equal(askStamp("2026-10-16", NOW), "future");
-  assert.equal(currentAt({ askedAt: "2026-10-10T10:00:00Z", confirmedAt: "2026-10-12T10:00:00Z" }, NOW), "2026-10-12T10:00:00Z");
-});
-
-await check("1: the P1 cases cannot change the classification: chat has no way in", () => {
-  // Codex's two examples: a cancellation quoting six words of the ask, and talk sharing two words with it. The record is all that is read.
-  const t = mk(113, { asked_at: hoursAgo(5) });
-  const before = confirmationOf(t, NOW);
-  const chat = ["Cancel T-113: Send Harper the new site labels from the board", "the new labels are on the board", "T-113 is off"];
-  assert.ok(chat.length);
-  assert.deepEqual(confirmationOf({ ...t }, NOW), before);
-  assert.equal(before.state, "confirmed", "a valid ask stays valid whatever is said around it");
-  const old = mk(114, { asked_at: hoursAgo(24 * 6) });
-  assert.equal(confirmationOf(old, NOW).state, "recheck", "an old ask stays unconfirmed whatever is said around it");
+await check("1: confirmation is the field: needs_aaron true is confirmed; stale is old; resting, no card, no room are away; a room's own task is confirmed", () => {
+  assert.deepEqual(confirmationOf(mk(1)), CONFIRMED);
+  assert.deepEqual(confirmationOf(mk(2, { needs_aaron: false, needs_aaron_why: "stale" })), { state: "recheck", why: "old" });
+  assert.deepEqual(confirmationOf(mk(3, { needs_aaron: false, needs_aaron_why: "no card" })), { state: "recheck", why: "away" });
+  assert.deepEqual(confirmationOf(mk(4, { needs_aaron: false, needs_aaron_why: "resting" })), { state: "recheck", why: "away" });
+  assert.deepEqual(confirmationOf(mk(5, { needs_aaron: false, needs_aaron_why: "no room" })), { state: "recheck", why: "away" });
+  assert.deepEqual(confirmationOf(mk(6, { needs_aaron: false, needs_aaron_why: "not his" })), CONFIRMED, "a room's own task is not an unconfirmed ask");
+  assert.deepEqual(confirmationOf(mk(7, { needs_aaron: false })), CONFIRMED, "no reason given: nothing to recheck");
+  assert.deepEqual(confirmationOf(mk(8, { asked_at: hoursAgo(24 * 30), needs_aaron: true })), CONFIRMED, "the date is never read: the field is");
 });
 
 await check("1: cancelled or superseded is the note's own state, never chat", () => {
@@ -64,33 +48,32 @@ await check("1: the same stored request classifies the same on a cold home and a
   // (T-335 one home: freshness is uni-tasks' word, in needs_aaron: an old one or one with no date is marked stale there)
   const stale = { needs_aaron: false, needs_aaron_why: "stale" };
   const tasks = [mk(30, { asked_at: hoursAgo(5) }), mk(31, { asked_at: hoursAgo(24 * 9), ...stale }), mk(32, { asked_at: hoursAgo(24 * 5), confirmed_at: hoursAgo(2) }), mk(33, stale)];
-  const cold = needsFeed(tasks, () => null, null, "2026-10-15", resolver());
-  const warm = needsFeed([...tasks].reverse(), () => null, null, "2026-10-15", resolver());
+  const cold = needsFeed(tasks, () => null, null, "2026-10-15");
+  const warm = needsFeed([...tasks].reverse(), () => null, null, "2026-10-15");
   const ids = (xs?: Task[]) => (xs ?? []).map((t) => t.id).sort();
   assert.deepEqual(ids(cold.rows), ["id30", "id32"]);
   assert.deepEqual(ids(warm.rows), ids(cold.rows));
-  assert.deepEqual(ids(warm.recheck), ids(cold.recheck));
-  assert.deepEqual(ids(cold.recheck), [], "nothing to recheck here: the field already says");
   assert.equal(cold.total, 2);
 });
 
-await check("1: a confirmed row says it was asked on the date of the newer stamp; the reason of one that is not is that date", () => {
+await check("1: a row says it was asked on the date of the newer stamp; the line over one that is not current says why", () => {
   const t = mk(40, { asked_at: "2026-10-11T09:00:00Z", confirmed_at: "2026-10-14T09:00:00Z" });
   assert.equal(t.asked, "2026-10-14T09:00:00Z");
   assert.equal(t.confirmedAt, "2026-10-14T09:00:00Z");
   assert.equal(mk(41, { asked_at: "2026-10-14T09:00:00Z", confirmed_at: "2026-10-11T09:00:00Z" }).asked, "2026-10-14T09:00:00Z");
   assert.equal(mk(42, { asked_at: "2026-10-11T09:00:00Z" }).confirmedAt, undefined);
-  assert.equal(reasonShort(mk(43, { asked_at: "2026-10-11T12:00:00Z" }), "2026-10-15"), "asked Oct 11");
-  assert.equal(reasonShort(mk(44, { asked_at: "2026-10-09T12:00:00Z", confirmed_at: "2026-10-12T12:00:00Z" }), "2026-10-15"), "asked Oct 12");
   assert.equal(unconfirmedLine("asked Oct 11"), "Asked Oct 11 · not confirmed since");
+  assert.equal(unconfirmedLine("asked Oct 11", "old"), "Asked Oct 11 · not confirmed since");
+  assert.equal(unconfirmedLine("asked Oct 11", "away"), "Asked Oct 11 · back with its room");
   assert.equal(unconfirmedLine(null), "Not confirmed since it was written");
-  assert.ok(!/chat since|couldn't read/i.test(unconfirmedLine("asked Oct 11") + reasonShort(mk(45), "2026-10-15")));
+  assert.equal(unconfirmedLine(null, "away"), "Back with its room");
+  assert.ok(!/chat since|couldn't read/i.test(unconfirmedLine("asked Oct 11")));
 });
 
 await check("1: waiting runs and dots still add up with the record-only resolver", () => {
   const confirmed = [mk(50, { asked_at: hoursAgo(2) }), mk(51, { asked_at: hoursAgo(2) })];
   const stale = mk(52, { needs_aaron: false, needs_aaron_why: "stale" });
-  const f0 = needsFeed([...confirmed, stale], () => null, null, "2026-10-15", resolver());
+  const f0 = needsFeed([...confirmed, stale], () => null, null, "2026-10-15");
   const run = (id: string, task: string | null): Run => ({ id, path: `Runs/${id}`, node: "Projects/ATLAS", task, what: "Waiting on your answer in #Uni: Ship it?", by: "uni", state: "decision", started: null, updated: null, result: null, room: null });
   const f = withWaiting(f0, [run("r1", null), run("r2", "T-50")]);
   assert.equal(f.total, 2, "T-335 one home: a waiting run is listed, never counted");
@@ -98,9 +81,8 @@ await check("1: waiting runs and dots still add up with the record-only resolver
   assert.equal([...m.values()].reduce((a, b) => a + b, 0), 2);
 });
 
-await check("1: taskIdOf reads the T-NN a task names; a task the feed has not resolved is a recheck with no date", () => {
+await check("1: taskIdOf reads the T-NN a task names", () => {
   assert.equal(taskIdOf(mk(30)), "T-30");
-  assert.deepEqual(UNRESOLVED, { state: "recheck", why: "no-date" });
 });
 
 await check("2: the folded summary is one line: the heading folded into the date and room; older than 2 days says how old", () => {

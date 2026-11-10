@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { buildTaskTree, isTaskRow, failureKind, groupOf, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { ROOT } from "./treeCore.ts";
 import { taskTitle } from "./whereCore.ts";
-import { askFromContent, askOrder, closedBy, hasDeps, isListLine, linkedRefs, questionCount, questionsFrom, refName, stepText, taskDeps, wouldNeedYou, type Assessed, type CheckRecord, type CheckState, type SourceRef, type SourceStamp } from "./simpleCore.ts";
+import { askFromContent, askOrder, closedBy, hasDeps, isListLine, linkedRefs, questionCount, questionsFrom, refName, stepText, taskDeps, needsYou, type Assessed, type CheckRecord, type CheckState, type SourceRef, type SourceStamp } from "./simpleCore.ts";
 
 /** A supporting note couldn't be read (r19): the row says "Couldn't check · Retry", never "nothing there". */
 export class Unavailable extends Error {}
@@ -351,8 +351,8 @@ export function createVaultTasks(callIn?: Call, vaultOf: string | (() => string)
   async function loadChecks(tasks: readonly Task[], keysOf: (t: Task) => readonly string[], onEach?: (id: string, s: CheckState) => void): Promise<Map<string, CheckState>> {
     checksLoaded();
     const out = new Map<string, CheckState>();
-    // r20: every record that would need the user and stands on a note, decisions too, the whole queue (six at a time, an open sheet's first)
-    const todo = tasks.filter((t) => wouldNeedYou(t) && hasDeps(taskDeps(t)));
+    // r20: every ask that needs the user (needs_aaron) and stands on a note, the whole queue (six at a time, an open sheet's first)
+    const todo = tasks.filter((t) => needsYou(t) && hasDeps(taskDeps(t)));
     let kept = false;
     await pool(todo, ASK_PARALLEL, async (t) => {
         let s: CheckState;

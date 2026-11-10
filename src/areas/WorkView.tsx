@@ -3,11 +3,11 @@
 // count, and a run waiting on the user's answer), Running (what is running), Drafts, With others (tasks others hold), Done lately, and Later (Someday,
 // folded). No census, no counters per state, no priority pickers: priority is set in the task sheet. Records that need rewording are the
 // rooms' business: logged, never shown. Styling is in tree.css.
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { cleanText } from "../interface/contract";
-import { NeedRow, PrivateRow, Rechecks, RunText, WaitingRuns } from "./Companion";
+import { NeedRow, PrivateRow, RunText, WaitingRuns } from "./Companion";
 import { isActiveRun, type Draft, type Run } from "./steerCore";
-import { noneLine, quietAgo, runStateLabel, stampMs, titleWords, waitingOnYou, type NeedsFeed, type PrivateNeed } from "./simpleCore";
+import { NOTHING_NEEDS_YOU, quietAgo, runStateLabel, stampMs, waitingOnYou, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 import type { TaskLoad } from "./Companion";
 import { asOf, countLabel, countText, LoadHealth } from "./LoadHealth";
 import type { Task } from "./taskCore";
@@ -35,28 +35,18 @@ export type WorkViewProps = {
   onTask: (t: Task) => void;
   /** r30: a run waiting on the user opens its room at the run's message, the composer focused */
   onRun?: (r: Run) => void; runMissing?: (r: Run) => boolean; onDecide: (t: Task, option: string) => void; onNote: (ref: NoteRef) => void; onPrivate: (open: PrivateNeed["open"]) => void;
-  /** r30: this is Uni's own work view: its counts are across all rooms; any other room's are its own */
-  scopeAll?: boolean;
   /** r20: a row's area when it is shown outside it (an action row's subtitle names it). */
   placeOf?: (t: Task) => string | null;
   /** Above the sections: the brief's lede and its Refresh. Below them: a project's own note, folded. */
   top?: ReactNode; foot?: ReactNode;
 };
 
-/** A record to reword, by its title as words (r20): no "Decision (default yes):" label, no cut tail ("…feature 4, the"). Logged for the rooms (r27), never shown. */
-export const tidyTitle = (t: Task): string => titleWords(cleanText(taskTitle(t.title).rest)) || cleanText(t.title);
 /** Runs finished lately (r27): "Done lately" lists those done within a week, newest first. */
 export const DONE_LATELY_DAYS = 7;
 export const doneLately = (runs: readonly Run[], nowMs = Date.now()): Run[] => runs.filter((r) => { const t = stampMs(r.updated ?? r.started ?? ""); return r.state === "done" && Number.isFinite(t) && nowMs - t <= DONE_LATELY_DAYS * 86_400_000; }).sort((a, b) => stampMs(b.updated ?? b.started) - stampMs(a.updated ?? a.started)).slice(0, 5);
 
 export function WorkView(p: WorkViewProps) {
   const [laterOpen, setLaterOpen] = useState(false);
-  /** r19: records that aren't real requests yet: Uni's to tidy, never counted in Needs you. r27: not Aaron's to read: they are for the rooms, so they are logged. */
-  const tidy = p.feed.tidy ?? [];
-  const tidyKey = tidy.map((t) => t.id).join(",");
-  useEffect(() => { if (tidy.length) console.info(`[uni] ${tidy.length} record${tidy.length === 1 ? "" : "s"} need rewording by their rooms:`, tidy.map((t) => `${t.id} ${tidyTitle(t)}`)); }, [tidyKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  /** r20: decisions not read yet: "Checking what's needed…" rows after the owed ones, never counted. */
-  const pending = p.feed.pending ?? [];
   const vault = useVaultProfile().vault;
   const live = p.runs.filter(isActiveRun);
   /** r27 (Codex P2-5): a run waiting on the user's answer is Needs you; Running holds only what is not waiting on them */
@@ -72,13 +62,11 @@ export function WorkView(p: WorkViewProps) {
     <section className="wv-sec" aria-label="Needs you" aria-busy={p.load.refreshing || undefined}>
       <h2 className="wv-h">Needs you <span className="wv-n" aria-label={countLabel(p.feed.total, p.load)} title={countLabel(p.feed.total, p.load)}>{countText(p.feed.total, p.load)}</span></h2>
       <ApprovalRows approvals={p.feed.approvals ?? []} className="cp-list cp-approvals wv-approvals" />
-      {p.feed.total === 0 && !pending.length && !waiting.length ? <p className="cp-none">{noneLine(p.feed)}</p> : p.feed.rows.length + p.feed.privates.length + pending.length === 0 ? null : <ul className="cp-list">
+      {p.feed.total === 0 && !waiting.length ? <p className="cp-none">{NOTHING_NEEDS_YOU}</p> : p.feed.rows.length + p.feed.privates.length === 0 ? null : <ul className="cp-list">
         {p.feed.rows.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} area={p.placeOf?.(t) ?? null} />)}
         {p.feed.privates.map((x) => <PrivateRow key={x.key} p={x} onPrivate={p.onPrivate} />)}
-        {pending.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} area={p.placeOf?.(t) ?? null} />)}
       </ul>}
       <WaitingRuns runs={waiting} className="cp-list cp-waiting wv-waiting" onRun={p.onRun} missing={p.runMissing} />
-      <Rechecks tasks={p.feed.recheck ?? []} why={p.feed.recheckWhy} scope={p.scopeAll ? "all" : "room"} onTask={p.onTask} placeOf={p.placeOf} />
     </section>
     {/* r29 (Codex P1-3): the summary is a dated account, below what needs you */}
     {p.top}

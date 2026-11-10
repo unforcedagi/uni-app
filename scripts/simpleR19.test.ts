@@ -2,7 +2,7 @@
 // Titles are real ones from the refreshed scratch copy (10-14); steps are written in the same shapes, never copied from a note's body.
 // Run: node --experimental-strip-types scripts/simpleR19.test.ts
 import assert from "node:assert/strict";
-import { CHECK_TTL, checkOf, needsFeed, needsYou, stepAudience, taskDeps, tidyReason, toTidy, withHosts, wouldNeedYou } from "../src/areas/simpleCore.ts";
+import { CHECK_TTL, checkOf, needsFeed, needsYou, stepAudience, taskDeps, tidyReason, toTidy, withHosts } from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import { swept } from "./swept.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
@@ -184,23 +184,24 @@ await check("P1-3 when unsure, the item stays in Needs you: concrete steps (the 
   assert.equal(tidyReason({ kind: "task", next: "Run /restart" }), null);
 });
 
-await check("P1-3 tidy records leave Needs you and its count, and are listed apart; a room's own record never shows there", () => {
+await check("P1-3 only a needs-you record is tidied; a room's own or unmarked record never shows in Needs you", () => {
   const rows = [
     task("a", "T-129 Send the ATLAS Oct 12 follow-up email", { next: "Edit and send the follow-up to Theo and Dominic.", priority: "now" }),
     task("f", "T-111 Fractal flow test: real work in area rooms, check updates…", { next: "Fractal flow test: real work in area rooms, check updates propagate up; nested room names; app refresh for the tree" }),
     task("m", "Mail: approve a test week, not an immediate cutover", {}, "decision"),
     task("o", "T-11 RegenHub site + newsletter systems", { owner: "room:boulder", next: "Run /restart after the merge" }),
   ];
-  // T-335 one home: whether it needs him is uni-tasks' field, so an ask that reads like an outline still counts while it is marked (its room
-  // rewords it); the tidy list holds only records that aren't counted (here the old decision)
-  assert.deepEqual(rows.map((t) => [t.id, needsYou(t), wouldNeedYou(t), toTidy(t)]), [["a", true, true, null], ["f", true, true, "outline"], ["m", false, true, "proposal"], ["o", false, false, null]]);
+  // T-335 one home: whether it needs him is uni-tasks' field, so an ask that reads like an outline still counts while it is marked; a record
+  // that isn't marked (the old decision, a room's own) is never listed for tidying
+  assert.deepEqual(rows.map((t) => [t.id, needsYou(t), toTidy(t)]), [["a", true, null], ["f", true, "outline"], ["m", false, null], ["o", false, null]]);
   const feed = needsFeed(rows, () => null);
   assert.equal(feed.total, 2);
   assert.deepEqual(feed.rows.map((t) => t.id), ["a", "f"]);
-  assert.deepEqual(feed.tidy!.map((t) => t.id), ["m"]);
   // inside another private area: never listed by title outside it
   const priv = rows.map((t) => ({ ...t, node: "Areas/Sanctum/X" }));
-  assert.equal(needsFeed(priv, () => ({ path: "Areas/Sanctum", name: "Sanctum" })).tidy!.length, 0);
+  const hidden = needsFeed(priv, () => ({ path: "Areas/Sanctum", name: "Sanctum" }));
+  assert.equal(hidden.rows.length, 0);
+  assert.equal(hidden.total, 2);
 });
 
 // r20: "Ask Uni to fix this record" is gone (Uni's tidying stays Uni's): see simpleR20.test.ts

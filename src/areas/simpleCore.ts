@@ -1,6 +1,6 @@
 // T-124 "Simple first" (pure, unit-tested in scripts/steer.test.ts): what the room's quiet companion says. One sentence for where
 // the room stands, at most three things that need the user (Now first), the chat composer's placeholder.
-import { ASK_SIG_VERSION, isMe, PRIORITIES, type Task } from "./taskCore.ts";
+import { isMe, PRIORITIES, type Task } from "./taskCore.ts";
 import { taskTitle, type Where } from "./whereCore.ts";
 import { ROOT } from "./treeCore.ts";
 import type { Run } from "./steerCore.ts";
@@ -37,17 +37,8 @@ export function unknownDecision(t: Partial<Pick<Task, "kind" | "title" | "ask" |
   if (!(tt.cut || tt.previewed)) return false;
   return !(typeof t.ask === "string" && !!t.updatedAt && t.askAt === t.updatedAt);
 }
-/** The r12 rule before r19's tidy check: open decisions, the user's own tasks and tasks waiting on them, at Now or Soon. */
-export function wouldNeedYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state"> & Partial<Pick<Task, "next" | "supersededBy">>): boolean {
-  if (t.state !== "open" && t.state !== "doing" && t.state !== "waiting") return false;
-  // r31: superseded is the note's own field (`superseded_by`), never read from chat
-  if (t.supersededBy) return false;
-  // r26: a task whose own step says it was superseded is closed, whatever its stored state
-  if (superseded(t.next)) return false;
-  return t.kind === "decision" || ((isMe(t.owner) || isMe(t.waitingOn)) && t.priority !== "someday");
-}
-/** A record the user would be asked for that Uni has to tidy first (r19): the work view's "Uni needs to tidy these (N)". */
-export const toTidy = (t: Task): TidyReason | null => (wouldNeedYou(t) ? tidyReason(t) : null);
+/** An ask that needs the user but whose record Uni has to tidy first (r19): its row and sheet say so instead of asking. */
+export const toTidy = (t: Task): TidyReason | null => (needsYou(t) ? tidyReason(t) : null);
 /** The user's own: an open decision, a task they own, or one that waits on them (r17). Everything else here is someone else's, in In motion. */
 export const isMine = (t: Pick<Task, "kind" | "owner" | "waitingOn">): boolean => t.kind === "decision" || isMe(t.owner) || isMe(t.waitingOn);
 
@@ -96,16 +87,8 @@ export type PrivateNeed = { key: string; count: number; place: string; open: { p
   others: number };
 /** Needs you at one level, the one list every surface reads (r13): the companion, "+N in areas", the dots and the work view add up to `total`. */
 export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number;
-  /** r28: requests that are not confirmed (r30: "N requests need confirming"): listed apart under Needs you, never in `total` or the dots. */
-  recheck?: Task[];
-  /** r30: why each of them is not confirmed (by task id), for its reason line */
-  recheckWhy?: Record<string, RecheckWhy | null>;
   /** r28 (Codex P2-6): runs waiting on the user's answer, deduplicated by task; they are in `total` (one count everywhere). */
   waiting?: Run[];
-  /** r19: records Uni has to tidy (not real requests yet), outside private areas; never in `total`. */
-  tidy?: Task[];
-  /** r20: decisions not read yet ("Checking what's needed…"), outside private areas: shown after the rows, never in `total` or the dots. */
-  pending?: Task[];
   /** T-161: Hermes approval prompts waiting in a room, first in the list and in `total` (a run is blocked on each) */
   approvals?: Approval[] };
 
@@ -116,43 +99,28 @@ export function rankNeeds(list: readonly Task[], today = localDay()): Task[] {
 }
 
 /**
- * Everything that needs you at a level and below, by the one rule (`needsYou`). `privateOf(node)`: the private area a node sits in, or null.
- * `self`: the private area this level is (or sits in), opened by the user: its own items are ordinary rows with their titles (r14); items in
- * any other private area are one line per area.
+ * Everything that needs you at a level and below: the tasks uni-tasks marked `needs_aaron` (the one rule, `needsYou`), nothing decided here.
+ * `privateOf(node)`: the private area a node sits in, or null. `self`: the private area this level is (or sits in), opened by the user: its
+ * own items are ordinary rows with their titles (r14); items in any other private area are one line per area.
  */
-export type ConfOf = (t: Task) => Resolved;
-export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => PrivatePlace | null, self: PrivatePlace | null = null, today = localDay(), confOf?: ConfOf): NeedsFeed {
-  // T-335 one home: the field already holds the freshness rule (asked or confirmed in 7 days), so nothing owed is "to recheck" here
+export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => PrivatePlace | null, self: PrivatePlace | null = null, today = localDay()): NeedsFeed {
   const owed = rankNeeds(tasks.filter(needsYou), today);
-  const stateOf = (_t: Task): Confirm => "confirmed";
-  void confOf;
-  const all = owed;
   const rows: Task[] = [];
-  const recheck: Task[] = [];
-  const recheckWhy: Record<string, RecheckWhy | null> = {};
   const by = new Map<string, PrivateNeed>();
   for (const t of owed) {
     const p = privateOf(t.node);
-    const open = !p || (self && p.path === self.path);
-    const st = stateOf(t);
-    // a private area's unconfirmed asks are not listed outside it (their words stay inside); they are neither counted nor named
-    if (st === "recheck") { if (open) { recheck.push(t); recheckWhy[t.id] = confOf ? confOf(t).why : null; } continue; }
-    if (open) { rows.push(t); continue; }
-    const g = by.get(p!.path) ?? { key: p!.path, count: 0, place: p!.name, open: { path: p!.path }, actions: [], others: 0 };
-    by.set(p!.path, g);
+    if (!p || (self && p.path === self.path)) { rows.push(t); continue; }
+    const g = by.get(p.path) ?? { key: p.path, count: 0, place: p.name, open: { path: p.path }, actions: [], others: 0 };
+    by.set(p.path, g);
     g.count++;
     const a = privateAction(t);
     if (a) g.actions.push(a); else g.others++;
   }
-  const here = (t: Task) => !privateOf(t.node) || privateOf(t.node)?.path === self?.path;
-  const tidy = tasks.filter((t) => toTidy(t) && !needsYou(t) && here(t));     // (listed apart only when not counted)
-  const pending = rankNeeds(tasks.filter((t) => wouldNeedYou(t) && unknownDecision(t) && here(t)), today);
-  return { rows, privates: [...by.values()], total: all.length, tidy, pending, recheck, recheckWhy, waiting: [] };
+  return { rows, privates: [...by.values()], total: owed.length, waiting: [] };
 }
 /**
  * r28 (Codex P2-6): the runs waiting on the user's answer join the feed, so the count, the dots and the strip say the same number. Each is
- * counted once, deduplicated by task: a run whose task is already a confirmed row is not a second item, and an ask in the recheck list whose
- * run is waiting now is not rechecked (the run is the live word).
+ * counted once, deduplicated by task: a run whose task is already a row is not a second item.
  */
 export function withWaiting(feed: NeedsFeed, runs: readonly Run[]): NeedsFeed {
   const have = new Set(feed.rows.map(taskIdOf).filter(Boolean) as string[]);
@@ -163,9 +131,8 @@ export function withWaiting(feed: NeedsFeed, runs: readonly Run[]): NeedsFeed {
     if (tid) seen.add(tid);
     return true;
   });
-  const names = new Set(waiting.map((r) => r.task?.toUpperCase()).filter(Boolean) as string[]);
   // T-335 one home: listed, never counted: a blocked run goes to its room; what needs him is his asks (the one rule)
-  return { ...feed, waiting, total: feed.total, recheck: (feed.recheck ?? []).filter((t) => { const id = taskIdOf(t); return !(id && names.has(id)); }) };
+  return { ...feed, waiting, total: feed.total };
 }
 
 /** T-161: the approval prompts waiting here join the feed, counted like every other ask (Uni's level holds every room's; a room's level, its own). */
@@ -187,10 +154,8 @@ export function uniPanel(feed: NeedsFeed, max = UNI_ROWS): NeedsFeed & { rest: n
   const areas = feed.rows.filter((t) => t.node !== ROOT);
   const rows = [...own, ...areas].slice(0, max);
   const privateCount = feed.privates.reduce((n, p) => n + p.count, 0);
-  // r20: a decision still being read fills a row only where nothing owed is left to show; it is never counted
-  const pending = (feed.pending ?? []).slice(0, Math.max(0, max - rows.length));
   // r28: the waiting runs are shown in the panel itself, so they are not in "Show N more"; T-161: nor are the approval prompts
-  return { ...feed, rows, privates: [], total: feed.total, rest: Math.max(0, feed.total - rows.length - (feed.approvals?.length ?? 0)), privateCount, pending };
+  return { ...feed, rows, privates: [], total: feed.total, rest: Math.max(0, feed.total - rows.length - (feed.approvals?.length ?? 0)), privateCount };
 }
 /** "Includes 1 in a private area": the "N more ›" link's tooltip, when private items are folded into its count. */
 export const privateNote = (n: number): string | null => (n <= 0 ? null : n === 1 ? "Includes 1 item in a private area" : `Includes ${n} items in private areas`);
@@ -432,23 +397,8 @@ export function answerText(raw: string): string | null {
   return t && t.length <= ANSWER_MAX ? t : null;
 }
 
-/**
- * "3 requests need confirming in this room" / "13 requests need confirming across all rooms": the one quiet line under Needs you for what is not
- * confirmed. It claims no work (the app starts none), says nothing about age (some were asked today), and says which rooms it counts (r30). (r29, Codex P1-2)
- */
-export type RecheckScope = "room" | "all";
-export const recheckLine = (n: number, scope: RecheckScope = "room"): string => `${n} ${n === 1 ? "request needs" : "requests need"} confirming ${scope === "all" ? "across all rooms" : "in this room"}`;
-/**
- * Why a request is not confirmed, in a few words: "asked Oct 11" (the date of the newer of its `asked_at` and `confirmed_at`), or "no date".
- * T-145: its words changed since that stamp: "changed since asked Oct 11".
- */
-export function reasonShort(t: Partial<Pick<Task, "asked" | "added">>, today = localDay(), why: RecheckWhy | null = null): string {
-  const asked = askedLine(requestDate(t), today);
-  if (why === "changed") return asked ? `changed since ${asked}` : "changed since asked";
-  return asked ?? "no date";
-}
-/** The empty Needs you: "Nothing needs you here" only when no ask is waiting to be confirmed either; else it says what is known: no ask is confirmed. */
-export const noneLine = (f: Pick<NeedsFeed, "recheck">): string => ((f.recheck?.length ?? 0) > 0 ? "No confirmed asks" : "Nothing needs you here.");
+/** The empty Needs you. */
+export const NOTHING_NEEDS_YOU = "Nothing needs you here.";
 /**
  * The needs-you feed (T-124 r7): only what the user must do. Their tasks (owner, or waiting on them) that are live and not snoozed (the
  * caller's `Where` has already dropped those, and anything done or archived), at priority Now or Soon (unsorted counts as Soon), plus open
@@ -1391,60 +1341,27 @@ export function itemForms(item: string): string[] {
   return out;
 }
 
-// ------------------------------------------------------------------------------------------------- r31: an ask is current because its record says so
+// ------------------------------------------------------------------------------------------------- T-335: an ask is current because needs_aaron says so
 /**
- * r31 (Codex P1, 19 rounds): chat can neither prove an ask is current nor that it was cancelled, so it is not read. An ask is *confirmed* when its
- * task note says so: `asked_at` (stamped by `tasks.py` whenever `next` or `detail` is written) or `confirmed_at` (`tasks.py confirm T-NN`), the
- * newer of the two, is within 3 days and not in the future (a clock a few minutes ahead is skew; more is a wrong date). Nothing else promotes
- * or demotes it. A cancelled or superseded ask is the note's own state (`done`, `archived`, `superseded_by`), which `wouldNeedYou` reads.
- * `confirmed` is counted and in Needs you; `recheck` is listed apart, never counted. It depends on the one stored record, so the same ask
- * classifies the same on a cold home and a warm one.
+ * Whether an ask is current, from `needs_aaron` alone (T-335 one reader: the app no longer judges asks by their dates or signatures; uni-tasks'
+ * needs.py does, once). An ask that needs the user is current. His ask that went back to its room (`needs_aaron_why` stale, no card, resting,
+ * no room) is not: its sheet says so, and its answers wait behind "Answer anyway". Anything else (someone else's task, a closed one) is not an
+ * ask and is not gated.
  */
-export const CONFIRM_DAYS = 3;
-export const CONFIRM_SKEW_MS = 5 * 60_000;
 export type Confirm = "confirmed" | "recheck";
-export type AskStamp = "none" | "old" | "future" | "recent";
-/**
- * The newer of `asked_at` and `confirmed_at` (the one date an ask is current by); null when neither is a date. A stamp in the future past the
- * clock skew is a wrong date: it is passed over for the other one, and used only when it is all there is (then it reads "future").
- */
-export function currentAt(t: { askedAt?: string | null; confirmedAt?: string | null }, nowMs = Date.now()): string | null {
-  const ok = [t.askedAt, t.confirmedAt].filter((x): x is string => !!x && Number.isFinite(stampMs(x)));
-  const newest = (xs: string[]) => xs.reduce((a, b) => (stampMs(b) > stampMs(a) ? b : a));
-  const sane = ok.filter((x) => askStamp(x, nowMs) !== "future");
-  return sane.length ? newest(sane) : ok.length ? newest(ok) : null;
-}
-export function askStamp(at: string | null | undefined, nowMs = Date.now()): AskStamp {
-  const t = stampMs(at ?? "");
-  if (!Number.isFinite(t)) return "none";
-  if (/^\d{4}-\d{2}-\d{2}$/.test((at ?? "").trim())) { const day = (at ?? "").trim(); const today = localDay(new Date(nowMs)); if (day > today) return "future"; }
-  else if (t - nowMs > CONFIRM_SKEW_MS) return "future";
-  return nowMs - t > CONFIRM_DAYS * 86_400_000 ? "old" : "recent";
-}
-/** Why an ask is not confirmed, for the log and the tests. T-145: `changed`, its words are not the ones its stamp was written with. */
-export type RecheckWhy = "no-date" | "old" | "future" | "changed";
+/** Why an ask is not current: `old` (not asked or confirmed by its room lately), `away` (back with its room: no card, resting, no room). */
+export type RecheckWhy = "old" | "away";
 export type Resolved = { state: Confirm; why: RecheckWhy | null };
-/**
- * T-145: a stamp vouches for the words it was written with. A record that carries `ask_sig` (the signature of `next` and `detail` written in the
- * same update as `asked_at` or `confirmed_at`) is current only while the note still holds those words: an edit to them by any other write (a
- * vault tool, a hand edit) leaves the stamp vouching for words that are gone, and the ask needs confirming until its room asks or confirms
- * again. A record without `ask_sig` (written before tasks.py stamped it) is read by its stamp alone, as before.
- */
-export function confirmationOf(t: { askedAt?: string | null; confirmedAt?: string | null; askSig?: string | null; sig?: string }, nowMs = Date.now()): Resolved {
-  // a signature of a version this app doesn't compute is not read (the stamp decides), never taken for changed words
-  if (t.askSig && t.sig && t.askSig.startsWith(ASK_SIG_VERSION) && t.askSig !== t.sig) return { state: "recheck", why: "changed" };
-  const stamp = askStamp(currentAt(t, nowMs), nowMs);
-  return stamp === "recent" ? { state: "confirmed", why: null } : { state: "recheck", why: stamp === "none" ? "no-date" : stamp };
+export const CONFIRMED: Resolved = { state: "confirmed", why: null };
+const BACK_WITH_ROOM = new Set(["stale", "resting", "no card", "no room"]);
+export function confirmationOf(t: Partial<Pick<Task, "needsAaron" | "needsAaronWhy">>): Resolved {
+  if (needsYou(t) || !t.needsAaronWhy || !BACK_WITH_ROOM.has(t.needsAaronWhy)) return CONFIRMED;
+  return { state: "recheck", why: t.needsAaronWhy === "stale" ? "old" : "away" };
 }
-/** A task whose record isn't asked about (or any task the feed hasn't resolved): unconfirmed, with no date to go on. */
-export const UNRESOLVED: Resolved = { state: "recheck", why: "no-date" };
-/**
- * The one quiet line over an unconfirmed request, with its reason: "Asked Oct 11 · not confirmed since"; with no date "Not confirmed since it was
- * written". T-145: words changed since the stamp: "Asked Oct 11 · changed since, not confirmed".
- */
+/** The one quiet line over an ask that isn't current: "Asked Oct 11 · not confirmed since", or "… · back with its room". */
 export const unconfirmedLine = (asked: string | null | undefined, why: RecheckWhy | null = null): string => {
-  const tail = why === "changed" ? "changed since, not confirmed" : "not confirmed since";
-  return asked ? `${asked[0].toLocaleUpperCase()}${asked.slice(1)} · ${tail}` : why === "changed" ? "Changed since it was asked, not confirmed" : "Not confirmed since it was written";
+  const tail = why === "away" ? "back with its room" : "not confirmed since";
+  return asked ? `${asked[0].toLocaleUpperCase()}${asked.slice(1)} · ${tail}` : why === "away" ? "Back with its room" : "Not confirmed since it was written";
 };
 /** Whether the approval answers (and "I did this") are offered as ready: only when the ask is confirmed, or after "Answer anyway". */
 export const answersReady = (c: Confirm, anyway: boolean): boolean => c === "confirmed" || anyway;
