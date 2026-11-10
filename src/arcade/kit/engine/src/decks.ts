@@ -52,7 +52,45 @@ function distance(a: Card, b: Card): number {
   return 1 - both / union;
 }
 
+type PlayGame = Exclude<GameId, "garden">;
+
+/** The game a card is played in (T-335 look here), first fit: The Gallery for a media card, Fix It, Ripple, Who Said It,
+ * else This or That when it can stand in a pair. null: nothing can deal it on this screen. */
+export function gameOf(card: Card, opts: DealOptions = {}): PlayGame | null {
+  const c = dealable(card, opts);
+  if (!c) return null;
+  if (GALLERY_KINDS.includes(c.kind) && c.media) return "gallery";
+  if (c.kind === "artifact" && c.artifact) return "fix-it";
+  if (c.kind === "question") return "ripple";
+  if (c.kind === "voice") return "who-said-it";
+  return pairable(c, opts) ? "this-or-that" : null;
+}
+
+/** The round for one card in its own game: a room's "look here" pin, dealt first. In This or That it is paired with the
+ * least-seen card it can stand beside. null: it can't be dealt here. */
+export function roundFor(cardId: string, allCards: readonly Card[], reactions: readonly Reaction[], rand: Rand = Math.random, opts: DealOptions = {}): Round | null {
+  const raw = allCards.find((c) => c.id === cardId);
+  const card = raw ? dealable(raw, opts) : null;
+  const game = card ? gameOf(card, opts) : null;
+  if (!card || !game) return null;
+  if (game !== "this-or-that") return { game, card, ask: askFor(game, dimensionOf(card, opts), opts) } as Round;
+  const seen = seenCounts(reactions);
+  const mates = freshFirst(allCards.map((c) => dealable(c, opts)).filter((c): c is Card => c !== null && c.id !== card.id && canPair(card, c, opts)), seen, rand);
+  if (!mates.length) return null;
+  const [a, b] = samePair(card, mates[0], opts);
+  return { game, a, b, ask: askFor(game, dimensionOf(a, opts), opts) };
+}
+
+const has = (r: Round, id: string) => ("card" in r && r.card.id === id) || ("a" in r && (r.a.id === id || r.b.id === id));
+
 export function buildRounds(game: Exclude<GameId, "garden">, allCards: readonly Card[], reactions: readonly Reaction[], n: number, rand: Rand = Math.random, opts: DealOptions = {}): Round[] {
+  if (opts.look) {   // a pinned card's round first, then the deal as usual without it
+    const { look, ...rest } = opts;
+    const first = roundFor(look, allCards, reactions, rand, rest);
+    const others = buildRounds(game, allCards, reactions, n, rand, rest);
+    if (!first || first.game !== game) return others;
+    return [first, ...others.filter((r) => !has(r, look))].slice(0, n);
+  }
   const seen = seenCounts(reactions);
   const cards = allCards.map((c) => dealable(c, opts)).filter((c): c is Card => c !== null);
   const one = <G extends "gallery" | "fix-it" | "who-said-it" | "ripple">(g: G, card: Card) => ({ game: g, card, ask: askFor(g, dimensionOf(card, opts), opts) }) as Round;

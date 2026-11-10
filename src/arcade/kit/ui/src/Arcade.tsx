@@ -3,9 +3,9 @@
 import "./arcade.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { GameId, Profile, Stats } from "../../engine/src/types.ts";
+import type { DealOptions, GameId, Profile, Stats } from "../../engine/src/types.ts";
 import { GAMES } from "../../engine/src/types.ts";
-import type { ArcadeHost, PlayGame } from "./host.ts";
+import type { ArcadeHost, LookPin, PlayGame } from "./host.ts";
 import { Ctx, useInk, useKeys, useReducedMotion } from "./kit/hooks.ts";
 import { useGreyscale } from "./kit/screen.ts";
 import type { ArcadeCtx } from "./kit/hooks.ts";
@@ -26,6 +26,8 @@ export interface ArcadeProps {
   burstSeconds?: number;
   /** open straight into a game */
   start?: GameId;
+  /** open straight into a pinned card (a room's "look here" link, #look/<card id>), once its pin is known */
+  look?: string;
 }
 
 const FOUND: Record<string, string> = {
@@ -49,16 +51,25 @@ function feel(g: GameId, host: ArcadeHost, uni: string | null): string {
   }
 }
 
-interface Home { stats: Stats | null; profile: Profile | null; fresh: Partial<Record<PlayGame, number>>; exact: boolean; error: boolean }
+interface Home { stats: Stats | null; profile: Profile | null; fresh: Partial<Record<PlayGame, number>>; exact: boolean; error: boolean; look: LookPin[] }
 
-export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) {
+export function Arcade({ host: base, onExit, burstSeconds = 60, start, look }: ArcadeProps) {
+  // look here: the first deal after opening a pin puts that card first; every later deal is plain play
+  const pinned = useRef<string | null>(null);
+  const host = useMemo<ArcadeHost>(() => Object.assign(Object.create(base) as ArcadeHost, {
+    rounds: (g: PlayGame, n: number, o?: DealOptions) => {
+      const card = pinned.current;
+      pinned.current = null;
+      return base.rounds(g, n, card ? { ...o, look: card } : o);
+    },
+  }), [base]);
   const ink = useInk();
   const reduce = useReducedMotion();
   const calm = ink || reduce;
   const { grey, found, locked, set: setGrey } = useGreyscale(ink);
   const deal = useMemo(() => ({ ...(grey ? { grey: true } : {}), ...(calm ? { still: true } : {}) }), [grey, calm]);
   const [view, setView] = useState<GameId | "home">(start ?? "home");
-  const [home, setHome] = useState<Home>({ stats: null, profile: null, fresh: {}, exact: true, error: false });
+  const [home, setHome] = useState<Home>({ stats: null, profile: null, fresh: {}, exact: true, error: false, look: [] });
   const lastToy = useRef<GameId | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const uni = host.owner.you ? null : "Uni";
@@ -71,7 +82,7 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
     const fresh = host.fresh
       ? host.fresh(deal).then((f) => ({ f, exact: true }))
       : Promise.all(play.map((g) => host.rounds(g, 12, deal).then((r) => [g, r.length] as const))).then((xs) => ({ f: Object.fromEntries(xs) as Partial<Record<PlayGame, number>>, exact: false }));
-    const [s, p, f] = await Promise.allSettled([host.stats(), host.profile(), fresh]);
+    const [s, p, f, l] = await Promise.allSettled([host.stats(), host.profile(), fresh, base.look ? base.look(deal) : Promise.resolve([])]);
     if (mine !== homeAsk.current) return;
     setHome({
       stats: s.status === "fulfilled" ? s.value : null,
@@ -79,13 +90,23 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
       fresh: f.status === "fulfilled" ? f.value.f : {},
       exact: f.status === "fulfilled" ? f.value.exact : true,
       error: s.status === "rejected" && p.status === "rejected",
+      look: l.status === "fulfilled" ? l.value.filter((x) => games.includes(x.game)) : [],
     });
-  }, [host, games, deal]);
+  }, [host, base, games, deal]);
 
   useEffect(() => { if (view === "home") void loadHome(); }, [view, loadHome]);
 
   const goHome = useCallback(() => setView("home"), []);
   const open = (g: GameId) => { lastToy.current = g; setView(g); root.current?.scrollTo?.({ top: 0 }); };
+  const openPin = (p: LookPin) => { pinned.current = p.card; open(p.game); };
+
+  // a "look here" link: open its card once the pin is known (a pin that's gone opens the plain home)
+  const linked = useRef(false);
+  useEffect(() => {
+    if (!look || linked.current) return;
+    const p = home.look.find((x) => x.card === look);
+    if (p) { linked.current = true; openPin(p); }
+  }, [look, home.look]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // back on the home, focus returns to the toy that was opened
   useEffect(() => {
@@ -101,12 +122,13 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
   const claims = home.profile?.claims ?? [];
   const growing = claims.filter((c) => c.status === "live").length;
 
+  // play: no tallies on the toys (T-335). Only an empty toy says so, so a tap never lands on nothing.
   const count = (g: GameId): string => {
-    if (g === "garden") return growing ? `${growing} growing` : "Bare soil, for now";
+    if (g === "garden") return growing ? "" : "Bare soil, for now";
     const n = home.fresh[g];
-    if (n === undefined) return home.stats ? "" : "…";
-    if (!home.exact) return n ? `${n >= 12 ? "12+" : n} ready` : "Nothing yet";
-    return n ? `${n} fresh` : grey ? "Nothing fresh for this screen" : "All played. Replays welcome";
+    if (n === undefined || n > 0) return "";
+    if (!home.exact) return "Nothing yet";
+    return grey ? "Nothing fresh for this screen" : "All played. Replays welcome";
   };
 
   const art: Record<GameId, ReactNode> = {
@@ -133,6 +155,16 @@ export function Arcade({ host, onExit, burstSeconds = 60, start }: ArcadeProps) 
               <Seed size={22} /> <b>{seeds}</b> <span>{seeds === 1 ? "seed" : "seeds"} planted</span>
             </p>
           </header>
+          {home.look.length > 0 && (
+            <div className="ta-look" role="group" aria-label="Look here">
+              {home.look.map((p) => (
+                <button key={p.card} type="button" className="ta-look-pin" data-card={p.card} onClick={() => openPin(p)}>
+                  <span className="ta-look-label">Look here{p.room ? ` · #${p.room}` : ""}</span>
+                  <span className="ta-look-why">{p.why || p.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="ta-grey-row">
             <button type="button" role="switch" aria-checked={grey} disabled={locked} className={`ta-grey-switch${grey ? " is-on" : ""}`} onClick={() => setGrey(!grey)}>
               <span className="ta-grey-knob" aria-hidden="true" />

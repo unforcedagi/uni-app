@@ -1,2 +1,2 @@
-Vendored from taste-arcade a8bab66 (MIT, see LICENSE). Do not edit here: run scripts/sync-arcade.sh.
+Vendored from taste-arcade 0449c86 (MIT, see LICENSE). Do not edit here: run scripts/sync-arcade.sh.
 Local fix on top of that, not yet in the library: games/Ripple.tsx holds the mic from first tap to stop or throw-away (a second tap, leaving while it opens or just after, the screen settling mid-answer). Apply it there before the next sync, or the sync undoes it; scripts/browser/arcade.spec.ts catches most of a loss, not all.

@@ -102,8 +102,9 @@ export const DIMENSIONS: readonly Dimension[] = ["type", "words", "colour", "val
 /** What a round says out loud: the question, and what stays the same while you answer it. */
 export interface Ask { dimension: Dimension; prompt: string; detail: string }
 
-/** What the screen can show. `grey`: no colour. `still`: nothing moves. */
-export interface DealOptions { grey?: boolean; still?: boolean }
+/** What the screen can show. `grey`: no colour. `still`: nothing moves. `look`: a card a room pinned for the player
+ * ("look here", T-335): its round is dealt first when this game can play it. */
+export interface DealOptions { grey?: boolean; still?: boolean; look?: string }
 
 export type ReactionKind = "pick" | "keep" | "drop" | "nudge" | "pin" | "voice" | "guess" | "claim" | "words";
 

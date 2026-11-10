@@ -4,6 +4,9 @@ import type { Card, DealOptions, GameId, Profile, Reaction, Round, Stats } from 
 
 export type PlayGame = Exclude<GameId, "garden">;
 
+/** A room's "look here" pin on one card (uni-tasks `tasks.py look --board arcade`): who asked, and why, in one line. */
+export interface LookPin { card: string; game: PlayGame; title?: string; room: string; why: string }
+
 export interface VoiceCapture {
   /** ask for the mic and start recording; rejects with a readable message if the mic can't be had */
   start(): Promise<void>;
@@ -30,6 +33,9 @@ export interface ArcadeHost {
   /** how many rounds of each game are still unplayed, for the Arcade home (optional; the door's /home has it). Without
    *  it the home asks rounds() and says how many are ready instead. */
   fresh?(opts?: DealOptions): Promise<Partial<Record<PlayGame, number>>>;
+  /** look here (T-335): the cards a room pinned for the owner, each with the game that deals it (the door's /home has
+   *  them). Without it, or with none, the Arcade is plain play. Pass `look` to rounds() to deal a pinned card first. */
+  look?(opts?: DealOptions): Promise<LookPin[]>;
   /** a URL the page can load for a card's media, or null */
   mediaUrl(card: Card, which: "src" | "poster"): Promise<string | null>;
   /** Ripple by voice; without it, Ripple takes typed answers */
