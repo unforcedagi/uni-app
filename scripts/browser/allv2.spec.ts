@@ -507,10 +507,12 @@ test.describe('review 3', () => {
   // 0.2 one home: All is the home, and what the old places page held (the approvals with it) is in the drawer under its head
   test('an approval waiting in a private room stays out of All; one in another room shows, and the home\'s drawer still has both', async ({ page }) => {
     await boot(page);
-    await page.evaluate((b) => { const w = window as any; w.__arrive('ch-sad', 'Uni', b[0]); w.__arrive('ch-kiln', 'Uni', b[1]); }, [PROMPT('private-thing'), PROMPT('kiln-thing')]);
+    // (All first, at its 13 messages; then the two prompts arrive: whichever renders first, the count can't race them)
     await allIn(page);
-    // the stream: only the one from a room All shows
+    await page.evaluate((b) => { const w = window as any; w.__arrive('ch-sad', 'Uni', b[0]); w.__arrive('ch-kiln', 'Uni', b[1]); }, [PROMPT('private-thing'), PROMPT('kiln-thing')]);
+    // the stream: only the one from a room All shows (13 and that one; the private room's never)
     await expect(page.locator('.cp-approval')).toHaveCount(1);
+    await expect(feed(page).locator('article.all-msg')).toHaveCount(14);
     await expect(page.locator('.areas-home')).toContainText('kiln-thing');
     await expect(page.locator('.areas-home')).not.toContainText('private-thing');
     await expect(feed(page)).not.toContainText('anctum');
