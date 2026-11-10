@@ -24,7 +24,15 @@ cleanup_generated() {
   git clean -fq -- src-tauri/gen/schemas
   rm -rf src-tauri/gen/android/buildSrc/.kotlin
 }
-trap cleanup_generated EXIT
+# T-335: set once the owner approved and the APK is signed by the right key, cleared once the tag exists.
+SIGNED_NOT_PUBLISHED=0
+on_exit() {
+  if ((SIGNED_NOT_PUBLISHED)); then
+    echo "Android signing was approved and the APK signed, but $VERSION was not published; $SHA is not asked again until a new main commit or UNI_RELEASE_ASK_AGAIN=1" >&2
+  fi
+  cleanup_generated
+}
+trap on_exit EXIT
 REPO_SLUG="unforcedagi/uni-app"
 # T-305: the largest APK this publishes. The release build is about 24 MB; a debug or unstripped one is far over.
 APK_MAX_BYTES=$((60 * 1024 * 1024))
@@ -78,16 +86,21 @@ BADGING="$("$HOME/Android/Sdk/build-tools/35.0.0/aapt" dump badging "$STAGE/uni-
 # ("Sign Uni X.Y.Z for Android", bound to this APK's sha256, the version, the code and the commit). Both builds are
 # done first, so an approval is never spent on a half release. Before asking, $SIGN_ASKED records this commit:
 # whatever happens next (declined, expired, broker down, killed mid-wait), watch-main.sh then skips the commit instead
-# of building and asking again every tick. Only a published-ready APK (signed and right key, below) clears it.
+# of building and asking again every tick. Only the release's tag existing (gh release create, below) clears it.
 # UNI_SEALED_CMD overrides the broker command (tests point it at a fake).
 read -ra SEALED <<<"${UNI_SEALED_CMD:-$HOME/REPOS/hermes-agent/.venv/bin/python -I $HOME/Code/uni-ops/sealed/cli.py --home $HOME/.config/uni-sealed}"
 printf '%s %s %s\n' "$SHA" "$VERSION" "$(date -Is)" >"$SIGN_ASKED"
 rm -f "$STAGE/uni.apk"
 SIGN_RESULT=0
+# The broker prints "asked: request …" on stdout once its card is posted; the copy in sign.out tells a declined or
+# unanswered card from a broker that never posted one.
 "${SEALED[@]}" release sign --apk "$STAGE/uni-unsigned.apk" --version "$VERSION" --code "$CODE" --commit "$SHA" \
-  --out "$STAGE/uni.apk" --purpose "Publish Uni $VERSION to every device (Android $CODE, main ${SHA:0:12})" --wait || SIGN_RESULT=$?
+  --out "$STAGE/uni.apk" --purpose "Publish Uni $VERSION to every device (Android $CODE, main ${SHA:0:12})" --wait \
+  | tee "$STAGE/sign.out" || SIGN_RESULT=$?
 if (( SIGN_RESULT )) || [[ ! -s $STAGE/uni.apk ]]; then
-  echo "Android signing not approved (sealed exit $SIGN_RESULT); nothing published. $SHA is not asked again until a new main commit or UNI_RELEASE_ASK_AGAIN=1" >&2
+  if grep -q '^asked: request ' "$STAGE/sign.out"; then WHY='the card was declined or not answered'
+  else WHY='no card was posted (broker unavailable?)'; fi
+  echo "Android signing not approved (sealed exit $SIGN_RESULT): $WHY; nothing published. $SHA is not asked again until a new main commit or UNI_RELEASE_ASK_AGAIN=1" >&2
   exit 1
 fi
 # Installed apps trust only the original signing key (once ~/.config/.android/debug.keystore; T-335 moves it into the
@@ -96,7 +109,7 @@ fi
 APK_SIGNER_SHA256="6e9f4f94ffbb86604e02ca97a1b7b764ae0cc341430e92b4c7a4a4f22246b63d"
 SIGNERS="$("$HOME/Android/Sdk/build-tools/36.1.0/apksigner" verify --print-certs "$STAGE/uni.apk" | sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p')"
 [[ $SIGNERS == "$APK_SIGNER_SHA256" ]] || { echo "APK signed by the wrong key: '$SIGNERS' (expected $APK_SIGNER_SHA256)" >&2; exit 1; }
-rm -f "$SIGN_ASKED"
+SIGNED_NOT_PUBLISHED=1
 python3 scripts/write-release-manifest.py "$STAGE" "$VERSION" "$SHA" "$REPO_SLUG"
 # The tag is created last, so a failed build leaves nothing behind and the next tick retries.
 # A release may carry its own notes in plain words (docs/releases/<version>.md); the build line follows them.
@@ -109,6 +122,7 @@ gh release create "$TAG" --repo "$REPO_SLUG" --target "$SHA" --latest \
   --notes "$NOTES" \
   "$STAGE/Uni-mac-arm64.zip" "$STAGE/Uni.app.tar.gz" "$STAGE/Uni.app.tar.gz.sig" \
   "$STAGE/uni.apk" "$STAGE/latest.json" "$STAGE/android.json"
+rm -f "$SIGN_ASKED"; SIGNED_NOT_PUBLISHED=0
 git fetch --quiet origin --tags
 # Read the release back by its tag, then at the address installed apps poll, which GitHub caches for a while. Neither
 # stops the run here: the tag exists now, so a later tick would never come back for the device installs below.

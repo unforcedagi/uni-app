@@ -21,15 +21,22 @@ def script(path, text):
 # Each fake logs one line "<name> <args>" to $CALLS.
 LOG = 'printf "%s %s\\n" "${0##*/}" "$*" >> "$CALLS"\n'
 FAKES = {
-    # The sealed broker: FAKE_SEAL=approve writes an APK "signed" by $FAKE_SIGNER; anything else is a declined card.
+    # The sealed broker, as its contract says: "asked: request …" on stdout once the card is posted; exit 0 with --out
+    # written on approval, exit 1 otherwise. FAKE_SEAL: approve (signed by $FAKE_SIGNER), decline, down (no card),
+    # empty (exit 0 but writes nothing: a broken broker).
     "sealed": LOG + '''
 while [[ $# -gt 0 ]]; do case $1 in --out) out=$2; shift ;; --apk) apk=$2; shift ;; esac; shift; done
-[[ $FAKE_SEAL == approve ]] || { echo 'declined' >&2; exit 4; }
-{ cat "$apk"; echo "signed-by:$FAKE_SIGNER"; } > "$out"
+[[ $FAKE_SEAL == down ]] && { echo 'broker unreachable' >&2; exit 1; }
+echo 'asked: request r-1'
+case $FAKE_SEAL in
+  approve) { cat "$apk"; echo "signed-by:$FAKE_SIGNER"; } > "$out" ;;
+  empty) : > "$out" ;;
+  *) echo 'refused: declined' >&2; exit 1 ;;
+esac
 ''',
     "gh": LOG + '''
 case "$1 $2" in
-  'release create') : ;;
+  'release create') [[ ${FAKE_GH_CREATE_FAILS:-0} == 0 ]] || { echo 'HTTP 503' >&2; exit 1; } ;;
   'release download') printf '{"version": "1.2.3"}\\n' ;;
   *) exit 2 ;;
 esac
@@ -149,9 +156,49 @@ class ReleaseSignTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(len(self.named(calls, "sealed ")), 1)
         self.assertEqual(self.named(calls, "gh release"), [])
-        self.assertIn("Android signing not approved (sealed exit 4); nothing published", result.stderr)
+        self.assertIn("Android signing not approved (sealed exit 1): the card was declined or not answered; nothing "
+                      "published", result.stderr)
         self.assertEqual(self.asked.read_text().split()[:2], [sha, "1.2.3"])
         self.assertFalse(Path(self.env["TMPDIR"], "uni-release-1.2.3/uni.apk").exists())
+
+    def test_a_broker_that_posted_no_card_is_named_and_still_not_asked_again(self):
+        sha = self.git("rev-parse", "HEAD")
+        result, calls = self.watch(FAKE_SEAL="down")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("(sealed exit 1): no card was posted (broker unavailable?)", result.stderr)
+        self.assertEqual(self.named(calls, "gh release"), [])
+        self.assertEqual(self.asked.read_text().split()[0], sha)
+
+    def test_sign_exit_0_without_a_signed_apk_is_refused(self):
+        for mode in ("empty", "missing"):
+            with self.subTest(mode=mode):
+                self.asked.unlink(missing_ok=True)
+                # "missing": exit 0 and no --out at all (the fake as `true`).
+                env = {"FAKE_SEAL": "empty"} if mode == "empty" else {"UNI_SEALED_CMD": "true"}
+                result, calls = self.watch(**env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Android signing not approved (sealed exit 0)", result.stderr)
+                self.assertEqual(self.named(calls, "gh release"), [])
+                self.assertTrue(self.asked.exists())
+
+    def test_approved_but_release_create_fails_is_not_asked_again(self):
+        sha = self.git("rev-parse", "HEAD")
+        result, calls = self.watch(FAKE_GH_CREATE_FAILS="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(self.named(calls, "gh release create")), 1)
+        self.assertIn("approved and the APK signed, but 1.2.3 was not published", result.stderr)
+        self.assertIn("UNI_RELEASE_ASK_AGAIN=1", result.stderr)
+        self.assertEqual(self.asked.read_text().split()[0], sha)
+
+        result, calls = self.watch()  # GitHub is back: the next tick still neither builds nor asks
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [])
+
+        result, calls = self.watch(UNI_RELEASE_ASK_AGAIN="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.named(calls, "sealed ")), 1)
+        self.assertEqual(len(self.named(calls, "gh release create")), 1)
+        self.assertFalse(self.asked.exists())
 
     def test_signed_by_another_key_is_refused_before_the_release(self):
         sha = self.git("rev-parse", "HEAD")
