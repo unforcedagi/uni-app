@@ -435,35 +435,34 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                 // still says what it is (kept as the fallback only if it is verified and reported ready); (2) the
                 // promotion is recorded (on trial, the new floor), and one that can't be recorded doesn't happen, so a
                 // bundle is never served without its trial counting; (3) the staged bundle moves into place.
-                let recorded = if unfinished(&b) {
-                    true
-                } else {
-                    // The current bundle replaces the fallback only when it is verified and proved itself (the state's
-                    // trial doesn't name it, so it reported ready); otherwise it goes and the fallback stays.
-                    let stepped_aside = match slot_version(dir, "current", pubkey) {
-                        Some(v) if state.trial.as_deref() != Some(v.to_string().as_str()) => move_slot(dir, "current", "previous"),
-                        _ => {
-                            remove_slot(dir, "current");
-                            true
-                        }
-                    };
-                    if !stepped_aside {
-                        log(format!("could not keep the current bundle as the fallback; {} stays staged", b.meta.version));
-                        false
+                let recorded = unfinished(&b) || {
+                    // The current bundle replaces the fallback only when it opens (signature and archive hash), proved
+                    // itself (the trial doesn't name it: it reported ready) and wasn't dropped; otherwise it goes and the
+                    // fallback stays. (A read error just now counts as not opening: the fallback is the safer keep.)
+                    let proven = read_slot(dir, "current")
+                        .and_then(|(c, a)| open(pubkey, &c, &a, builtin, shell_api).ok())
+                        .is_some_and(|c| state.trial.as_deref() != Some(c.meta.version.as_str()) && !state.rejected.contains(&c.meta.version));
+                    let stepped_aside = if proven {
+                        move_slot(dir, "current", "previous")
                     } else {
+                        remove_slot(dir, "current");
+                        true
+                    };
                     let mut promoted = state.clone();
                     promoted.trial = Some(b.meta.version.clone());
                     promoted.boots = 0;
                     promoted.floor = Some(b.meta.version.clone());
                     promoted.issued = state.issued.max(b.manifest.issued);
-                    let ok = promoted.save(dir);
-                    if ok {
+                    if !stepped_aside {
+                        log(format!("could not keep the current bundle as the fallback; {} stays staged", b.meta.version));
+                        false
+                    } else if promoted.save(dir) {
                         state = promoted;
+                        true
                     } else {
                         log(format!("could not record the promotion of {}; it stays staged (the bundle it replaces has \
                                      already stepped aside)", b.meta.version));
-                    }
-                    ok
+                        false
                     }
                 };
                 if recorded {
@@ -516,16 +515,15 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                     // last good bundle moves back, so a kill mid-move leaves nothing stale for tidy() to trip on.
                     state.trial = None;
                     state.boots = 0;
-                    if !state.save(dir) {
-                        log(format!("back to the last good bundle {}, served from where it is (the state can't be written)", b.meta.version));
-                        chosen = Some(b);
-                    } else if move_slot(dir, "previous", "current") {
-                        log(format!("back to the last good bundle {}", b.meta.version));
-                        chosen = Some(b);
+                    let how = if !state.save(dir) {
+                        ", served from where it is (the state can't be written)"
+                    } else if !move_slot(dir, "previous", "current") {
+                        ", served from where it is (it couldn't be moved)"
                     } else {
-                        log(format!("back to the last good bundle {}, served from where it is (it couldn't be moved)", b.meta.version));
-                        chosen = Some(b);
-                    }
+                        ""
+                    };
+                    log(format!("back to the last good bundle {}{how}", b.meta.version));
+                    chosen = Some(b);
                 }
                 Err(e) => {
                     log(format!("last good bundle refused: {e}"));
@@ -779,11 +777,10 @@ impl Ota {
         }
         let reason: String = reason.chars().take(200).collect();
         log(format!("bundle {} refused this shell: {reason:?}; dropped", b.meta.version));
-        state.reject(&b.meta.version);
-        if !state.save(dir) {
-            return false;
-        }
+        // Removed, then recorded: a kill between leaves a trial naming nothing, which the fallback ends.
         remove_slot(dir, "current");
+        state.reject(&b.meta.version);
+        state.save(dir);
         self.set_active(activate(dir, self.pubkey, builtin, SHELL_API));
         true
     }
@@ -1449,6 +1446,25 @@ mod tests {
         put(dir.path(), "next", &signed(&k, "0.3.9", 1));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
         assert_eq!(slot_version(dir.path(), "previous", &k.pk), Some(v("0.3.7")), "the good fallback stays");
+    }
+
+    #[test]
+    fn a_rejected_bundle_never_becomes_the_fallback_and_a_failed_move_back_serves_in_place() {
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "current", &signed(&k, "0.3.9", 1));
+        let mut s = State::default();
+        s.rejected = vec!["0.3.9".into()]; // dropped, but a kill left its files
+        s.save(dir.path());
+        put(dir.path(), "next", &signed(&k, "0.3.10", 1));
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.10"));
+        assert_eq!(slot_version(dir.path(), "previous", &k.pk), Some(v("0.3.8")), "0.3.9 didn't take its place");
+        // The move back can't happen (something sits where current.json would go): served where it is.
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
+        std::fs::create_dir_all(dir.path().join("current.json/blocked")).unwrap();
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
     }
 
     fn ota_for(dir: &Path, k: &Key) -> Arc<Ota> {
