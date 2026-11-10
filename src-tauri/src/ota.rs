@@ -326,8 +326,9 @@ impl State {
     }
 }
 
-/// A check writes these, then renames them to `next.json` and `next.tar.gz` (the archive last).
-const STAGING_TMP: [&str; 2] = ["next.json.tmp", "next.tar.gz.tmp"];
+/// A slot's two files, in the order they are written and moved: the channel file, then the archive. A slot whose archive
+/// exists has its channel file. A check writes `next.<ext>.tmp`, then renames each to `next.<ext>`.
+const PARTS: [&str; 2] = ["json", "tar.gz"];
 
 /// `next`: staged by a check. `current`: being served (or on trial). `previous`: the last one that reported ready.
 const SLOTS: [&str; 3] = ["next", "current", "previous"];
@@ -350,13 +351,18 @@ fn move_slot(dir: &Path, from: &str, to: &str) -> bool {
         && std::fs::rename(dir.join(format!("{from}.tar.gz")), dir.join(format!("{to}.tar.gz"))).is_ok()
 }
 
-/// The staged bundle's version, from its signed channel file (a few KB; the archive isn't unpacked for this).
-fn staged_version(dir: &Path, pubkey: &str) -> Option<semver::Version> {
-    if !dir.join("next.tar.gz").exists() {
-        return None; // a channel file alone is half a staging, not a staged bundle
+/// A slot's version, from its signed channel file, if both its files are there.
+fn slot_version(dir: &Path, slot: &str, pubkey: &str) -> Option<semver::Version> {
+    if !dir.join(format!("{slot}.tar.gz")).exists() {
+        return None;
     }
-    let text = std::fs::read(dir.join("next.json")).ok()?;
+    let text = std::fs::read(dir.join(format!("{slot}.json"))).ok()?;
     semver::Version::parse(&verify_channel(pubkey, &text).ok()?.version).ok()
+}
+
+/// The staged bundle's version (a few KB read; the archive isn't unpacked for this).
+fn staged_version(dir: &Path, pubkey: &str) -> Option<semver::Version> {
+    slot_version(dir, "next", pubkey)
 }
 
 /// After a kill mid-way: finish a slot move that was cut between its two renames (the channel file moves first), then
@@ -373,8 +379,8 @@ fn tidy(dir: &Path) {
             remove_slot(dir, slot);
         }
     }
-    for tmp in STAGING_TMP {
-        let _ = std::fs::remove_file(dir.join(tmp));
+    for ext in PARTS {
+        let _ = std::fs::remove_file(dir.join(format!("next.{ext}.tmp")));
     }
 }
 
@@ -431,13 +437,25 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                 let recorded = if unfinished(&b) {
                     true
                 } else {
-                    if dir.join("current.tar.gz").exists() {
-                        if state.trial.is_none() {
-                            move_slot(dir, "current", "previous");
-                        } else {
+                    // Proved itself: reported ready, i.e. the state's trial doesn't name it.
+                    let current = slot_version(dir, "current", pubkey);
+                    let stepped_aside = match &current {
+                        None => {
                             remove_slot(dir, "current");
+                            true
                         }
-                    }
+                        Some(v) if state.trial.as_deref() != Some(v.to_string().as_str()) => {
+                            move_slot(dir, "current", "previous")
+                        }
+                        Some(_) => {
+                            remove_slot(dir, "current");
+                            true
+                        }
+                    };
+                    if !stepped_aside {
+                        log(format!("could not keep the current bundle as the fallback; {} stays staged", b.meta.version));
+                        false
+                    } else {
                     let mut promoted = state.clone();
                     promoted.trial = Some(b.meta.version.clone());
                     promoted.boots = 0;
@@ -447,9 +465,11 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                     if ok {
                         state = promoted;
                     } else {
-                        log(format!("could not record the promotion of {}; it stays staged", b.meta.version));
+                        log(format!("could not record the promotion of {}; it stays staged (the bundle it replaces has \
+                                     already stepped aside)", b.meta.version));
                     }
                     ok
+                    }
                 };
                 if recorded {
                     if move_slot(dir, "next", "current") {
@@ -509,6 +529,12 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                 }
             }
         }
+    }
+    // A trial that names no bundle being served (a kill cut a fallback short) is over: left set, it would make the bundle
+    // being served look unproven at the next promotion. Its version is at or below the floor, so it isn't fetched again.
+    if state.trial.is_some() && chosen.as_ref().map(|b| b.meta.version.as_str()) != state.trial.as_deref() {
+        state.trial = None;
+        state.boots = 0;
     }
     if !state.save(dir) {
         if let Some(b) = chosen.as_ref().filter(|b| state.trial.as_deref() == Some(b.meta.version.as_str())) {
@@ -624,12 +650,13 @@ pub async fn check(
     if !dir.join("state.json").exists() && !state.save(dir) {
         return Err("could not write state.json".into());
     }
-    for (name, bytes) in STAGING_TMP.iter().zip([text.as_slice(), archive.as_slice()]) {
-        std::fs::write(dir.join(name), bytes).map_err(|e| e.to_string())?;
+    for (ext, bytes) in PARTS.iter().zip([text.as_slice(), archive.as_slice()]) {
+        std::fs::write(dir.join(format!("next.{ext}.tmp")), bytes).map_err(|e| e.to_string())?;
     }
     // The archive lands last: a launch that sees next.tar.gz also sees its channel file.
-    std::fs::rename(dir.join(STAGING_TMP[0]), dir.join("next.json")).map_err(|e| e.to_string())?;
-    std::fs::rename(dir.join(STAGING_TMP[1]), dir.join("next.tar.gz")).map_err(|e| e.to_string())?;
+    for ext in PARTS {
+        std::fs::rename(dir.join(format!("next.{ext}.tmp")), dir.join(format!("next.{ext}"))).map_err(|e| e.to_string())?;
+    }
     log(format!("staged bundle {} for the next launch or resume", bundle.meta.version));
     Ok(CheckResult::Staged { version: bundle.meta.version })
 }
@@ -1383,9 +1410,21 @@ mod tests {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
         put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
-        // Killed after previous.json moved to current.json, before the archive followed.
+        // 0.3.9 never started three times; dropped, and killed after previous.json moved to current.json, before the
+        // archive followed and before the state recorded the drop.
+        let mut s = State::default();
+        s.trial = Some("0.3.9".into());
+        s.boots = MAX_UNCONFIRMED_BOOTS;
+        s.floor = Some("0.3.9".into());
+        s.issued = T0 + 9 * 3600;
+        s.save(dir.path());
         std::fs::rename(dir.path().join("previous.json"), dir.path().join("current.json")).unwrap();
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
+        assert_eq!(State::load_checked(dir.path()).unwrap().trial, None, "0.3.9's trial is over");
+        // The next promotion keeps 0.3.8 as the fallback.
+        put(dir.path(), "next", &signed(&k, "0.3.10", 1));
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.10"));
+        assert!(dir.path().join("previous.tar.gz").exists(), "0.3.8 kept as the last good bundle");
     }
 
     fn ota_for(dir: &Path, k: &Key) -> Arc<Ota> {
