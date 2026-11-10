@@ -212,20 +212,6 @@ test.describe('r28', () => {
     await expect(details(page).locator('.cp-asof')).toHaveText(/^Last written (Oct \d+ )?by #Techne:$/);
     await expect(page.locator('.cp-stale, [data-stale], [data-stale-why]')).toHaveCount(0);
   });
-
-  test('line 2: the rechecks are told to the rooms once per launch, as "recheck: T-NN …", in the app\'s log', async ({ page }) => {
-    test.skip(!wide(page), 'work view');
-    await boot(page);
-    await add(page, { id: 'g1', title: 'T-691 Placeholder logged', node: 'Areas/Techne', asked_at: null, meta: { next: 'Say go on logged' } });
-    await refresh(page);
-    const logged = () => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'log_line').map((c: any) => c.args.line as string));
-    await expect.poll(async () => (await logged())[0] ?? '').toMatch(/^recheck: (T-\d+ ?)+$|^recheck: none$/);
-    await openRoom(page, 'Techne');
-    await refresh(page, '2026-10-14T09:10:00.000Z');
-    await openRoom(page, 'Techne').catch(() => {});
-    expect((await logged()).length, 'once per launch, not once per list read').toBe(1);
-    expect((await logged())[0]).toMatch(/^recheck: /);
-  });
 });
 
 // T-335: the strip, its fold, its one panel and that panel's footer went with the old room view; at a small window the room's details

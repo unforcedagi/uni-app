@@ -637,7 +637,7 @@ Two proposals wait on a scope decision.
         mk('st11', 'T-120 Grade the Week 6 reflections', 'Projects/Learn Vibe Build', { owner: 'aaron', due: '2026-10-15' }),
         mk('st12', 'T-121 Final brief', 'Projects/Learn Vibe Build', { owner: 'room:atlas/teach', state: 'waiting', waiting_on: 'external' }),
         mk('dq2', 'Decision (default yes): Decide the ATLAS hosting', 'Projects/ATLAS', { priority: 'soon', options: ['Self-host', 'Managed'] }, 'decision'));
-      const run = (id: string, what: string, meta: Record<string, unknown>) => ({ id, path: `Runs/${id}`, extension: 'md', tags: ['run'], createdAt: T0, updatedAt: T0, metadata: { node: 'Projects/ATLAS', what, by: 'room:atlas/build', started: new Date((d.now - 600) * 1000).toISOString(), updated: new Date((d.now - 60) * 1000).toISOString(), ...meta } });
+      const run = (id: string, what: string, meta: Record<string, unknown>) => ({ id, path: `Runs/${id}`, extension: 'md', tags: ['run'], createdAt: T0, updatedAt: T0, metadata: { node: 'Projects/ATLAS', what, by: 'room:atlas/build', started: new Date((d.now - 600) * 1000).toISOString(), started_at: new Date((d.now - 600) * 1000).toISOString(), updated: new Date((d.now - 60) * 1000).toISOString(), ...meta } });
       const draft = (id: string, meta: Record<string, unknown>) => ({ id, path: `Drafts/${id}`, extension: 'md', tags: ['draft'], createdAt: T0, updatedAt: T0, metadata: { node: 'Projects/ATLAS', ...meta } });
       // run-1 is the T-125 shape (summary, worker, started_at), the rest are the 0.1.44 ledger
       notes.push({ id: 'run-1', path: 'Runs/scratch-atlas-sow', extension: 'md', tags: ['run'], createdAt: T0, updatedAt: T0, metadata: { node: 'Projects/ATLAS', task: 'T-07', state: 'running', summary: 'Draft the SOW', worker: 'sonnet', room: '#atlas/build', started_at: new Date((d.now - 600) * 1000).toISOString() } }, run('run-2', 'Re-label the map', { task: 'T-08', state: 'queued' }), run('run-3', 'Summarise the grant call', { state: 'done', result: 'Drafts/Grant call summary' }),
@@ -712,6 +712,20 @@ Two proposals wait on a scope decision.
             return notes.filter((n) => (n.tags ?? []).includes(args.tag)).map((n) => ({ createdAt: '2026-09-01T00:00:00Z', metadata: {}, ...n, ...(args.includeContent === false ? { content: undefined } : {}) }));
           }
           case 'vault_query_meta': {
+            // T-335 one reader: the runs are read by state (the live ones) and by `started_at` window, as the vault answers them
+            if (args.tag === 'run') {
+              const td = (w.__tagDelay ?? {}).run; if (td) await new Promise((r) => setTimeout(r, td));
+              if ((w.__queryFails as string[]).includes('run')) throw 'query failed: run';
+              const m = args.metadata ?? {}, st = m.state, at = m.started_at;
+              const hits = notes.filter((n) => (n.tags ?? []).includes('run')).filter((n) => {
+                const md = n.metadata ?? {};
+                if (st && !(st.eq !== undefined ? md.state === st.eq : (st.in ?? []).includes(md.state))) return false;
+                if (at && !(typeof md.started_at === 'string' && (!at.gte || md.started_at >= at.gte) && (!at.lt || md.started_at < at.lt))) return false;
+                return true;
+              });
+              const from = args.offset ?? 0;
+              return hits.slice(from, from + (args.limit ?? 200)).map((n) => ({ createdAt: '2026-09-01T00:00:00Z', ...n }));
+            }
             if (w.__tasksDelay) await new Promise((r) => setTimeout(r, w.__tasksDelay)); // r16: a slow task read
             if (!d.tasks) return [];
             if ((w.__queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;

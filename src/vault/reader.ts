@@ -29,7 +29,9 @@ export const POLL_MS = 60_000;
 export const FOCUS_GAP_MS = 10_000;
 /** A read is shared with the rest of its tick, never longer than this (a tick's readers start within a render or two of each other). */
 const SHARE_MS = 20_000;
-/** The runs a work read covers: every run still marked running, and those started in these day windows (newest first). */
+/** A run in one of these states is still live (steerCore's isActiveRun: anything not done or failed): read whenever it started. */
+export const LIVE_RUNS = ["running", "queued", "stalled", "blocked", "decision", "lost"] as const;
+/** The runs a work read covers: every live run, and those started in these day windows (newest first). */
 export const RUN_WINDOWS: readonly [number, number][] = [[0, 2], [2, 7], [7, 21], [21, 60]];
 /** The run windows older than the first are read at most this often (see `runs`). */
 export const OLD_RUNS_MS = 5 * 60_000;
@@ -100,7 +102,7 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
   /** Every draft note, metadata only. */
   const drafts = (vault: string): Promise<Rows<"draft">> => share(keyOf("draft", vault), () => allPages(query<"draft">(vault, "draft")));
   /**
-   * The runs that matter now: every one still marked running, and those started in the last 60 days, a window at a time (newest first).
+   * The runs that matter now: every one still live (running, queued, stalled, blocked, waiting on a decision, lost: whenever it started), and those started in the last 60 days, a window at a time (newest first).
    * `partial` says which part a short read left out. Runs older than two days have mostly ended and change rarely: their windows are read at
    * most every OLD_RUNS_MS, and the fresh window reaches back to where that older read began, so no run falls between the two.
    */
@@ -117,7 +119,7 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
       old.set(vault, o = entry);
     }
     const [running, recent, windows] = await Promise.all([
-      allPages(where(vault, "run", { state: { eq: "running" } })),
+      allPages(where(vault, "run", { state: { in: [...LIVE_RUNS] } })),
       allPages(where(vault, "run", { started_at: { gte: iso(o.at, RUN_WINDOWS[0][1]) } })),
       o.p,
     ]);
