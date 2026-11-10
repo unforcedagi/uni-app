@@ -144,7 +144,8 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
     if (endedIds.length && o.at !== now) {
       for (const id of endedIds) forced.add(id);
       forcedFor.set(vault, forced);
-      try { o = readOld(now); windows = await o.p; } catch { /* the windows read above stand */ }
+      // (a failed one evicts itself in readOld; its runs may force again on the next read)
+      try { o = readOld(now); windows = await o.p; } catch { for (const id of endedIds) forced.delete(id); }
     }
     const seen = new Set<unknown>();
     const rows = [running, recent, ...windows].flatMap((r) => r.rows).filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
