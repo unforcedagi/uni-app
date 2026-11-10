@@ -130,7 +130,7 @@ check("look asks are Ready to look at, not Yours; their one tap is Seen (no seco
 
 check("a look-here pin's deep link (look_url) is its Open link, so the Arcade's opens in the app", () => {
   const url = "https://box.example.ts.net:8543/#look/web%3A12";
-  const v = view([task("p", "T-22 Look at this card", { node: "Areas/Kiln Studio", kind: "look", no_default: true, look_url: url })]);
+  const v = view([task("p", "T-22 Look at this card", { node: "Areas/Kiln Studio", kind: "look", no_default: true, link: "https://example.com/ref", look_url: url })]);
   assert.equal(v.look[0].link, url);
 });
 
