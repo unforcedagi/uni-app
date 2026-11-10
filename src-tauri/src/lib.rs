@@ -3089,7 +3089,7 @@ pub fn run() {
     #[cfg(mobile)]
     mobile::init_runtime();
     uni_core::init_crypto();
-    // T-305 spike: a verified over-the-air web bundle, when one is installed, is served in place of the built-in one.
+    // T-335 OTA: a verified over-the-air screens bundle, when one is installed, is served in place of the built-in one.
     let mut context = tauri::generate_context!();
     let ota = ota::wrap(&mut context);
     tauri::Builder::default()
@@ -3261,6 +3261,7 @@ pub fn run() {
             ota::ota_status,
             ota::ota_ready,
             ota::ota_reject,
+            ota::ota_apply,
             ota::ota_check,
             #[cfg(feature = "messages")]
             messages::messages_status,

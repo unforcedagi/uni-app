@@ -1,4 +1,4 @@
-// T-305 spike: which web layer is running, beside the app version.
+// T-335 OTA: which screens are running (over the air or built in), beside the app version.
 import { useEffect, useState } from "react";
 import { otaStatus, webLabel } from "./ota";
 

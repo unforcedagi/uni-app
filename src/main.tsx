@@ -41,7 +41,7 @@ startMotion();
 // T-335 glow-up: the accent's hue for the time of day
 startTide();
 
-/** T-305: mounted beside App, so it commits only when the first render did not throw. */
+/** T-335 OTA: mounted beside App, so it commits only when the first render did not throw. */
 function OtaReady() {
   React.useEffect(() => otaRendered(), []);
   return null;

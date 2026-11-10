@@ -1,52 +1,78 @@
-//! T-305 spike: the web layer (the Vite `dist/`) delivered over the air, so an APK is needed only when the Rust shell
-//! changes.
+//! T-335 (from the T-305 spike): the app's screens (the Vite `dist/`) delivered over the air, so an APK is needed only
+//! when the Rust shell changes.
 //!
-//! - **API version.** The shell's commands are its contract with the web layer. [`SHELL_API`] names that contract;
-//!   change it whenever a command is added, removed or changes shape. A bundle declares the API it was built against
-//!   (`uni-bundle.json` inside the archive); the shell serves it only when the two are equal, and the bundle's own
-//!   code checks again at boot (`src/ota.ts`) and asks to be dropped on a mismatch.
-//! - **Signature.** A bundle is a `.tar.gz` plus a minisign signature (the `tauri signer sign` format). The public key
-//!   is compiled in ([`PUBKEY`]); nothing from the channel or the webview can change it. The signature is checked when
-//!   a bundle is downloaded and again at every launch, before a byte of it is served.
+//! - **Shell API.** The shell's commands are its contract with the screens. [`SHELL_API`] names that contract; it must
+//!   change whenever a command is added, removed or changes shape (`scripts/shell-api.test.ts` fails the build
+//!   otherwise). A bundle declares the API it was built against (`uni-bundle.json` inside the archive, and the signed
+//!   manifest); the shell serves it only when the two are equal, and the bundle's own code checks again at boot
+//!   (`src/ota.ts`) and asks to be dropped on a mismatch.
+//! - **Trust.** The channel publishes `web.json`: a manifest and its Ed25519 signature, made by the sealed broker only
+//!   after the owner's tap (uni-ops `sealed/bundle.py`). The public key is compiled in ([`PUBKEY_HEX`]); nothing from
+//!   the channel or the webview can change it. The manifest names the archive by SHA-256 and size, the version and the
+//!   API, when it was issued and when it expires. The signature and the archive's hash are checked when a bundle is
+//!   downloaded and again at every launch, before a byte of it is served.
+//! - **Replay.** A manifest is taken only before it expires, and only if it was issued no earlier than the newest one
+//!   this device has taken; a bundle is fetched only if it is newer than anything the device has run (the floor). So
+//!   the channel (or anyone who can serve its address) can't hold a device on, or send it back to, an old signed
+//!   bundle, and a device that lost its state accepts only a manifest signed in the last [`MAX_VALID_DAYS`] days.
 //! - **Serving.** [`OtaAssets`] wraps the assets built into the binary. With a verified bundle active it serves the
 //!   bundle's files instead, on the same `tauri://` origin, so IPC, capabilities and CSP are unchanged.
-//! - **Next launch.** A check downloads a newer bundle into `next.*`; the next launch verifies and promotes it to
-//!   `current.*`. A new bundle is on trial until its page reports ready (`ota_ready`); one that is started
-//!   [`MAX_UNCONFIRMED_BOOTS`] times without doing so is dropped and never fetched again, and the app falls back to
-//!   the built-in web layer.
-//! - **Versions.** A bundle carries a release version (`0.1.85`). It is used only while it is newer than the web layer
+//! - **Updating.** A check (at launch and when the app comes back to the foreground) downloads a newer bundle into
+//!   `next.*`. It is applied at the next launch, or when the app next comes back to the foreground (the page reloads
+//!   then, before the user has done anything). A new bundle is on trial until its page reports ready (`ota_ready`); one
+//!   that is started [`MAX_UNCONFIRMED_BOOTS`] times without doing so, or that refuses this shell, is dropped and never
+//!   fetched again.
+//! - **Fallback.** The last bundle that reported ready is kept as `previous.*`. When the current one is dropped, the
+//!   app goes back to it; with none, to the screens built in.
+//! - **Versions.** A bundle carries a release version (`0.3.8`). It is used only while it is newer than the screens
 //!   built into the app, so installing a newer APK always wins over an older bundle.
 //!
-//! The channel is off unless the build sets `UNI_OTA_CHANNEL` (a URL to `manifest.json`). Release builds don't.
+//! Android builds look at the release channel ([`CHANNEL`]); desktop builds don't (the Mac app has its own updater).
+//! `UNI_OTA_CHANNEL` and `UNI_OTA_PUBKEY` at build time point a test build at a local channel and a test key; the
+//! release scripts refuse to build with either set.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::Duration;
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
+use sha2::Digest as _;
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
 use tauri::{Assets, Manager, Runtime};
 
-/// The shell's command API, as seen by the web layer. Bump it with any change to the command set or a command's
-/// arguments or result. `src/ota.ts` holds the same number (checked by `scripts/ota.test.ts`).
+/// The shell's command API, as seen by the screens. Bump it with any change to the command set or a command's
+/// arguments or result. `src/ota.ts` holds the same number, and `src-tauri/shell-api.txt` the commands it stands for
+/// (both checked by `scripts/shell-api.test.ts`).
 pub const SHELL_API: u32 = 1;
 
-/// The bundle signing public key (minisign, base64 of the `.pub` file, as `tauri signer generate` writes it). Spike
-/// key: its private half is on uni-1 only (`~/.config/uni/ota-spike/`).
-pub const PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNDRTE3MEI3MzU5MkY0NTMKUldSVDlKSTF0M0RoUEpWb0FtL05UTEJqT1c5bXNGVkUwcnlyNnV2c3BZOHNlbmFMSUxScXhyNWYK";
+/// The public half of the sealed screens bundle key (uni-ops `sealed/bundle.py` PUBKEY_HEX), raw Ed25519, hex.
+const RELEASE_PUBKEY_HEX: &str = "";
+pub const PUBKEY_HEX: &str = match option_env!("UNI_OTA_PUBKEY") {
+    Some(k) => k,
+    None => RELEASE_PUBKEY_HEX,
+};
 
-/// Where this build looks for bundles, if anywhere. Set at build time only.
-pub const CHANNEL: Option<&str> = option_env!("UNI_OTA_CHANNEL");
+/// Where this build looks for bundles, if anywhere.
+pub const CHANNEL: Option<&str> = match option_env!("UNI_OTA_CHANNEL") {
+    Some(c) => Some(c),
+    None if cfg!(target_os = "android") => Some("https://github.com/unforcedagi/uni-app/releases/latest/download/web.json"),
+    None => None,
+};
 
+/// What the broker prefixes to the manifest before signing it (bundle.py DOMAIN).
+const DOMAIN: &[u8] = b"uni-ota-manifest-v1\n";
+const PACKAGE: &str = "org.unforced.uni";
+/// The longest a manifest may be valid (bundle.py VALID_DAYS_MAX, plus a day of slack for clocks).
+pub const MAX_VALID_DAYS: u64 = 31;
 /// A bundle started this many times without reporting ready is dropped.
 pub const MAX_UNCONFIRMED_BOOTS: u32 = 2;
 
 const META_FILE: &str = "uni-bundle.json";
+const MAX_CHANNEL_BYTES: u64 = 16 * 1024;
 const MAX_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_UNPACKED_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_FILES: usize = 10_000;
@@ -61,6 +87,26 @@ fn log(msg: impl AsRef<str>) {
     eprintln!("[ota] {msg}");
 }
 
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+fn hex32(s: &str) -> Option<[u8; 32]> {
+    let b = s.as_bytes();
+    if b.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (i, pair) in b.chunks(2).enumerate() {
+        out[i] = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+    }
+    Some(out)
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    sha2::Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// What a bundle says about itself, inside the signed archive.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Meta {
@@ -68,9 +114,64 @@ pub struct Meta {
     pub api: u32,
 }
 
+/// The signed manifest (bundle.py `manifest_bytes`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Manifest {
+    pub v: u32,
+    pub app: String,
+    pub version: String,
+    pub api: u32,
+    pub archive: String,
+    pub sha256: String,
+    pub bytes: u64,
+    pub commit: String,
+    pub issued: u64,
+    pub expires: u64,
+}
+
+/// The channel file, `web.json`: the manifest's exact signed text and its signature.
+#[derive(Deserialize)]
+struct ChannelFile {
+    manifest: String,
+    sig: String,
+}
+
+/// A channel file whose signature checks out with `pubkey`: the manifest, read strictly.
+pub fn verify_channel(pubkey: &str, text: &[u8]) -> Result<Manifest, String> {
+    let key = hex32(pubkey).ok_or("no bundle key is built into this app")?;
+    let key = ed25519_dalek::VerifyingKey::from_bytes(&key).map_err(|_| "the built-in bundle key is malformed")?;
+    let file: ChannelFile = serde_json::from_slice(text).map_err(|e| format!("channel file: {e}"))?;
+    let sig = base64::engine::general_purpose::STANDARD.decode(file.sig.trim()).map_err(|e| format!("signature: {e}"))?;
+    let sig = ed25519_dalek::Signature::from_slice(&sig).map_err(|_| "signature: not an Ed25519 signature")?;
+    let mut msg = DOMAIN.to_vec();
+    msg.extend_from_slice(file.manifest.as_bytes());
+    key.verify_strict(&msg, &sig).map_err(|_| "signature does not match the built-in key".to_string())?;
+    let m: Manifest = serde_json::from_str(&file.manifest).map_err(|e| format!("manifest: {e}"))?;
+    if m.v != 1 || m.app != PACKAGE {
+        return Err(format!("manifest is for {} v{}, not this app", m.app, m.v));
+    }
+    semver::Version::parse(&m.version).map_err(|e| format!("manifest version: {e}"))?;
+    if m.archive != format!("web-{}.tar.gz", m.version) || m.sha256.len() != 64 || hex32(&m.sha256).is_none() {
+        return Err("manifest: archive name or hash malformed".into());
+    }
+    if m.expires <= m.issued || m.expires - m.issued > MAX_VALID_DAYS * 86400 {
+        return Err("manifest: validity window malformed".into());
+    }
+    Ok(m)
+}
+
+/// A manifest is fetched and staged only while it is valid.
+pub fn fresh(m: &Manifest, now: u64) -> Result<(), String> {
+    if now >= m.expires {
+        return Err(format!("manifest for {} expired", m.version));
+    }
+    Ok(())
+}
+
 /// A verified, unpacked bundle.
 pub struct Bundle {
     pub meta: Meta,
+    pub manifest: Manifest,
     pub version: semver::Version,
     files: HashMap<String, Vec<u8>>,
 }
@@ -87,21 +188,8 @@ impl Bundle {
     }
 }
 
-/// Checks `sig` (a `tauri signer sign` signature: base64 of a minisign signature file) over `archive`.
-pub fn verify(pubkey: &str, archive: &[u8], sig: &str) -> Result<(), String> {
-    let b64 = base64::engine::general_purpose::STANDARD;
-    let pk_file = String::from_utf8(b64.decode(pubkey.trim()).map_err(|e| format!("public key: {e}"))?)
-        .map_err(|e| format!("public key: {e}"))?;
-    let pk_line = pk_file.lines().nth(1).ok_or("public key: no key line")?;
-    let pk = minisign_verify::PublicKey::from_base64(pk_line.trim()).map_err(|e| format!("public key: {e}"))?;
-    let sig_file = String::from_utf8(b64.decode(sig.trim()).map_err(|e| format!("signature: {e}"))?)
-        .map_err(|e| format!("signature: {e}"))?;
-    let sig = minisign_verify::Signature::decode(&sig_file).map_err(|e| format!("signature: {e}"))?;
-    pk.verify(archive, &sig, false).map_err(|e| format!("signature does not match: {e}"))
-}
-
 /// Unpacks a `.tar.gz` into memory. Only regular files with plain relative paths; anything else fails the bundle.
-pub fn unpack(archive: &[u8]) -> Result<Bundle, String> {
+pub fn unpack(archive: &[u8]) -> Result<(Meta, HashMap<String, Vec<u8>>), String> {
     let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(archive));
     let mut files = HashMap::new();
     let mut total = 0u64;
@@ -130,30 +218,40 @@ pub fn unpack(archive: &[u8]) -> Result<Bundle, String> {
         if total > MAX_UNPACKED_BYTES || files.len() >= MAX_FILES {
             return Err("archive: too large".into());
         }
-        let mut bytes = Vec::with_capacity(entry.size() as usize);
+        let mut bytes = Vec::with_capacity(entry.size().min(MAX_UNPACKED_BYTES) as usize);
         entry.read_to_end(&mut bytes).map_err(|e| format!("archive: {e}"))?;
-        files.insert(parts.join("/"), bytes);
+        if files.insert(parts.join("/"), bytes).is_some() {
+            return Err("archive: a path appears twice".into());
+        }
     }
     let meta: Meta = serde_json::from_slice(files.get(META_FILE).ok_or("archive: no uni-bundle.json")?)
         .map_err(|e| format!("uni-bundle.json: {e}"))?;
-    let version = semver::Version::parse(&meta.version).map_err(|e| format!("uni-bundle.json version: {e}"))?;
     if !files.contains_key("index.html") {
         return Err("archive: no index.html".into());
     }
-    Ok(Bundle { meta, version, files })
+    Ok((meta, files))
 }
 
-/// Verifies and unpacks a bundle, then checks it fits this shell: the same API, and newer than the built-in web layer.
-pub fn open(pubkey: &str, archive: &[u8], sig: &str, builtin: &semver::Version, shell_api: u32) -> Result<Bundle, String> {
-    verify(pubkey, archive, sig)?;
-    let bundle = unpack(archive)?;
-    if bundle.meta.api != shell_api {
-        return Err(format!("bundle {} needs shell API {}, this shell has {shell_api}", bundle.meta.version, bundle.meta.api));
+/// Verifies a stored or downloaded bundle (its channel file's signature, then the archive against the manifest),
+/// unpacks it and checks it fits this shell: the same API, and newer than the built-in screens. Expiry is not checked
+/// here: a bundle that was fresh when it was fetched stays usable.
+pub fn open(pubkey: &str, channel: &[u8], archive: &[u8], builtin: &semver::Version, shell_api: u32) -> Result<Bundle, String> {
+    let manifest = verify_channel(pubkey, channel)?;
+    if archive.len() as u64 != manifest.bytes || sha256_hex(archive) != manifest.sha256 {
+        return Err(format!("archive for {} is not the one its signed manifest names", manifest.version));
     }
-    if bundle.version <= *builtin {
-        return Err(format!("bundle {} is not newer than the built-in web layer {builtin}", bundle.meta.version));
+    let (meta, files) = unpack(archive)?;
+    if meta.version != manifest.version || meta.api != manifest.api {
+        return Err(format!("archive says {} for API {}, its manifest {} for API {}", meta.version, meta.api, manifest.version, manifest.api));
     }
-    Ok(bundle)
+    let version = semver::Version::parse(&meta.version).map_err(|e| format!("uni-bundle.json version: {e}"))?;
+    if meta.api != shell_api {
+        return Err(format!("bundle {} needs shell API {}, this shell has {shell_api}", meta.version, meta.api));
+    }
+    if version <= *builtin {
+        return Err(format!("bundle {} is not newer than the built-in screens {builtin}", meta.version));
+    }
+    Ok(Bundle { meta, manifest, version, files })
 }
 
 /// The bundle directory's bookkeeping (`state.json`).
@@ -166,9 +264,11 @@ pub struct State {
     pub boots: u32,
     /// Versions dropped here (failed checks, refused by their own code, never ready). Never fetched again.
     pub rejected: Vec<String>,
-    /// The newest version ever promoted here. Nothing older is used again, even if it is signed and the bundle that
-    /// set the floor is gone: a channel can't roll a device back to an old bundle.
+    /// The newest version ever promoted here. Nothing that isn't newer is fetched or promoted again, even if it is
+    /// signed and the bundle that set the floor is gone: a channel can't roll a device back to an old bundle.
     pub floor: Option<String>,
+    /// The newest manifest `issued` time taken here. An older manifest is never taken again.
+    pub issued: u64,
 }
 
 impl State {
@@ -184,7 +284,7 @@ impl State {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                if ["current.tar.gz", "next.tar.gz", "floor"].iter().any(|f| dir.join(f).exists()) {
+                if SLOTS.iter().any(|s| dir.join(format!("{s}.tar.gz")).exists()) || dir.join("floor").exists() {
                     Err("bundles or a floor on disk but no state.json".into())
                 } else {
                     Ok(State::default())
@@ -194,9 +294,9 @@ impl State {
         }
     }
     fn save(&self, dir: &Path) {
-        // The floor is also kept on its own (`floor`), so damage to state.json alone can't lose it.
+        // The floor is also kept on its own (`floor`: "<version> <issued>"), so damage to state.json alone can't lose it.
         if let Some(f) = &self.floor {
-            if std::fs::write(dir.join("floor.tmp"), f).is_ok() {
+            if std::fs::write(dir.join("floor.tmp"), format!("{f} {}", self.issued)).is_ok() {
                 let _ = std::fs::rename(dir.join("floor.tmp"), dir.join("floor"));
             }
         }
@@ -219,59 +319,86 @@ impl State {
     }
 }
 
-fn read_pair(dir: &Path, name: &str) -> Option<(Vec<u8>, String)> {
-    let archive = std::fs::read(dir.join(format!("{name}.tar.gz"))).ok()?;
-    let sig = std::fs::read_to_string(dir.join(format!("{name}.tar.gz.sig"))).ok()?;
-    Some((archive, sig))
+/// `next`: staged by a check. `current`: being served (or on trial). `previous`: the last one that reported ready.
+const SLOTS: [&str; 3] = ["next", "current", "previous"];
+
+fn read_slot(dir: &Path, slot: &str) -> Option<(Vec<u8>, Vec<u8>)> {
+    let channel = std::fs::read(dir.join(format!("{slot}.json"))).ok()?;
+    let archive = std::fs::read(dir.join(format!("{slot}.tar.gz"))).ok()?;
+    Some((channel, archive))
 }
 
-fn remove_pair(dir: &Path, name: &str) {
-    let _ = std::fs::remove_file(dir.join(format!("{name}.tar.gz")));
-    let _ = std::fs::remove_file(dir.join(format!("{name}.tar.gz.sig")));
+fn remove_slot(dir: &Path, slot: &str) {
+    let _ = std::fs::remove_file(dir.join(format!("{slot}.tar.gz")));
+    let _ = std::fs::remove_file(dir.join(format!("{slot}.json")));
 }
 
-/// Inner version of a stored archive, for bookkeeping when it fails its checks (best effort, unverified).
+/// Moves a slot's two files over another's. The archive moves last: a slot whose archive exists has its channel file.
+fn move_slot(dir: &Path, from: &str, to: &str) -> bool {
+    remove_slot(dir, to);
+    std::fs::rename(dir.join(format!("{from}.json")), dir.join(format!("{to}.json"))).is_ok()
+        && std::fs::rename(dir.join(format!("{from}.tar.gz")), dir.join(format!("{to}.tar.gz"))).is_ok()
+}
+
+/// Version a stored archive claims, for bookkeeping when it fails its checks (best effort, unverified).
 fn claimed_version(archive: &[u8]) -> Option<String> {
-    unpack(archive).ok().map(|b| b.meta.version)
+    unpack(archive).ok().map(|(m, _)| m.version)
 }
 
-/// At launch: promote a staged bundle, then pick the bundle to serve, if any. Every failure falls back to the built-in
-/// web layer and is logged.
+/// At launch (and when a staged bundle is applied on resume): promote a staged bundle, then pick the bundle to serve:
+/// the current one, else the last good one, else none (the built-in screens). Every failure falls back and is logged.
 pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: u32) -> Option<Bundle> {
     let mut state = match State::load_checked(dir) {
         Ok(s) => s,
         Err(e) => {
             // Start over without the bundles, keeping the newest version they claim as the floor (unverified, so it
-            // can only make the floor stricter).
-            let floor = ["current", "next"]
+            // can only make the floor stricter), and the newest issued time any of their signed manifests has.
+            let kept = std::fs::read_to_string(dir.join("floor")).ok();
+            let mut words = kept.as_deref().unwrap_or("").split_whitespace();
+            let (kept_floor, kept_issued) = (words.next().map(str::to_string), words.next().and_then(|w| w.parse::<u64>().ok()));
+            let slots: Vec<_> = SLOTS.iter().filter_map(|s| read_slot(dir, s)).collect();
+            let floor = slots
                 .iter()
-                .filter_map(|n| read_pair(dir, n).and_then(|(a, _)| claimed_version(&a)))
-                .chain(std::fs::read_to_string(dir.join("floor")).ok().map(|f| f.trim().to_string()))
+                .filter_map(|(_, a)| claimed_version(a))
+                .chain(kept_floor)
                 .filter_map(|v| semver::Version::parse(&v).ok())
                 .max();
-            log(format!("{e}; dropping installed bundles, built-in web layer {builtin}"));
-            remove_pair(dir, "current");
-            remove_pair(dir, "next");
-            State { floor: floor.map(|v| v.to_string()), ..State::default() }.save(dir);
+            let issued = slots
+                .iter()
+                .filter_map(|(c, _)| verify_channel(pubkey, c).ok().map(|m| m.issued))
+                .chain(kept_issued)
+                .max()
+                .unwrap_or(0);
+            log(format!("{e}; dropping installed bundles, built-in screens {builtin}"));
+            SLOTS.iter().for_each(|s| remove_slot(dir, s));
+            State { floor: floor.map(|v| v.to_string()), issued, ..State::default() }.save(dir);
             return None;
         }
     };
-    if let Some((archive, sig)) = read_pair(dir, "next") {
-        match open(pubkey, &archive, &sig, builtin, shell_api).and_then(|b| match state.floor() {
+    if let Some((channel, archive)) = read_slot(dir, "next") {
+        match open(pubkey, &channel, &archive, builtin, shell_api).and_then(|b| match state.floor() {
             Some(f) if b.version <= f => Err(format!("bundle {} is not newer than {f}, already used here", b.meta.version)),
+            _ if b.manifest.issued < state.issued => Err(format!("manifest for {} is older than one already taken", b.meta.version)),
             _ => Ok(b),
         }) {
             Ok(b) => {
-                let ok = std::fs::rename(dir.join("next.tar.gz"), dir.join("current.tar.gz")).is_ok()
-                    && std::fs::rename(dir.join("next.tar.gz.sig"), dir.join("current.tar.gz.sig")).is_ok();
-                if ok {
+                // The current bundle becomes the fallback only if it proved itself (reported ready).
+                if dir.join("current.tar.gz").exists() {
+                    if state.trial.is_none() {
+                        move_slot(dir, "current", "previous");
+                    } else {
+                        remove_slot(dir, "current");
+                    }
+                }
+                if move_slot(dir, "next", "current") {
                     log(format!("promoted staged bundle {} (on trial)", b.meta.version));
                     state.trial = Some(b.meta.version.clone());
                     state.boots = 0;
                     state.floor = Some(b.meta.version.clone());
+                    state.issued = state.issued.max(b.manifest.issued);
                 } else {
                     log("could not promote the staged bundle");
-                    remove_pair(dir, "next");
+                    remove_slot(dir, "next");
                 }
             }
             Err(e) => {
@@ -279,53 +406,60 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                 if let Some(v) = claimed_version(&archive) {
                     state.reject(&v);
                 }
-                remove_pair(dir, "next");
+                remove_slot(dir, "next");
             }
         }
     }
-    let chosen = match read_pair(dir, "current") {
-        None => None,
-        Some((archive, sig)) => match open(pubkey, &archive, &sig, builtin, shell_api).and_then(|b| match state.floor() {
-            Some(f) if b.version < f => Err(format!("bundle {} is older than {f}, already used here", b.meta.version)),
-            _ => Ok(b),
-        }) {
+    let mut chosen = None;
+    if let Some((channel, archive)) = read_slot(dir, "current") {
+        match open(pubkey, &channel, &archive, builtin, shell_api) {
             Ok(b) if state.trial.as_deref() == Some(b.meta.version.as_str()) && state.boots >= MAX_UNCONFIRMED_BOOTS => {
                 log(format!("bundle {} started {} times without reporting ready; dropped", b.meta.version, state.boots));
                 state.reject(&b.meta.version);
-                remove_pair(dir, "current");
-                None
+                remove_slot(dir, "current");
             }
             Ok(b) => {
                 if state.trial.as_deref() == Some(b.meta.version.as_str()) {
                     state.boots += 1;
                 }
-                log(format!("serving bundle {} (shell API {shell_api}, built-in {builtin})", b.meta.version));
-                Some(b)
+                chosen = Some(b);
             }
             Err(e) => {
-                log(format!("current bundle refused, using the built-in web layer: {e}"));
-                remove_pair(dir, "current");
-                None
+                log(format!("current bundle refused: {e}"));
+                if state.trial.is_some() {
+                    state.trial = None;
+                    state.boots = 0;
+                }
+                remove_slot(dir, "current");
             }
-        },
-    };
-    state.save(dir);
+        }
+    }
     if chosen.is_none() {
-        log(format!("serving the built-in web layer {builtin}"));
+        if let Some((channel, archive)) = read_slot(dir, "previous") {
+            match open(pubkey, &channel, &archive, builtin, shell_api) {
+                Ok(b) if move_slot(dir, "previous", "current") => {
+                    log(format!("back to the last good bundle {}", b.meta.version));
+                    state.trial = None;
+                    state.boots = 0;
+                    chosen = Some(b);
+                }
+                Ok(_) => remove_slot(dir, "previous"),
+                Err(e) => {
+                    log(format!("last good bundle refused: {e}"));
+                    remove_slot(dir, "previous");
+                }
+            }
+        }
+    }
+    state.save(dir);
+    match &chosen {
+        Some(b) => log(format!("serving bundle {} (shell API {shell_api}, built-in {builtin})", b.meta.version)),
+        None => log(format!("serving the built-in screens {builtin}")),
     }
     chosen
 }
 
-/// The channel's pointer to its newest bundle. Unsigned: everything it points at is checked against the signature.
-#[derive(Debug, Deserialize)]
-pub struct Manifest {
-    pub version: String,
-    pub api: u32,
-    pub archive: String,
-    pub signature: String,
-}
-
-/// Bundle URLs: https, or plain http to this machine / the emulator's host only (local spikes).
+/// Bundle URLs: https, or plain http to this machine / the emulator's host only (local tests).
 fn allowed_url(u: &url::Url) -> bool {
     match u.scheme() {
         "https" => true,
@@ -338,15 +472,18 @@ async fn fetch(client: &reqwest::Client, u: &url::Url, max: u64) -> Result<Vec<u
     if !allowed_url(u) {
         return Err(format!("refused URL {u}"));
     }
-    let resp = client.get(u.clone()).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?;
+    let mut resp = client.get(u.clone()).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?;
     if resp.content_length().is_some_and(|n| n > max) {
         return Err("download too large".into());
     }
-    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    if bytes.len() as u64 > max {
-        return Err("download too large".into());
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        if (out.len() + chunk.len()) as u64 > max {
+            return Err("download too large".into());
+        }
+        out.extend_from_slice(&chunk);
     }
-    Ok(bytes.to_vec())
+    Ok(out)
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -372,8 +509,8 @@ fn not_new(
     (*offered <= newest || state.rejected.contains(&offered.to_string())).then_some(newest)
 }
 
-/// Fetches the channel's manifest and, when it names a newer bundle this shell can run, downloads, verifies and
-/// stages it as `next.*` for the next launch.
+/// Fetches the channel file; when it is signed, still valid, not older than one already taken, and names a newer
+/// bundle this shell can run, downloads, verifies and stages it as `next.*`.
 pub async fn check(
     dir: &Path,
     channel: &str,
@@ -381,15 +518,20 @@ pub async fn check(
     builtin: &semver::Version,
     active: Option<&semver::Version>,
     shell_api: u32,
+    now: u64,
 ) -> Result<CheckResult, String> {
     let base = url::Url::parse(channel).map_err(|e| format!("channel: {e}"))?;
     uni_core::init_crypto();
-    let client = uni_core::media::https_client_following_redirects(Duration::from_secs(30)).map_err(|e| e.to_string())?;
-    let manifest: Manifest =
-        serde_json::from_slice(&fetch(&client, &base, 64 * 1024).await?).map_err(|e| format!("manifest: {e}"))?;
-    let offered = semver::Version::parse(&manifest.version).map_err(|e| format!("manifest version: {e}"))?;
+    let client = uni_core::media::https_client_following_redirects(Duration::from_secs(60)).map_err(|e| e.to_string())?;
+    let text = fetch(&client, &base, MAX_CHANNEL_BYTES).await?;
+    let manifest = verify_channel(pubkey, &text)?;
+    fresh(&manifest, now)?;
     let state = State::load_checked(dir)?;
-    let staged = read_pair(dir, "next").and_then(|(a, _)| claimed_version(&a)).and_then(|v| semver::Version::parse(&v).ok());
+    if manifest.issued < state.issued {
+        return Err(format!("manifest for {} is older than one already taken here (a replay?)", manifest.version));
+    }
+    let offered = semver::Version::parse(&manifest.version).map_err(|e| e.to_string())?;
+    let staged = read_slot(dir, "next").and_then(|(_, a)| claimed_version(&a)).and_then(|v| semver::Version::parse(&v).ok());
     if let Some(newest) = not_new(&state, builtin, active, staged.as_ref(), &offered) {
         return Ok(CheckResult::UpToDate { version: newest.to_string() });
     }
@@ -397,76 +539,151 @@ pub async fn check(
         log(format!("bundle {offered} needs shell API {}, this shell has {shell_api}: needs a newer app", manifest.api));
         return Ok(CheckResult::NeedsNewerApp { version: manifest.version, api: manifest.api });
     }
-    let archive = fetch(&client, &base.join(&manifest.archive).map_err(|e| e.to_string())?, MAX_ARCHIVE_BYTES).await?;
-    let sig = String::from_utf8(fetch(&client, &base.join(&manifest.signature).map_err(|e| e.to_string())?, 16 * 1024).await?)
-        .map_err(|_| "signature is not text".to_string())?;
-    let bundle = open(pubkey, &archive, &sig, builtin, shell_api)?;
-    if bundle.meta.version != manifest.version {
-        return Err(format!("manifest says {}, the signed bundle says {}", manifest.version, bundle.meta.version));
-    }
+    let archive = fetch(&client, &base.join(&manifest.archive).map_err(|e| e.to_string())?, MAX_ARCHIVE_BYTES.min(manifest.bytes)).await?;
+    let bundle = open(pubkey, &text, &archive, builtin, shell_api)?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     // state.json first: bundles on disk without it read as lost state at the next launch.
     state.save(dir);
-    for (name, bytes) in [("next.tar.gz.sig.tmp", sig.as_bytes()), ("next.tar.gz.tmp", archive.as_slice())] {
+    for (name, bytes) in [("next.json.tmp", text.as_slice()), ("next.tar.gz.tmp", archive.as_slice())] {
         std::fs::write(dir.join(name), bytes).map_err(|e| e.to_string())?;
     }
-    // The archive lands last: a launch that sees next.tar.gz also sees its signature.
-    std::fs::rename(dir.join("next.tar.gz.sig.tmp"), dir.join("next.tar.gz.sig")).map_err(|e| e.to_string())?;
+    // The archive lands last: a launch that sees next.tar.gz also sees its channel file.
+    std::fs::rename(dir.join("next.json.tmp"), dir.join("next.json")).map_err(|e| e.to_string())?;
     std::fs::rename(dir.join("next.tar.gz.tmp"), dir.join("next.tar.gz")).map_err(|e| e.to_string())?;
-    log(format!("staged bundle {} for the next launch", bundle.meta.version));
+    log(format!("staged bundle {} for the next launch or resume", bundle.meta.version));
     Ok(CheckResult::Staged { version: bundle.meta.version })
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Setup {
+    Pending,
+    Done,
+    /// A page request gave up waiting: the built-in screens stay for this launch (one page never mixes layers).
+    TimedOut,
 }
 
 /// Shared between the asset provider and the commands.
 pub struct Ota {
-    chosen: OnceLock<Option<Bundle>>,
-    ready: (Mutex<bool>, Condvar),
-    /// Set when the active bundle is refused at runtime: everything after is served from the built-in assets.
-    dropped: AtomicBool,
-    dir: OnceLock<PathBuf>,
-    builtin: OnceLock<semver::Version>,
+    /// The bundle being served. Each activated bundle is leaked (a few per process at most) so the asset provider can
+    /// hand out borrowed slices without holding a lock; a swap is always followed by a page reload.
+    active: RwLock<Option<&'static Bundle>>,
+    setup: (Mutex<Setup>, Condvar),
+    dir: std::sync::OnceLock<PathBuf>,
+    builtin: std::sync::OnceLock<semver::Version>,
+    pubkey: &'static str,
+    /// Serialises launch, apply, reject and check, which all move files in the bundle directory.
+    files: Mutex<()>,
     wait: Duration,
 }
 
 impl Ota {
     fn new() -> Arc<Ota> {
         Arc::new(Ota {
-            chosen: OnceLock::new(),
-            ready: (Mutex::new(false), Condvar::new()),
-            dropped: AtomicBool::new(false),
-            dir: OnceLock::new(),
-            builtin: OnceLock::new(),
+            active: RwLock::new(None),
+            setup: (Mutex::new(Setup::Pending), Condvar::new()),
+            dir: std::sync::OnceLock::new(),
+            builtin: std::sync::OnceLock::new(),
+            pubkey: PUBKEY_HEX,
+            files: Mutex::new(()),
             wait: SETUP_WAIT,
         })
     }
 
-    fn init(&self, dir: PathBuf, builtin: semver::Version, pubkey: &str) {
+    fn set_active(&self, b: Option<Bundle>) {
+        let leaked = b.map(|b| &*Box::leak(Box::new(b)));
+        *self.active.write().unwrap_or_else(|e| e.into_inner()) = leaked;
+    }
+
+    fn init(&self, dir: PathBuf, builtin: semver::Version) {
         let _ = std::fs::create_dir_all(&dir);
-        if self.chosen.get().is_some() {
-            log("setup came after the first page request; the built-in web layer stays for this launch");
-        } else if self.chosen.set(activate(&dir, pubkey, &builtin, SHELL_API)).is_err() {
-            // A page request timed out while this ran and fixed the built-in layer; the bundle stays for next launch.
-            log("setup finished after the first page request timed out; the built-in web layer stays for this launch");
+        let (lock, cvar) = &self.setup;
+        let mut setup = lock.lock().unwrap_or_else(|e| e.into_inner());
+        if *setup == Setup::TimedOut {
+            log("setup came after the first page request timed out; the built-in screens stay for this launch");
+        } else if !self.pubkey.is_empty() {
+            let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
+            self.set_active(activate(&dir, self.pubkey, &builtin, SHELL_API));
+            *setup = Setup::Done;
+        } else {
+            *setup = Setup::Done;
         }
         let _ = self.dir.set(dir);
         let _ = self.builtin.set(builtin);
-        let (lock, cvar) = &self.ready;
-        *lock.lock().unwrap_or_else(|e| e.into_inner()) = true;
         cvar.notify_all();
     }
 
-    /// The bundle being served, once launch has chosen. Waits briefly for that choice. On timeout the built-in layer
-    /// is fixed for the whole launch, so one page never mixes built-in and bundle files.
-    fn active(&self) -> Option<&Bundle> {
-        if self.dropped.load(Ordering::Acquire) {
+    /// The bundle being served, once launch has chosen. Waits briefly for that choice; on timeout the built-in screens
+    /// are fixed for the whole launch.
+    fn active(&self) -> Option<&'static Bundle> {
+        let (lock, cvar) = &self.setup;
+        let mut setup = lock.lock().unwrap_or_else(|e| e.into_inner());
+        if *setup == Setup::Pending {
+            setup = cvar.wait_timeout_while(setup, self.wait, |s| *s == Setup::Pending).map(|(g, _)| g).unwrap_or_else(|e| e.into_inner().0);
+            if *setup == Setup::Pending {
+                *setup = Setup::TimedOut;
+            }
+        }
+        if *setup == Setup::TimedOut {
             return None;
         }
-        if self.chosen.get().is_none() {
-            let (lock, cvar) = &self.ready;
-            let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-            let _ = cvar.wait_timeout_while(guard, self.wait, |ready| !*ready);
+        drop(setup);
+        *self.active.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn ready_dir(&self) -> Option<(&Path, &semver::Version)> {
+        if self.pubkey.is_empty() {
+            return None;
         }
-        self.chosen.get_or_init(|| None).as_ref()
+        Some((self.dir.get()?.as_path(), self.builtin.get()?))
+    }
+
+    /// The page booted: the bundle on trial is kept.
+    fn ready(&self) {
+        let (Some((dir, _)), Some(b)) = (self.ready_dir(), self.active()) else { return };
+        let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
+        // Unreadable now: leave it; the next launch fails closed.
+        let Ok(mut state) = State::load_checked(dir) else { return };
+        if state.trial.as_deref() == Some(b.meta.version.as_str()) {
+            state.trial = None;
+            state.boots = 0;
+            state.save(dir);
+            log(format!("bundle {} reported ready; kept", b.meta.version));
+        }
+    }
+
+    /// The bundle's own code refused this shell: drop it and fall back (the last good bundle, else built in). The caller
+    /// reloads the page.
+    fn reject(&self, reason: &str) {
+        let (Some((dir, builtin)), Some(b)) = (self.ready_dir(), self.active()) else { return };
+        let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
+        log(format!("bundle {} refused by its own code: {reason}", b.meta.version));
+        if let Ok(mut state) = State::load_checked(dir) {
+            state.reject(&b.meta.version);
+            state.save(dir);
+        }
+        remove_slot(dir, "current");
+        self.set_active(activate(dir, self.pubkey, builtin, SHELL_API));
+    }
+
+    /// A staged bundle, applied now (the app came back to the foreground). True when the screens changed and the caller
+    /// must reload the page.
+    fn apply(&self) -> bool {
+        let Some((dir, builtin)) = self.ready_dir() else { return false };
+        if *self.setup.0.lock().unwrap_or_else(|e| e.into_inner()) != Setup::Done {
+            return false; // still launching, or this launch is fixed on the built-in screens
+        }
+        let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
+        if !dir.join("next.tar.gz").exists() {
+            return false;
+        }
+        let before = self.active().map(|b| b.meta.version.clone());
+        let chosen = activate(dir, self.pubkey, builtin, SHELL_API);
+        let after = chosen.as_ref().map(|b| b.meta.version.clone());
+        if after == before {
+            return false;
+        }
+        self.set_active(chosen);
+        true
     }
 }
 
@@ -502,12 +719,11 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
         self.builtin.setup(app);
         let builtin = app.package_info().version.clone();
         match app.path().app_data_dir() {
-            Ok(d) => self.ota.init(d.join("ota"), builtin, PUBKEY),
+            Ok(d) => self.ota.init(d.join("ota"), builtin),
             Err(e) => {
-                log(format!("no app data dir ({e}); serving the built-in web layer"));
-                let _ = self.ota.chosen.set(None);
-                let (lock, cvar) = &self.ota.ready;
-                *lock.lock().unwrap_or_else(|e| e.into_inner()) = true;
+                log(format!("no app data dir ({e}); serving the built-in screens"));
+                let (lock, cvar) = &self.ota.setup;
+                *lock.lock().unwrap_or_else(|e| e.into_inner()) = Setup::Done;
                 cvar.notify_all();
             }
         }
@@ -541,7 +757,7 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
 pub struct Status {
     shell_api: u32,
     builtin: String,
-    /// The bundle being served, if not the built-in web layer.
+    /// The bundle being served, if not the built-in screens.
     active: Option<Meta>,
     channel: Option<&'static str>,
 }
@@ -552,45 +768,34 @@ pub fn ota_status(app: tauri::AppHandle, ota: tauri::State<'_, Arc<Ota>>) -> Sta
         shell_api: SHELL_API,
         builtin: app.package_info().version.to_string(),
         active: ota.active().map(|b| b.meta.clone()),
-        channel: CHANNEL,
+        channel: if ota.pubkey.is_empty() { None } else { CHANNEL },
     }
 }
 
-/// The page booted: the bundle on trial is kept.
 #[tauri::command]
 pub fn ota_ready(ota: tauri::State<'_, Arc<Ota>>) {
-    let (Some(dir), Some(b)) = (ota.dir.get(), ota.active()) else { return };
-    // Unreadable now: leave it; the next launch fails closed.
-    let Ok(mut state) = State::load_checked(dir) else { return };
-    if state.trial.as_deref() == Some(b.meta.version.as_str()) {
-        state.trial = None;
-        state.boots = 0;
-        state.save(dir);
-        log(format!("bundle {} reported ready; kept", b.meta.version));
-    }
+    ota.ready();
 }
 
-/// The bundle's own code refused this shell (its API differs). Drop it and reload with the built-in web layer.
+/// The bundle's own code refused this shell (its API differs): drop it, fall back, reload.
 #[tauri::command]
 pub fn ota_reject(window: tauri::WebviewWindow, ota: tauri::State<'_, Arc<Ota>>, reason: String) -> Result<(), String> {
-    let (Some(dir), Some(b)) = (ota.dir.get(), ota.active()) else { return Ok(()) };
-    log(format!("bundle {} refused by its own code: {reason}; reloading the built-in web layer", b.meta.version));
-    if let Ok(mut state) = State::load_checked(dir) {
-        state.reject(&b.meta.version);
-        state.save(dir);
-    }
-    remove_pair(dir, "current");
-    ota.dropped.store(true, Ordering::Release);
+    ota.reject(&reason);
     window.eval("location.reload()").map_err(|e| e.to_string())
 }
 
-/// Look for a newer bundle on the build's channel and stage it for the next launch.
+/// Apply a staged bundle now. True when the page must reload (the caller does it, once nothing would be lost).
+#[tauri::command]
+pub fn ota_apply(ota: tauri::State<'_, Arc<Ota>>) -> bool {
+    ota.apply()
+}
+
+/// Look for a newer bundle on the build's channel and stage it.
 #[tauri::command]
 pub async fn ota_check(ota: tauri::State<'_, Arc<Ota>>) -> Result<CheckResult, String> {
-    let Some(channel) = CHANNEL else { return Ok(CheckResult::Off) };
-    let (Some(dir), Some(builtin)) = (ota.dir.get(), ota.builtin.get()) else { return Err("not set up".into()) };
+    let (Some(channel), Some((dir, builtin))) = (CHANNEL, ota.ready_dir()) else { return Ok(CheckResult::Off) };
     let active = ota.active().map(|b| b.version.clone());
-    let r = check(dir, channel, PUBKEY, builtin, active.as_ref(), SHELL_API).await;
+    let r = check(dir, channel, ota.pubkey, builtin, active.as_ref(), SHELL_API, now()).await;
     if let Err(e) = &r {
         log(format!("check failed: {e}"));
     }
@@ -600,21 +805,17 @@ pub async fn ota_check(ota: tauri::State<'_, Arc<Ota>>) -> Result<CheckResult, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::Signer as _;
 
     struct Key {
+        sk: ed25519_dalek::SigningKey,
         pk: String,
-        kp: minisign::KeyPair,
     }
 
-    fn key() -> Key {
-        let kp = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
-        let pk = base64::engine::general_purpose::STANDARD.encode(kp.pk.to_box().unwrap().to_string());
-        Key { pk, kp }
-    }
-
-    fn sign(k: &Key, data: &[u8]) -> String {
-        let sig = minisign::sign(Some(&k.kp.pk), &k.kp.sk, std::io::Cursor::new(data), None, None).unwrap();
-        base64::engine::general_purpose::STANDARD.encode(sig.to_string())
+    fn key(seed: u8) -> Key {
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
+        let pk = sk.verifying_key().to_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        Key { sk, pk }
     }
 
     fn archive(files: &[(&str, &[u8])]) -> Vec<u8> {
@@ -639,198 +840,328 @@ mod tests {
         archive(&[("uni-bundle.json", meta.as_bytes()), ("index.html", page.as_bytes()), ("assets/app.js", b"1")])
     }
 
+    /// The channel file the broker would write for `archive`, as bundle.py does it.
+    fn channel_for(k: &Key, version: &str, api: u32, archive: &[u8], issued: u64, days: u64) -> Vec<u8> {
+        let m = Manifest {
+            v: 1,
+            app: PACKAGE.into(),
+            version: version.into(),
+            api,
+            archive: format!("web-{version}.tar.gz"),
+            sha256: sha256_hex(archive),
+            bytes: archive.len() as u64,
+            commit: "0".repeat(40),
+            issued,
+            expires: issued + days * 86400,
+        };
+        let text = serde_json::to_string(&m).unwrap();
+        let mut msg = DOMAIN.to_vec();
+        msg.extend_from_slice(text.as_bytes());
+        let sig = base64::engine::general_purpose::STANDARD.encode(k.sk.sign(&msg).to_bytes());
+        serde_json::to_vec(&serde_json::json!({"manifest": text, "sig": sig})).unwrap()
+    }
+
+    const T0: u64 = 1_800_000_000;
+
+    fn signed(k: &Key, version: &str, api: u32) -> (Vec<u8>, Vec<u8>) {
+        let a = bundle(version, api);
+        // Later versions are issued later, as the broker does.
+        let minor: u64 = version.rsplit('.').next().unwrap().parse().unwrap();
+        (channel_for(k, version, api, &a, T0 + minor * 3600, 14), a)
+    }
+
     fn v(s: &str) -> semver::Version {
         semver::Version::parse(s).unwrap()
     }
 
     /// As the app does it: state.json exists (launch writes it) before any bundle lands.
-    fn put(dir: &Path, name: &str, archive: &[u8], sig: &str) {
+    fn put(dir: &Path, slot: &str, (channel, archive): &(Vec<u8>, Vec<u8>)) {
         if !dir.join("state.json").exists() {
             State::default().save(dir);
         }
-        std::fs::write(dir.join(format!("{name}.tar.gz")), archive).unwrap();
-        std::fs::write(dir.join(format!("{name}.tar.gz.sig")), sig).unwrap();
+        std::fs::write(dir.join(format!("{slot}.json")), channel).unwrap();
+        std::fs::write(dir.join(format!("{slot}.tar.gz")), archive).unwrap();
+    }
+
+    fn act(dir: &Path, k: &Key) -> Option<String> {
+        activate(dir, &k.pk, &v("0.3.7"), 1).map(|b| b.meta.version)
+    }
+
+    fn ready(dir: &Path) {
+        let mut s = State::load_checked(dir).unwrap();
+        s.trial = None;
+        s.boots = 0;
+        s.save(dir);
     }
 
     #[test]
     fn a_signed_newer_bundle_for_this_api_opens() {
-        let k = key();
-        let a = bundle("0.1.85", 1);
-        let b = open(&k.pk, &a, &sign(&k, &a), &v("0.1.84"), 1).unwrap();
-        assert_eq!(b.meta, Meta { version: "0.1.85".into(), api: 1 });
-        assert_eq!(b.get("/index.html"), Some(&b"<html>web 0.1.85</html>"[..]));
+        let k = key(1);
+        let (c, a) = signed(&k, "0.3.8", 1);
+        let b = open(&k.pk, &c, &a, &v("0.3.7"), 1).unwrap();
+        assert_eq!(b.meta, Meta { version: "0.3.8".into(), api: 1 });
+        assert_eq!(b.get("/index.html"), Some(&b"<html>web 0.3.8</html>"[..]));
         assert_eq!(b.get("assets/app.js"), Some(&b"1"[..]));
     }
 
     #[test]
-    fn a_tampered_bundle_or_another_key_is_refused() {
-        let (k, other) = (key(), key());
-        let a = bundle("0.1.85", 1);
-        let sig = sign(&k, &a);
+    fn a_tampered_archive_another_key_or_a_bad_signature_is_refused() {
+        let (k, other) = (key(1), key(2));
+        let (c, a) = signed(&k, "0.3.8", 1);
         let mut tampered = a.clone();
         let n = tampered.len();
         tampered[n / 2] ^= 1;
-        assert!(open(&k.pk, &tampered, &sig, &v("0.1.84"), 1).unwrap_err().contains("signature"));
-        assert!(open(&other.pk, &a, &sig, &v("0.1.84"), 1).unwrap_err().contains("signature"));
-        assert!(open(&k.pk, &a, "not a signature", &v("0.1.84"), 1).is_err());
+        assert!(open(&k.pk, &c, &tampered, &v("0.3.7"), 1).unwrap_err().contains("not the one its signed manifest names"));
+        assert!(open(&other.pk, &c, &a, &v("0.3.7"), 1).unwrap_err().contains("signature does not match"));
+        // The manifest text edited after signing (a longer validity, say): the signature no longer matches.
+        let edited = String::from_utf8(c.clone()).unwrap().replace("\\\"expires\\\":", "\\\"expires\\\":9");
+        assert_ne!(edited.as_bytes(), c.as_slice());
+        assert!(open(&k.pk, edited.as_bytes(), &a, &v("0.3.7"), 1).unwrap_err().contains("signature"));
+        assert!(open(&k.pk, b"not json", &a, &v("0.3.7"), 1).is_err());
+        assert!(open("", &c, &a, &v("0.3.7"), 1).unwrap_err().contains("no bundle key"));
     }
 
     #[test]
-    fn the_production_key_parses() {
-        let k = key();
-        let a = bundle("0.1.85", 1);
-        // Signed by a test key, so the pinned key must refuse it (and must parse to get that far).
-        assert!(verify(PUBKEY, &a, &sign(&k, &a)).unwrap_err().contains("signature does not match"));
+    fn the_signed_text_is_domain_separated() {
+        let k = key(1);
+        let a = bundle("0.3.8", 1);
+        let m = serde_json::to_string(&verify_channel(&k.pk, &channel_for(&k, "0.3.8", 1, &a, T0, 14)).unwrap()).unwrap();
+        // The same manifest signed without the prefix (any other use of the key) doesn't pass as a manifest.
+        let sig = base64::engine::general_purpose::STANDARD.encode(k.sk.sign(m.as_bytes()).to_bytes());
+        let bare = serde_json::to_vec(&serde_json::json!({"manifest": m, "sig": sig})).unwrap();
+        assert!(verify_channel(&k.pk, &bare).unwrap_err().contains("signature"));
+    }
+
+    #[test]
+    fn an_archive_that_disagrees_with_its_manifest_is_refused() {
+        let k = key(1);
+        let a = bundle("0.3.9", 1); // says 0.3.9 inside
+        let c = channel_for(&k, "0.3.8", 1, &a, T0, 14); // signed as 0.3.8
+        assert!(open(&k.pk, &c, &a, &v("0.3.7"), 1).unwrap_err().contains("archive says 0.3.9"));
+    }
+
+    #[test]
+    fn an_expired_or_overlong_manifest_is_refused() {
+        let k = key(1);
+        let a = bundle("0.3.8", 1);
+        let m = verify_channel(&k.pk, &channel_for(&k, "0.3.8", 1, &a, T0, 14)).unwrap();
+        assert!(fresh(&m, T0 + 13 * 86400).is_ok());
+        assert!(fresh(&m, T0 + 14 * 86400).unwrap_err().contains("expired"));
+        assert!(verify_channel(&k.pk, &channel_for(&k, "0.3.8", 1, &a, T0, 40)).unwrap_err().contains("validity"));
+    }
+
+    #[test]
+    fn the_production_key_is_a_key() {
+        // Empty until the sealed key exists; once pinned it must be a valid Ed25519 point.
+        if !RELEASE_PUBKEY_HEX.is_empty() {
+            let k = key(1);
+            let a = bundle("0.3.8", 1);
+            let c = channel_for(&k, "0.3.8", 1, &a, T0, 14);
+            assert!(verify_channel(RELEASE_PUBKEY_HEX, &c).unwrap_err().contains("signature does not match"));
+        }
     }
 
     #[test]
     fn another_api_or_an_older_bundle_is_refused() {
-        let k = key();
-        let a = bundle("0.1.85", 2);
-        assert!(open(&k.pk, &a, &sign(&k, &a), &v("0.1.84"), 1).unwrap_err().contains("shell API"));
-        let a = bundle("0.1.84", 1);
-        assert!(open(&k.pk, &a, &sign(&k, &a), &v("0.1.84"), 1).unwrap_err().contains("not newer"));
+        let k = key(1);
+        let (c, a) = signed(&k, "0.3.8", 2);
+        assert!(open(&k.pk, &c, &a, &v("0.3.7"), 1).unwrap_err().contains("shell API"));
+        let (c, a) = signed(&k, "0.3.7", 1);
+        assert!(open(&k.pk, &c, &a, &v("0.3.7"), 1).unwrap_err().contains("not newer"));
     }
 
     #[test]
-    fn unsafe_paths_and_missing_metadata_are_refused() {
-        let meta = br#"{"version":"0.1.85","api":1}"#;
+    fn unsafe_paths_links_and_missing_metadata_are_refused() {
+        let meta = br#"{"version":"0.3.8","api":1}"#;
         let a = archive(&[("uni-bundle.json", meta), ("index.html", b"x"), ("../evil", b"x")]);
         assert!(unpack(&a).unwrap_err().contains("unsafe path"));
         let a = archive(&[("index.html", b"x")]);
         assert!(unpack(&a).unwrap_err().contains("uni-bundle.json"));
+        let a = archive(&[("uni-bundle.json", meta), ("index.html", b"x"), ("index.html", b"y")]);
+        assert!(unpack(&a).unwrap_err().contains("twice"));
+        let mut b = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        let mut h = tar::Header::new_gnu();
+        h.set_entry_type(tar::EntryType::Symlink);
+        h.set_size(0);
+        b.append_link(&mut h, "index.html", "/etc/passwd").unwrap();
+        assert!(unpack(&b.into_inner().unwrap().finish().unwrap()).unwrap_err().contains("regular files"));
     }
 
     #[test]
     fn launch_promotes_a_staged_bundle_and_serves_it() {
-        let k = key();
+        let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none(), "nothing installed: built-in");
-        let a = bundle("0.1.85", 1);
-        put(dir.path(), "next", &a, &sign(&k, &a));
-        let b = activate(dir.path(), &k.pk, &v("0.1.84"), 1).unwrap();
-        assert_eq!(b.meta.version, "0.1.85");
+        assert_eq!(act(dir.path(), &k), None, "nothing installed: built-in");
+        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
         assert!(!dir.path().join("next.tar.gz").exists() && dir.path().join("current.tar.gz").exists());
-        assert_eq!(State::load_checked(dir.path()).unwrap().trial.as_deref(), Some("0.1.85"));
+        let s = State::load_checked(dir.path()).unwrap();
+        assert_eq!((s.trial.as_deref(), s.floor.as_deref(), s.issued), (Some("0.3.8"), Some("0.3.8"), T0 + 8 * 3600));
     }
 
     #[test]
-    fn a_bundle_that_never_reports_ready_is_dropped() {
-        let k = key();
+    fn a_bundle_that_never_reports_ready_falls_back_to_the_last_good_one() {
+        let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        let a = bundle("0.1.85", 1);
-        put(dir.path(), "next", &a, &sign(&k, &a));
+        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
+        ready(dir.path());
+        // 0.3.9 arrives, takes over, and never boots.
+        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
         for _ in 0..MAX_UNCONFIRMED_BOOTS {
-            assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_some());
+            assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
         }
-        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none(), "never ready: back to built-in");
-        assert_eq!(State::load_checked(dir.path()).unwrap().rejected, vec!["0.1.85".to_string()]);
-        assert!(!dir.path().join("current.tar.gz").exists());
+        assert!(dir.path().join("previous.tar.gz").exists(), "0.3.8 kept as the last good bundle");
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"), "never ready: back to the last good bundle");
+        let s = State::load_checked(dir.path()).unwrap();
+        assert_eq!((s.rejected, s.trial), (vec!["0.3.9".to_string()], None));
+        assert!(!dir.path().join("previous.tar.gz").exists(), "it is current again");
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"), "and stays");
+        // With no last good bundle, the built-in screens.
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        for _ in 0..MAX_UNCONFIRMED_BOOTS {
+            assert!(act(dir.path(), &k).is_some());
+        }
+        assert_eq!(act(dir.path(), &k), None);
+    }
+
+    #[test]
+    fn a_bundle_still_on_trial_is_not_kept_as_the_fallback() {
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        assert!(act(dir.path(), &k).is_some()); // 0.3.8 on trial, never ready
+        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
+        assert!(!dir.path().join("previous.tar.gz").exists());
     }
 
     #[test]
     fn a_ready_bundle_stays_and_a_newer_app_wins() {
-        let k = key();
+        let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        let a = bundle("0.1.85", 1);
-        put(dir.path(), "current", &a, &sign(&k, &a));
-        // Not on trial (already reported ready): served on every launch.
+        put(dir.path(), "current", &signed(&k, "0.3.8", 1));
         for _ in 0..5 {
-            assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_some());
+            assert!(act(dir.path(), &k).is_some());
         }
-        // An APK update to 0.1.85 brings the same web layer built in; the bundle is no longer newer.
-        assert!(activate(dir.path(), &k.pk, &v("0.1.85"), 1).is_none());
+        // An APK update to 0.3.8 brings the same screens built in; the bundle is no longer newer.
+        assert!(activate(dir.path(), &k.pk, &v("0.3.8"), 1).is_none());
     }
 
     #[test]
     fn a_tampered_installed_bundle_falls_back_at_launch() {
-        let k = key();
+        let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        let a = bundle("0.1.85", 1);
-        let sig = sign(&k, &a);
-        let mut t = a.clone();
-        let n = t.len();
-        t[n / 2] ^= 1;
-        put(dir.path(), "current", &t, &sig);
-        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
+        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
+        let (c, mut a) = signed(&k, "0.3.9", 1);
+        let n = a.len();
+        a[n / 2] ^= 1;
+        put(dir.path(), "current", &(c, a));
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
     }
 
     #[test]
     fn an_older_signed_bundle_is_never_used_again() {
-        let k = key();
+        let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        let (a85, a86) = (bundle("0.1.85", 1), bundle("0.1.86", 1));
-        put(dir.path(), "next", &a86, &sign(&k, &a86));
-        assert_eq!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).unwrap().meta.version, "0.1.86");
-        // 0.1.86 is lost (cleared, refused later); the channel replays the older 0.1.85, validly signed.
-        remove_pair(dir.path(), "current");
-        put(dir.path(), "next", &a85, &sign(&k, &a85));
-        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
-        put(dir.path(), "current", &a85, &sign(&k, &a85));
-        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
+        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
+        // 0.3.9 is lost (cleared, refused later); the channel replays the older 0.3.8, validly signed.
+        remove_slot(dir.path(), "current");
+        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        assert_eq!(act(dir.path(), &k), None);
         // And a check won't fetch it.
         let state = State::load_checked(dir.path()).unwrap();
-        assert_eq!(state.floor.as_deref(), Some("0.1.86"));
-        assert!(not_new(&state, &v("0.1.84"), None, None, &v("0.1.85")).is_some());
-        assert!(not_new(&state, &v("0.1.84"), None, None, &v("0.1.87")).is_none());
+        assert_eq!(state.floor.as_deref(), Some("0.3.9"));
+        assert!(not_new(&state, &v("0.3.7"), None, None, &v("0.3.8")).is_some());
+        assert!(not_new(&state, &v("0.3.7"), None, None, &v("0.3.10")).is_none());
+    }
+
+    #[test]
+    fn a_manifest_issued_before_one_already_taken_is_not_promoted() {
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        assert!(act(dir.path(), &k).is_some());
+        // A newer version, but signed earlier than the manifest already taken (an old signing held back and replayed).
+        let a = bundle("0.3.9", 1);
+        put(dir.path(), "next", &(channel_for(&k, "0.3.9", 1, &a, T0, 14), a));
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
     }
 
     #[test]
     fn a_lost_or_corrupt_state_fails_closed_and_keeps_the_floor() {
-        let k = key();
-        let (a85, a86) = (bundle("0.1.85", 1), bundle("0.1.86", 1));
+        let k = key(1);
         for damage in ["corrupt", "missing"] {
             let dir = tempfile::tempdir().unwrap();
-            put(dir.path(), "next", &a86, &sign(&k, &a86));
-            assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_some());
+            put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+            assert!(act(dir.path(), &k).is_some());
             match damage {
                 "corrupt" => std::fs::write(dir.path().join("state.json"), b"{not json").unwrap(),
                 _ => std::fs::remove_file(dir.path().join("state.json")).unwrap(),
             }
-            assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none(), "{damage}: built-in");
+            assert_eq!(act(dir.path(), &k), None, "{damage}: built-in");
             assert!(!dir.path().join("current.tar.gz").exists(), "{damage}: bundles dropped");
-            assert_eq!(State::load_checked(dir.path()).unwrap().floor.as_deref(), Some("0.1.86"), "{damage}: floor kept");
-            put(dir.path(), "next", &a85, &sign(&k, &a85));
-            assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none(), "{damage}: the older one stays out");
+            let s = State::load_checked(dir.path()).unwrap();
+            assert_eq!((s.floor.as_deref(), s.issued), (Some("0.3.9"), T0 + 9 * 3600), "{damage}: floor kept");
+            put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+            assert_eq!(act(dir.path(), &k), None, "{damage}: the older one stays out");
         }
         // state.json damaged after the bundle that set the floor is already gone: the floor file still holds it.
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &a86, &sign(&k, &a86));
-        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_some());
-        remove_pair(dir.path(), "current");
+        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        assert!(act(dir.path(), &k).is_some());
+        remove_slot(dir.path(), "current");
         std::fs::write(dir.path().join("state.json"), b"{not json").unwrap();
-        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
-        assert_eq!(State::load_checked(dir.path()).unwrap().floor.as_deref(), Some("0.1.86"));
-        // A floor that isn't a version is damage too.
+        assert_eq!(act(dir.path(), &k), None);
+        let s = State::load_checked(dir.path()).unwrap();
+        assert_eq!((s.floor.as_deref(), s.issued), (Some("0.3.9"), T0 + 9 * 3600));
+    }
+
+    #[test]
+    fn apply_swaps_in_a_staged_bundle_and_reject_falls_back() {
+        let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "current", &a85, &sign(&k, &a85));
-        std::fs::write(dir.path().join("state.json"), br#"{"floor":"not-a-version"}"#).unwrap();
-        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
-        assert!(!dir.path().join("current.tar.gz").exists());
-        assert_eq!(State::load_checked(dir.path()).unwrap().floor.as_deref(), Some("0.1.85"));
+        put(dir.path(), "current", &signed(&k, "0.3.8", 1));
+        let mut o = Ota::new();
+        Arc::get_mut(&mut o).unwrap().pubkey = Box::leak(k.pk.clone().into_boxed_str());
+        o.init(dir.path().to_path_buf(), v("0.3.7"));
+        assert_eq!(o.active().unwrap().meta.version, "0.3.8");
+        assert!(!o.apply(), "nothing staged: nothing to apply");
+        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        assert!(o.apply());
+        assert_eq!(o.active().unwrap().meta.version, "0.3.9");
+        // 0.3.9's own code refuses this shell: back to 0.3.8, the last good one.
+        o.reject("test");
+        assert_eq!(o.active().unwrap().meta.version, "0.3.8");
+        assert!(State::load_checked(dir.path()).unwrap().rejected.contains(&"0.3.9".to_string()));
     }
 
     #[test]
     fn a_page_request_before_setup_fixes_the_built_in_layer_for_the_launch() {
-        let k = key();
+        let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        let a = bundle("0.1.85", 1);
-        put(dir.path(), "current", &a, &sign(&k, &a));
+        put(dir.path(), "current", &signed(&k, "0.3.8", 1));
+        let pk: &'static str = Box::leak(k.pk.clone().into_boxed_str());
         let mut late = Ota::new();
-        Arc::get_mut(&mut late).unwrap().wait = Duration::from_millis(10);
+        let l = Arc::get_mut(&mut late).unwrap();
+        l.wait = Duration::from_millis(10);
+        l.pubkey = pk;
         assert!(late.active().is_none(), "setup hasn't run: built-in");
-        late.init(dir.path().to_path_buf(), v("0.1.84"), &k.pk);
+        late.init(dir.path().to_path_buf(), v("0.3.7"));
         assert!(late.active().is_none(), "still built-in for this launch");
-        let on_time = Ota::new();
-        on_time.init(dir.path().to_path_buf(), v("0.1.84"), &k.pk);
-        assert_eq!(on_time.active().unwrap().meta.version, "0.1.85");
+        let mut on_time = Ota::new();
+        Arc::get_mut(&mut on_time).unwrap().pubkey = pk;
+        on_time.init(dir.path().to_path_buf(), v("0.3.7"));
+        assert_eq!(on_time.active().unwrap().meta.version, "0.3.8");
     }
 
     #[test]
     fn only_https_or_local_http_urls() {
         let ok = |s: &str| allowed_url(&url::Url::parse(s).unwrap());
-        assert!(ok("https://example.com/web/manifest.json"));
-        assert!(ok("http://127.0.0.1:8765/manifest.json") && ok("http://10.0.2.2:8765/m.json"));
-        assert!(!ok("http://example.com/manifest.json") && !ok("file:///etc/passwd"));
+        assert!(ok("https://example.com/web/web.json"));
+        assert!(ok("http://127.0.0.1:8765/web.json") && ok("http://10.0.2.2:8765/m.json"));
+        assert!(!ok("http://example.com/web.json") && !ok("file:///etc/passwd"));
     }
 }

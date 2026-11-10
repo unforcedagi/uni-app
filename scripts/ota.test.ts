@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types scripts/ota.test.ts
-// T-305: the web layer and the shell agree on the command API number, and a bundle refuses a shell with another one.
+// T-335 OTA: the screens and the shell agree on the command API number, and a bundle refuses a shell with another one.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { SHELL_API, refusesShell, webLabel } from "../src/ota.ts";
@@ -16,6 +16,8 @@ assert.equal(refusesShell({ shell_api: SHELL_API, active: bundle }), false, "sam
 assert.equal(refusesShell({ shell_api: SHELL_API + 1, active: bundle }), true, "newer shell: the bundle steps aside");
 assert.equal(refusesShell({ shell_api: SHELL_API - 1, active: bundle }), true, "older shell: the bundle steps aside");
 assert.equal(refusesShell({ shell_api: SHELL_API + 1, active: null }), false, "the built-in web layer never refuses its own shell");
-assert.equal(webLabel({ shell_api: 1, builtin: "0.1.84", active: bundle, channel: null }), "web 0.1.85 (over the air)");
-assert.equal(webLabel({ shell_api: 1, builtin: "0.1.84", active: null, channel: null }), "web built in");
+const channel = "https://example.com/web.json";
+assert.equal(webLabel({ shell_api: 1, builtin: "0.1.84", active: bundle, channel }), "Screens 0.1.85 · over the air");
+assert.equal(webLabel({ shell_api: 1, builtin: "0.1.84", active: null, channel }), "Screens built in");
+assert.equal(webLabel({ shell_api: 1, builtin: "0.1.84", active: null, channel: null }), null, "no channel (the Mac): nothing to say");
 console.log("ota tests passed");
