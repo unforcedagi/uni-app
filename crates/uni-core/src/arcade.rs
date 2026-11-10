@@ -131,9 +131,14 @@ impl Screen {
     }
 }
 
-fn rounds_path(game: &str, n: u32, screen: Screen) -> ArcadeResult<String> {
+/// The rounds path, signed as it stands: `look` is a card a room pinned ("look here"), dealt first when this game can.
+fn rounds_path(game: &str, n: u32, screen: Screen, look: Option<&str>) -> ArcadeResult<String> {
+    let look = match look {
+        Some(card) => format!("&look={}", check_card(card)?),
+        None => String::new(),
+    };
     Ok(format!(
-        "/arcade/v1/rounds?game={}&n={}{}",
+        "/arcade/v1/rounds?game={}&n={}{}{look}",
         check_game(game)?,
         n.clamp(1, 60),
         screen.query('&')
@@ -168,13 +173,20 @@ impl<'a> ArcadeDoor<'a> {
         self
     }
 
+    /// The home as the door gives it, `look` (the cards a room pinned) included.
     pub async fn home(&self, screen: Screen) -> ArcadeResult<Value> {
         let path = format!("/arcade/v1/home{}", screen.query('?'));
         self.json("GET", &path, None).await
     }
 
-    pub async fn rounds(&self, game: &str, n: u32, screen: Screen) -> ArcadeResult<Value> {
-        let path = rounds_path(game, n, screen)?;
+    pub async fn rounds(
+        &self,
+        game: &str,
+        n: u32,
+        screen: Screen,
+        look: Option<&str>,
+    ) -> ArcadeResult<Value> {
+        let path = rounds_path(game, n, screen, look)?;
         self.json("GET", &path, None).await
     }
 
@@ -351,12 +363,28 @@ mod tests {
         let plain = Screen::default();
         let grey = Screen { grey: true, still: false };
         let both = Screen { grey: true, still: true };
-        assert_eq!(rounds_path("gallery", 5, plain).unwrap(), "/arcade/v1/rounds?game=gallery&n=5");
-        assert_eq!(rounds_path("gallery", 5, grey).unwrap(), "/arcade/v1/rounds?game=gallery&n=5&grey=1");
-        assert_eq!(rounds_path("gallery", 5, both).unwrap(), "/arcade/v1/rounds?game=gallery&n=5&grey=1&still=1");
+        assert_eq!(rounds_path("gallery", 5, plain, None).unwrap(), "/arcade/v1/rounds?game=gallery&n=5");
+        assert_eq!(rounds_path("gallery", 5, grey, None).unwrap(), "/arcade/v1/rounds?game=gallery&n=5&grey=1");
+        assert_eq!(rounds_path("gallery", 5, both, None).unwrap(), "/arcade/v1/rounds?game=gallery&n=5&grey=1&still=1");
         assert_eq!(both.query('?'), "?grey=1&still=1");
         assert_eq!(plain.query('?'), "");
-        assert!(rounds_path("garden", 5, grey).is_err());
+        assert!(rounds_path("garden", 5, grey, None).is_err());
+    }
+
+    #[test]
+    fn a_pinned_card_rides_in_the_signed_rounds_path() {
+        let grey = Screen { grey: true, still: false };
+        assert_eq!(
+            rounds_path("gallery", 5, grey, Some("media:a_b.c")).unwrap(),
+            "/arcade/v1/rounds?game=gallery&n=5&grey=1&look=media:a_b.c"
+        );
+        assert_eq!(
+            rounds_path("ripple", 3, Screen::default(), Some("web:12")).unwrap(),
+            "/arcade/v1/rounds?game=ripple&n=3&look=web:12"
+        );
+        // a card id that would smuggle another parameter into the signed URL is refused, not escaped
+        assert!(rounds_path("gallery", 5, grey, Some("a&game=ripple")).is_err());
+        assert!(rounds_path("gallery", 5, grey, Some("")).is_err());
     }
 
     #[test]
