@@ -501,6 +501,9 @@ Two proposals wait on a scope decision.
           waiting_on: 'uni', waiting_for: 'Merge the jar list, then resume me' }, '**Blocked after 17 min. Waiting on Uni:** Merge the jar list, then resume me'),
         runNote('run-choir', 'Old rehearsal plan', { area: 'Areas/Choir', node: 'a-choir', room: 'choir', channel: 'ch-choir', state: 'superseded', attempt: 'choirrn1', worker: 'mts-choirrn1', started_at: iso(20000), ended_at: iso(19000), superseded_by: 'choirrn2',
           waiting_on: 'aaron', waiting_for: 'Pick a hall' }, '**Blocked. Waiting on Aaron:** Pick a hall'),
+        // a private area's run: its words never reach its door
+        runNote('run-sad', 'Quiet practice log', { area: 'Areas/Sanctum', node: 'a-sad', room: 'sanctum', channel: 'ch-sad', state: 'running', attempt: 'sadrun01', worker: 'mts-sadrun01', started_at: iso(1200), doing_now: 'Running git', doing_at: iso(60), live_line: 'Private words about the practice' },
+          '**Working now:** Private words about the practice'),
       );
     }
     // T-335: the store's unread count, when a spec asks for it (`unread`): seeded per room, one more per message from someone else, cleared by mark_read

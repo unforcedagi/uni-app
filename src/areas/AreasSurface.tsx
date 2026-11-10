@@ -575,7 +575,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
       const raw = isPrivatePath(data!.tree, a.path) ? null : tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
       const st = raw ? plainWords(raw) : null;
       return { path: a.path, name: a.name, about: isPrivatePath(data!.tree, a.path) ? null : a.purpose || null, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null,
-        room: v.own ? v.target?.id ?? null : null,
+        room: v.own ? v.target?.id ?? null : null, private: isPrivatePath(data!.tree, a.path),
         // T-335: everything new in the area's rooms (its own and its projects'); what needs you is what its details list: the tasks
         // under it, and the approval prompts in its own room (0.3.0: the room's own rule, as its details; the home's sentence is For you's)
         ...(i >= 0 ? { unread: rolledUnread(navRows, newByPath, i), needs: rolledNeeds(navRows, navNeeds, i) + (v.own && v.target ? approvalsAll.list.filter((x) => x.channel === v.target!.id).length : 0) } : {}) };

@@ -234,7 +234,7 @@
 .fd-count.at { background: var(--th-ink); color: var(--th-card); }
 /* T-335 runs visible: a room's runs, one line each, joined to the foot of its door: the newest at work with its live line, and the newest
    waiting on you with what it waits for. Each is a tap into the run's note. One line, cut with an ellipsis; nothing moves. */
-.fd-doors li:has(.fd-runs) .fd-door { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.fd-doors li:has(.fd-runs) .fd-door { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }  /* (the glow look: glow.css) */
 .fd-runs { display: grid; border: var(--g-hair) solid var(--g-line-strong); border-top: 0; border-radius: 0 0 3px 3px; background: var(--th-card); overflow: hidden; }
 .fd-run { all: unset; box-sizing: border-box; min-height: 40px; padding: 8px 14px; display: flex; align-items: center; gap: 8px; cursor: pointer; font: 400 13px/1.35 var(--th-sans); color: var(--th-ink2); min-width: 0; }
 .fd-run + .fd-run { border-top: 1px dashed var(--th-hair2); }

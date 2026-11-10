@@ -29,6 +29,10 @@ test('the room list says which rooms are moving and which wait on you, and each 
   // a run waiting on Uni, and a superseded one, put nothing in the list
   await expect(door(page, 'Bee Garden').locator('.fd-run')).toHaveCount(0);
   await expect(door(page, 'Choir').locator('.fd-run')).toHaveCount(0);
+  // a private area's door never carries its runs' words
+  await expect(door(page, 'Sanctum')).toHaveCount(1);
+  await expect(door(page, 'Sanctum').locator('.fd-run')).toHaveCount(0);
+  await expect(page.getByText('Private words about the practice')).toHaveCount(0);
   // the page stays one column wide on a phone (a long line is cut, never pushes the page sideways)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await north.scrollIntoViewIfNeeded();

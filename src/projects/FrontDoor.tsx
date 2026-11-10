@@ -18,7 +18,8 @@ import "./projects.css";
 export type Door = { path: string; name: string; slug: string | null; stands: string | null; lastTs: number | null;
   /** The area note's own one line on what it is (never a private area's): the route's description of it. */ about?: string | null;
   /** The area's own room (its id), where a turn of the room's Uni is looked for; null when it has none of its own. */ room?: string | null;
-  /** T-335: what is new in the area's rooms (its own and its projects'), and how many things there need you. */ unread?: Unread | null; needs?: number };
+  /** T-335: what is new in the area's rooms (its own and its projects'), and how many things there need you. */ unread?: Unread | null; needs?: number;
+  /** A private area: its runs' words stay inside it (no run lines on its door). */ private?: boolean };
 /** 0.3.1: an area's own stream: its path and name, and its rooms (its own first). */
 export type Scope = { path: string; name: string; rooms: readonly AllRoom[] };
 
@@ -224,7 +225,7 @@ export function FrontDoor({ onOpenNote, onOpenProject, doors, forYou = null, you
           {d.stands && <span className="fd-stands">{d.stands}</span>}
           <span className="fd-foot">{d.slug && !sameWords(d.name, d.slug) && <span className="fd-slug">#{d.slug}</span>}{d.lastTs && <span className="fd-when">{talked(now, d.lastTs)}</span>}</span>
         </button>
-        {a && <RunLines {...roomRuns(work, a.id)} onOpen={onOpenNote} at={at} />}
+        {a && !d.private && <RunLines {...roomRuns(work, a.id)} onOpen={onOpenNote} at={at} />}
       </li>;
     })}</ul></nav>;
   const unfiled = onOpenProject && work.projects.some((p) => p.id === UNFILED) ? (() => {
