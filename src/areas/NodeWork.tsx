@@ -4,7 +4,7 @@ import { cleanText } from "../interface/contract";
 import { isMe, ownerLabel, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { ActResult, TaskAction, Undo } from "./useTasks";
-import { isOverdue, ANSWER_ANYWAY, CHANGED_SINCE, answersReady, notWrittenDown, confirmationOf, type Resolved, referencedItems, repeatsHeading, revisionMoved, stepNotes, unconfirmedLine, actionLead, actionOf, askedLine, titleSays, checkingBanner, currentStep, unresolvedBlock, withoutIntro, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
+import { isOverdue, ANSWER_ANYWAY, CHANGED_SINCE, answersReady, notWrittenDown, type Resolved, referencedItems, repeatsHeading, revisionMoved, stepNotes, unconfirmedLine, actionLead, actionOf, askedLine, titleSays, checkingBanner, currentStep, unresolvedBlock, withoutIntro, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 import { taskTitle } from "./whereCore";
 import { DecisionAnswer, NextText, decisionAsk, rowLinkLabel, supportOf } from "./Companion";
@@ -39,7 +39,7 @@ const linksIn = (text: string): string[] => [...text.matchAll(URLS)].map((m) => 
 /** A step that asks the user to look at or open something (r22): its link is the step's own action. */
 const LOOK = /^(?:look|open|view|visit|see|check|try|watch|read|test)\b/i;
 
-export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null, confirmation = null }: {
+export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null, confirmation }: {
   task: Task; gone?: boolean; here: string; nodeName: (path: string) => string; room: RoomRef | null;
   /** r24: the joined room a step names ("#cohere's 'For Harper' block"), when there is one */
   roomNamed?: (name: string) => RoomRef | null;
@@ -59,8 +59,8 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   onStale?: () => void;
   /** r18: a draft note written for this task (`draft` tag, its `task` field): its text is the message "Copy the message" copies. */
   draft?: { vault: string; id: string } | null;
-  /** r28: what the feed resolved for this ask (confirmed, to recheck, or still being checked); null: nothing resolved (a recheck with no date) */
-  confirmation?: Resolved | null;
+  /** T-335: whether the ask is current, from its needs_aaron (confirmationOf): current, or back with its room and gated behind "Answer anyway" */
+  confirmation: Resolved;
   /** r28: read this room's chat again ("Couldn't read #room · Retry") */
 }) {
   const box = useRef<HTMLDivElement>(null);
@@ -194,8 +194,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   /** r31: an overdue task says "was due Oct 13" and not when it was asked: one date, as on its row */
   const overdue = !!task.due && isOverdue(task.due);
   const gated = !gone && !unsure;
-  // (no confirmation given: the task's own needs_aaron decides, as it does for the feed)
-  const conf: Resolved = confirmation ?? confirmationOf(task);
+  const conf: Resolved = confirmation;
   const [anyway, setAnyway] = useState(false);
   // (a check that comes back different, Retry for one, takes the answers back behind "Answer anyway")
   useEffect(() => { setAnyway(false); }, [task.id, conf.state, conf.why]);

@@ -7,9 +7,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRecorder } from "../recorder";
 import { transcribe } from "./useForYou";
-import { contextLine, linkParts, seenCloses, awayLine, cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine, type AskContext } from "./forYouCore";
+import { contextLine, seenCloses, awayLine, cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine, type AskContext } from "./forYouCore";
 import { RefText } from "../areas/noteRefs";
-import { hostOf } from "../areas/simpleCore";
+import { splitMarkdownLinks } from "../areas/linkText";
 import { useVaultProfile } from "../areas/ProfileContext";
 import { invoke } from "@tauri-apps/api/core";
 import { quietLine } from "../projects/FrontDoor";
@@ -119,7 +119,7 @@ export type ItemActions = Pick<ForYouProps, "view" | "answer" | "seen" | "retry"
 const openOut = (e: React.MouseEvent, url: string) => { e.preventDefault(); void invoke("open_link", { url }).catch(() => {}); };
 /** Text with its links: a web address (bare or `[words](address)`) opens outside, by its words or its host; a note id reads as its title. */
 function CtxText({ text, vault }: { text: string; vault: string }) {
-  return <>{linkParts(text).map((p, i) => (p.url ? <a key={i} href={p.url} onClick={(e) => openOut(e, p.url!)}>{p.label ?? hostOf(p.url)}</a> : <RefText key={i} text={p.text} vault={vault} />))}</>;
+  return <>{splitMarkdownLinks(text).map((p, i) => ("url" in p ? <a key={i} href={p.url} onClick={(e) => openOut(e, p.url)}>{p.label}</a> : <RefText key={i} text={p.text} vault={vault} />))}</>;
 }
 
 /** T-335: the ask's context, folded in place under its why: "Steps and links · about 5 minutes", opening to the steps, the links, why it

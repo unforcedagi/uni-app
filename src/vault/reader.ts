@@ -59,7 +59,8 @@ export async function allPages<N = Note>(page: (offset: number) => Promise<N[]>)
 }
 
 /** The reader over one vault door (`call`): the app's is `reader`, a test makes its own with a fake door and clock. */
-export function createReader(call: Call = (cmd, args) => invoke(cmd, args), clock: () => number = () => Date.now(), opts: { share?: boolean } = {}) {
+export function createReader(call: Call = (cmd, args) => invoke(cmd, args), clock: () => number = () => Date.now(),
+  opts: { share?: boolean; /** a test's timer */ every?: (f: () => void, ms: number) => unknown; stopEvery?: (h: unknown) => void } = {}) {
   const sharing = opts.share !== false;
   // ---- sharing within a tick ----
   let generation = 0;
@@ -114,28 +115,30 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
   const runs = (vault: string): Promise<{ rows: Note<"run">[]; partial: string[] }> => share(keyOf("run", vault), async () => {
     const now = clock();
     const iso = (at: number, days: number) => new Date(at - days * DAY).toISOString();
-    let o = old.get(vault);
-    if (!o || now - o.at >= OLD_RUNS_MS) {
-      const at = now;
+    const readOld = (at: number) => {
       const p = Promise.all(RUN_WINDOWS.slice(1).map(([to, from]) => allPages(where(vault, "run", { started_at: { gte: iso(at, from), lt: iso(at, to) } }))));
       const entry = { at, p };
+      // a failed read is never kept: the next asks again
       p.catch(() => { if (old.get(vault) === entry) old.delete(vault); });
-      old.set(vault, o = entry);
-    }
-    // eslint-disable-next-line prefer-const
-    let [running, recent, windows] = await Promise.all([
+      old.set(vault, entry);
+      return entry;
+    };
+    let o = old.get(vault);
+    if (!o || now - o.at >= OLD_RUNS_MS) o = readOld(now);
+    const [running, recent, first] = await Promise.all([
       allPages(where(vault, "run", { state: { in: [...LIVE_RUNS] } })),
       allPages(where(vault, "run", { started_at: { gte: iso(o.at, RUN_WINDOWS[0][1]) } })),
       o.p,
     ]);
-    // a run the older read saw live that the live read no longer lists has ended since: read the older windows again now, so it is never
-    // shown live from a five-minute-old copy
+    let windows = first;
+    // a run the older read saw live that the live read no longer lists has ended since: the older windows are read again (at most once a
+    // minute: a note the live query never lists can't make every read a re-read), so it is never shown live from a five-minute-old copy.
+    // (the fresh window already reaches back to where the older read began)
     const liveNow = new Set(running.rows.map((r) => r.id));
     const ended = (rows: Note<"run">[]) => rows.some((r) => LIVE_RUNS.includes((r.metadata as { state?: never } | undefined)?.state ?? ("" as never)) && !liveNow.has(r.id));
-    if (running.complete && o.at !== now && windows.some((w) => ended(w.rows))) {
-      old.delete(vault);
-      windows = await (old.set(vault, o = { at: now, p: Promise.all(RUN_WINDOWS.slice(1).map(([to, from]) => allPages(where(vault, "run", { started_at: { gte: iso(now, from), lt: iso(now, to) } })))) }), o.p);
-      recent = await allPages(where(vault, "run", { started_at: { gte: iso(now, RUN_WINDOWS[0][1]) } }));
+    if (running.complete && now - o.at >= POLL_MS && windows.some((w) => ended(w.rows))) {
+      o = readOld(now);
+      windows = await o.p;
     }
     const seen = new Set<unknown>();
     const rows = [running, recent, ...windows].flatMap((r) => r.rows).filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
@@ -147,12 +150,17 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
 
   // ---- one poller ----
   const subs = new Set<() => void>();
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let timer: unknown = null;
   let lastTick: number | null = null;
   const visible = () => typeof document === "undefined" || document.visibilityState === "visible";
-  /** Every subscriber reads again now (their reads shared within this tick). */
+  const every = opts.every ?? ((f: () => void, ms: number) => setInterval(f, ms));
+  const stopEvery = opts.stopEvery ?? ((h: unknown) => clearInterval(h as ReturnType<typeof setInterval>));
+  const arm = () => { if (timer !== null) stopEvery(timer); timer = every(() => { if (visible()) tick(); }, POLL_MS); };
+  /** Every subscriber reads again now (their reads shared within this tick). The timer starts over, so the next tick is a minute after
+   *  this one, whatever brought it (the timer, or coming back to the window). */
   function tick() {
     lastTick = clock();
+    if (timer !== null) arm();
     invalidate();
     for (const f of [...subs]) { try { f(); } catch { /* one screen part's failure is its own */ } }
   }
@@ -166,14 +174,13 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
     subs.add(f);
     if (subs.size === 1 && typeof window !== "undefined") {
       lastTick = clock();
-      // (a tick on coming back to the window counts: the timer's next one waits until a minute has passed since it)
-      timer = setInterval(() => { const now = clock(); if (visible() && (lastTick === null || now - lastTick >= POLL_MS - 1000 || now < lastTick)) tick(); }, POLL_MS);
+      arm();
       window.addEventListener("focus", onBack);
       document.addEventListener("visibilitychange", onBack);
     }
     return () => {
       if (!subs.delete(f) || subs.size) return;
-      if (timer) clearInterval(timer);
+      if (timer !== null) stopEvery(timer);
       timer = null;
       if (typeof window !== "undefined") { window.removeEventListener("focus", onBack); document.removeEventListener("visibilitychange", onBack); }
     };

@@ -103,7 +103,7 @@ test('a request becomes a masked card; the value goes only to send_secret and le
   expect(sends).toHaveLength(1);
   expect(sends[0].args).toEqual({ channel: 'test', request: 'd'.repeat(64), value: `<${DUMMY.length} chars>` });
   expect(await page.evaluate(() => (window as any).sentValueMatches)).toBe(true);
-  // never post_message, never a log_line: nothing the page passed anywhere holds the value (the fake kept none either)
+  // never post_message: nothing the page passed anywhere holds the value (the fake kept none either)
   expect(JSON.stringify(c)).not.toContain(DUMMY);
   const page_has = await page.evaluate((d) => document.documentElement.outerHTML.includes(d)
     || [...document.querySelectorAll('input,textarea')].some((e) => (e as HTMLInputElement).value.includes(d))

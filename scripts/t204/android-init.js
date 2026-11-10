@@ -6,7 +6,7 @@ if (window.top === window) (function () {
   // Injected before Tauri's own bridge exists: look it up when called.
   const real = () => w.__TAURI_INTERNALS__;
   const NOTE = __NOTE__;
-  const REAL = new Set(['note_download', 'note_share', 'log_line']);
+  const REAL = new Set(['note_download', 'note_share']);
   localStorage.setItem('uni.tabs.v2', JSON.stringify({ v: 1, tabs: [{ id: 'note', kind: 'note', title: NOTE.id, note: { hub: null, vault: 'uni', ref: NOTE.id } }], active: 'note', recent: ['note'] }));
   localStorage.setItem('uni.noteDownload.frontmatter', '0');
   w.__calls = [];

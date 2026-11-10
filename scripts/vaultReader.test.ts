@@ -146,6 +146,29 @@ await check("the one poller: every subscriber hears a tick, its reads fresh; the
   delete g.window; delete g.document;
 });
 
+await check("the poller's timer starts over on every tick: a tick on coming back is followed by the next a minute later, not seconds later", () => {
+  const g = globalThis as any;
+  const listeners: Record<string, () => void> = {};
+  g.window = { addEventListener: (k: string, f: () => void) => { listeners[k] = f; }, removeEventListener: () => {} };
+  g.document = { visibilityState: "visible", addEventListener: () => {}, removeEventListener: () => {} };
+  // a fake timer: each `every` is one armed callback with the time it is due
+  let now = 0; const armed: { f: () => void; due: number }[] = [];
+  const advance = (ms: number) => { const end = now + ms; for (;;) { const next = armed.filter((a) => a.due <= end).sort((a, b) => a.due - b.due)[0]; if (!next) break; now = next.due; next.due += 60_000; next.f(); } now = end; };
+  const r = createReader(door().call, () => now, { every: (f) => { const a = { f, due: now + 60_000 }; armed.push(a); return a; }, stopEvery: (h) => { armed.splice(armed.indexOf(h as never), 1); } });
+  const at: number[] = [];
+  const stop = r.onPoll(() => at.push(now));
+  advance(55_000); listeners.focus();          // back at 55 s: a tick
+  advance(10_000);                             // 65 s: the old timer would tick again here
+  assert.deepEqual(at, [55_000], "no second tick seconds after the first");
+  advance(60_000);                             // 115 s: a minute after the focus tick
+  assert.deepEqual(at, [55_000, 115_000]);
+  advance(60_000);
+  assert.deepEqual(at, [55_000, 115_000, 175_000]);
+  stop();
+  assert.equal(armed.length, 0, "the last subscriber gone, no timer");
+  delete g.window; delete g.document;
+});
+
 await check("the generated schema declares what the needs-you path reads (needs_aaron on task, the card's fields)", () => {
   assert.equal(SCHEMA.task.needs_aaron.type, "boolean");
   assert.ok("needs_aaron_why" in SCHEMA.task && "kind" in SCHEMA.task && "card" in SCHEMA.task);

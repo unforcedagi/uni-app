@@ -18,8 +18,6 @@ export type TaskAction = "done" | "archive" | "snooze";
 export type ActResult = { ok: true } | { ok: false; kind: FailureKind | "refused"; message: string };
 export type Undo = { id: string; label: string; run: () => Promise<void> };
 export const UNDO_MS = 5000;
-/** How stale a list may be when a room is opened (the window's own re-reads are the one poller's): src/vault/reader.ts. */
-export { FOCUS_GAP_MS } from "../vault/reader";
 /** r19: the event a row's or a sheet's Retry sends ("Couldn't check · Retry"): every open list reads its sources again. */
 export const RECHECK = "uni:recheck";
 export const requestRecheck = () => { try { window.dispatchEvent(new Event(RECHECK)); } catch { /* no window */ } };

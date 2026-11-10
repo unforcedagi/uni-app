@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { buildTaskTree, isTaskRow, parseTask } from "../src/areas/taskCore.ts";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree } from "../src/areas/treeCore.ts";
-import { askContext, contextLine, linkParts, seenBody, seenCloses, seenMeta, answerBody, answerMeta, areaCards, awayLine, placeDormant, treeDormant, type PlaceNote, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
+import { splitMarkdownLinks } from "../src/areas/linkText.ts";
+import { askContext, contextLine, seenBody, seenCloses, seenMeta, answerBody, answerMeta, areaCards, awayLine, placeDormant, treeDormant, type PlaceNote, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -482,11 +483,11 @@ console.log("\nall For you checks passed");
   assert.equal(askContext(undefined), null);
   assert.equal(contextLine({ why: "w", steps: [], links: [], time: null, answered: null }), "Why");
   assert.equal(contextLine({ why: null, steps: [], links: [], time: "About 5 minutes", answered: null }), "About 5 minutes");
-  // links: a bare address without the sentence's full stop or an unopened bracket; a markdown link by its words; brackets it opened stay
-  const urls = (t: string) => linkParts(t).filter((p) => p.url).map((p) => [p.url, p.label ?? null]);
-  assert.deepEqual(urls("See https://example.com/kiln/tiles."), [["https://example.com/kiln/tiles", null]]);
-  assert.deepEqual(urls("(at https://example.com/a)"), [["https://example.com/a", null]]);
-  assert.deepEqual(urls("the [glaze sheet](https://example.com/sheet) and https://example.com/wiki/Kiln_(pottery), then"), [["https://example.com/sheet", "glaze sheet"], ["https://example.com/wiki/Kiln_(pottery)", null]]);
-  assert.equal(linkParts("See https://example.com/x. Then go").map((p) => p.url ? `<${p.url}>` : p.text).join(""), "See <https://example.com/x>. Then go");
+  // links: markdown links read as their words (an address with its own brackets too); bare ones as their host, the full stop left out
+  const urls = (t: string) => splitMarkdownLinks(t).filter((p) => "url" in p).map((p) => ["url" in p ? p.url : "", "url" in p ? p.label : ""]);
+  assert.deepEqual(urls("See https://example.com/kiln/tiles."), [["https://example.com/kiln/tiles", "example.com"]]);
+  assert.deepEqual(urls("- [glaze sheet](https://example.com/sheet) and [kiln](https://example.com/wiki/Kiln_(pottery))."), [["https://example.com/sheet", "glaze sheet"], ["https://example.com/wiki/Kiln_(pottery)", "kiln"]]);
+  assert.deepEqual(urls("[not a web link](javascript:alert(1))"), []);
+  assert.equal(splitMarkdownLinks("See [it](https://example.com/x). Then go").map((p) => ("url" in p ? `<${p.label}>` : p.text)).join(""), "See <it>. Then go");
   console.log("ok   an ask's context is read from its body: why, steps, links, time, what he already said");
 }

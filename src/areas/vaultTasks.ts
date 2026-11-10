@@ -12,7 +12,6 @@ export class Unavailable extends Error {}
 import { activeProfile } from "./profile.ts";
 import { allPages, createReader, LIMIT, reader as appReader, type Call, type Reader } from "../vault/reader.ts";
 
-export type { Call } from "../vault/reader.ts";
 
 // (the paging read lives with the one reader now: src/vault/reader.ts)
 export { allPages };

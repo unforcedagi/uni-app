@@ -5,7 +5,7 @@ if (window.top === window) (function () {
   const w = window;
   const real = w.__TAURI_INTERNALS__;
   w.__T76_REAL = real;
-  const REAL = new Set(['vault_note', 'note_download', 't76_write', 't76_read', 'log_line']);
+  const REAL = new Set(['vault_note', 'note_download', 't76_write', 't76_read']);
   const out = (name, v) => real.invoke('t76_write', { name, contents: typeof v === 'string' ? v : JSON.stringify(v, null, 2) }).catch(() => {});
   localStorage.setItem('uni.tabs.v2', JSON.stringify({ v: 1, tabs: [{ id: 'note', kind: 'note', title: T204.noteId, note: { hub: null, vault: 'uni', ref: T204.noteId } }], active: 'note', recent: ['note'] }));
   localStorage.setItem('uni.noteDownload.frontmatter', T204.frontmatter ? '1' : '0');

@@ -27,3 +27,20 @@ export function splitLinks(text: string): TextPart[] {
   if (at < text.length) out.push({ text: text.slice(at) });
   return out;
 }
+
+/** T-335: text a room wrote in markdown: a `[words](https://…)` link reads as its words (an address with its own brackets too), and every
+ *  other part goes through `splitLinks`. */
+export function splitMarkdownLinks(text: string): TextPart[] {
+  const out: TextPart[] = [];
+  const MD = /\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()]|\([^\s()]*\))+)\)/g;
+  let at = 0;
+  for (const m of text.matchAll(MD)) {
+    const start = m.index ?? 0;
+    try { if (!/^https?:$/.test(new URL(m[2]).protocol)) continue; } catch { continue; }
+    if (start > at) out.push(...splitLinks(text.slice(at, start)));
+    out.push({ url: m[2], label: m[1] });
+    at = start + m[0].length;
+  }
+  if (at < text.length) out.push(...splitLinks(text.slice(at)));
+  return out;
+}

@@ -494,22 +494,3 @@ export function contextLine(c: AskContext): string {
   const what = has.length ? `${has.join(" and ")}` : c.why ? "why" : c.answered ? "what you said before" : null;
   return [what ? what[0].toUpperCase() + what.slice(1) : null, c.time ? c.time.split("\n")[0] : null].filter(Boolean).join(" · ");
 }
-/** Text cut at its web links: `[words](https://…)` and bare `https://…` addresses, a bare one without the sentence's closing punctuation
- *  or an unbalanced closing bracket. */
-export function linkParts(text: string): { text: string; url?: string; label?: string }[] {
-  const out: { text: string; url?: string; label?: string }[] = [];
-  const re = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>]+/g;
-  let at = 0;
-  for (let m = re.exec(text); m; m = re.exec(text)) {
-    let url = m[2] ?? m[0], end = m.index + m[0].length;
-    if (!m[2]) {
-      // a bare address: its trailing . , ; : ! ? and any ) it didn't open stay text
-      while (/[.,;:!?'"]$/.test(url) || (url.endsWith(")") && (url.match(/\(/g)?.length ?? 0) < (url.match(/\)/g)?.length ?? 0))) { url = url.slice(0, -1); end--; }
-    }
-    if (m.index > at) out.push({ text: text.slice(at, m.index) });
-    out.push({ text: m[0], url, ...(m[1] ? { label: m[1] } : {}) });
-    at = end; re.lastIndex = end;
-  }
-  if (at < text.length) out.push({ text: text.slice(at) });
-  return out;
-}
