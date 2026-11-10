@@ -326,6 +326,9 @@ impl State {
     }
 }
 
+/// A check writes these, then renames them to `next.json` and `next.tar.gz` (the archive last).
+const STAGING_TMP: [&str; 2] = ["next.json.tmp", "next.tar.gz.tmp"];
+
 /// `next`: staged by a check. `current`: being served (or on trial). `previous`: the last one that reported ready.
 const SLOTS: [&str; 3] = ["next", "current", "previous"];
 
@@ -360,7 +363,7 @@ fn staged_version(dir: &Path, pubkey: &str) -> Option<semver::Version> {
 /// drop what is left half: a slot with one of its two files, and a check's temporary files.
 fn tidy(dir: &Path) {
     let has = |slot: &str, ext: &str| dir.join(format!("{slot}.{ext}")).exists();
-    for (from, to) in [("next", "current"), ("current", "previous")] {
+    for (from, to) in [("next", "current"), ("current", "previous"), ("previous", "current")] {
         if has(from, "tar.gz") && !has(from, "json") && has(to, "json") && !has(to, "tar.gz") {
             let _ = std::fs::rename(dir.join(format!("{from}.tar.gz")), dir.join(format!("{to}.tar.gz")));
         }
@@ -370,8 +373,9 @@ fn tidy(dir: &Path) {
             remove_slot(dir, slot);
         }
     }
-    let _ = std::fs::remove_file(dir.join("next.json.tmp"));
-    let _ = std::fs::remove_file(dir.join("next.tar.gz.tmp"));
+    for tmp in STAGING_TMP {
+        let _ = std::fs::remove_file(dir.join(tmp));
+    }
 }
 
 /// Version a stored archive claims, for bookkeeping when it fails its checks (best effort, unverified).
@@ -411,32 +415,43 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
     };
     tidy(dir);
     if let Some((channel, archive)) = read_slot(dir, "next") {
+        // A promotion a kill cut short after it was recorded: the state already has this version on trial, as the floor.
+        let unfinished = |b: &Bundle| state.trial.as_deref() == Some(b.meta.version.as_str()) && state.floor().as_ref() == Some(&b.version);
         match open(pubkey, &channel, &archive, builtin, shell_api).and_then(|b| match state.floor() {
+            _ if unfinished(&b) => Ok(b),
             Some(f) if b.version <= f => Err(format!("bundle {} is not newer than {f}, already used here", b.meta.version)),
             _ if b.manifest.issued < state.issued => Err(format!("manifest for {} is older than one already taken", b.meta.version)),
             _ => Ok(b),
         }) {
             Ok(b) => {
-                // Recorded first (on trial, the new floor): a promotion that can't be recorded doesn't happen, so a bundle
-                // is never served without its trial counting.
-                let was_good = state.trial.is_none();
-                let mut promoted = state.clone();
-                promoted.trial = Some(b.meta.version.clone());
-                promoted.boots = 0;
-                promoted.floor = Some(b.meta.version.clone());
-                promoted.issued = state.issued.max(b.manifest.issued);
-                if !promoted.save(dir) {
-                    log(format!("could not record the promotion of {}; it stays staged", b.meta.version));
+                // In an order a kill at any point can resume from: (1) the current bundle steps aside while the state
+                // still says what it is (kept as the fallback only if it proved itself by reporting ready); (2) the
+                // promotion is recorded (on trial, the new floor), and one that can't be recorded doesn't happen, so a
+                // bundle is never served without its trial counting; (3) the staged bundle moves into place.
+                let recorded = if unfinished(&b) {
+                    true
                 } else {
-                    state = promoted;
-                    // The current bundle becomes the fallback only if it proved itself (reported ready).
                     if dir.join("current.tar.gz").exists() {
-                        if was_good {
+                        if state.trial.is_none() {
                             move_slot(dir, "current", "previous");
                         } else {
                             remove_slot(dir, "current");
                         }
                     }
+                    let mut promoted = state.clone();
+                    promoted.trial = Some(b.meta.version.clone());
+                    promoted.boots = 0;
+                    promoted.floor = Some(b.meta.version.clone());
+                    promoted.issued = state.issued.max(b.manifest.issued);
+                    let ok = promoted.save(dir);
+                    if ok {
+                        state = promoted;
+                    } else {
+                        log(format!("could not record the promotion of {}; it stays staged", b.meta.version));
+                    }
+                    ok
+                };
+                if recorded {
                     if move_slot(dir, "next", "current") {
                         log(format!("promoted staged bundle {} (on trial)", b.meta.version));
                     } else {
@@ -609,12 +624,12 @@ pub async fn check(
     if !dir.join("state.json").exists() && !state.save(dir) {
         return Err("could not write state.json".into());
     }
-    for (name, bytes) in [("next.json.tmp", text.as_slice()), ("next.tar.gz.tmp", archive.as_slice())] {
+    for (name, bytes) in STAGING_TMP.iter().zip([text.as_slice(), archive.as_slice()]) {
         std::fs::write(dir.join(name), bytes).map_err(|e| e.to_string())?;
     }
     // The archive lands last: a launch that sees next.tar.gz also sees its channel file.
-    std::fs::rename(dir.join("next.json.tmp"), dir.join("next.json")).map_err(|e| e.to_string())?;
-    std::fs::rename(dir.join("next.tar.gz.tmp"), dir.join("next.tar.gz")).map_err(|e| e.to_string())?;
+    std::fs::rename(dir.join(STAGING_TMP[0]), dir.join("next.json")).map_err(|e| e.to_string())?;
+    std::fs::rename(dir.join(STAGING_TMP[1]), dir.join("next.tar.gz")).map_err(|e| e.to_string())?;
     log(format!("staged bundle {} for the next launch or resume", bundle.meta.version));
     Ok(CheckResult::Staged { version: bundle.meta.version })
 }
@@ -729,16 +744,15 @@ impl Ota {
     /// MAX_UNCONFIRMED_BOOTS blank starts, and fall back. Only a bundle still on trial: a script in it can do no more
     /// than not reporting ready would. True when the page must reload.
     fn refused(&self, version: &str, reason: &str) -> bool {
-        let Some((dir, builtin)) = self.ready_dir() else { return false };
+        let (Some((dir, builtin)), Some(b)) = (self.ready_dir(), self.active()) else { return false };
         let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(b) = self.active() else { return false };
         let Ok(mut state) = State::load_checked(dir) else { return false };
         // The refusing page names its version: an apply that swapped bundles meanwhile doesn't drop the new one.
         if b.meta.version != version || state.trial.as_deref() != Some(version) {
             return false;
         }
         let reason: String = reason.chars().take(200).collect();
-        log(format!("bundle {} refused this shell: {reason}; dropped", b.meta.version));
+        log(format!("bundle {} refused this shell: {reason:?}; dropped", b.meta.version));
         state.reject(&b.meta.version);
         if !state.save(dir) {
             return false;
@@ -1343,6 +1357,35 @@ mod tests {
         std::fs::write(dir.path().join("next.tar.gz.tmp"), b"partial").unwrap();
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"), "the floor already says 0.3.8: it must not be lost");
         assert!(!dir.path().join("next.tar.gz").exists() && !dir.path().join("next.tar.gz.tmp").exists());
+    }
+
+    #[test]
+    fn a_promotion_killed_after_it_was_recorded_is_finished_at_launch() {
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        assert!(act(dir.path(), &k).is_some());
+        ready(dir.path());
+        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        // Killed after the current bundle stepped aside and the promotion was recorded, before next moved.
+        std::fs::rename(dir.path().join("current.json"), dir.path().join("previous.json")).unwrap();
+        std::fs::rename(dir.path().join("current.tar.gz"), dir.path().join("previous.tar.gz")).unwrap();
+        let mut s = State::load_checked(dir.path()).unwrap();
+        s.trial = Some("0.3.9".into());
+        s.floor = Some("0.3.9".into());
+        s.save(dir.path());
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"), "not refused as 'already used here'");
+        assert!(dir.path().join("previous.tar.gz").exists(), "0.3.8 still the fallback");
+    }
+
+    #[test]
+    fn a_fallback_cut_between_its_two_renames_keeps_the_last_good_bundle() {
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
+        // Killed after previous.json moved to current.json, before the archive followed.
+        std::fs::rename(dir.path().join("previous.json"), dir.path().join("current.json")).unwrap();
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
     }
 
     fn ota_for(dir: &Path, k: &Key) -> Arc<Ota> {

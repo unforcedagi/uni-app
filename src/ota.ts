@@ -23,7 +23,7 @@ export const APPLY_AWAY_MS = 2 * 60 * 1000;
 const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /** A bundle refuses a shell with another API: it doesn't start, and asks to be dropped. */
-export function refusesShell(status: Pick<OtaStatus, "shell_api" | "active">, ours = SHELL_API): boolean {
+export function refusesShell<S extends Pick<OtaStatus, "shell_api" | "active">>(status: S, ours = SHELL_API): status is S & { active: NonNullable<OtaStatus["active"]> } {
   return status.active !== null && status.shell_api !== ours;
 }
 
@@ -40,7 +40,7 @@ export async function otaBoot(reload = () => location.reload()): Promise<boolean
   if (s && refusesShell(s)) {
     const reason = `screens built for shell API ${SHELL_API}, shell has ${s.shell_api}`;
     console.warn(`${reason}: not starting`);
-    if (s.active && await invoke<boolean>("ota_refused", { version: s.active.version, reason }).catch(() => false)) reload();
+    if (await invoke<boolean>("ota_refused", { version: s.active.version, reason }).catch(() => false)) reload();
     return false;
   }
   return true;
