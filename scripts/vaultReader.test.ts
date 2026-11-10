@@ -32,6 +32,17 @@ await check("a kind asked twice in one tick is one vault call; after invalidate 
   assert.equal(d.calls.length, 4);
 });
 
+await check("each asker of a shared read gets its own rows: one changing its copy never changes another's", async () => {
+  const d = door(() => [{ id: "n1", path: "Areas/Orchard", metadata: { room: "orchard" } }]);
+  const r = createReader(d.call, () => 0);
+  const [a, b] = await Promise.all([r.nodes("uni"), r.nodes("uni")]);
+  (a.rows[0].metadata as any).room = "changed"; a.rows.push({ id: "extra" });
+  assert.equal(d.calls.length, 1);
+  assert.equal((b.rows[0].metadata as any).room, "orchard");
+  assert.equal(b.rows.length, 1);
+  assert.equal(((await r.nodes("uni")).rows[0].metadata as any).room, "orchard");
+});
+
 await check("the live tasks and open decisions are asked by state (and node), and the filter is part of what is shared", async () => {
   const d = door(); const r = createReader(d.call, () => 0);
   await r.liveTasks("uni"); await r.liveTasks("uni", ["Areas/A"]); await r.liveTasks("uni", ["Areas/A"]); await r.openDecisions("uni");

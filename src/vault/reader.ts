@@ -71,16 +71,18 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
     if (!kinds.length) { generation++; shared.clear(); return; }
     for (const k of [...shared.keys()]) if (kinds.includes(JSON.parse(k)[0])) shared.delete(k);
   }
+  const copy = <T,>(v: T): T => structuredClone(v);
   function share<T>(key: string, read: () => Promise<T>): Promise<T> {
     const now = clock();
     const had = shared.get(key);
-    if (sharing && had && had.gen === generation && now - had.at < SHARE_MS) return had.p as Promise<T>;
+    // each asker gets its own copy: one screen part changing its rows never changes another's
+    if (sharing && had && had.gen === generation && now - had.at < SHARE_MS) return (had.p as Promise<T>).then(copy);
     const p = read();
     const entry = { gen: generation, at: now, p };
     shared.set(key, entry);
     // a failed read is never shared: the next asker tries again
     p.catch(() => { if (shared.get(key) === entry) shared.delete(key); });
-    return p;
+    return p.then(copy);
   }
 
   const query = <K extends Kind>(vault: string, tag: K | string, content = false) => (offset: number) =>
