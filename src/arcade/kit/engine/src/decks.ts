@@ -89,7 +89,8 @@ export function buildRounds(game: Exclude<GameId, "garden">, allCards: readonly 
     const first = roundFor(look, allCards, reactions, rand, rest);
     const others = buildRounds(game, allCards, reactions, n, rand, rest);
     if (!first || first.game !== game) return others;
-    return [first, ...others.filter((r) => !has(r, look))].slice(0, n);
+    const ids = "card" in first ? [first.card.id] : [first.a.id, first.b.id];   // This or That: its mate shows once too
+    return [first, ...others.filter((r) => !ids.some((id) => has(r, id)))].slice(0, n);
   }
   const seen = seenCounts(reactions);
   const cards = allCards.map((c) => dealable(c, opts)).filter((c): c is Card => c !== null);

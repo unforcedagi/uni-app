@@ -54,13 +54,15 @@ function feel(g: GameId, host: ArcadeHost, uni: string | null): string {
 interface Home { stats: Stats | null; profile: Profile | null; fresh: Partial<Record<PlayGame, number>>; exact: boolean; error: boolean; look: LookPin[] }
 
 export function Arcade({ host: base, onExit, burstSeconds = 60, start, look }: ArcadeProps) {
-  // look here: the first deal after opening a pin puts that card first; every later deal is plain play
-  const pinned = useRef<string | null>(null);
+  // look here: the deal that opens a pin puts that card first; later deals in that game are plain play. A deal made
+  // again within a moment of the first (React's dev double-run, the screen's colour check settling) still gets it.
+  const pinned = useRef<{ card: string; game: GameId; at: number } | null>(null);
   const host = useMemo<ArcadeHost>(() => Object.assign(Object.create(base) as ArcadeHost, {
     rounds: (g: PlayGame, n: number, o?: DealOptions) => {
-      const card = pinned.current;
-      pinned.current = null;
-      return base.rounds(g, n, card ? { ...o, look: card } : o);
+      const p = pinned.current;
+      const use = !!p && p.game === g && (p.at === 0 || Date.now() - p.at < 1500);
+      if (p && use && p.at === 0) p.at = Date.now();
+      return base.rounds(g, n, use ? { ...o, look: p!.card } : o);
     },
   }), [base]);
   const ink = useInk();
@@ -96,9 +98,9 @@ export function Arcade({ host: base, onExit, burstSeconds = 60, start, look }: A
 
   useEffect(() => { if (view === "home") void loadHome(); }, [view, loadHome]);
 
-  const goHome = useCallback(() => setView("home"), []);
+  const goHome = useCallback(() => { pinned.current = null; setView("home"); }, []);
   const open = (g: GameId) => { lastToy.current = g; setView(g); root.current?.scrollTo?.({ top: 0 }); };
-  const openPin = (p: LookPin) => { pinned.current = p.card; open(p.game); };
+  const openPin = (p: LookPin) => { pinned.current = { card: p.card, game: p.game, at: 0 }; open(p.game); };
 
   // a "look here" link: open its card once the pin is known (a pin that's gone opens the plain home)
   const linked = useRef(false);
