@@ -1162,6 +1162,24 @@ mod tests {
     }
 
     #[test]
+    fn a_ustar_archive_with_a_long_path_unpacks() {
+        // scripts/ota-bundle.sh packs POSIX ustar: a path over 100 bytes goes in the header's prefix field.
+        let long = format!("assets/{}/chunk.js", "d".repeat(110));
+        let mut b = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        for (path, data) in [("uni-bundle.json", &br#"{"version":"0.3.8","api":1}"#[..]), ("index.html", b"x"), (long.as_str(), b"1")] {
+            let mut h = tar::Header::new_ustar();
+            h.set_path(path).unwrap();
+            h.set_size(data.len() as u64);
+            h.set_mode(0o644);
+            h.set_entry_type(tar::EntryType::Regular);
+            h.set_cksum();
+            b.append(&h, data).unwrap();
+        }
+        let (_, files) = unpack(&b.into_inner().unwrap().finish().unwrap()).unwrap();
+        assert_eq!(files.get(&long).map(Vec::as_slice), Some(&b"1"[..]));
+    }
+
+    #[test]
     fn launch_promotes_a_staged_bundle_and_serves_it() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();

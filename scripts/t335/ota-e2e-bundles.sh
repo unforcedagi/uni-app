@@ -19,7 +19,7 @@ A=$OUT/archives
 build() { bash scripts/ota-bundle.sh "$1" "$A/$2" >/dev/null; }
 pack() { # <dir> <version> <api> <name>
   echo "{\"version\":\"$2\",\"api\":$3}" > "$1/uni-bundle.json"; mkdir -p "$A/$4"
-  tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$1" -cf - . | gzip -n -9 > "$A/$4/web-$2.tar.gz"
+  tar --format=ustar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$1" -cf - . | gzip -n -9 > "$A/$4/web-$2.tar.gz"
 }
 build 0.4.1 n1
 TITLE='Sign in to Uni from a device you already use'

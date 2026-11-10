@@ -15,7 +15,8 @@ printf '{"version":"%s","api":%s}\n' "$VERSION" "$API" > dist/uni-bundle.json
 mkdir -p "$OUT"
 NAME="web-$VERSION.tar.gz"
 # Reproducible: sorted names, fixed times and owners, no gzip timestamp.
-tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C dist -cf - . | gzip -n -9 > "$OUT/$NAME.tmp"
+# POSIX ustar: long paths go in the header's prefix field (no GNU long-name or pax headers, which the broker refuses).
+tar --format=ustar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C dist -cf - . | gzip -n -9 > "$OUT/$NAME.tmp"
 mv "$OUT/$NAME.tmp" "$OUT/$NAME"
 echo "ota-bundle: $OUT/$NAME ($(stat -c %s "$OUT/$NAME") bytes), API $API" >&2
 echo "$API $OUT/$NAME"
