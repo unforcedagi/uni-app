@@ -607,7 +607,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     const openItem = (it: ForYouItem) => { const t = tasks.all?.find((x) => x.id === it.id); openAsk({ id: it.id, room: (t ? roomOfAsk(t) : answerRoom(it))?.id ?? null, path: it.node }); };
     const forYou = <ForYou view={scope ? scopeForYou(fy.view, scope.path) : fy.view} scope={scope?.name ?? null}
       approvals={scope ? approvalsAll.list.filter((x) => scope.rooms.some((r) => r.id === x.channel)).length : approvalsAll.list.length} answer={fy.answer} seen={fy.seen} retry={fy.retry} errors={fy.errors} busy={fy.busy} onOpenAsk={openItem}
-      onOpenPrivate={(x) => openPlace(x.areaPath ?? x.node, "details")} failed={needsKnown === "failed" ? tasks.refresh : null} reading={needsKnown === "reading"} onCard={openCard} />;
+      onOpenPrivate={(x) => openPlace(x.areaPath ?? x.node, "details")} failed={needsKnown === "failed" ? tasks.refresh : null} reading={needsKnown === "reading"} onCard={openCard} contexts={fy.contexts} />;
     // 0.3.2: the card. Where its answers land: the thread under the card's post (an open ask's reply_root), else its area's room; a private card's
     // way on is its area's details (the asks are answered there, in its own words)
     const cardThread = (c: CardView) => {
@@ -620,7 +620,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     };
     const cardNow = cardOpen ? fy.view.cards.get(cardOpen) ?? null : null;
     const cardPanel = cardNow && <CardPanel card={cardNow} beside={cardBeside} onClose={() => setCardOpen(null)} onThread={cardThread(cardNow)}
-      p={{ view: fy.view, answer: fy.answer, seen: fy.seen, retry: fy.retry, errors: fy.errors, busy: fy.busy, onOpenAsk: (it) => { if (!cardBeside) setCardOpen(null); openItem(it); } }} />;
+      p={{ view: fy.view, answer: fy.answer, seen: fy.seen, retry: fy.retry, errors: fy.errors, busy: fy.busy, contexts: fy.contexts, onOpenAsk: (it) => { if (!cardBeside) setCardOpen(null); openItem(it); } }} />;
     const focusRoomOpen = focus && !focus.leaving ? focus.room : null;
     // (the drawer is the owner's own home, as the places page was: every approval waiting, a private room's too; All's stream keeps those out)
     const approvalRows = <ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" />;

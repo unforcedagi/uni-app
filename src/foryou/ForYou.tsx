@@ -7,7 +7,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRecorder } from "../recorder";
 import { transcribe } from "./useForYou";
-import { seenCloses, awayLine, cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine } from "./forYouCore";
+import { contextLine, seenCloses, awayLine, cardItems, cardLines, cardMark, MARK_WORDS, ms, privateAsks, waitsWords, type AreaCard, type Answered, type CardMark, type CardView, type ForYouView, type Item, type MovingLine, type PrivateLine, type AskContext } from "./forYouCore";
+import { RefText } from "../areas/noteRefs";
+import { hostOf } from "../areas/simpleCore";
+import { useVaultProfile } from "../areas/ProfileContext";
 import { quietLine } from "../projects/FrontDoor";
 import { headWords } from "./scope";
 import { dialogOpen, openDialog } from "../areas/focusTrap";
@@ -30,6 +33,8 @@ export type ForYouProps = {
   reading?: boolean;
   /** 0.3.2: open a card (by its path): the one card panel, wherever its name was tapped. */
   onCard: (path: string) => void;
+  /** T-335: each ask's context (why, steps, links, time), read from its note; absent until read, null when it has none. */
+  contexts?: ReadonlyMap<string, AskContext | null>;
 };
 
 export const Mark = ({ kind }: { kind: CardMark }) => <i className="fy-mark" data-mark={kind} aria-hidden="true" />;
@@ -107,12 +112,32 @@ function Said({ text, footer, onSend, onCancel }: { text: string; footer: string
 }
 
 /** What an item needs to be answered from wherever it is drawn (For you, or the card). */
-export type ItemActions = Pick<ForYouProps, "view" | "answer" | "seen" | "retry" | "errors" | "busy" | "onOpenAsk">;
+export type ItemActions = Pick<ForYouProps, "view" | "answer" | "seen" | "retry" | "errors" | "busy" | "onOpenAsk" | "contexts">;
+
+/** Text with its links: a web address opens outside (by its host), a note id reads as its title. */
+function CtxText({ text, vault }: { text: string; vault: string }) {
+  const parts = text.split(/(https?:\/\/[^\s)<>]+)/g);
+  return <>{parts.map((t, i) => (i % 2 ? <a key={i} href={t} target="_blank" rel="noreferrer">{hostOf(t)}</a> : <RefText key={i} text={t} vault={vault} />))}</>;
+}
+
+/** T-335: the ask's context, folded in place under its why: "Steps and links · about 5 minutes", opening to the steps, the links, why it
+ *  matters and what he already said. Nothing to open when the ask carries none. */
+function Context({ c }: { c: AskContext }) {
+  const vault = useVaultProfile().vault;
+  return <details className="fy-ctx">
+    <summary>{contextLine(c)}</summary>
+    {c.why && <p className="fy-ctx-why"><CtxText text={c.why} vault={vault} /></p>}
+    {c.steps.length > 0 && <ol className="fy-ctx-steps">{c.steps.map((x, i) => <li key={i}><CtxText text={x} vault={vault} /></li>)}</ol>}
+    {c.links.length > 0 && <ul className="fy-ctx-links">{c.links.map((x, i) => <li key={i}><CtxText text={x} vault={vault} /></li>)}</ul>}
+    {c.answered && <p className="fy-ctx-said"><CtxText text={c.answered} vault={vault} /></p>}
+  </details>;
+}
 
 function ItemView({ item, p, onCard, inCard = false }: { item: Item; p: ItemActions; onCard: ((path: string) => void) | null; inCard?: boolean }) {
   const busy = p.busy.has(item.id);
   const go = (text: string) => void p.answer(item, text);
   const card = item.where.cardPath ? p.view.cards.get(item.where.cardPath) ?? null : null;
+  const ctx = p.contexts?.get(item.id) ?? null;
   return <article className="fy-item" data-id={item.id} data-kind={item.kind} aria-busy={busy || undefined}>
     <div className="fy-head">
       <Mark kind={item.band} />
@@ -124,6 +149,7 @@ function ItemView({ item, p, onCard, inCard = false }: { item: Item; p: ItemActi
     </div>
     {p.onOpenAsk ? <button type="button" className="fy-what" onClick={() => p.onOpenAsk!(item)}>{item.what}</button> : <p className="fy-what">{item.what}</p>}
     {item.why && <p className="fy-why">{item.why}</p>}
+    {ctx && <Context c={ctx} />}
     <div className="fy-acts">
       {item.default && <button type="button" className="fy-default" disabled={busy} onClick={() => go(item.default!.value)} aria-label={`${item.default.label}: the default${item.default.at ? `, which applies then` : ""}. Take it now`}>
         {item.default.label}</button>}

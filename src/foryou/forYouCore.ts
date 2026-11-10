@@ -75,6 +75,8 @@ export type Item = {
   updatedAt: string | null;
   defaultAt: string | null;
   asked: string | null;
+  /** An older ask's separate context note (`context_note`, before T-335 put the context in the ask's own body): read when the body has none. */
+  contextNote: string | null;
 };
 export type PrivateLine = { area: string; node: string; areaPath: string | null; count: number };
 /** One line on a card: one per session, newest first; `mine`: Aaron's own answer (the line says so, or it was given on this device). */
@@ -332,6 +334,7 @@ export function forYou(input: ForYouInput): ForYouView {
       link: s(m.link) ?? s(m.url),
       replyRoom, replyRoot, footer, node, state, updatedAt: s(n.updatedAt), defaultAt: defAt,
       asked: s(m.asked_at) ?? s(m.asked) ?? s(m.created) ?? s(n.createdAt),
+      contextNote: s(m.context_note),
     });
   }
   // earliest default first (an ask with no default after every dated one), then the oldest asked
@@ -456,4 +459,37 @@ export function cardMatcher(view: Pick<ForYouView, "yours" | "more" | "look" | "
     }
     return null;
   };
+}
+
+// ------------------------------------------------------------------------------------------------- T-335: the ask's context, in its body
+/** What an ask carries for him to act on: why, the exact steps, the links, how long it takes, and what he already said. */
+export type AskContext = { why: string | null; steps: string[]; links: string[]; time: string | null; answered: string | null };
+const CTX_HEAD = /^##[ \t]+(why|steps|links|time|already answered)[ \t]*$/i;
+/**
+ * The context block of an ask's note (uni-tasks `tasks.py new/set --context…` writes it at the end of the ask's own body; an older ask's
+ * separate `ask-context` note holds the same sections): the `## Why`, `## Steps`, `## Links`, `## Time` and `## Already answered` sections,
+ * each to the next `#` or `##` heading. null when the note carries none of them.
+ */
+export function askContext(content: unknown): AskContext | null {
+  if (typeof content !== "string") return null;
+  const parts = new Map<string, string[]>();
+  let cur: string[] | null = null;
+  for (const line of content.replace(/\r\n?/g, "\n").split("\n")) {
+    const h = CTX_HEAD.exec(line);
+    if (h) { cur = []; parts.set(h[1].toLowerCase(), cur); continue; }
+    if (/^#{1,2}[ \t]/.test(line)) { cur = null; continue; }
+    // a smaller heading inside a section (uni-tasks demotes the room's own to ####) is read as its words
+    cur?.push(line.replace(/^#{3,6}[ \t]+/, ""));
+  }
+  const text = (k: string) => (parts.get(k) ?? []).join("\n").trim() || null;
+  // a list item's marker goes ("- ", "1. "); its words stay as written
+  const items = (k: string) => (parts.get(k) ?? []).map((l) => l.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "").trim()).filter(Boolean);
+  const ctx: AskContext = { why: text("why"), steps: items("steps"), links: items("links"), time: text("time"), answered: text("already answered") };
+  return ctx.why || ctx.steps.length || ctx.links.length || ctx.time || ctx.answered ? ctx : null;
+}
+/** The fold's one line: "Steps and links · about 5 minutes" (what it holds, and how long it takes when the room said). */
+export function contextLine(c: AskContext): string {
+  const has = [c.steps.length ? "steps" : null, c.links.length ? "links" : null].filter(Boolean) as string[];
+  const what = has.length ? `${has.join(" and ")}` : c.why ? "why" : "what you said before";
+  return [what[0].toUpperCase() + what.slice(1), c.time ? c.time.split("\n")[0] : null].filter(Boolean).join(" · ");
 }

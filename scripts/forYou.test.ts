@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { buildTaskTree, isTaskRow, parseTask } from "../src/areas/taskCore.ts";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree } from "../src/areas/treeCore.ts";
-import { seenBody, seenCloses, seenMeta, answerBody, answerMeta, areaCards, awayLine, placeDormant, treeDormant, type PlaceNote, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
+import { askContext, contextLine, seenBody, seenCloses, seenMeta, answerBody, answerMeta, areaCards, awayLine, placeDormant, treeDormant, type PlaceNote, cardItems, cardLines, cardMark, cardOfMessage, cardView, forYou, hillWords, quietLine, splitTitle, waitsWords, whenLabel, type Note, type Place } from "../src/foryou/forYouCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -454,4 +454,32 @@ console.log("\nall For you checks passed");
   assert.ok(!JSON.stringify(v).includes("secret-ish why"));
   assert.equal(v.privates.reduce((n, p) => n + p.count, 0), 1);
   console.log("ok   an ask whose card isn't read yet is only counted");
+}
+
+{
+  // T-335: the ask's context lives at the end of its own body (tasks.py), or in an older ask's context note: the same sections
+  const body = [
+    "T-540 Sign the lease for the kiln shed", "", "**Next:** sign it", "",
+    "## Why", "The landlord holds the shed until Friday.", "",
+    "## Steps", "1. Open the lease (uni:01ABCDEFGHJKMNPQRSTVWXYZ00)", "2. Sign page 3", "",
+    "## Links", "- https://example.com/lease", "", "## Time", "About 5 minutes", "",
+    "## Already answered", "You said yes to the shed on 11-02.",
+  ].join("\r\n");
+  const c = askContext(body)!;
+  assert.equal(c.why, "The landlord holds the shed until Friday.");
+  assert.deepEqual(c.steps, ["Open the lease (uni:01ABCDEFGHJKMNPQRSTVWXYZ00)", "Sign page 3"]);
+  assert.deepEqual(c.links, ["https://example.com/lease"]);
+  assert.equal(c.time, "About 5 minutes");
+  assert.equal(c.answered, "You said yes to the shed on 11-02.");
+  assert.equal(contextLine(c), "Steps and links · About 5 minutes");
+  // the title and Next above the block are not context; a `# title` or another `##` heading ends a section
+  assert.ok(!c.steps.some((x) => x.includes("Next")));
+  assert.equal(askContext("# T-1 Old context note\n\n## Why\nIt matters.\n\n## Notes\nnot context")!.why, "It matters.");
+  assert.equal(askContext("## Why\nIt matters.\n\n## Notes\nnot context")!.steps.length, 0);
+  assert.deepEqual(askContext("## Steps\n#### On the phone\n1. Call the hall")!.steps, ["On the phone", "Call the hall"]);
+  // a body with none of the sections has no context; nor does a missing body
+  assert.equal(askContext("T-2 Plain task\n\n**Next:** do it"), null);
+  assert.equal(askContext(undefined), null);
+  assert.equal(contextLine({ why: "w", steps: [], links: [], time: null, answered: null }), "Why");
+  console.log("ok   an ask's context is read from its body: why, steps, links, time, what he already said");
 }

@@ -11,7 +11,7 @@ import { POLL_MS, reader } from "../vault/reader";
 import { activeProfile } from "../areas/profile";
 import { findUniMember } from "../uniActions";
 import { relayAccepted } from "../voiceOutbox";
-import { answerBody, answerMeta, seenBody, seenCloses, seenMeta, forYou, type Answered, type ForYouView, type Item, type Note, type Place } from "./forYouCore";
+import { answerBody, answerMeta, askContext, seenBody, seenCloses, seenMeta, forYou, type Answered, type AskContext, type ForYouView, type Item, type Note, type Place } from "./forYouCore";
 
 type Member = { pubkey: string; name: string };
 /** A room as the app knows it: its channel id and name. */
@@ -108,6 +108,29 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
   const view: ForYouView = useMemo(() => forYou({ asks, cards, placeOf: o.placeOf, liveRoom: o.liveRoom, privateRoom: o.privateRoom, me: activeProfile().me, now, lastLooked: since, answered: entries }),
     [asks, cards, o.placeOf, o.liveRoom, o.privateRoom, since, entries, Math.floor(now / POLL_MS)]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // T-335: each ask's context (why, steps, links, time) is in its own note's body (an older ask's, in its `context_note`). The lists carry no
+  // content, so each ask shown is read once per revision (three at a time), never on every poll; a failed read leaves it out until the next
+  // revision or launch. Kept for this session and this owner only.
+  const [contexts, setContexts] = useState<ReadonlyMap<string, AskContext | null>>(new Map());
+  const asked = useRef(new Map<string, string>());
+  useEffect(() => { asked.current = new Map(); setContexts(new Map()); }, [owner]);
+  useEffect(() => {
+    if (!enabled) return;
+    const want = [...view.yours, ...view.more, ...view.look].filter((i) => !i.legacy && asked.current.get(i.id) !== `${i.updatedAt}`);
+    if (!want.length) return;
+    for (const i of want) asked.current.set(i.id, `${i.updatedAt}`);
+    const mine = owner;
+    const read = async (ref: string) => ((await invoke<{ note?: RawNote } | null>("vault_note", { vault: o.vault, noteRef: ref }))?.note?.content);
+    const one = async (i: Item) => {
+      try {
+        const ctx = askContext(await read(i.id)) ?? (i.contextNote ? askContext(await read(i.contextNote)) : null);
+        if (ownerRef.current === mine) setContexts((m) => new Map(m).set(i.id, ctx));
+      } catch { if (asked.current.get(i.id) === `${i.updatedAt}`) asked.current.delete(i.id); }
+    };
+    const queue = [...want];
+    void Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => { while (queue.length) await one(queue.shift()!); }));
+  }, [view, enabled, owner, o.vault]);
+
   const post = useCallback(async (e: Entry) => {
     let channel = e.channel;
     if (!channel) {
@@ -184,7 +207,7 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
   }, [o.roomOf, o.refresh, post]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const retry = useCallback((id: string) => { const e = entries.find((x) => x.id === id); if (e) void post(e); }, [entries, post]);
-  return { view, answer, seen, retry, errors, busy, cardsFailed };
+  return { view, answer, seen, retry, errors, busy, cardsFailed, contexts };
 }
 
 /** Speech to text on the hub (the app's transcription path), for hold-to-talk. */

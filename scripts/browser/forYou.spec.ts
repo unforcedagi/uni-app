@@ -69,6 +69,34 @@ test.describe('For you', () => {
     await expect(page.locator('[data-place="front-door"] .fd-pull')).toHaveAttribute('aria-label', /Eight things need you\./);
   });
 
+  test('T-335: an ask shows its context in place, folded: from its own body, or an older ask\'s context note; read once per revision', async ({ page }) => {
+    await bootForYou(page);
+    const glaze = item(page, 'fy-glaze');
+    const ctx = glaze.locator('details.fy-ctx');
+    // folded under its why: what it holds and how long it takes
+    await expect(ctx.locator('summary')).toHaveText('Steps and links · About 2 minutes');
+    await expect(ctx).not.toHaveAttribute('open', '');
+    await expect(ctx.locator('.fy-ctx-steps li').first()).toBeHidden();
+    await ctx.locator('summary').click();
+    await expect(ctx.locator('.fy-ctx-why')).toHaveText('The test tiles go in the kiln on Friday and need one glaze.');
+    await expect(ctx.locator('.fy-ctx-steps li')).toHaveText(['Look at the three test tiles on the shelf', 'Pick the glaze you like best']);
+    await expect(ctx.locator('.fy-ctx-links a')).toHaveText('example.com');
+    await expect(ctx.locator('.fy-ctx-links a')).toHaveAttribute('href', 'https://example.com/kiln/tiles');
+    // an older ask with no context in its body: its context note's
+    const hall = item(page, 'fy-hall').locator('details.fy-ctx');
+    await expect(hall.locator('summary')).toHaveText('Steps and links · A minute');
+    await hall.locator('summary').click();
+    await expect(hall.locator('.fy-ctx-steps li')).toHaveText(['Say which night suits the choir']);
+    // an ask with neither has nothing to open
+    await expect(item(page, 'fy-soup').locator('details.fy-ctx')).toHaveCount(0);
+    // each ask's note is read once for its revision: a minute of polling reads none of them again
+    const reads = async () => (await calls(page, 'vault_note')).filter((c: any) => /^(fy-|ctx-)/.test(c.args.noteRef)).length;
+    const before = await reads();
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.waitForTimeout(500);
+    expect(await reads()).toBe(before);
+  });
+
   test('one tap takes the default: one compare-and-set with the answer, then the reply in its room under the card\'s post', async ({ page }) => {
     await bootForYou(page);
     const glaze = item(page, 'fy-glaze');

@@ -34,7 +34,13 @@ export function asks(now: number) {
     task('fy-quiet', 'T-520 Morning practice note', { node: 'Areas/Sanctum', kind: 'tell', no_default: true, card: 'Cards/Sanctum/daily practice', why_now: 'Private words that never leave the area.', asked_at: ago(now, 1 * D) }),
     task('fy-room', 'T-530 Fire the second bisque load', { node: 'Areas/Kiln Studio', owner: 'room:kiln-studio', state: 'doing' }),
     task('fy-was', 'T-531 Answered from the phone already', { node: 'Areas/Kiln Studio', kind: 'tell', answered_at: ago(now, H), answer: 'Seen', no_default: true }),
-  ];
+    // T-335: an older ask's separate context note (read only through the ask's `context_note`, never listed)
+    { id: 'ctx-hall', path: 'Aaron/Asks/T-503 context', extension: 'md', tags: ['ask-context'], createdAt: T0, updatedAt: T0, metadata: {},
+      content: '# T-503 context\n\n## Why\nThe hall books the new term this week.\n\n## Steps\n1. Say which night suits the choir\n\n## Links\n- none: the hall takes a reply in the room\n\n## Time\nA minute\n' },
+  ].map((n: any) => n.id === 'fy-glaze'
+    // T-335: an ask's context at the end of its own body, as tasks.py writes it
+    ? { ...n, content: 'T-501 Pick the glaze for the test tiles\n\n**Next:** pick one\n\n## Why\nThe test tiles go in the kiln on Friday and need one glaze.\n\n## Steps\n1. Look at the three test tiles on the shelf\n2. Pick the glaze you like best\n\n## Links\n- https://example.com/kiln/tiles\n\n## Time\nAbout 2 minutes\n' }
+    : n.id === 'fy-hall' ? { ...n, metadata: { ...n.metadata, context_note: 'ctx-hall' } } : n);
 }
 
 const line = (now: number, run: string, hoursAgo: number, text: string) => ({ run, at: ago(now, (hoursAgo + 1) * H), ended: ago(now, hoursAgo * H), status: 'completed', text });
