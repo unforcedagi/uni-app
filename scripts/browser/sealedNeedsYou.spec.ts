@@ -19,7 +19,9 @@ async function boot(page: Page, failTasks = false) {
     const row = () => ({ rid: 'r1'.padEnd(32, '0'), action: 'dns.edit', credential: 'dns-zone', class: 'powerful', scope: 'Add an A record for demo.example.org', ttl_s: 600, uses: 1,
       payload: { name: 'demo' }, request_digest: '9b13b2ae' + 'f'.repeat(56), expires: t() + 900, answer: w.__answer ?? null });
     w.__extraInvoke = async (cmd: string, args: any) => {
-      if (cmd === 'sealed_waiting') return w.__waiting;
+      // T-335 card timing: a spec can make the read slow (`__swDelay` ms), fail (`__swFail` times) or make the sync fail (`__refreshFail` times)
+      if (cmd === 'sealed_waiting') { const now = JSON.parse(JSON.stringify(w.__waiting)); if (w.__swDelay) await new Promise((r) => setTimeout(r, w.__swDelay)); if (w.__swFail > 0) { w.__swFail -= 1; throw new Error('database is locked'); } return now; }
+      if (cmd === 'refresh' && w.__refreshFail > 0) { w.__refreshFail -= 1; throw new Error('relay: no route to host'); }
       if (cmd === 'sealed_card') return { kind: 'single', event_id: args.reference, refused: null, rows: [row()] };
       if (cmd === 'sealed_answer') { w.__answer = { decision: args.decision, at: t(), until: null, sent: true }; w.__waiting = []; return { kind: 'single', event_id: args.reference, refused: null, rows: [row()] }; }
       return undefined;
@@ -118,4 +120,57 @@ test('a card answered on another device leaves the room it is open in: no button
   await expect(page.locator(`article[data-ref="${ref}"]`)).toContainText("Denied at 14:05");
   await expect(page.locator('.approval-banner')).toHaveCount(0);
   await expect(page.locator('.message.approval-waiting')).toHaveCount(0);
+});
+
+// T-335 card timing (11-09): three ways a card already in the store stayed off the screen. Each is driven as the app meets it: the read of
+// the waiting cards (`sealed_waiting`) is slow while other rooms keep talking, or fails once, or the sync fails as the app comes back.
+const waitingRow = (ref: string) => ({ ref, channel: ROOM, root: null, ts: Math.floor(Date.now() / 1000), kind: 'single', credential: 'dns-zone', action: 'dns.edit', class: 'powerful', rows: 1, expires: Math.floor(Date.now() / 1000) + 900, fingerprint: '9b13b2ae' });
+const setVisible = (page: Page, visible: boolean) => page.evaluate((v) => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (v ? 'visible' : 'hidden') }); document.dispatchEvent(new Event('visibilitychange')); }, visible);
+
+test('a waiting card shows while other rooms keep talking, though each read of the cards is slower than the talk', async ({ page }) => {
+  test.setTimeout(120_000);
+  await boot(page);
+  await places(page);
+  const rows = page.locator('.cp-sealed');
+  await expect(rows).toHaveCount(0);
+  await page.evaluate(() => { (window as any).__swDelay = 400; });
+  const ref = await page.evaluate(([room, body]) => (window as any).__arrive(room, 'Uni', body, 0, false, null), [ROOM, BODY] as const);
+  await page.evaluate((w) => { (window as any).__waiting = [w]; }, waitingRow(ref));
+  // another room talks for 6 s, a message every 200 ms: every read of the cards has a newer one started before it lands
+  await page.evaluate(() => { const w = window as any; let n = 0; w.__talk = setInterval(() => { w.__arrive('ch-kiln', 'Uni', 'line ' + n, 0, false, null); if (++n >= 30) clearInterval(w.__talk); }, 200); });
+  await expect(rows).toHaveCount(1, { timeout: 2500 });
+  expect(await page.evaluate(() => (window as any).__talk !== undefined && (window as any).__msgs['ch-kiln'].filter((m: any) => /^line /.test(m.body)).length), 'the card is up while the talk is still going').toBeLessThan(30);
+  await page.evaluate(() => clearInterval((window as any).__talk));
+});
+
+test('a read of the waiting cards that fails is tried again, with no new message to prompt it', async ({ page }) => {
+  test.setTimeout(120_000);
+  await boot(page);
+  await places(page);
+  const rows = page.locator('.cp-sealed');
+  await page.evaluate(() => { (window as any).__swFail = 1; });
+  const ref = await page.evaluate(([room, body]) => (window as any).__arrive(room, 'Uni', body, 0, false, null), [ROOM, BODY] as const);
+  await page.evaluate((w) => { (window as any).__waiting = [w]; }, waitingRow(ref));
+  await expect(rows).toHaveCount(1, { timeout: 4000 });
+});
+
+test('a sync that fails as the app comes back is tried again, and the card that landed while it was away shows', async ({ page }) => {
+  test.setTimeout(120_000);
+  await boot(page);
+  await places(page);
+  const rows = page.locator('.cp-sealed');
+  await setVisible(page, false);
+  // the card lands while the app is away: stored by the next sync, never announced on the live socket
+  const ref = await page.evaluate(([room, body]) => { const w = window as any; const l = w.__listeners['uni://live']; w.__listeners['uni://live'] = []; const r = w.__arrive(room, 'Uni', body, 0, false, null); w.__listeners['uni://live'] = l; return r; }, [ROOM, BODY] as const);
+  await page.evaluate(() => { const w = window as any; w.__refreshFail = 1; w.__calls.length = 0; });
+  await setVisible(page, true);
+  // the first sync fails (the network is not up yet): nothing new is read
+  await expect.poll(() => page.evaluate(() => (window as any).__calls.filter((x: any) => x.cmd === 'refresh').length)).toBe(1);
+  await page.evaluate((w) => { (window as any).__waiting = [w]; }, waitingRow(ref));
+  await expect(rows).toHaveCount(1, { timeout: 6000 });
+  expect(await page.evaluate(() => (window as any).__calls.filter((x: any) => x.cmd === 'live_start').length), 'live updates are on again').toBeGreaterThan(0);
+  // and it stops trying once it is through
+  const calls = await page.evaluate(() => (window as any).__calls.filter((x: any) => x.cmd === 'refresh').length);
+  await page.waitForTimeout(3500);
+  expect(await page.evaluate(() => (window as any).__calls.filter((x: any) => x.cmd === 'refresh').length)).toBe(calls);
 });

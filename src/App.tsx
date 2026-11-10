@@ -106,6 +106,8 @@ type Message = { ref: string; channel: string; author: string; author_name: stri
 type LivePayload = { kind: "message" | "edit" | "delete" | "rooms" | "profiles" | "status" | "typing"; channel: string | null; status: string | null; author: string | null; root?: string | null; notify?: { author_name: string; preview: string } };
 /** Buzz desktop: an indicator lives 8 s; send at most one every 3 s. */
 const TYPING_TTL_MS = 8000;
+/** T-335 card timing: how long after a failed sync each retry waits while the app is on screen; the last one repeats. */
+const SYNC_RETRY_MS = [2000, 5000, 15_000, 30_000];
 const TYPING_SEND_MS = 3000;
 /** How long a freshly opened room holds the newest message against late layout (images, older pages). */
 const SETTLE_MS = 1500;
@@ -509,6 +511,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Bumped after each successful sync so the open room and roster re-read.
   const [synced, setSynced] = useState(0);
   const busyRef = useRef(false);
+  /** T-335 card timing: the retry of a sync that failed while the app is on screen (see `refresh`). */
+  const syncRetry = useRef<{ timer: number | undefined; tries: number }>({ timer: undefined, tries: 0 });
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
   const [limit, setLimit] = useState(300);
   const relayOrigin = useRelayOrigin();
   const [older, setOlder] = useState<"idle" | "loading" | "done">("idle");
@@ -1087,6 +1092,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const refresh = useCallback(async () => {
     if (busyRef.current) return;
     busyRef.current = true;
+    window.clearTimeout(syncRetry.current.timer); syncRetry.current.timer = undefined;
     mark("syncStart");
     setBusy(true);
     // r25 (Codex 8): the first sync of a cold start takes seconds, but its rooms are in the local store in milliseconds and each room's
@@ -1109,11 +1115,19 @@ function Conversations({ onForget }: { onForget: () => void }) {
       // Keep the socket open for push while we're in the foreground.
       // r19 (Codex 10): the reason goes to the developer log, the status line says it in words
       invoke<boolean>("live_start").catch((e) => { console.warn("live_start failed", e); setLive("Live updates paused"); });
+      syncRetry.current.tries = 0;
     } catch (e) {
       setError(String(e));
       setStatus("Offline · showing what this device saved");
+      // T-335 card timing: a sync that fails as the device wakes (the network is a moment behind the screen) left the app with no live
+      // updates until it was hidden and shown again. While it is on screen it tries again: after 2 s, 5 s, 15 s, then every 30 s.
+      if (document.visibilityState === "visible") {
+        const wait = SYNC_RETRY_MS[Math.min(syncRetry.current.tries++, SYNC_RETRY_MS.length - 1)];
+        syncRetry.current.timer = window.setTimeout(() => { syncRetry.current.timer = undefined; if (document.visibilityState === "visible") void refreshRef.current(); }, wait);
+      }
     } finally { if (poll) window.clearInterval(poll); busyRef.current = false; setBusy(false); }
   }, [loadRooms]);
+  refreshRef.current = refresh;
 
   useEffect(() => {
     let active = true;
@@ -1131,10 +1145,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") void refresh();
-      else { void invoke("live_stop").catch(() => {}); setLive(null); }
+      else { window.clearTimeout(syncRetry.current.timer); syncRetry.current = { timer: undefined, tries: 0 }; void invoke("live_stop").catch(() => {}); setLive(null); }
     };
+    // the network is back while a retry waits: sync now
+    const onOnline = () => { if (syncRetry.current.timer !== undefined && document.visibilityState === "visible") void refresh(); };
     document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onOnline);
+    return () => { document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("online", onOnline); window.clearTimeout(syncRetry.current.timer); };
   }, [refresh]);
 
   useEffect(() => {
