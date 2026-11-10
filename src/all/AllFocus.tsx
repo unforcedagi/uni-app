@@ -18,7 +18,9 @@ export const FOCUS_OUT_MS = 170;
 const PULL_PX = 72;
 
 /** The head's one line: what it is (`src`, said first, so where it comes from is plain) and its words. */
-export type FocusLine = { src: string; text: string };
+export type FocusLine = { src: string; text: string;
+  /** T-335 runs visible: a run's line (one at work, or one waiting on you): `kind` marks it, `open` opens the run's note. */
+  run?: { kind: "moving" | "waiting"; open: (() => void) | null } };
 
 export function AllFocusSheet({ id, name, line, root, replies, view = "chat", leaving, onBack, onView, details, children }: { id: string; name: string;
   /** The room's one line under its name (its summary, saying whose; or the room a place talks in), or nothing. */ line: FocusLine | null;
@@ -64,10 +66,13 @@ export function AllFocusSheet({ id, name, line, root, replies, view = "chat", le
       <button type="button" className="note-action all-focus-back" aria-label={back.aria} onClick={onBack}><span aria-hidden="true">←</span> {back.label}</button>
       {/* the name is the room's heading, and its button is the whole of the titles: the room's details, and from them (or its work) the conversation again */}
       {/* a tap anywhere on the titles (the name, its line, the chevron) is the button's; the button itself is the way for keys and screen readers */}
-      <div className="all-focus-titles" onClick={(e) => { if (moved.current) { moved.current = false; return; } if (!(e.target as Element).closest(".all-focus-open")) onView(inChat ? "details" : "chat"); }}>
+      <div className="all-focus-titles" onClick={(e) => { if (moved.current) { moved.current = false; return; } if (!(e.target as Element).closest(".all-focus-open, .all-focus-run")) onView(inChat ? "details" : "chat"); }}>
         <h2 className="all-focus-title"><button type="button" className="all-focus-open" aria-expanded={!inChat} aria-label={inChat ? `${name}: room details` : `${name}: back to the conversation`} title={inChat ? "Room details" : "Back to the conversation"}
           onClick={() => onView(inChat ? "details" : "chat")}>{name}</button></h2>
-        {sub && <p className="all-focus-line"><span className="all-focus-src">{sub.src}{sub.text ? ":" : ""}</span>{sub.text && <> {sub.text}</>}</p>}
+        {sub && (sub.run?.open
+          ? <p className="all-focus-line" data-run={sub.run.kind}><button type="button" className="all-focus-run" aria-label={`${sub.src}${sub.text ? `: ${sub.text}` : ""}. Open its note`} onClick={sub.run.open}>
+              <i aria-hidden="true" /><span className="all-focus-src">{sub.src}{sub.text ? ":" : ""}</span>{sub.text && <> {sub.text}</>}</button></p>
+          : <p className="all-focus-line" data-run={sub.run?.kind}><span className="all-focus-src">{sub.src}{sub.text ? ":" : ""}</span>{sub.text && <> {sub.text}</>}</p>)}
         <span className="all-focus-more" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{inChat ? <path d="M4 6l4 4 4-4" /> : <path d="M4 10l4-4 4 4" />}</svg></span>
       </div>
     </header>

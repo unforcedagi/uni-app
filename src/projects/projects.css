@@ -232,3 +232,16 @@
 .fd-new button:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .fd-count { min-width: 22px; height: 22px; padding: 0 6px; box-sizing: border-box; display: inline-grid; place-items: center; border: var(--g-hair) solid var(--g-line-strong); border-radius: 11px; font: 600 12px/1 var(--g-font-ui); font-variant-numeric: tabular-nums; }
 .fd-count.at { background: var(--th-ink); color: var(--th-card); }
+/* T-335 runs visible: a room's runs, one line each, joined to the foot of its door: the newest at work with its live line, and the newest
+   waiting on you with what it waits for. Each is a tap into the run's note. One line, cut with an ellipsis; nothing moves. */
+.fd-doors li:has(.fd-runs) .fd-door { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.fd-runs { display: grid; border: var(--g-hair) solid var(--g-line-strong); border-top: 0; border-radius: 0 0 3px 3px; background: var(--th-card); overflow: hidden; }
+.fd-run { all: unset; box-sizing: border-box; min-height: 40px; padding: 8px 14px; display: flex; align-items: center; gap: 8px; cursor: pointer; font: 400 13px/1.35 var(--th-sans); color: var(--th-ink2); min-width: 0; }
+.fd-run + .fd-run { border-top: 1px dashed var(--th-hair2); }
+.fd-run:hover { background: var(--th-paper); }
+.fd-run:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -2px; }
+.fd-run b { flex: none; font-weight: 700; color: var(--th-ink); }
+.fd-run-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fd-run i { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--th-sap); box-shadow: 0 0 0 2px var(--th-card), 0 0 0 3px var(--th-ink); }
+.fd-run[data-run="waiting"] { box-shadow: inset 3px 0 0 var(--th-sap); }
+.fd-run[data-run="waiting"] i { border-radius: 2px; box-shadow: none; }

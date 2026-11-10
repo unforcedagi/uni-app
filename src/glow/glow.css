@@ -243,6 +243,15 @@ body { font-family: var(--g-font-ui); text-rendering: optimizeLegibility; }
 .fd-live { grid-row: 1; grid-column: 3; align-self: center; border: 0; padding: 0; font: 500 13px/1.2 var(--g-font-ui); color: var(--g-ink-2); }
 .fd-live i { background: none !important; width: 9px; height: 9px; box-shadow: inset 0 0 0 1.8px var(--g-accent) !important; }
 .fd-marks { grid-column: 2 / -1; gap: 6px; }
+/* T-335 runs visible: a room's run lines sit in its row, under its words (the text column), not as a box of their own */
+.fd-runs { border: 0; border-radius: 0; background: transparent; margin-top: -10px; padding: 0 0 12px 34px; }
+.fd-run { min-height: 36px; padding: 4px 8px; margin: 0 -8px; border-radius: 10px; font: 400 14px/1.35 var(--g-font-ui); color: var(--g-ink-2); }
+.fd-run + .fd-run { border-top: 0; }
+@media (hover: hover) { .fd-run:hover { background: var(--g-paper); } }
+.fd-run b { font-weight: 600; color: var(--g-ink); }
+.fd-run[data-run="moving"] i { width: 9px; height: 9px; background: none; box-shadow: inset 0 0 0 1.8px var(--g-accent); }
+.fd-run[data-run="waiting"] { box-shadow: none; }
+.fd-run[data-run="waiting"] i { width: 9px; height: 9px; border-radius: 50%; background: var(--g-needs); box-shadow: 0 0 0 3px var(--g-needs-soft); }
 .fd-new-n, .fd-need-n { padding: 2px 9px; border-width: 1px; font: 600 12px/1.4 var(--g-font-ui); }
 .fd-new-n { border-color: var(--g-line-strong); }
 .fd-new-n.at { background: var(--g-ink); color: var(--g-ground); border-color: var(--g-ink); }

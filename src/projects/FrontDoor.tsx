@@ -8,7 +8,7 @@ import { sameWords } from "../areas/sameWords";
 import { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, type ReactNode } from "react";
 import { AllComposer, AllFeed, roomWords, useEchoes, useReplyTarget, useRoomsFeed, type AllRoom, type FeedCards } from "../all/AllView";
 import { andList, roomAddress } from "../all/allCore";
-import { liveSessions, liveInArea, sessionsOf, span, UNFILED } from "./model";
+import { liveSessions, liveInArea, roomRuns, sessionsOf, span, UNFILED, type Session } from "./model";
 import { asOf, useWork } from "./store";
 import { useRoomTurns } from "./roomTurns";
 import { UsageLine } from "./UsageLine";
@@ -105,6 +105,21 @@ function workingWords(sessions: number, turn: boolean): string {
   return turn ? `Uni is answering here${s ? ` and ${s}` : ""}` : s;
 }
 
+/** T-335 runs visible: a room's runs in one line each under its door: the newest one at work with its live line, and the newest waiting on
+ *  you with what it waits for. A tap opens the run's note (what it did, what is open, who it waits on). Nothing when neither. */
+export function RunLines({ live, waiting, onOpen, at = null }: { live: Session | null; waiting: Session | null; onOpen?: (id: string) => void; at?: string | null }) {
+  if (!live && !waiting) return null;
+  const line = (s: Session, kind: "waiting" | "moving", head: string, text: string | null) =>
+    <button type="button" className="fd-run" data-run={kind} data-note={s.id} disabled={!onOpen} onClick={() => onOpen?.(s.id)}
+      aria-label={`${head}${text ? `: ${text}` : ""}. Open its note`}>
+      <i aria-hidden="true" /><b>{head}</b>{text && <span className="fd-run-text">{text}</span>}
+    </button>;
+  return <div className="fd-runs">
+    {waiting && line(waiting, "waiting", "Waiting on you", waiting.waiting?.what ?? waiting.ask)}
+    {live && line(live, "moving", at ? `Working · as of ${at}` : "Working", live.now ?? live.ask)}
+  </div>;
+}
+
 /** T-335: All before the rooms are read, or when no area has a room of its own: it says which, never another screen under All's name. */
 export function AllEmpty({ reading, error = null }: { reading: boolean; error?: (() => void) | null; onBack?: () => void }) {
   return <div className="fd fd-all fd-home all-empty" data-place="front-door" data-view="all">
@@ -122,7 +137,7 @@ function OtherRooms({ rooms, onOpen }: { rooms: readonly { id: string; name: str
     <ul>{rooms.map((r) => <li key={r.id}><button type="button" data-room={r.id} onClick={() => onOpen(r.id)}>#{r.name.replace(/^#/, "")}</button></li>)}</ul></details>;
 }
 
-export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOpen, me = null, newRooms = [], otherRooms = [], noAreas, onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = "known", alsoNeeds = 0, onRetryNeeds, pulled = false, onPull, approvals = null }: {
+export function FrontDoor({ onOpenNote, onOpenProject, doors, forYou = null, yours = 0, onOpen, me = null, newRooms = [], otherRooms = [], noAreas, onOpenRoom, toPost = null, all = null, allPlace = null, onComposerFocus, needsKnown = "known", alsoNeeds = 0, onRetryNeeds, pulled = false, onPull, approvals = null }: {
   /** 0.2 one home: the head's drawer (your OK, To post, the places) is open, and how to open or close it */ pulled?: boolean; onPull?: (open: boolean) => void;
   /** 0.2: the approval prompts waiting, in the drawer under their own heading */ approvals?: ReactNode;
   /** 0.3.0: For you, the top of the home (Yours, Ready to look at, Moving), and how many things in it are his */ forYou?: ReactNode; yours?: number;
@@ -139,7 +154,8 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
   /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
   /** Your key: a turn is the room's Uni at work on your message. */ me?: string | null;
   /** T-335: the To post queue's one quiet line, in the drawer */ toPost?: ReactNode;
-  /** Opens a project or home in place (here: the Unfiled sessions). */ onOpenProject?: (id: string) => void }) {
+  /** Opens a project or home in place (here: the Unfiled sessions). */ onOpenProject?: (id: string) => void;
+  /** T-335 runs visible: opens a run's note (a room's working or waiting line). */ onOpenNote?: (id: string) => void }) {
   const ws = useWork();
   const turns = useRoomTurns(doors.map((d) => ({ room: d.room ?? null, lastTs: d.lastTs })), me);
   const { work } = ws;
@@ -208,6 +224,7 @@ export function FrontDoor({ onOpenProject, doors, forYou = null, yours = 0, onOp
           {d.stands && <span className="fd-stands">{d.stands}</span>}
           <span className="fd-foot">{d.slug && !sameWords(d.name, d.slug) && <span className="fd-slug">#{d.slug}</span>}{d.lastTs && <span className="fd-when">{talked(now, d.lastTs)}</span>}</span>
         </button>
+        {a && <RunLines {...roomRuns(work, a.id)} onOpen={onOpenNote} at={at} />}
       </li>;
     })}</ul></nav>;
   const unfiled = onOpenProject && work.projects.some((p) => p.id === UNFILED) ? (() => {

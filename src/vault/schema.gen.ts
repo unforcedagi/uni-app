@@ -109,11 +109,13 @@ export const SCHEMA = {
     "closed_event": {"type": "string"},
     "doing_at": {"type": "date"},
     "doing_now": {"type": "string"},
+    "duration_s": {"type": "integer"},
     "end_note": {"type": "string"},
     "ended": {"type": "string"},
     "ended_at": {"type": "date"},
     "feed": {"type": "string"},
     "folder": {"type": "string"},
+    "live_line": {"type": "string"},
     "node": {"type": "reference", "indexed": true},
     "report": {"type": "object"},
     "resumes": {"type": "string"},
@@ -122,11 +124,15 @@ export const SCHEMA = {
     "starter_channel": {"type": "string"},
     "starter_room": {"type": "string"},
     "starter_session": {"type": "string"},
-    "state": {"type": "string", "enum": ["running", "done", "failed", "blocked", "decision", "lost"], "indexed": true},
+    "state": {"type": "string", "enum": ["running", "done", "failed", "blocked", "decision", "lost", "superseded"], "indexed": true},
     "steps": {"type": "integer"},
     "summary": {"type": "string"},
+    "superseded_at": {"type": "date"},
+    "superseded_by": {"type": "string"},
     "task": {"type": "string"},
     "thread": {"type": "string", "indexed": true},
+    "waiting_for": {"type": "string"},
+    "waiting_on": {"type": "string"},
     "why": {"type": "string"},
     "worker": {"type": "string"},
   },
@@ -265,11 +271,13 @@ export type RunMeta = {
   "closed_event"?: string | null;
   "doing_at"?: string | null;
   "doing_now"?: string | null;
+  "duration_s"?: number | null;
   "end_note"?: string | null;
   "ended"?: string | null;
   "ended_at"?: string | null;
   "feed"?: string | null;
   "folder"?: string | null;
+  "live_line"?: string | null;
   "node"?: string | null;
   "report"?: Record<string, unknown> | null;
   "resumes"?: string | null;
@@ -278,11 +286,15 @@ export type RunMeta = {
   "starter_channel"?: string | null;
   "starter_room"?: string | null;
   "starter_session"?: string | null;
-  "state"?: "running" | "done" | "failed" | "blocked" | "decision" | "lost" | null;
+  "state"?: "running" | "done" | "failed" | "blocked" | "decision" | "lost" | "superseded" | null;
   "steps"?: number | null;
   "summary"?: string | null;
+  "superseded_at"?: string | null;
+  "superseded_by"?: string | null;
   "task"?: string | null;
   "thread"?: string | null;
+  "waiting_for"?: string | null;
+  "waiting_on"?: string | null;
   "why"?: string | null;
   "worker"?: string | null;
 };

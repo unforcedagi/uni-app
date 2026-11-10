@@ -34,6 +34,13 @@
 /* its one line says where it comes from first ("#choir's summary:"), then the words */
 .all-focus-line { display: block; margin: 1px 0 0; font: 400 13px/1.35 var(--g-font-uni); color: var(--g-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .all-focus-src { font: 600 12px/1.35 var(--g-font-ui); color: var(--g-ink-2); letter-spacing: .01em; }
+/* T-335 runs visible: a run's line in the head (one waiting on you, else one at work): the same one line, a tap into the run's note */
+.all-focus-run { all: unset; box-sizing: border-box; max-width: 100%; min-height: 28px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 6px; }
+.all-focus-run:hover { text-decoration: underline; text-underline-offset: 3px; }
+.all-focus-run:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+.all-focus-run i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: none; box-shadow: inset 0 0 0 1.6px var(--g-accent, currentColor); }
+.all-focus-line[data-run="waiting"] .all-focus-run i { background: var(--g-needs, currentColor); box-shadow: none; }
+.all-focus-line[data-run="waiting"] .all-focus-src { color: var(--g-ink); }
 .all-focus-more { position: absolute; top: 50%; right: 2px; transform: translateY(-50%); width: 24px; height: 24px; display: grid; place-items: center; font: 400 16px/1 var(--g-font-ui); color: var(--g-ink-3); }
 @media (hover: hover) { .all-focus-titles:hover .all-focus-more, .all-focus-titles:hover .all-focus-title { color: var(--g-ink); } }
 

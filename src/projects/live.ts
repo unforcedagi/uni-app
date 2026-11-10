@@ -16,7 +16,7 @@ import { parseArea, parseProject, type Area as TreeNode } from "../areas/areasCo
 import { buildTree } from "../areas/treeCore.ts";
 import { isPrivateName, isPrivatePath, runIsPrivate } from "../areas/treeRooms.ts";
 import { redactRaw, safeStep } from "./sessionWords.ts";
-import { END_WHYS, isFolder, makeProject, ModelError, UNFILED, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type Work } from "./model.ts";
+import { END_WHYS, isFolder, makeProject, ModelError, UNFILED, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type SessionWait, type Work } from "./model.ts";
 
 /** A project the model can't take, named so it is never silently missing. `areaPath`: the area it sits under (even one with no room), so
  *  that area's strip can name it. */
@@ -110,6 +110,21 @@ export function sessionEnd(m: Record<string, unknown>, state: SessionState): Ses
   return Object.values(end).some((v) => v !== null) ? end : null;
 }
 
+/** T-335 runs visible: who a waiting run waits on, and for what. A decision with no one named is yours; `uni`, `#room` or a name is someone else's. */
+function waitOf(m: Record<string, unknown>): SessionWait | null {
+  const on = str(m.waiting_on)?.trim().toLowerCase() === "aaron" ? "aaron" : str(m.waiting_on)?.trim() || (str(m.state) === "decision" ? "aaron" : null);
+  if (!on) return null;
+  const what = str(m.waiting_for);
+  return { on, what: what ? oneLine(what) : null };
+}
+
+/** Free words from a run note (already through redactRaw) as one short plain line: no wiki-link brackets, no task numbers, at most LINE_MAX. */
+const LINE_MAX = 160;
+function oneLine(text: string): string {
+  const t = plainWords(text.replace(/\[\[|\]\]/g, "").replace(/\s+/g, " ").trim());
+  return t.length > LINE_MAX ? `${t.slice(0, LINE_MAX - 1).trimEnd()}…` : t;
+}
+
 /** A running note's worker counts as working while it was heard from this recently (mts writes `doing_at` at least once a minute while
  *  tools run; one long command can hold it quiet a while), or, before it has said anything, this long after it started. */
 export const HEARD_MS = 2 * 3_600_000;
@@ -134,7 +149,7 @@ export function freshen<W extends Work>(w: W, now = Date.now()): W {
 }
 
 /** The words of a run note's metadata through redactRaw (raw, before anything else); its ids, times, counts and states as they are. */
-const SAID = ["doing_now", "summary", "end_note", "video"] as const;
+const SAID = ["doing_now", "live_line", "waiting_for", "summary", "end_note", "video"] as const;
 function saidSafe(m: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...m };
   for (const k of SAID) if (typeof m[k] === "string") out[k] = redactRaw(m[k] as string);
@@ -329,13 +344,16 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const steps = typeof m.steps === "number" && Number.isFinite(m.steps) ? Math.max(0, Math.floor(m.steps)) : 0;
     sessions.push({
       id, project, state, ask,
-      now: !sealed && live && str(m.doing_now) ? safeStep(str(m.doing_now)!) : null, nowAt: live ? time(m.doing_at) : null,
+      // T-335 runs visible: the live line (its PROGRESS.md step, else its last tool) before the bare last tool
+      // (free words, like the report's parts: redactRaw above and one plain line; a bare tool step keeps safeStep's known phrases)
+      now: sealed || !live ? null : str(m.live_line) && str(m.live_line) !== str(m.doing_now) ? oneLine(str(m.live_line)!) : str(m.doing_now) ? safeStep(str(m.doing_now)!) : null, nowAt: live ? time(m.doing_at) : null,
       startedAt, endedAt: ended, steps,
       result: sealed || live ? null : resultWords(m.summary, state),
       video: !sealed && str(m.video) && /^https:\/\//.test(str(m.video)!) ? str(m.video) : null,
       why: null,
       end: sealed ? null : sessionEnd(m, state),
       feed: sealed ? null : str(m.feed),
+      waiting: sealed || state !== "waiting" ? null : waitOf(m),
     });
     const att = attemptOf(m);
     if (att) byAttempt.set(att, id);

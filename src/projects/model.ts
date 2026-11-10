@@ -68,7 +68,12 @@ export type Session = {
   end: SessionEnd | null;
   /** T-304: the note holding its steps (mts keeps it while the session works); null when there is none. */
   feed: string | null;
+  /** T-335 runs visible: a waiting session's who and what (mts writes them from its report: `waiting_on`, `waiting_for`); `on` is "aaron"
+   *  when it waits on you, else the room or agent it waits on. Left out or null: it says no one. */
+  waiting?: SessionWait | null;
 };
+
+export type SessionWait = { on: string; what: string | null };
 
 /** Why a session ended, in mts's one word: `done` (with something to show for it), `unverified` (says it finished; nothing it left could
  *  be checked), `blocked` (stopped to ask you), `stopped` (on purpose), `killed` (cut off), `limit` (the account's session limit), `turns`
@@ -137,6 +142,16 @@ export const liveInArea = (w: Work, area: string) => {
   const here = new Set(projectsIn(w, area).map((p) => p.id));
   return w.sessions.filter((s) => here.has(s.project) && isLive(s));
 };
+
+/** T-335 runs visible: a session waiting on you (blocked on you, or a decision that is yours). */
+export const waitsOnYou = (s: Session) => s.state === "waiting" && s.waiting?.on === "aaron";
+/** T-335 runs visible: what a room's line and head say of its runs: the newest live one (its live line), and the newest waiting on you.
+ *  Each opens its run note (the session's id). */
+export function roomRuns(w: Work, area: string): { live: Session | null; waiting: Session | null } {
+  const here = new Set(projectsIn(w, area).map((p) => p.id));
+  const newest = (f: (s: Session) => boolean) => w.sessions.filter((s) => here.has(s.project) && f(s)).sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;
+  return { live: newest(isLive), waiting: newest(waitsOnYou) };
+}
 
 /** A project's sessions in the order a person reads them: live ones first (newest first), then the rest by when they ended. */
 export function sessionsOf(w: Work, project: string): Session[] {

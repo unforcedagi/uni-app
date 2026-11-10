@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree } from "../src/areas/treeCore.ts";
 import { privateRunIds } from "../src/areas/treeRooms.ts";
-import { ModelError, UNFILED, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
+import { ModelError, UNFILED, ago, roomRuns, waitsOnYou, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
 import { HEARD_MS, freshen, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
 import { DASHES, FOLD, HIDDEN, LABEL, PHRASES, REDACT_RULES, answerDraft, askOf, endWords, feedPages, HELD_MAX, labelOk, leftItems, parseFeed, partBefore, redactRaw, safeStep, withHead, withPart, type FeedItem } from "../src/projects/sessionWords.ts";
@@ -663,5 +663,33 @@ check("redaction, the full real path: a steps note holding each case, read by pa
     assert.equal(items.length, 2, c.name);
     assert.deepEqual(leaks(c, items.map((i) => i.text).join("\n")), [], `${c.from}: ${c.name}`);
   }
+});
+check("T-335 runs visible: a room's line is its newest live run's live line, and its newest run waiting on you, never one waiting on someone else", () => {
+  const vault = demoVault(NOW);
+  const iso = (m: number) => new Date(NOW - m * MIN).toISOString();
+  const r = (id: string, md: Record<string, unknown>) => ({ id, path: `Runs/2026-11-10 ${id}`, tags: ["run"], createdAt: iso(300), updatedAt: iso(1), metadata: { node: "area-hearth", channel: "demo-hearth", ...md } });
+  const runs = [
+    r("h-old-live", { state: "running", started_at: iso(90), doing_at: iso(2), doing_now: "Running git" }),
+    r("h-live", { state: "running", started_at: iso(20), doing_at: iso(1), doing_now: "Running pnpm", live_line: "Wire the [[Areas/Hearth|hearth]] list (T-77) api_key=zz-made-up-0001" }),
+    r("h-bare", { state: "running", started_at: iso(10), doing_at: iso(1), doing_now: "Running pnpm", live_line: "Running pnpm", node: "area-desk", channel: "demo-desk" }),
+    r("h-ask", { state: "blocked", started_at: iso(200), waiting_on: "Aaron", waiting_for: "Tap the card for the shelf order" }),
+    r("h-newer-uni", { state: "blocked", started_at: iso(100), waiting_on: "uni", waiting_for: "Merge the branch" }),
+    r("h-decision", { state: "decision", started_at: iso(250) }),
+    r("h-gone", { state: "superseded", started_at: iso(50), waiting_on: "aaron", waiting_for: "Old ask" }),
+  ];
+  const w = workFrom({ nodes: vault.nodes, runs, tasks: vault.tasks }, NOW);
+  const hearth = w.areas.find((a) => a.path === "Areas/Hearth")!;
+  const got = roomRuns(w, hearth.id);
+  assert.equal(got.live?.id, "h-live");
+  // free words, redacted, one plain line: no wiki brackets, no task numbers, no key
+  assert.equal(got.live?.now, "Wire the Areas/Hearth|hearth list [hidden]");
+  assert.equal(got.waiting?.id, "h-ask");
+  assert.deepEqual(got.waiting?.waiting, { on: "aaron", what: "Tap the card for the shelf order" });
+  assert.equal(waitsOnYou(w.sessions.find((s) => s.id === "h-newer-uni")!), false);
+  assert.equal(w.sessions.find((s) => s.id === "h-decision")!.waiting?.on, "aaron");
+  assert.equal(w.sessions.find((s) => s.id === "h-gone")!.waiting ?? null, null);
+  // with no PROGRESS.md step, the live line is the tool step as before (safeStep's known phrases)
+  const desk = w.areas.find((a) => a.path === "Areas/Writing Desk")!;
+  assert.equal(roomRuns(w, desk.id).live?.now, "Running pnpm");
 });
 if (failed) process.exit(1);

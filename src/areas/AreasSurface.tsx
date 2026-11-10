@@ -46,6 +46,8 @@ import "./areas.css";
 import type { AllRoom, FeedCards } from "../all/AllView";
 import { AllFocusSheet, type AllFocusState, type FocusLine, type FocusView } from "../all/AllFocus";
 import { AllEmpty, FrontDoor, type Door, type NewRoom, type Scope } from "../projects/FrontDoor";
+import { useWork } from "../projects/store";
+import { roomRuns } from "../projects/model";
 import { scopeForYou } from "../foryou/scope";
 import { AreaCardList, CardPanel, ForYou, useCardBeside } from "../foryou/ForYou";
 import { useForYou } from "../foryou/useForYou";
@@ -143,6 +145,8 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
   const chat = profile.chat.provider === "buzz";
   /** A note named by path or id in this vault (a brief's link, the area app's), opened in this vault, never in another. */
   const openHere = (ref: string) => actions.openNote({ vault: profile.vault, id: ref });
+  // T-335 runs visible: the runs at work and waiting on you, for a room's line in the list and its head (the one reader's work read)
+  const { work } = useWork();
   // T-335: the To post queue's quiet count, on Uni's vault only (posts are Uni glue): the home, and each area's work
   // (only once signed in: the queue is read with the account's key)
   const postsLine = (node: string | null) => actions.openPosts && showUniGlue(profile.vault) && identity
@@ -631,7 +635,7 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
       <FrontDoor needsKnown={needsKnown} alsoNeeds={approvalsAll.list.length} onRetryNeeds={tasks.refresh} doors={doors} forYou={forYou} yours={fy.view.total} onOpen={(p) => openPlace(p)} me={identity} newRooms={newRooms} onOpenRoom={(id) => actions.openRoom(id)}
         otherRooms={others} noAreas={!!data && !error && !doorAreas.length ? (uniRef ? () => actions.openRoom(uniRef.id) : null) : undefined}
         toPost={postsLine(null)} all={all} allPlace={allPlace && { backTo: allPlace.backTo, onBack: allPlace.onBack, focusRoom: focusRoomOpen }} onComposerFocus={actions.composerFocus} onOpenProject={setProjectOpen}
-        pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.length > 0 ? approvalRows : null} />
+        pulled={pulled} onPull={setPulled} approvals={allPlace && approvalsAll.list.length > 0 ? approvalRows : null} onOpenNote={openHere} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>;
     // the home's Unfiled sessions open in place over it
     if (!allPlace) return <div className="areas-home tree-home-wrap">{home}{sheetView}{projectSheet}{cardPanel}</div>;
@@ -651,8 +655,13 @@ export default function AreasSurface({ allPlace = null, identity, path, rooms: h
     // only the summary the room keeps on its place's note (`stands`), never a brief's or the app's own line: the label says whose it is
     const written0 = node ? tasks.tree?.stands.get(node.path)?.text ?? (typeof node.metadata.stands === "string" ? node.metadata.stands : null) : null;
     const summary = written0 && firstSentence(written0) ? plainWords(written0) : null;
+    // T-335 runs visible: a run waiting on you, else one at work here, is the head's line (a tap opens its note); the summary otherwise
+    const focusArea = focus && !focusPrivate ? work.areas.find((a) => a.room === focus.room) ?? null : null;
+    const focusRuns = focusArea ? roomRuns(work, focusArea.id) : null;
+    const runLine: FocusLine | null = focusRuns?.waiting ? { src: "Waiting on you", text: focusRuns.waiting.waiting?.what ?? focusRuns.waiting.ask, run: { kind: "waiting", open: () => openHere(focusRuns.waiting!.id) } }
+      : focusRuns?.live ? { src: "Working", text: focusRuns.live.now ?? focusRuns.live.ask, run: { kind: "moving", open: () => openHere(focusRuns.live!.id) } } : null;
     const line: FocusLine | null = borrowed ? { src: `Talks in ${borrowed} · no room of its own yet`, text: "" }
-      : !focusPrivate && summary && node && !isRoot ? { src: focusSlug ? `#${focusSlug}'s summary` : "Summary", text: summary } : null;
+      : runLine ?? (!focusPrivate && summary && node && !isRoot ? { src: focusSlug ? `#${focusSlug}'s summary` : "Summary", text: summary } : null);
     const placeholder = node && nodeView ? chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? nodeView.heldBy.name : null }) : focusSlug ? `Message #${focusSlug}` : "Message";
     /** The places inside this one, each one tap into its own room (a project with no room of its own is in the projects above). */
     const inside = node && tree && !isRoot ? childrenOf(tree, node.path).filter((c) => !hidden(c.path)).map((c) => ({ c, v: roomView(tree, c.path, roomRefs, uniRef) })).filter(({ v }) => !!v.target) : [];
