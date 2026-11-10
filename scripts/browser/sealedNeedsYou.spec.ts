@@ -169,8 +169,21 @@ test('a sync that fails as the app comes back is tried again, and the card that 
   await page.evaluate((w) => { (window as any).__waiting = [w]; }, waitingRow(ref));
   await expect(rows).toHaveCount(1, { timeout: 6000 });
   expect(await page.evaluate(() => (window as any).__calls.filter((x: any) => x.cmd === 'live_start').length), 'live updates are on again').toBeGreaterThan(0);
-  // and it stops trying once it is through
-  const calls = await page.evaluate(() => (window as any).__calls.filter((x: any) => x.cmd === 'refresh').length);
+});
+
+test('a sync retry that is waiting when the app leaves the screen does not run while it is away', async ({ page }) => {
+  test.setTimeout(120_000);
+  await boot(page);
+  const syncs = () => page.evaluate(() => (window as any).__calls.filter((x: any) => x.cmd === 'refresh').length);
+  await setVisible(page, false);
+  await page.evaluate(() => { const w = window as any; w.__refreshFail = 9; w.__calls.length = 0; });
+  await setVisible(page, true);
+  await expect.poll(syncs).toBe(1);
+  await setVisible(page, false);
+  // the first retry would have run at 2 s
   await page.waitForTimeout(3500);
-  expect(await page.evaluate(() => (window as any).__calls.filter((x: any) => x.cmd === 'refresh').length)).toBe(calls);
+  expect(await syncs()).toBe(1);
+  // back on screen: it syncs at once, and after that failure tries again by itself
+  await setVisible(page, true);
+  await expect.poll(syncs, { timeout: 5000 }).toBeGreaterThanOrEqual(3);
 });

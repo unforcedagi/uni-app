@@ -512,7 +512,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [synced, setSynced] = useState(0);
   const busyRef = useRef(false);
   /** T-335 card timing: the retry of a sync that failed while the app is on screen (see `refresh`). */
-  const syncRetry = useRef<{ timer: number | undefined; tries: number }>({ timer: undefined, tries: 0 });
+  const syncRetry = useRef<{ timer: number | undefined; tries: number; alive: boolean }>({ timer: undefined, tries: 0, alive: true });
   const refreshRef = useRef<() => Promise<void>>(async () => {});
   const [limit, setLimit] = useState(300);
   const relayOrigin = useRelayOrigin();
@@ -1099,10 +1099,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // messages as its history lands: read them while it runs, so the conversation and its composer don't wait for the whole sync
     const cold = roomsRef.current.length === 0;
     const poll = cold ? window.setInterval(() => { void loadRooms().catch(() => {}); setTick((n) => n + 1); }, 700) : 0;
-    setStatus("Connecting…");
-    setError(null);
+    // (a retry keeps "Offline" and its reason up until it gets through: the line doesn't flap, and the alert isn't read out again each time)
+    if (!syncRetry.current.tries) { setStatus("Connecting…"); setError(null); }
     try {
       const result = await invoke<SyncResult>("refresh");
+      if (syncRetry.current.tries) setError(null);
       setIdentity(result.pubkey);
       await loadRooms();
       const warnings = Object.entries(result.channel_errors).map(([id, reason]) => `${id.slice(0, 8)}: ${reason}`);
@@ -1121,9 +1122,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setStatus("Offline · showing what this device saved");
       // T-335 card timing: a sync that fails as the device wakes (the network is a moment behind the screen) left the app with no live
       // updates until it was hidden and shown again. While it is on screen it tries again: after 2 s, 5 s, 15 s, then every 30 s.
-      if (document.visibilityState === "visible") {
+      // (never once this screen is gone, e.g. the key was forgotten mid-sync: nothing would ever stop it)
+      if (syncRetry.current.alive && document.visibilityState === "visible") {
         const wait = SYNC_RETRY_MS[Math.min(syncRetry.current.tries++, SYNC_RETRY_MS.length - 1)];
-        syncRetry.current.timer = window.setTimeout(() => { syncRetry.current.timer = undefined; if (document.visibilityState === "visible") void refreshRef.current(); }, wait);
+        syncRetry.current.timer = window.setTimeout(() => { syncRetry.current.timer = undefined; if (syncRetry.current.alive && document.visibilityState === "visible") void refreshRef.current(); }, wait);
       }
     } finally { if (poll) window.clearInterval(poll); busyRef.current = false; setBusy(false); }
   }, [loadRooms]);
@@ -1145,13 +1147,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") void refresh();
-      else { window.clearTimeout(syncRetry.current.timer); syncRetry.current = { timer: undefined, tries: 0 }; void invoke("live_stop").catch(() => {}); setLive(null); }
+      else { window.clearTimeout(syncRetry.current.timer); syncRetry.current.timer = undefined; syncRetry.current.tries = 0; void invoke("live_stop").catch(() => {}); setLive(null); }
     };
     // the network is back while a retry waits: sync now
     const onOnline = () => { if (syncRetry.current.timer !== undefined && document.visibilityState === "visible") void refresh(); };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("online", onOnline);
-    return () => { document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("online", onOnline); window.clearTimeout(syncRetry.current.timer); };
+    syncRetry.current.alive = true;
+    return () => { syncRetry.current.alive = false; document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("online", onOnline); window.clearTimeout(syncRetry.current.timer); };
   }, [refresh]);
 
   useEffect(() => {
