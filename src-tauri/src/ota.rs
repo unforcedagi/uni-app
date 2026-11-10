@@ -421,6 +421,7 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
         }
     };
     tidy(dir);
+    let mut promoted_now = None; // opened just above: not read and opened again below
     if let Some((channel, archive)) = read_slot(dir, "next") {
         // A promotion a kill cut short after it was recorded: the state already has this version on trial, as the floor.
         let unfinished = |b: &Bundle| state.trial.as_deref() == Some(b.meta.version.as_str()) && state.floor().as_ref() == Some(&b.version);
@@ -440,23 +441,26 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                     // itself (the trial doesn't name it: it reported ready) and wasn't dropped; otherwise it goes and the
                     // fallback stays. (A read error just now counts as not opening: the fallback is the safer keep.)
                     let proven = read_slot(dir, "current")
-                        .and_then(|(c, a)| open(pubkey, &c, &a, builtin, shell_api).ok())
-                        .is_some_and(|c| state.trial.as_deref() != Some(c.meta.version.as_str()) && !state.rejected.contains(&c.meta.version));
+                        .and_then(|(c, a)| verify_channel(pubkey, &c).ok().filter(|m| a.len() as u64 == m.bytes && sha256_hex(&a) == m.sha256))
+                        .is_some_and(|m| state.trial.as_deref() != Some(m.version.as_str()) && !state.rejected.contains(&m.version));
                     let stepped_aside = if proven {
                         move_slot(dir, "current", "previous")
                     } else {
                         remove_slot(dir, "current");
                         true
                     };
-                    let mut promoted = state.clone();
-                    promoted.trial = Some(b.meta.version.clone());
-                    promoted.boots = 0;
-                    promoted.floor = Some(b.meta.version.clone());
-                    promoted.issued = state.issued.max(b.manifest.issued);
                     if !stepped_aside {
                         log(format!("could not keep the current bundle as the fallback; {} stays staged", b.meta.version));
                         false
-                    } else if promoted.save(dir) {
+                    } else if let Some(promoted) = Some(State {
+                        trial: Some(b.meta.version.clone()),
+                        boots: 0,
+                        floor: Some(b.meta.version.clone()),
+                        issued: state.issued.max(b.manifest.issued),
+                        ..state.clone()
+                    })
+                    .filter(|p| p.save(dir))
+                    {
                         state = promoted;
                         true
                     } else {
@@ -468,6 +472,7 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                 if recorded {
                     if move_slot(dir, "next", "current") {
                         log(format!("promoted staged bundle {} (on trial)", b.meta.version));
+                        promoted_now = Some(b);
                     } else {
                         log("could not promote the staged bundle");
                         remove_slot(dir, "next");
@@ -484,8 +489,18 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
         }
     }
     let mut chosen = None;
-    if let Some((channel, archive)) = read_slot(dir, "current") {
-        match open(pubkey, &channel, &archive, builtin, shell_api) {
+    // A dropped version is never served again, even if a kill left its files behind.
+    let rejected = state.rejected.clone();
+    let not_dropped = |b: Bundle| match rejected.contains(&b.meta.version) {
+        true => Err(format!("bundle {} was dropped here", b.meta.version)),
+        false => Ok(b),
+    };
+    let current = match promoted_now {
+        Some(b) => Some(Ok(b)),
+        None => read_slot(dir, "current").map(|(c, a)| open(pubkey, &c, &a, builtin, shell_api).and_then(not_dropped)),
+    };
+    if let Some(opened) = current {
+        match opened {
             Ok(b) if state.trial.as_deref() == Some(b.meta.version.as_str()) && state.boots >= MAX_UNCONFIRMED_BOOTS => {
                 log(format!("bundle {} started {} times without reporting ready; dropped", b.meta.version, state.boots));
                 state.reject(&b.meta.version);
@@ -509,7 +524,7 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
     }
     if chosen.is_none() {
         if let Some((channel, archive)) = read_slot(dir, "previous") {
-            match open(pubkey, &channel, &archive, builtin, shell_api) {
+            match open(pubkey, &channel, &archive, builtin, shell_api).and_then(not_dropped) {
                 Ok(b) => {
                     // Recorded, then moved (as a promotion): the trial is over (and a drop above is kept) before the
                     // last good bundle moves back, so a kill mid-move leaves nothing stale for tidy() to trip on.
@@ -777,10 +792,13 @@ impl Ota {
         }
         let reason: String = reason.chars().take(200).collect();
         log(format!("bundle {} refused this shell: {reason:?}; dropped", b.meta.version));
-        // Removed, then recorded: a kill between leaves a trial naming nothing, which the fallback ends.
-        remove_slot(dir, "current");
+        // Recorded, then removed: a drop that can't be recorded doesn't happen, and files a kill leaves behind are never
+        // served again (a rejected version isn't).
         state.reject(&b.meta.version);
-        state.save(dir);
+        if !state.save(dir) {
+            return false;
+        }
+        remove_slot(dir, "current");
         self.set_active(activate(dir, self.pubkey, builtin, SHELL_API));
         true
     }
@@ -1457,6 +1475,13 @@ mod tests {
         let mut s = State::default();
         s.rejected = vec!["0.3.9".into()]; // dropped, but a kill left its files
         s.save(dir.path());
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"), "a dropped version isn't served: the last good one is");
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "current", &signed(&k, "0.3.9", 1));
+        let mut s = State::default();
+        s.rejected = vec!["0.3.9".into()];
+        s.save(dir.path());
         put(dir.path(), "next", &signed(&k, "0.3.10", 1));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.10"));
         assert_eq!(slot_version(dir.path(), "previous", &k.pk), Some(v("0.3.8")), "0.3.9 didn't take its place");
@@ -1465,6 +1490,7 @@ mod tests {
         put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
         std::fs::create_dir_all(dir.path().join("current.json/blocked")).unwrap();
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
+        assert!(dir.path().join("previous.tar.gz").exists(), "still there for the next launch");
     }
 
     fn ota_for(dir: &Path, k: &Key) -> Arc<Ota> {
