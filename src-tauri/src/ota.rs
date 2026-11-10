@@ -330,7 +330,8 @@ impl State {
 /// exists has its channel file. A check writes `next.<ext>.tmp`, then renames each to `next.<ext>`.
 const PARTS: [&str; 2] = ["json", "tar.gz"];
 
-/// `next`: staged by a check. `current`: being served (or on trial). `previous`: the last one that reported ready.
+/// `next`: staged by a check. `current`: being served (or on trial). `previous`: the last one that reported ready (verified
+/// again before it is used).
 const SLOTS: [&str; 3] = ["next", "current", "previous"];
 
 fn read_slot(dir: &Path, slot: &str) -> Option<(Vec<u8>, Vec<u8>)> {
@@ -431,21 +432,20 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
         }) {
             Ok(b) => {
                 // In an order a kill at any point can resume from: (1) the current bundle steps aside while the state
-                // still says what it is (kept as the fallback only if it proved itself by reporting ready); (2) the
+                // still says what it is (kept as the fallback only if it is verified and reported ready); (2) the
                 // promotion is recorded (on trial, the new floor), and one that can't be recorded doesn't happen, so a
                 // bundle is never served without its trial counting; (3) the staged bundle moves into place.
                 let recorded = if unfinished(&b) {
                     true
                 } else {
-                    // The current bundle is kept as the fallback unless the state's trial names it (it never reported
-                    // ready). One whose channel file can't be read now is kept too: the fallback verifies it before use.
-                    let on_trial = slot_version(dir, "current", pubkey)
-                        .is_some_and(|v| state.trial.as_deref() == Some(v.to_string().as_str()));
-                    let stepped_aside = if !dir.join("current.tar.gz").exists() || on_trial {
-                        remove_slot(dir, "current");
-                        true
-                    } else {
-                        move_slot(dir, "current", "previous")
+                    // The current bundle replaces the fallback only when it is verified and proved itself (the state's
+                    // trial doesn't name it, so it reported ready); otherwise it goes and the fallback stays.
+                    let stepped_aside = match slot_version(dir, "current", pubkey) {
+                        Some(v) if state.trial.as_deref() != Some(v.to_string().as_str()) => move_slot(dir, "current", "previous"),
+                        _ => {
+                            remove_slot(dir, "current");
+                            true
+                        }
                     };
                     if !stepped_aside {
                         log(format!("could not keep the current bundle as the fallback; {} stays staged", b.meta.version));
@@ -523,7 +523,8 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                         log(format!("back to the last good bundle {}", b.meta.version));
                         chosen = Some(b);
                     } else {
-                        remove_slot(dir, "previous");
+                        log(format!("back to the last good bundle {}, served from where it is (it couldn't be moved)", b.meta.version));
+                        chosen = Some(b);
                     }
                 }
                 Err(e) => {
@@ -1436,6 +1437,18 @@ mod tests {
             assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
             assert_eq!(dir.path().join("previous.tar.gz").exists(), kept, "trial {trial:?}");
         }
+    }
+
+    #[test]
+    fn a_current_bundle_that_does_not_verify_never_replaces_the_fallback() {
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "previous", &signed(&k, "0.3.7", 1));
+        put(dir.path(), "current", &signed(&k, "0.3.8", 1));
+        std::fs::write(dir.path().join("current.json"), b"{damaged").unwrap();
+        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
+        assert_eq!(slot_version(dir.path(), "previous", &k.pk), Some(v("0.3.7")), "the good fallback stays");
     }
 
     fn ota_for(dir: &Path, k: &Key) -> Arc<Ota> {
