@@ -774,8 +774,9 @@ pub fn approval_summary(view: &CardView, rids: &[String]) -> Result<(String, Str
 }
 
 /// The actions only the broker words itself (a caller's request can't use them), so the first line of their scope is the
-/// broker's, from fields it checked. Everyone else's scope is that caller's words.
-const BROKER_WORDED: [&str; 3] = ["job.cloudflare", "mint.cloudflare", "lookup.cloudflare"];
+/// broker's, from fields it checked. Everyone else's scope is that caller's words. `github.ruleset.apply`: the broker
+/// reserves every `github.*` action for its own op (uni-ops sealed/broker.py `reserved`).
+const BROKER_WORDED: [&str; 4] = ["job.cloudflare", "mint.cloudflare", "lookup.cloudflare", "github.ruleset.apply"];
 
 /// The first line of a card's scope when it says the key's true reach (uni-ops sealed/card_text.py).
 pub fn reach_line(action: &str, scope: &str) -> Option<String> {
@@ -1053,6 +1054,26 @@ mod tests {
         assert_eq!(check(&w, &card(&w.uni, &g)).unwrap_err(), Refusal::Misstated);
     }
 
+    /// A staging window (uni-ops jobs.py): the parent opens for `ttl_s` (at most 600 s, the powerful cap) to mint one key
+    /// that lives `window.for_s`, up to 30 days. The cap is on the unlock, so a 30-day window card passes as it is, and
+    /// it still asks for the device's own unlock.
+    #[test]
+    fn a_30_day_staging_window_card_passes_the_powerful_cap_and_still_needs_the_unlock() {
+        let w = world();
+        let (mut g, _) = fields(&w, "cf-parent", "powerful", 120, 1);
+        g["action"] = json!("job.cloudflare");
+        g["scope"] = json!("🟡 Acct (no production) · all of it · 30 days\nCan: x.");
+        g["payload"] = json!({"v": 1, "job": "window.acct", "account": "acct", "account_id": "0".repeat(32),
+            "templates": ["d1-write", "kv-write", "pages-write", "r2-admin", "workers-scripts-write"], "window_s": 120,
+            "purpose": "p", "window": {"for_s": 30 * 86_400}});
+        g["payload_digest"] = json!(payload_digest("job.cloudflare", &g["payload"]).unwrap());
+        let c = check(&w, &card(&w.uni, &g)).unwrap();
+        assert_eq!((c.rows[0].ttl_s, c.rows[0].class), (120, Class::Powerful));
+        assert!(always_unlock(Class::Powerful, "job.cloudflare", &g["payload"]));
+        assert_eq!(reach_line("job.cloudflare", g["scope"].as_str().unwrap()).as_deref(),
+            Some("🟡 Acct (no production) · all of it · 30 days"));
+    }
+
     #[test]
     fn the_class_caps_are_enforced_here() {
         let w = world();
@@ -1303,6 +1324,12 @@ mod tests {
         assert_eq!(reach_line("job.cloudflare", scope).as_deref(), Some("🔴 All of Acct, production included · 10 min"));
         assert_eq!(reach_line("mint.cloudflare", "🟡 One thing on A · 10 min\nCan: x.").as_deref(), Some("🟡 One thing on A · 10 min"));
         assert_eq!(reach_line("lookup.cloudflare", "🟢 Names · 5 min\nRead-only.").as_deref(), Some("🟢 Names · 5 min"));
+        assert_eq!(reach_line("github.ruleset.apply", "🟡 Admin on one repo, o/r · one call\nDoes: x.").as_deref(),
+            Some("🟡 Admin on one repo, o/r · one call"));
+        // the broker's account-first line (T-335): the account and whether it holds production lead
+        let first = "🔴 Acct — PRODUCTION account · all of it · 10 min";
+        assert_eq!(reach_line("job.cloudflare", &format!("{first}\nCan: x.")).as_deref(), Some(first));
+        assert_eq!(reach_line("github.other", "🟢 One small thing"), None, "only the one GitHub action the broker words");
         assert_eq!(reach_line("dns.edit", "🟢 One small thing"), None, "a caller's words");
         assert_eq!(reach_line("hermes.tool", "🟢 One small thing"), None);
         assert_eq!(reach_line("job.cloudflare", "One job (x), 10 min, tokens for A"), None, "an older card");
