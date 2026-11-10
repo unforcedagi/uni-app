@@ -16,7 +16,7 @@
 - Run by hand: `bash scripts/watch-main.sh`. Pause: `systemctl --user stop uni-updater.timer`.
 
 ### Signing needs a tap
-- A card that is declined, expires or can't be posted (broker down) fails the run before any tag or release: nothing is published. The log line says which: "the card was declined or not answered" or "no card was posted (broker unavailable?)". `publish.sh` writes `<sha> <version> <time>` to `~/.config/uni/updater/sign-asked` before it asks and clears it only once the release's tag exists, so an approved APK whose release then fails (a GitHub outage) is not asked for again on its own either.
+- A card that is declined, expires or can't be posted (broker down) fails the run before any tag or release: nothing is published. The log line says whether a card was posted and quotes the sealed CLI's last error line. `publish.sh` writes `<sha> <version> <time>` to `~/.config/uni/updater/sign-asked` before it asks and clears it only once the release's tag exists, so an approved APK whose release then fails (a GitHub outage) is not asked for again on its own either.
 - The watcher skips that commit with one log line, so a missed card is not rebuilt and asked again every 30 minutes. A new commit on `main` releases as usual. To ask again for the same commit: `UNI_RELEASE_ASK_AGAIN=1 bash scripts/watch-main.sh` (or delete `sign-asked`).
 - A build or test failure is not an ask: the next tick retries as before.
 - Switches: `UNI_ANDROID_UNSIGNED=1` builds the release APK unsigned (no keystore read; without it a local release build still signs with `$ANDROID_USER_HOME/debug.keystore`); `UNI_SEALED_CMD` names the broker command (default: the sealed CLI on uni-1); `UNI_RELEASE_ASK_AGAIN=1` as above.

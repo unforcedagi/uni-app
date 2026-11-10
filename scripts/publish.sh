@@ -28,7 +28,12 @@ cleanup_generated() {
 SIGNED_NOT_PUBLISHED=0
 on_exit() {
   if ((SIGNED_NOT_PUBLISHED)); then
-    echo "Android signing was approved and the APK signed, but $VERSION was not published; $SHA is not asked again until a new main commit or UNI_RELEASE_ASK_AGAIN=1" >&2
+    # gh release create can fail part-way, after the tag exists.
+    local tags state="may be partly published: check the release page"
+    if tags="$(timeout 20 git ls-remote --tags origin "refs/tags/$TAG" 2>/dev/null)" && [[ -z $tags ]]; then
+      state="was not published"
+    fi
+    echo "Android signing was approved and the APK signed, but $VERSION $state; $SHA is not asked again until a new main commit or UNI_RELEASE_ASK_AGAIN=1" >&2
   fi
   cleanup_generated
 }
@@ -92,15 +97,16 @@ read -ra SEALED <<<"${UNI_SEALED_CMD:-$HOME/REPOS/hermes-agent/.venv/bin/python 
 printf '%s %s %s\n' "$SHA" "$VERSION" "$(date -Is)" >"$SIGN_ASKED"
 rm -f "$STAGE/uni.apk"
 SIGN_RESULT=0
-# The broker prints "asked: request …" on stdout once its card is posted; the copy in sign.out tells a declined or
-# unanswered card from a broker that never posted one.
+# The broker prints "asked: request …" on stdout once its card is posted (kept in sign.out), and why it stopped on
+# stderr (kept in sign.err, shown after it exits). The failure line says only what those show.
 "${SEALED[@]}" release sign --apk "$STAGE/uni-unsigned.apk" --version "$VERSION" --code "$CODE" --commit "$SHA" \
   --out "$STAGE/uni.apk" --purpose "Publish Uni $VERSION to every device (Android $CODE, main ${SHA:0:12})" --wait \
-  | tee "$STAGE/sign.out" || SIGN_RESULT=$?
+  2>"$STAGE/sign.err" | tee "$STAGE/sign.out" || SIGN_RESULT=$?
+cat "$STAGE/sign.err" >&2
 if (( SIGN_RESULT )) || [[ ! -s $STAGE/uni.apk ]]; then
-  if grep -q '^asked: request ' "$STAGE/sign.out"; then WHY='the card was declined or not answered'
-  else WHY='no card was posted (broker unavailable?)'; fi
-  echo "Android signing not approved (sealed exit $SIGN_RESULT): $WHY; nothing published. $SHA is not asked again until a new main commit or UNI_RELEASE_ASK_AGAIN=1" >&2
+  CARD='no card was posted'; grep -q '^asked: request ' "$STAGE/sign.out" && CARD='a card was posted'
+  SEALED_ERROR="$(grep -v '^[[:space:]]*$' "$STAGE/sign.err" | tail -n 1 | tr -d '\r' | cut -c1-200 || :)"
+  echo "Android signing did not complete (sealed exit $SIGN_RESULT; $CARD): ${SEALED_ERROR:-no error from sealed}. Nothing published; $SHA is not asked again until a new main commit or UNI_RELEASE_ASK_AGAIN=1" >&2
   exit 1
 fi
 # Installed apps trust only the original signing key (once ~/.config/.android/debug.keystore; T-335 moves it into the

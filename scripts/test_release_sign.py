@@ -36,7 +36,10 @@ esac
 ''',
     "gh": LOG + '''
 case "$1 $2" in
-  'release create') [[ ${FAKE_GH_CREATE_FAILS:-0} == 0 ]] || { echo 'HTTP 503' >&2; exit 1; } ;;
+  'release create')
+    # FAKE_GH_CREATE_FAILS=partly: the tag reaches origin, then an upload fails.
+    [[ ${FAKE_GH_CREATE_FAILS:-0} == partly ]] && /usr/bin/git push -q origin "$7:refs/tags/$3"
+    [[ ${FAKE_GH_CREATE_FAILS:-0} == 0 ]] || { echo 'HTTP 503' >&2; exit 1; } ;;
   'release download') printf '{"version": "1.2.3"}\\n' ;;
   *) exit 2 ;;
 esac
@@ -156,8 +159,8 @@ class ReleaseSignTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(len(self.named(calls, "sealed ")), 1)
         self.assertEqual(self.named(calls, "gh release"), [])
-        self.assertIn("Android signing not approved (sealed exit 1): the card was declined or not answered; nothing "
-                      "published", result.stderr)
+        self.assertIn("Android signing did not complete (sealed exit 1; a card was posted): refused: declined. "
+                      "Nothing published", result.stderr)
         self.assertEqual(self.asked.read_text().split()[:2], [sha, "1.2.3"])
         self.assertFalse(Path(self.env["TMPDIR"], "uni-release-1.2.3/uni.apk").exists())
 
@@ -165,7 +168,7 @@ class ReleaseSignTests(unittest.TestCase):
         sha = self.git("rev-parse", "HEAD")
         result, calls = self.watch(FAKE_SEAL="down")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("(sealed exit 1): no card was posted (broker unavailable?)", result.stderr)
+        self.assertIn("(sealed exit 1; no card was posted): broker unreachable. Nothing published", result.stderr)
         self.assertEqual(self.named(calls, "gh release"), [])
         self.assertEqual(self.asked.read_text().split()[0], sha)
 
@@ -177,7 +180,7 @@ class ReleaseSignTests(unittest.TestCase):
                 env = {"FAKE_SEAL": "empty"} if mode == "empty" else {"UNI_SEALED_CMD": "true"}
                 result, calls = self.watch(**env)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("Android signing not approved (sealed exit 0)", result.stderr)
+                self.assertIn("Android signing did not complete (sealed exit 0; ", result.stderr)
                 self.assertEqual(self.named(calls, "gh release"), [])
                 self.assertTrue(self.asked.exists())
 
@@ -187,6 +190,7 @@ class ReleaseSignTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(len(self.named(calls, "gh release create")), 1)
         self.assertIn("approved and the APK signed, but 1.2.3 was not published", result.stderr)
+        self.assertIn("HTTP 503", result.stderr)
         self.assertIn("UNI_RELEASE_ASK_AGAIN=1", result.stderr)
         self.assertEqual(self.asked.read_text().split()[0], sha)
 
@@ -199,6 +203,12 @@ class ReleaseSignTests(unittest.TestCase):
         self.assertEqual(len(self.named(calls, "sealed ")), 1)
         self.assertEqual(len(self.named(calls, "gh release create")), 1)
         self.assertFalse(self.asked.exists())
+
+    def test_a_release_that_failed_after_its_tag_says_it_may_be_partly_published(self):
+        result, calls = self.watch(FAKE_GH_CREATE_FAILS="partly")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("approved and the APK signed, but 1.2.3 may be partly published: check the release page",
+                      result.stderr)
 
     def test_signed_by_another_key_is_refused_before_the_release(self):
         sha = self.git("rev-parse", "HEAD")
