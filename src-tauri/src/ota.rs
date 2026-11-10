@@ -50,7 +50,7 @@ use tauri::{Assets, Manager, Runtime};
 pub const SHELL_API: u32 = 1;
 
 /// The public half of the sealed screens bundle key (uni-ops `sealed/bundle.py` PUBKEY_HEX), raw Ed25519, hex.
-const RELEASE_PUBKEY_HEX: &str = "";
+const RELEASE_PUBKEY_HEX: &str = "7eb47a945c28f019c78ea8691d19337f672261e10cff4e9abdfdbecbaec0330f";
 pub const PUBKEY_HEX: &str = match option_env!("UNI_OTA_PUBKEY") {
     Some(k) => k,
     None => RELEASE_PUBKEY_HEX,

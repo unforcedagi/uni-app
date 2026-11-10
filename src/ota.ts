@@ -13,8 +13,9 @@ export type OtaStatus = {
   channel: string | null;
 };
 
-/** How often coming back to the app looks for new screens. */
-export const RESUME_CHECK_MS = 30 * 60 * 1000;
+/** Coming back to the app looks for new screens (one small signed file); at most once a minute, so flicking between
+ *  apps doesn't fetch it again and again. */
+export const RESUME_CHECK_MS = 60 * 1000;
 
 const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -47,7 +48,7 @@ function check(now: number) {
 }
 
 /** When the app comes back to the foreground: new screens staged earlier are put in now, with a reload, before the
- *  person has done anything (never over an open recording); otherwise look for newer ones, at most every half hour. */
+ *  person has done anything (never over an open recording); otherwise look for newer ones (at most once a minute). */
 export async function otaResumed(now = Date.now(), reload = () => location.reload()): Promise<"reloaded" | "checked" | "idle"> {
   if (!recordingHolder() && await invoke<boolean>("ota_apply").catch(() => false)) {
     reload();
