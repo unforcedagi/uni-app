@@ -58,12 +58,13 @@ async function boot(page: Page) {
     };
     let n = 0;
     w.__extraInvoke = async (cmd: string, args: any) => {
-      if (cmd === 'arcade_home') return { stats: stats(), fresh: { 'this-or-that': 2, gallery: 0, 'fix-it': 0, 'who-said-it': 0, ripple: 1 }, games: {}, profile: {} };
+      if (cmd === 'arcade_home') return { stats: stats(), fresh: { 'this-or-that': 2, gallery: 0, 'fix-it': 0, 'who-said-it': 0, ripple: 1 }, games: {}, profile: {}, look: w.__look ?? [] };
       if (cmd === 'arcade_rounds') {
         if (args.game === 'this-or-that' && args.grey) return { rounds: Array.from({ length: args.n }, () => ({ game: 'this-or-that', a: tonal[0], b: tonal[1], ask: askGrey })) };
         if (args.game === 'this-or-that') return { rounds: Array.from({ length: args.n }, (_, i) => { const a = cards[(2 * i + n++) % 4], b = cards[(2 * i + 1 + n) % 4]; return { game: 'this-or-that', a, b: b.id === a.id ? cards[(cards.indexOf(a) + 1) % 4] : b, ask }; }) };
         if (args.game === 'ripple') return { rounds: [{ game: 'ripple', card: question, ask: askQ }] };
-        if (args.game === 'gallery') return { rounds: gallery.map((card: any) => ({ game: 'gallery', card, ask: askGal })) };
+        // look here: the pinned card's round first, as the door deals it
+        if (args.game === 'gallery') return { rounds: [...gallery].sort((a: any, b: any) => (b.id === args.look ? 1 : 0) - (a.id === args.look ? 1 : 0)).map((card: any) => ({ game: 'gallery', card, ask: askGal })) };
         if (args.game === 'fix-it') return { rounds: [{ game: 'fix-it', card: fix, ask: askFix }] };
         if (args.game === 'who-said-it') return { rounds: voices.map((card: any) => ({ game: 'who-said-it', card, ask: askWho })) };
         return { rounds: [] };
@@ -367,4 +368,33 @@ test('Ripple: a second answer while the first is still saving is its own recordi
   await expect.poll(async () => (await calls(page, 'journal_save_voice')).length).toBe(2); // each answer saved
   await expect.poll(async () => (await reactions(page)).length).toBe(2);
   for (const r of await reactions(page)) expect(r.voice.seconds).toBeLessThan(3); // the time spoken, not the time saving
+});
+
+// T-335 look here: a room pins a card for the owner (uni-tasks `tasks.py look --board arcade`); the ask in For you carries the pin's
+// link, and the app opens it itself: the Arcade, on that card, dealt first by the door. Made-up host, room and words.
+const PIN_URL = 'https://box.example.ts.net:8543/#look/t-img-b';
+test('a look-here link in For you opens the Arcade on the pinned card, in the app', async ({ page }) => {
+  await page.addInitScript((url) => {
+    const w = window as any;
+    w.__look = [{ card: 't-img-b', game: 'gallery', title: 'Made-up sign', room: 'kiln-studio', why: 'Made-up: does the sign read from the road?', drops: '2026-12-01' }];
+    w.__seedTasks = [{ id: 'fy-pin', path: 'Tasks/T-540 Look at this card', extension: 'md', tags: ['task'], fy: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      metadata: { state: 'open', owner: 'aaron', needs_aaron: true, kind: 'look', no_default: true, node: 'Areas/Kiln Studio', look_url: url, why_now: 'Made-up: does the sign read from the road?', asked_at: new Date().toISOString() } }];
+  }, PIN_URL);
+  await boot(page);
+  await tap(page, page.getByRole('button', { name: /1 to look at\. Open For you/ }));
+  const open = page.locator('.fy-item[data-id="fy-pin"] .fy-open');
+  await expect(open).toHaveAttribute('href', PIN_URL);
+  await tap(page, open);
+  // the Arcade, on the pinned card: its round came first because the app asked the door for it by id
+  await expect(page.locator('.arcade-place .ta-game')).toBeVisible();
+  await expect(page.locator('.ta-gal-where')).toHaveText(/^1 of/);
+  await expect(page.getByRole('figure', { name: 'Made-up sign' })).toBeVisible();
+  expect((await calls(page, 'arcade_rounds')).find((a: any) => a.game === 'gallery')).toMatchObject({ look: 't-img-b' });
+  expect(await calls(page, 'open_link')).toHaveLength(0); // never handed to the system browser
+  // back on the Arcade's home the pin says who asked and why; the next deal is plain play (no look)
+  await tap(page, page.locator('.ta-arcade').getByRole('button', { name: 'Arcade' }).first());
+  await expect(page.locator('.ta-look-pin')).toContainText('Look here · #kiln-studio');
+  await tap(page, page.locator('[data-toy="gallery"]'));
+  await expect(page.locator('.ta-gal-where')).toHaveText(/^1 of/);
+  expect((await calls(page, 'arcade_rounds')).filter((a: any) => a.game === 'gallery').pop()?.look).toBeUndefined();
 });

@@ -14,6 +14,7 @@ import { useVaultProfile } from "./ProfileContext";
 import { changedBy, vaultTasks } from "./vaultTasks";
 import { openDialog } from "./focusTrap";
 import { invoke } from "@tauri-apps/api/core";
+import { openLink as routeLink } from "../openLink.ts";
 import { copyText } from "../clipboard";
 import { inline, publishedIn } from "../publishedMedia";
 import { PublishedMedia, usePublishOrigins } from "../PublishedPlayer";
@@ -182,7 +183,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   /** r23: "Ask #room for the message": the request goes in the room's composer (never sent) */
   const askRoom = !gone && nowhere && room && onSay ? () => { onSay(room.id, `Please post the ${pointsAt(task.next)?.noun ?? "message"} for ${tid ?? "this task"}: ${task.next.trim()}`); onClose(); } : null;
   const primary0 = missing ? "task" : check || waits ? "source" : checking || unavailable || tidy ? "note" : askRoom ? "askroom" : sayIn ? "say" : !gone && toPerson ? (message ? "message" : dest ? "dest" : askDraft ? "draft" : "done") : !gone && !decision ? "done" : null;
-  const openOut = (href: string) => { void invoke("open_link", { url: href }).catch(() => { try { window.open(href, "_blank", "noopener"); } catch { /* nothing to open with */ } }); };
+  const openOut = (href: string) => { void routeLink(href).catch(() => { try { window.open(href, "_blank", "noopener"); } catch { /* nothing to open with */ } }); };
   /** r22 (Codex 7): a link in a step is a button in that step ("Open cohere-signup-staging"); for a "look at / open" step it is the primary action */
   const firstStep = steps ? steps.steps[0] : act?.head ?? "";
   const lookOpen = !gone && !!act && LOOK.test(withoutIntro(firstStep.trim())) && linksIn(firstStep).length > 0;

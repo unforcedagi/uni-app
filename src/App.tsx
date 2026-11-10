@@ -31,6 +31,7 @@ import { appendDraft } from "./areas/composeDraft";
 import { openDialog } from "./areas/focusTrap";
 import { ArcadeView } from "./arcade/ArcadeView.tsx";
 import { ArcadeIcon } from "./arcade/ArcadeIcon.tsx";
+import { LOOK_EVENT } from "./arcade/arcadeCore.ts";
 import { readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { draftBox, type DraftBox } from "./draftBox";
@@ -406,6 +407,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, []);
   /** T-335 Taste Arcade: the profile note opens like any note, over the Arcade */
   const openArcadeNote = useCallback((vault: string, path: string) => { openTargetRef.current({ kind: "note", note: { hub: null, vault, ref: path }, title: "Taste profile" }, "new"); }, []);
+  /** Look here: a room's link to a pinned card (src/openLink.ts) opens the Arcade on that card. `n` tells a second tap of a link
+   *  from the first, so it opens the card again; leaving the Arcade forgets it, so the rail's Arcade is plain play. */
+  const [arcadeLook, setArcadeLook] = useState<{ card: string; n: number } | null>(null);
+  useEffect(() => {
+    const look = (e: Event) => {
+      const card = (e as CustomEvent<string>).detail;
+      setArcadeLook((l) => ({ card, n: (l?.n ?? 0) + 1 }));
+      openTargetRef.current({ kind: "arcade", title: "Arcade" });
+    };
+    window.addEventListener(LOOK_EVENT, look);
+    return () => window.removeEventListener(LOOK_EVENT, look);
+  }, []);
   const [journalRecording, setJournalRecording] = useState<{ controls: RecorderControls } | null>(null);
   const journalRecordingRef = useRef(false);
   const [channel, setChannel] = useState<string | null>(null);
@@ -2588,6 +2601,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [canGoBack]);
   const active = activeTab(tabs);
   useEffect(() => { setRailMore(false); }, [active?.id]);
+  useEffect(() => { if (active?.kind !== "arcade") setArcadeLook(null); }, [active?.kind]);
   // 0.2 one home: a restored Uni places page (an older version's save) is the home, All
   useLayoutEffect(() => { if (homeIsAll && tabsReady.current && oldHome(active)) openTarget(uniHome(), "replace"); }, [homeIsAll, active?.id, active?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (active && (active.kind === "areas" || active.kind === "area")) { const { id: _id, ...t } = active; originRef.current = t; } }, [active]);
@@ -2762,7 +2776,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {active?.kind === "mail" ? <Mail />
       : active?.kind === "calendar" ? <Calendar />
       : active?.kind === "messages" ? <Messages />
-      : active?.kind === "arcade" ? <ArcadeView ownerName={myName ?? null} onOpenNote={openArcadeNote} />
+      : active?.kind === "arcade" ? <ArcadeView ownerName={myName ?? null} onOpenNote={openArcadeNote} look={arcadeLook} />
       : active?.kind === "posts" ? <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} />
       : active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix, query = "") => { setSearchQuery(query); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
