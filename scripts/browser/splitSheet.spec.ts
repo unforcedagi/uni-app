@@ -127,7 +127,9 @@ test.describe('sheet', () => {
     await expect(pane).toHaveCount(1);
     expect(await third()).toBeLessThanOrEqual(2);
     // a quick flick down closes it, the chat and its draft untouched
-    await drag(page, handle, { dy: 160 }, { steps: 4, gap: 0, rest: 0 });
+    // (two moves, not four: each CDP move waits for a re-render, slowest on the Daylight upright, and the speed is read from those
+    // timestamps, so more moves read as a slower flick than any finger makes; the app wants 0.8 px/ms)
+    await drag(page, handle, { dy: 160 }, { steps: 2, gap: 0, rest: 0 });
     await expect(pane).toHaveCount(0);
     await expect(box).toHaveValue('A draft that stays.');
     // a slow pull past its bottom closes it as well, and the next note opens at the height it had before the pull
