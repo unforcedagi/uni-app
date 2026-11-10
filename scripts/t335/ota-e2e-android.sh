@@ -40,7 +40,7 @@ $E install "$APK" | tail -1
 $E shell dumpsys package org.unforced.uni | grep -E 'versionName|lastUpdateTime' | tee -a "$OUT/steps.log"
 $E logcat -c
 
-publish n1;         launch 01 built-in-0.4.0-finds-0.4.1
+publish n1;         WAIT=45 launch 01 built-in-0.4.0-finds-0.4.1  # a first start after install is slow on the emulator
 launch 02 serves-0.4.1-no-apk
 publish n2;         AWAY=40 resume 03 resume-finds-0.4.2
 AWAY=130 resume 04 resume-puts-in-0.4.2
