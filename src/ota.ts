@@ -22,7 +22,7 @@ export const APPLY_AWAY_MS = 2 * 60 * 1000;
 
 const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-/** A bundle refuses a shell with another API (it doesn't start). */
+/** A bundle refuses a shell with another API: it doesn't start, and asks to be dropped. */
 export function refusesShell(status: Pick<OtaStatus, "shell_api" | "active">, ours = SHELL_API): boolean {
   return status.active !== null && status.shell_api !== ours;
 }
@@ -33,12 +33,14 @@ export function otaStatus(): Promise<OtaStatus | null> {
   return status;
 }
 
-/** Before the first render. False when these screens were built for another shell: they don't start, so the shell
- *  drops them after a few tries (as any bundle that never reports ready) and goes back to the last good screens. */
-export async function otaBoot(): Promise<boolean> {
+/** Before the first render. False when these screens were built for another shell: they don't start, and ask the shell
+ *  to drop them (it does only while they are on trial) and go back to the last good screens. */
+export async function otaBoot(reload = () => location.reload()): Promise<boolean> {
   const s = await otaStatus();
   if (s && refusesShell(s)) {
-    console.warn(`screens built for shell API ${SHELL_API}, shell has ${s.shell_api}: not starting`);
+    const reason = `screens built for shell API ${SHELL_API}, shell has ${s.shell_api}`;
+    console.warn(`${reason}: not starting`);
+    if (await invoke<boolean>("ota_refused", { reason }).catch(() => false)) reload();
     return false;
   }
   return true;
