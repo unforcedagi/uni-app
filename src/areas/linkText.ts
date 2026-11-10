@@ -38,7 +38,8 @@ export function splitMarkdownLinks(text: string): TextPart[] {
     const start = m.index ?? 0;
     try { if (!/^https?:$/.test(new URL(m[2]).protocol)) continue; } catch { continue; }
     if (start > at) out.push(...splitLinks(text.slice(at, start)));
-    out.push({ url: m[2], label: m[1] });
+    // (words that are themselves an address show the host it really opens, never another address)
+    out.push({ url: m[2], label: /^(?:https?:\/\/|www\.)/i.test(m[1].trim()) ? linkLabel(m[2]) : m[1] });
     at = start + m[0].length;
   }
   if (at < text.length) out.push(...splitLinks(text.slice(at)));

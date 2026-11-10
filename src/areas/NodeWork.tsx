@@ -39,7 +39,7 @@ const linksIn = (text: string): string[] => [...text.matchAll(URLS)].map((m) => 
 /** A step that asks the user to look at or open something (r22): its link is the step's own action. */
 const LOOK = /^(?:look|open|view|visit|see|check|try|watch|read|test)\b/i;
 
-export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null, confirmation }: {
+export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null, confirmation: conf }: {
   task: Task; gone?: boolean; here: string; nodeName: (path: string) => string; room: RoomRef | null;
   /** r24: the joined room a step names ("#cohere's 'For Harper' block"), when there is one */
   roomNamed?: (name: string) => RoomRef | null;
@@ -61,7 +61,6 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   draft?: { vault: string; id: string } | null;
   /** T-335: whether the ask is current, from its needs_aaron (confirmationOf): current, or back with its room and gated behind "Answer anyway" */
   confirmation: Resolved;
-  /** r28: read this room's chat again ("Couldn't read #room · Retry") */
 }) {
   const box = useRef<HTMLDivElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
@@ -194,7 +193,6 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   /** r31: an overdue task says "was due Oct 13" and not when it was asked: one date, as on its row */
   const overdue = !!task.due && isOverdue(task.due);
   const gated = !gone && !unsure;
-  const conf: Resolved = confirmation;
   const [anyway, setAnyway] = useState(false);
   // (a check that comes back different, Retry for one, takes the answers back behind "Answer anyway")
   useEffect(() => { setAnyway(false); }, [task.id, conf.state, conf.why]);

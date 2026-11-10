@@ -60,7 +60,7 @@ export async function allPages<N = Note>(page: (offset: number) => Promise<N[]>)
 
 /** The reader over one vault door (`call`): the app's is `reader`, a test makes its own with a fake door and clock. */
 export function createReader(call: Call = (cmd, args) => invoke(cmd, args), clock: () => number = () => Date.now(),
-  opts: { share?: boolean; /** a test's timer */ every?: (f: () => void, ms: number) => unknown; stopEvery?: (h: unknown) => void } = {}) {
+  opts: { share?: boolean; /** a test's timer, with setInterval's meaning (it fires every `ms` until stopped) */ every?: (f: () => void, ms: number) => unknown; stopEvery?: (h: unknown) => void } = {}) {
   const sharing = opts.share !== false;
   // ---- sharing within a tick ----
   let generation = 0;
@@ -112,6 +112,8 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
    * most every OLD_RUNS_MS, and the fresh window reaches back to where that older read began, so no run falls between the two.
    */
   const old = new Map<string, { at: number; p: Promise<Rows<"run">[]> }>();
+  /** The runs that already forced a re-read of the older windows, by vault (see `runs`). */
+  const forcedFor = new Map<string, Set<unknown>>();
   const runs = (vault: string): Promise<{ rows: Note<"run">[]; partial: string[] }> => share(keyOf("run", vault), async () => {
     const now = clock();
     const iso = (at: number, days: number) => new Date(at - days * DAY).toISOString();
@@ -124,21 +126,25 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
       return entry;
     };
     let o = old.get(vault);
-    if (!o || now - o.at >= OLD_RUNS_MS) o = readOld(now);
+    // (a clock that went back reads the older windows again too)
+    if (!o || now - o.at >= OLD_RUNS_MS || now < o.at) o = readOld(now);
     const [running, recent, first] = await Promise.all([
       allPages(where(vault, "run", { state: { in: [...LIVE_RUNS] } })),
       allPages(where(vault, "run", { started_at: { gte: iso(o.at, RUN_WINDOWS[0][1]) } })),
       o.p,
     ]);
     let windows = first;
-    // a run the older read saw live that the live read no longer lists has ended since: the older windows are read again (at most once a
-    // minute: a note the live query never lists can't make every read a re-read), so it is never shown live from a five-minute-old copy.
-    // (the fresh window already reaches back to where the older read began)
+    // a run the older read saw live that the live read no longer lists has ended since (a stop, a finish): the older windows are read again
+    // at once, so it is never shown live from a five-minute-old copy. Each such run forces one re-read only (a note the live query never
+    // lists can't make every read a re-read); a re-read that fails keeps the windows already read. (The fresh window already reaches back
+    // to where the older read began.)
     const liveNow = new Set(running.rows.map((r) => r.id));
-    const ended = (rows: Note<"run">[]) => rows.some((r) => LIVE_RUNS.includes((r.metadata as { state?: never } | undefined)?.state ?? ("" as never)) && !liveNow.has(r.id));
-    if (running.complete && now - o.at >= POLL_MS && windows.some((w) => ended(w.rows))) {
-      o = readOld(now);
-      windows = await o.p;
+    const forced = forcedFor.get(vault) ?? new Set<unknown>();
+    const endedIds = running.complete ? windows.flatMap((w) => w.rows).filter((r) => LIVE_RUNS.includes((r.metadata as { state?: never } | undefined)?.state ?? ("" as never)) && !liveNow.has(r.id) && !forced.has(r.id)).map((r) => r.id) : [];
+    if (endedIds.length && o.at !== now) {
+      for (const id of endedIds) forced.add(id);
+      forcedFor.set(vault, forced);
+      try { o = readOld(now); windows = await o.p; } catch { /* the windows read above stand */ }
     }
     const seen = new Set<unknown>();
     const rows = [running, recent, ...windows].flatMap((r) => r.rows).filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
@@ -146,7 +152,7 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
     return { rows, partial };
   });
   /** Forget (the user's Forget, another identity): nothing read before is shared or kept. */
-  function forget() { invalidate(); old.clear(); }
+  function forget() { invalidate(); old.clear(); forcedFor.clear(); }
 
   // ---- one poller ----
   const subs = new Set<() => void>();

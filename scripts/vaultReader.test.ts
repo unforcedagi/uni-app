@@ -97,9 +97,20 @@ await check("runs: a run the older windows saw live that has since ended is read
   });
   const r = createReader(d.call, () => now);
   assert.equal((await r.runs("uni")).rows[0].metadata!.state, "running");
-  state = "done"; now += 60_000; r.invalidate();
+  // stopped twenty seconds later (the write reads the runs fresh): done at once, not running from the older copy
+  state = "done"; now += 20_000; r.invalidate("run");
   const got = await r.runs("uni");
-  assert.equal((got.rows[0].metadata as any).state, "done", "a minute later it is done, not running from the older copy");
+  assert.equal((got.rows[0].metadata as any).state, "done");
+});
+
+await check("runs: a note the live read never lists (its index disagrees) forces one re-read of the older windows, not one on every read", async () => {
+  let now = Date.parse("2026-11-10T12:00:00Z");
+  const d = door((c) => (c.args.metadata?.started_at?.lt && "2026-11-07T10:00:00Z" >= c.args.metadata.started_at.gte && "2026-11-07T10:00:00Z" < c.args.metadata.started_at.lt ? [{ id: "r9", metadata: { state: "running", started_at: "2026-11-07T10:00:00Z" } }] : []));
+  const r = createReader(d.call, () => now);
+  const windows = () => d.calls.filter((c) => c.args.metadata?.started_at?.lt).length;
+  await r.runs("uni");
+  for (let i = 0; i < 4; i++) { now += 60_000; r.invalidate(); await r.runs("uni"); }
+  assert.equal(windows(), 2 * (RUN_WINDOWS.length - 1), "the first read and one forced re-read");
 });
 
 await check("invalidate by kind: the work's follow-up read is fresh, the rest of the tick stays shared", async () => {
@@ -154,7 +165,7 @@ await check("the poller's timer starts over on every tick: a tick on coming back
   // a fake timer: each `every` is one armed callback with the time it is due
   let now = 0; const armed: { f: () => void; due: number }[] = [];
   const advance = (ms: number) => { const end = now + ms; for (;;) { const next = armed.filter((a) => a.due <= end).sort((a, b) => a.due - b.due)[0]; if (!next) break; now = next.due; next.due += 60_000; next.f(); } now = end; };
-  const r = createReader(door().call, () => now, { every: (f) => { const a = { f, due: now + 60_000 }; armed.push(a); return a; }, stopEvery: (h) => { armed.splice(armed.indexOf(h as never), 1); } });
+  const r = createReader(door().call, () => now, { every: (f) => { const a = { f, due: now + 60_000 }; armed.push(a); return a; }, stopEvery: (h) => { const i = armed.indexOf(h as never); assert.ok(i >= 0, "only an armed timer is stopped"); armed.splice(i, 1); } });
   const at: number[] = [];
   const stop = r.onPoll(() => at.push(now));
   advance(55_000); listeners.focus();          // back at 55 s: a tick

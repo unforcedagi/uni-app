@@ -488,6 +488,8 @@ console.log("\nall For you checks passed");
   assert.deepEqual(urls("See https://example.com/kiln/tiles."), [["https://example.com/kiln/tiles", "example.com"]]);
   assert.deepEqual(urls("- [glaze sheet](https://example.com/sheet) and [kiln](https://example.com/wiki/Kiln_(pottery))."), [["https://example.com/sheet", "glaze sheet"], ["https://example.com/wiki/Kiln_(pottery)", "kiln"]]);
   assert.deepEqual(urls("[not a web link](javascript:alert(1))"), []);
+  // words that are an address show the host the link really opens
+  assert.deepEqual(urls("[https://example.com/safe](https://example.org/other)"), [["https://example.org/other", "example.org"]]);
   assert.equal(splitMarkdownLinks("See [it](https://example.com/x). Then go").map((p) => ("url" in p ? `<${p.label}>` : p.text)).join(""), "See <it>. Then go");
   console.log("ok   an ask's context is read from its body: why, steps, links, time, what he already said");
 }
