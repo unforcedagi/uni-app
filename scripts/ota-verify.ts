@@ -33,7 +33,7 @@ export function checkChannel(channel: string, archive: Buffer, pubkeyHex: string
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(m.version)) throw new Error("the manifest's version isn't X.Y.Z");
   if (!/^[0-9a-f]{64}$/.test(m.sha256)) throw new Error("the manifest's sha256 isn't 64 hex characters");
   if (![m.api, m.bytes, m.issued, m.expires].every((n) => Number.isSafeInteger(n) && n >= 0)) throw new Error("the manifest's numbers aren't whole");
-  if (m.v !== 1 || m.api > 0xffffffff) throw new Error("the manifest's API is out of range");
+  if (m.api > 0xffffffff) throw new Error("the manifest's API is out of range");
   if (m.archive !== `web-${m.version}.tar.gz`) throw new Error("the manifest's archive name isn't web-<version>.tar.gz");
   if (archive.length !== m.bytes || createHash("sha256").update(archive).digest("hex") !== m.sha256) {
     throw new Error("the archive is not the one the manifest names");

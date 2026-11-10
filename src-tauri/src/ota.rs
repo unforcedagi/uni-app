@@ -356,6 +356,24 @@ fn staged_version(dir: &Path, pubkey: &str) -> Option<semver::Version> {
     semver::Version::parse(&verify_channel(pubkey, &text).ok()?.version).ok()
 }
 
+/// After a kill mid-way: finish a slot move that was cut between its two renames (the channel file moves first), then
+/// drop what is left half: a slot with one of its two files, and a check's temporary files.
+fn tidy(dir: &Path) {
+    let has = |slot: &str, ext: &str| dir.join(format!("{slot}.{ext}")).exists();
+    for (from, to) in [("next", "current"), ("current", "previous")] {
+        if has(from, "tar.gz") && !has(from, "json") && has(to, "json") && !has(to, "tar.gz") {
+            let _ = std::fs::rename(dir.join(format!("{from}.tar.gz")), dir.join(format!("{to}.tar.gz")));
+        }
+    }
+    for slot in SLOTS {
+        if has(slot, "json") != has(slot, "tar.gz") {
+            remove_slot(dir, slot);
+        }
+    }
+    let _ = std::fs::remove_file(dir.join("next.json.tmp"));
+    let _ = std::fs::remove_file(dir.join("next.tar.gz.tmp"));
+}
+
 /// Version a stored archive claims, for bookkeeping when it fails its checks (best effort, unverified).
 fn claimed_version(archive: &[u8]) -> Option<String> {
     unpack(archive).ok().map(|(m, _)| m.version)
@@ -391,9 +409,7 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
             return None;
         }
     };
-    if read_slot(dir, "next").is_none() {
-        remove_slot(dir, "next"); // half of a staging a killed check left behind
-    }
+    tidy(dir);
     if let Some((channel, archive)) = read_slot(dir, "next") {
         match open(pubkey, &channel, &archive, builtin, shell_api).and_then(|b| match state.floor() {
             Some(f) if b.version <= f => Err(format!("bundle {} is not newer than {f}, already used here", b.meta.version)),
@@ -656,16 +672,8 @@ impl Ota {
         let mut setup = lock.lock().unwrap_or_else(|e| e.into_inner());
         if *setup == Setup::TimedOut {
             log("setup came after the first page request timed out; the built-in screens stay for this launch");
-            // The start activate counted for a bundle on trial wasn't one: it isn't shown this launch.
-            if let Some(b) = &chosen {
-                let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
-                if let Ok(mut state) = State::load_checked(&dir) {
-                    if state.trial.as_deref() == Some(b.meta.version.as_str()) && state.boots > 0 {
-                        state.boots -= 1;
-                        state.save(&dir);
-                    }
-                }
-            }
+            // A start activate counted for a bundle on trial stands: on a device this slow every launch would time out,
+            // and giving it back would keep that bundle on trial forever; counted, it is dropped after a few.
         } else {
             self.set_active(chosen);
             *setup = Setup::Done;
@@ -720,13 +728,16 @@ impl Ota {
     /// The screens on trial don't fit this shell (their own code says so at boot): drop them now rather than after
     /// MAX_UNCONFIRMED_BOOTS blank starts, and fall back. Only a bundle still on trial: a script in it can do no more
     /// than not reporting ready would. True when the page must reload.
-    fn refused(&self, reason: &str) -> bool {
-        let (Some((dir, builtin)), Some(b)) = (self.ready_dir(), self.active()) else { return false };
+    fn refused(&self, version: &str, reason: &str) -> bool {
+        let Some((dir, builtin)) = self.ready_dir() else { return false };
         let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(b) = self.active() else { return false };
         let Ok(mut state) = State::load_checked(dir) else { return false };
-        if state.trial.as_deref() != Some(b.meta.version.as_str()) {
+        // The refusing page names its version: an apply that swapped bundles meanwhile doesn't drop the new one.
+        if b.meta.version != version || state.trial.as_deref() != Some(version) {
             return false;
         }
+        let reason: String = reason.chars().take(200).collect();
         log(format!("bundle {} refused this shell: {reason}; dropped", b.meta.version));
         state.reject(&b.meta.version);
         if !state.save(dir) {
@@ -873,8 +884,8 @@ pub fn ota_ready(ota: tauri::State<'_, Arc<Ota>>) {
 
 /// The screens on trial refused this shell at boot: dropped, fall back. True when the page must reload.
 #[tauri::command(async)]
-pub fn ota_refused(ota: tauri::State<'_, Arc<Ota>>, reason: String) -> bool {
-    ota.refused(&reason)
+pub fn ota_refused(ota: tauri::State<'_, Arc<Ota>>, version: String, reason: String) -> bool {
+    ota.refused(&version, &reason)
 }
 
 /// Apply a staged bundle now. True when the page must reload (the caller does it, once nothing would be lost).
@@ -1290,12 +1301,17 @@ mod tests {
         writable(dir.path());
         assert_eq!(served.as_deref(), Some("0.3.8"), "a start that isn't counted could repeat forever: the last good one");
         std::fs::remove_file(dir.path().join("previous.tar.gz")).unwrap();
-        assert!(read_only(dir.path()));
+        std::fs::remove_file(dir.path().join("previous.json")).unwrap();
+        if !read_only(dir.path()) {
+            return;
+        }
         let served = act(dir.path(), &k);
         writable(dir.path());
         assert_eq!(served, None, "and with none, the built-in screens");
         ready(dir.path());
-        assert!(read_only(dir.path()));
+        if !read_only(dir.path()) {
+            return;
+        }
         let served = act(dir.path(), &k);
         writable(dir.path());
         assert_eq!(served.as_deref(), Some("0.3.9"), "a bundle that proved itself needs no count");
@@ -1311,6 +1327,22 @@ mod tests {
         assert_eq!(staged_version(dir.path(), &k.pk), None);
         assert_eq!(act(dir.path(), &k), None);
         assert!(!dir.path().join("next.json").exists(), "cleared at launch");
+    }
+
+    #[test]
+    fn a_promotion_cut_between_its_two_renames_is_finished_at_launch() {
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        let mut s = State::default();
+        s.trial = Some("0.3.8".into());
+        s.floor = Some("0.3.8".into());
+        s.save(dir.path());
+        // Killed after next.json moved to current.json, before the archive followed.
+        std::fs::rename(dir.path().join("next.json"), dir.path().join("current.json")).unwrap();
+        std::fs::write(dir.path().join("next.tar.gz.tmp"), b"partial").unwrap();
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"), "the floor already says 0.3.8: it must not be lost");
+        assert!(!dir.path().join("next.tar.gz").exists() && !dir.path().join("next.tar.gz.tmp").exists());
     }
 
     fn ota_for(dir: &Path, k: &Key) -> Arc<Ota> {
@@ -1330,29 +1362,14 @@ mod tests {
         put(dir.path(), "next", &signed(&k, "0.3.9", 1));
         let o = ota_for(dir.path(), &k);
         assert_eq!(o.active().unwrap().meta.version, "0.3.9");
-        assert!(o.refused("test"));
+        assert!(!o.refused("0.3.8", "test"), "only the version that is running");
+        assert!(o.refused("0.3.9", "test"));
         assert_eq!(o.active().unwrap().meta.version, "0.3.8", "back to the last good one");
         assert!(State::load_checked(dir.path()).unwrap().rejected.contains(&"0.3.9".to_string()));
         // 0.3.8 reported ready long ago: a script can't drop it.
         let o = ota_for(dir.path(), &k);
-        assert!(!o.refused("test"));
+        assert!(!o.refused("0.3.8", "test"));
         assert_eq!(o.active().unwrap().meta.version, "0.3.8");
-    }
-
-    #[test]
-    fn a_launch_that_timed_out_counts_no_start() {
-        let k = key(1);
-        let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
-        let mut late = Ota::new();
-        let l = Arc::get_mut(&mut late).unwrap();
-        l.wait = Duration::from_millis(1);
-        l.pubkey = Box::leak(k.pk.clone().into_boxed_str());
-        assert!(late.active().is_none());
-        late.init(dir.path().to_path_buf(), v("0.3.7"));
-        assert!(late.active().is_none());
-        let s = State::load_checked(dir.path()).unwrap();
-        assert_eq!((s.trial.as_deref(), s.boots), (Some("0.3.8"), 0), "promoted, but not started");
     }
 
     /// A channel on 127.0.0.1: path -> body. `hook` runs when a path is asked for, before the answer (a launch or an

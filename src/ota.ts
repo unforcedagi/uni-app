@@ -40,7 +40,7 @@ export async function otaBoot(reload = () => location.reload()): Promise<boolean
   if (s && refusesShell(s)) {
     const reason = `screens built for shell API ${SHELL_API}, shell has ${s.shell_api}`;
     console.warn(`${reason}: not starting`);
-    if (await invoke<boolean>("ota_refused", { reason }).catch(() => false)) reload();
+    if (s.active && await invoke<boolean>("ota_refused", { version: s.active.version, reason }).catch(() => false)) reload();
     return false;
   }
   return true;

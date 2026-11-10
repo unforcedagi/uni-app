@@ -147,7 +147,7 @@ command media_release(sha: String) -> Result<(), String>
 command open_link(app: tauri::AppHandle, url: String) -> Result<(), String>
 command ota::ota_apply(ota: tauri::State<'_, Arc<Ota>>) -> bool
 command ota::ota_ready(ota: tauri::State<'_, Arc<Ota>>)
-command ota::ota_refused(ota: tauri::State<'_, Arc<Ota>>, reason: String) -> bool
+command ota::ota_refused(ota: tauri::State<'_, Arc<Ota>>, version: String, reason: String) -> bool
 command ota::ota_status(app: tauri::AppHandle, ota: tauri::State<'_, Arc<Ota>>) -> Status
 command pair_source::pair_source_available() -> bool
 command relay_origin(app: tauri::AppHandle) -> String
