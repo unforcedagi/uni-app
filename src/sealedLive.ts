@@ -62,7 +62,7 @@ export function useSealedWaiting(opts: { enabled: boolean; synced: number; rooms
   useEffect(() => {
     if (!list.length) return;
     const next = Math.min(...list.map((w) => w.expires));
-    const t = window.setTimeout(read, Math.min(2 ** 31 - 1, Math.max(0, next * 1000 - Date.now()) + 500));
+    const t = window.setTimeout(() => read(), Math.min(2 ** 31 - 1, Math.max(0, next * 1000 - Date.now()) + 500));
     return () => window.clearTimeout(t);
   }, [list, read]);
   useEffect(() => {

@@ -1100,10 +1100,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const cold = roomsRef.current.length === 0;
     const poll = cold ? window.setInterval(() => { void loadRooms().catch(() => {}); setTick((n) => n + 1); }, 700) : 0;
     // (a retry keeps "Offline" and its reason up until it gets through: the line doesn't flap, and the alert isn't read out again each time)
-    if (!syncRetry.current.tries) { setStatus("Connecting…"); setError(null); }
+    const retrying = syncRetry.current.tries > 0;
+    if (!retrying) { setStatus("Connecting…"); setError(null); }
     try {
       const result = await invoke<SyncResult>("refresh");
-      if (syncRetry.current.tries) setError(null);
+      if (retrying) setError(null);
       setIdentity(result.pubkey);
       await loadRooms();
       const warnings = Object.entries(result.channel_errors).map(([id, reason]) => `${id.slice(0, 8)}: ${reason}`);
