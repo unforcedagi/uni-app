@@ -31,6 +31,12 @@ export const SCHEMA = {
     "kind": {"type": "string", "enum": ["do", "choose", "look", "tell"]},
     "last_step": {"type": "string"},
     "legacy_id": {"type": "string"},
+    "look_board": {"type": "string"},
+    "look_dropped_at": {"type": "date"},
+    "look_dropped_by": {"type": "string"},
+    "look_item": {"type": "string"},
+    "look_room": {"type": "string"},
+    "look_url": {"type": "string"},
     "needs_aaron": {"type": "boolean", "indexed": true},
     "needs_aaron_why": {"type": "string"},
     "next": {"type": "string"},
@@ -178,6 +184,12 @@ export type TaskMeta = {
   "kind"?: "do" | "choose" | "look" | "tell" | null;
   "last_step"?: string | null;
   "legacy_id"?: string | null;
+  "look_board"?: string | null;
+  "look_dropped_at"?: string | null;
+  "look_dropped_by"?: string | null;
+  "look_item"?: string | null;
+  "look_room"?: string | null;
+  "look_url"?: string | null;
   "needs_aaron"?: boolean | null;
   "needs_aaron_why"?: string | null;
   "next"?: string | null;
