@@ -437,20 +437,15 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                 let recorded = if unfinished(&b) {
                     true
                 } else {
-                    // Proved itself: reported ready, i.e. the state's trial doesn't name it.
-                    let current = slot_version(dir, "current", pubkey);
-                    let stepped_aside = match &current {
-                        None => {
-                            remove_slot(dir, "current");
-                            true
-                        }
-                        Some(v) if state.trial.as_deref() != Some(v.to_string().as_str()) => {
-                            move_slot(dir, "current", "previous")
-                        }
-                        Some(_) => {
-                            remove_slot(dir, "current");
-                            true
-                        }
+                    // The current bundle is kept as the fallback unless the state's trial names it (it never reported
+                    // ready). One whose channel file can't be read now is kept too: the fallback verifies it before use.
+                    let on_trial = slot_version(dir, "current", pubkey)
+                        .is_some_and(|v| state.trial.as_deref() == Some(v.to_string().as_str()));
+                    let stepped_aside = if !dir.join("current.tar.gz").exists() || on_trial {
+                        remove_slot(dir, "current");
+                        true
+                    } else {
+                        move_slot(dir, "current", "previous")
                     };
                     if !stepped_aside {
                         log(format!("could not keep the current bundle as the fallback; {} stays staged", b.meta.version));
@@ -516,25 +511,27 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
     if chosen.is_none() {
         if let Some((channel, archive)) = read_slot(dir, "previous") {
             match open(pubkey, &channel, &archive, builtin, shell_api) {
-                Ok(b) if move_slot(dir, "previous", "current") => {
-                    log(format!("back to the last good bundle {}", b.meta.version));
+                Ok(b) => {
+                    // Recorded, then moved (as a promotion): the trial is over (and a drop above is kept) before the
+                    // last good bundle moves back, so a kill mid-move leaves nothing stale for tidy() to trip on.
                     state.trial = None;
                     state.boots = 0;
-                    chosen = Some(b);
+                    if !state.save(dir) {
+                        log(format!("back to the last good bundle {}, served from where it is (the state can't be written)", b.meta.version));
+                        chosen = Some(b);
+                    } else if move_slot(dir, "previous", "current") {
+                        log(format!("back to the last good bundle {}", b.meta.version));
+                        chosen = Some(b);
+                    } else {
+                        remove_slot(dir, "previous");
+                    }
                 }
-                Ok(_) => remove_slot(dir, "previous"),
                 Err(e) => {
                     log(format!("last good bundle refused: {e}"));
                     remove_slot(dir, "previous");
                 }
             }
         }
-    }
-    // A trial that names no bundle being served (a kill cut a fallback short) is over: left set, it would make the bundle
-    // being served look unproven at the next promotion. Its version is at or below the floor, so it isn't fetched again.
-    if state.trial.is_some() && chosen.as_ref().map(|b| b.meta.version.as_str()) != state.trial.as_deref() {
-        state.trial = None;
-        state.boots = 0;
     }
     if !state.save(dir) {
         if let Some(b) = chosen.as_ref().filter(|b| state.trial.as_deref() == Some(b.meta.version.as_str())) {
@@ -654,6 +651,7 @@ pub async fn check(
         std::fs::write(dir.join(format!("next.{ext}.tmp")), bytes).map_err(|e| e.to_string())?;
     }
     // The archive lands last: a launch that sees next.tar.gz also sees its channel file.
+    remove_slot(dir, "next"); // an older staged bundle: a cut between the renames then leaves a half tidy() can see
     for ext in PARTS {
         std::fs::rename(dir.join(format!("next.{ext}.tmp")), dir.join(format!("next.{ext}"))).map_err(|e| e.to_string())?;
     }
@@ -1410,21 +1408,34 @@ mod tests {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
         put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
-        // 0.3.9 never started three times; dropped, and killed after previous.json moved to current.json, before the
-        // archive followed and before the state recorded the drop.
+        // 0.3.9 never started three times and was dropped (recorded first), then the move back was killed after
+        // previous.json became current.json, before the archive followed.
         let mut s = State::default();
-        s.trial = Some("0.3.9".into());
-        s.boots = MAX_UNCONFIRMED_BOOTS;
+        s.rejected = vec!["0.3.9".into()];
         s.floor = Some("0.3.9".into());
         s.issued = T0 + 9 * 3600;
         s.save(dir.path());
         std::fs::rename(dir.path().join("previous.json"), dir.path().join("current.json")).unwrap();
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
-        assert_eq!(State::load_checked(dir.path()).unwrap().trial, None, "0.3.9's trial is over");
         // The next promotion keeps 0.3.8 as the fallback.
         put(dir.path(), "next", &signed(&k, "0.3.10", 1));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.10"));
         assert!(dir.path().join("previous.tar.gz").exists(), "0.3.8 kept as the last good bundle");
+    }
+
+    #[test]
+    fn the_current_bundle_is_kept_as_the_fallback_unless_it_is_the_one_on_trial() {
+        let k = key(1);
+        for (trial, kept) in [(None, true), (Some("0.3.7"), true), (Some("0.3.8"), false)] {
+            let dir = tempfile::tempdir().unwrap();
+            put(dir.path(), "current", &signed(&k, "0.3.8", 1));
+            let mut s = State::default();
+            s.trial = trial.map(str::to_string);
+            s.save(dir.path());
+            put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+            assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
+            assert_eq!(dir.path().join("previous.tar.gz").exists(), kept, "trial {trial:?}");
+        }
     }
 
     fn ota_for(dir: &Path, k: &Key) -> Arc<Ota> {

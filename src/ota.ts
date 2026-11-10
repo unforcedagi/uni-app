@@ -37,10 +37,11 @@ export function otaStatus(): Promise<OtaStatus | null> {
  *  to drop them (it does only while they are on trial) and go back to the last good screens. */
 export async function otaBoot(reload = () => location.reload()): Promise<boolean> {
   const s = await otaStatus();
-  if (s && refusesShell(s)) {
+  const active = s?.active;
+  if (s && active && refusesShell(s)) {
     const reason = `screens built for shell API ${SHELL_API}, shell has ${s.shell_api}`;
     console.warn(`${reason}: not starting`);
-    if (s.active && await invoke<boolean>("ota_refused", { version: s.active.version, reason }).catch(() => false)) reload();
+    if (await invoke<boolean>("ota_refused", { version: active.version, reason }).catch(() => false)) reload();
     return false;
   }
   return true;
