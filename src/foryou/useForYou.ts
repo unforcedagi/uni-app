@@ -5,8 +5,9 @@
 // device until it goes (one with no room named is let go after a day, like a sent one).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { allPages, vaultTasks } from "../areas/vaultTasks";
+import { vaultTasks } from "../areas/vaultTasks";
 import type { RawNote, Task } from "../areas/taskCore";
+import { POLL_MS, reader } from "../vault/reader";
 import { activeProfile } from "../areas/profile";
 import { findUniMember } from "../uniActions";
 import { relayAccepted } from "../voiceOutbox";
@@ -19,7 +20,6 @@ export type RoomRef = { id: string; name: string };
 type Entry = Answered & { channel: string | null; root: string | null; body: string };
 
 const DAY = 86_400_000;
-const POLL_MS = 60_000;
 const lookedKey = (owner: string) => `uni.foryou.looked.v1:${owner}`;
 const answeredKey = (owner: string) => `uni.foryou.answered.v1:${owner}`;
 const read = <T,>(key: string, fallback: T): T => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) as T : fallback; } catch { return fallback; } };
@@ -81,19 +81,15 @@ export function useForYou(o: { identity: string | null; vault: string; tasks: re
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const now = Date.now();
 
+  // T-335 one reader: the cards come from the app's one reader, kept fresh by its one poller (shared with the tasks' read of the same tick)
   const readCards = useCallback(async () => {
     if (!enabled) return;
-    try {
-      const { rows } = await allPages((offset) => invoke("vault_query", { vault: o.vault, tag: "card", includeContent: false, limit: 200, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>);
-      setCards(rows); setCardsFailed(false);
-    } catch { setCardsFailed(true); }
+    try { setCards((await reader.cards(o.vault)).rows as RawNote[]); setCardsFailed(false); }
+    catch { setCardsFailed(true); }
   }, [enabled, o.vault]);
   useEffect(() => {
     void readCards();
-    const t = window.setInterval(() => void readCards(), POLL_MS);
-    const onFocus = () => void readCards();
-    window.addEventListener("focus", onFocus);
-    return () => { window.clearInterval(t); window.removeEventListener("focus", onFocus); };
+    return reader.onPoll(() => void readCards());
   }, [readCards]);
   useEffect(() => {
     if (!enabled) return;

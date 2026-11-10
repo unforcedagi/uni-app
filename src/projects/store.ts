@@ -14,7 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useSyncExternalStore } from "react";
 import { activeProfile, onVaultChange } from "../areas/profile";
 import type { RawNote } from "../areas/taskCore";
-import { allPages } from "../areas/vaultTasks";
+import { POLL_MS, reader } from "../vault/reader";
 import { freshen, workFrom, type LiveWork, type Sources } from "./live";
 import { isHome } from "./model";
 import type { Action } from "./actions";
@@ -31,10 +31,9 @@ export type WorkState = {
 };
 
 const EMPTY: LiveWork = { areas: [], projects: [], sessions: [], gaps: [] };
-/** How often the work is read again while something shows it (and the window is visible). */
-export const REFRESH_MS = 30_000;
-/** A read older than this (or a failed one) is "as of" its time, and the working counts say so. */
-export const FRESH_MS = 3 * REFRESH_MS;
+/** The work is read again on the app's one poller (src/vault/reader.ts: a minute apart while the window is visible). A read older than
+ *  this (two ticks), or a failed one, is "as of" its time, and the working counts say so. */
+export const FRESH_MS = 2 * POLL_MS;
 /** How often what is on screen is aged by the clock (working → silent), between reads too. */
 const CLOCK_MS = 60_000;
 /** Tasks change slowly and only name sessions: read at most this often. */
@@ -43,9 +42,6 @@ const TASKS_MS = 5 * 60_000;
 const ASKED_MS = 15 * 60_000;
 /** The device keeps the last read's sessions from this far back (all live ones), so a cold start paints at once. */
 const KEEP_MS = 30 * 86_400_000;
-const DAY = 86_400_000;
-/** Run notes are read in these windows of `started_at` (days back, newest first), plus every one still marked running. */
-const RUN_WINDOWS: readonly [number, number][] = [[0, 2], [2, 7], [7, 21], [21, 60]];
 
 const BLANK: WorkState = { work: EMPTY, ready: false, error: null, at: null, partial: [], asked: new Map() };
 let state: WorkState = BLANK;
@@ -92,21 +88,6 @@ function dropCaches(keep: string | null = null) {
   try { for (const k of Object.keys(localStorage)) if (k.startsWith(CACHE_PREFIX) && k !== keep) localStorage.removeItem(k); } catch { /* private storage */ }
 }
 
-const page = (vault: string, tag: string) => (offset: number) => invoke("vault_query", { vault, tag, includeContent: false, limit: 200, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>;
-const pageWhere = (vault: string, tag: string, metadata: Record<string, unknown>) => (offset: number) => invoke("vault_query_meta", { vault, tag, metadata, limit: 200, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>;
-/** The runs that started in the last 60 days, a window at a time (newest first), and every one still marked running. */
-async function readRuns(vault: string, at: number): Promise<{ rows: RawNote[]; partial: string[] }> {
-  const iso = (days: number) => new Date(at - days * DAY).toISOString();
-  const [running, ...windows] = await Promise.all([
-    allPages(pageWhere(vault, "run", { state: { eq: "running" } })),
-    ...RUN_WINDOWS.map(([to, from]) => allPages(pageWhere(vault, "run", { started_at: to === 0 ? { gte: iso(from) } : { gte: iso(from), lt: iso(to) } }))),
-  ]);
-  const seen = new Set<unknown>();
-  const rows = [running, ...windows].flatMap((r) => r.rows).filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
-  const partial = !running.complete || !windows[0].complete ? ["Some sessions aren't loaded"] : windows.some((w) => !w.complete) ? ["Some older sessions aren't loaded"] : [];
-  return { rows, partial };
-}
-
 const taskIdIn = (path: unknown) => (typeof path === "string" ? /^Tasks\/(T-\d+[a-z]?)\b/i.exec(path)?.[1]?.toUpperCase() ?? null : null);
 /** At most this many tasks are looked up one by one in a read (the rest wait for the next read, and are counted as not placed). */
 const FILL_MAX = 40;
@@ -139,13 +120,15 @@ async function fillTasks(vault: string, runs: readonly RawNote[], nodes: readonl
   return { rows, missing: count(ids.filter((id) => !found.has(id))) };
 }
 
-/** Reads the work again (one at a time; a call while a read is out waits for it). A failed read keeps what was shown and says so. */
-export function refreshWork(): Promise<void> {
+/** Reads the work again (one at a time; a call while a read is out waits for it). A failed read keeps what was shown and says so.
+ *  `fromVault` (the default: an action, a new owner, a test): from the vault; the poller's tick passes false and shares the tick's reads. */
+export function refreshWork(fromVault = true): Promise<void> {
   const vault = activeProfile().vault;
   const owner = ownerOf(identity, vault);
   if (owner !== loadedFor) adopt(owner);
   if (!owner) return Promise.resolve();
   if (inflight) return inflight;
+  if (fromVault) reader.invalidate();
   const mine = generation;
   // dropped if Forget, another identity or another vault came since this read began (checked again before anything is shown or kept)
   const current = () => mine === generation && currentOwner() === owner;
@@ -154,9 +137,10 @@ export function refreshWork(): Promise<void> {
     try {
       const fresh = !tasks || Date.now() - tasks.at > TASKS_MS;
       const t0 = Date.now();
+      // T-335 one reader: the nodes and the runs are the same reads the tasks and Running make in this tick (shared, one call each)
       const [nodes, runs, taskRead] = await Promise.all([
-        allPages(page(vault, "node")), readRuns(vault, t0),
-        fresh ? allPages(page(vault, "task")).then((r) => ({ rows: r.rows, whole: r.complete }), () => ({ rows: tasks?.rows ?? [], whole: false }))
+        reader.nodes(vault), reader.runs(vault),
+        fresh ? reader.allTasks(vault).then((r) => ({ rows: r.rows as RawNote[], whole: r.complete }), () => ({ rows: tasks?.rows ?? [], whole: false }))
           : Promise.resolve({ rows: tasks!.rows, whole: tasks!.whole }),
       ]);
       // Forget, or another identity or vault, since this read began: its answer is not this owner's, so it is dropped
@@ -190,6 +174,8 @@ export function refreshWork(): Promise<void> {
 /** The work of a new owner (or none): what this device kept for that owner, never another's. Reads still out are dropped. */
 function adopt(owner: string | null, notify = true) {
   generation++;
+  // another owner (identity or vault): nothing read for the last one is shared with this one's reads
+  reader.invalidate();
   loadedFor = owner; tasks = null; inflight = null; lastRead = null;
   // T-304: a session's steps are the same owner's, and go with the work
   setFeedOwner(owner, owner ? activeProfile().vault : "");
@@ -237,6 +223,7 @@ export function setWorkRooms(rooms: readonly { id: string; name: string }[] | nu
 
 /** Forget this device key: the device copies (every owner's), the work in memory, the pending asks, and any read still out. */
 export function forgetWork() {
+  reader.forget();
   identity = null;
   hubRooms = null;
   adopt(null);
@@ -287,9 +274,9 @@ const get = () => (loadedFor === currentOwner() ? state : NONE);
 /** What the screen would see now (for code outside React, and the store's own test). */
 export const workSnapshot = (): WorkState => get();
 let users = 0;
-let timer: ReturnType<typeof setInterval> | null = null;
+let stopPoll: (() => void) | null = null;
 let clock: ReturnType<typeof setInterval> | null = null;
-const onVisible = () => { if (document.visibilityState === "visible" && (!state.at || state.error || Date.now() - state.at > REFRESH_MS / 2)) void refreshWork(); };
+
 /** Ages what is on screen by the clock (a session no one has heard from stops counting as working), and re-renders "as of". */
 const tick = () => set({ work: freshen(state.work) });
 
@@ -298,18 +285,15 @@ export function useWork(): WorkState {
   useEffect(() => {
     if (users++ === 0) {
       void refreshWork();
-      timer = setInterval(() => { if (document.visibilityState === "visible") void refreshWork(); }, REFRESH_MS);
+      // the app's one poller (and coming back to the window) reads it again
+      stopPoll = reader.onPoll(() => void refreshWork(false));
       clock = setInterval(tick, CLOCK_MS);
-      document.addEventListener("visibilitychange", onVisible);
-      window.addEventListener("focus", onVisible);
     }
     return () => {
       if (--users === 0) {
-        if (timer) clearInterval(timer);
+        stopPoll?.(); stopPoll = null;
         if (clock) clearInterval(clock);
-        timer = clock = null;
-        document.removeEventListener("visibilitychange", onVisible);
-        window.removeEventListener("focus", onVisible);
+        clock = null;
       }
     };
   }, []);

@@ -6,7 +6,7 @@ const daylight = { browserName: 'chromium' as const, viewport: { width: 828, hei
 const dist = process.env.FORYOU_DIST || 'dist-foryou';
 export default defineConfig({
   outputDir: 'test-results/foryou',
-  testDir: './scripts/browser', testMatch: /(forYou|homeLayout|cardView)\.spec\.ts$/, reporter: 'list', timeout: 60_000, expect: { timeout: 10_000 }, workers: 3, fullyParallel: true,
+  testDir: './scripts/browser', testMatch: /(forYou|homeLayout|cardView|pollCount)\.spec\.ts$/, reporter: 'list', timeout: 60_000, expect: { timeout: 10_000 }, workers: 3, fullyParallel: true,
   use: { baseURL: `http://127.0.0.1:${port}`, colorScheme: 'light', reducedMotion: 'reduce', screenshot: 'only-on-failure',
     launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] } },
   projects: [

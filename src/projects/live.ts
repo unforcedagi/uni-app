@@ -11,6 +11,7 @@
 // - A run touching a private place by any clue (node, task's node, folder, room id or name) is the private place's, whatever public clue it
 //   also carries: it goes to the private area, or (with none) to Unfiled with none of its words. The app's own private-place rules decide.
 import type { RawNote } from "../areas/taskCore.ts";
+import { metaOf } from "../vault/reader.ts";
 import { parseArea, parseProject, type Area as TreeNode } from "../areas/areasCore.ts";
 import { buildTree } from "../areas/treeCore.ts";
 import { isPrivateName, isPrivatePath, runIsPrivate } from "../areas/treeRooms.ts";
@@ -26,7 +27,8 @@ export type Sources = { nodes: readonly RawNote[]; runs: readonly RawNote[]; tas
   /** The rooms the account has, by id and name: a run note may hold only a room's id, and a node may hold only its name. Left out: not read yet. Empty: it has none. */ rooms?: readonly { id: string; name: string }[] | null };
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
-const meta = (n: RawNote): Record<string, unknown> => (n.metadata && typeof n.metadata === "object" ? (n.metadata as Record<string, unknown>) : {});
+/** The work view reads nodes, runs and tasks: their metadata as the vault declares those kinds (src/vault/reader.ts). */
+const meta = (n: RawNote) => metaOf(n, "node", "run", "task");
 const tagsOf = (n: RawNote): string[] => (Array.isArray(n.tags) ? n.tags.filter((t): t is string => typeof t === "string") : []);
 const time = (v: unknown): number | null => { const s = str(v); const t = s ? Date.parse(s) : NaN; return Number.isFinite(t) ? t : null; };
 const lastName = (path: string) => path.split("/").pop() ?? path;

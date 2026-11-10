@@ -4,6 +4,7 @@ import { vaultTasks, type AskRead } from "./vaultTasks";
 import { localDay } from "./simpleCore";
 import { ROOT } from "./treeCore";
 import { shouldReload } from "./pathCache";
+import { reader } from "../vault/reader";
 import { useVaultProfile } from "./ProfileContext";
 import { parseDrafts, parseRuns } from "./steerCore";
 import { activeProfile } from "./profile";
@@ -17,8 +18,7 @@ export type TaskAction = "done" | "archive" | "snooze";
 export type ActResult = { ok: true } | { ok: false; kind: FailureKind | "refused"; message: string };
 export type Undo = { id: string; label: string; run: () => Promise<void> };
 export const UNDO_MS = 5000;
-/** How often an open window re-reads the tasks, and how stale a list may be when the window or a room is opened. */
-export const POLL_MS = 60_000;
+/** How stale a list may be when a room is opened (the window's own re-reads are the one poller's: src/vault/reader.ts). */
 export const FOCUS_GAP_MS = 10_000;
 /** r19: the event a row's or a sheet's Retry sends ("Couldn't check · Retry"): every open list reads its sources again. */
 export const RECHECK = "uni:recheck";
@@ -36,7 +36,7 @@ type Memory = { owner: string; tree: (TaskTree & { truncated: boolean }) | null;
   checks: Map<string, CheckState> | null };
 const fresh = (owner: string): Memory => ({ owner, tree: null, tasks: new Map(), at: null, runs: [], drafts: [], closed: [], closedAt: 0, activity: { ready: false, error: null, lastOk: null }, checks: null });
 let memory: Memory = fresh("");
-export function forgetTasks() { memory = fresh(""); }
+export function forgetTasks() { memory = fresh(""); reader.forget(); }
 /** Forget on the device too (the user's Forget): the saved list goes with the key. */
 export function forgetSavedTasks() { forgetTasks(); savedTasks.clear(); forgetTitles(); vaultTasks.forgetKept(); }
 /** The list kept on the device for this identity and vault (r16), for Uni's level (the whole tree's list). */
@@ -91,7 +91,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const epoch = useRef(0);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const refresh = useCallback(() => setN((x) => x + 1), []);
+  /** Read again now, from the vault (after a write, a Retry, a room opened): never what this tick already read. */
+  const refresh = useCallback(() => { reader.invalidate(); setN((x) => x + 1); }, []);
 
   useEffect(() => {
     if (!identity) return;
@@ -129,7 +130,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     // Running and Drafts (Uni's level reads them for the whole tree): their own reads, never holding the list back (r16). A failed read keeps
     // what was read before and says so; with nothing read yet the work view says it couldn't check, never "nothing is moving".
     if (nodePath === "") {
-      void Promise.all([vaultTasks.loadTagged("run"), vaultTasks.loadTagged("draft")]).then(([runs, drafts]) => {
+      void Promise.all([vaultTasks.loadRuns(), vaultTasks.loadDrafts()]).then(([runs, drafts]) => {
         if (!current() || memory !== mem) return;
         if (runs) { mem.runs = runs; setRawRuns(runs); }
         if (drafts) { mem.drafts = drafts; setRawDrafts(drafts); }
@@ -186,20 +187,16 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     })().catch((e) => { if (current()) setError(String(e)); }).finally(() => { clearTimeout(slowTimer); if (current()) { setLoading(false); setSlow(false); } });
     return () => { live = false; clearTimeout(slowTimer); };
   }, [identity, vault, nodePath, n]); // eslint-disable-line react-hooks/exhaustive-deps
+  // T-335 one reader: the list is kept fresh by the app's one poller (src/vault/reader.ts: a minute apart while the window is visible, and on
+  // coming back to it), so a task finished elsewhere (Uni in the vault, another device) leaves the feed on its own. Its reads are shared with
+  // the rest of the tick. The local date is read again on coming back too: a snooze ends at midnight even if the app stayed open.
   useEffect(() => {
-    const visible = () => {
-      if (document.visibilityState !== "visible") return;
-      setDay(dayOf(new Date()));
-      if (shouldReload(lastLoad.current, Date.now())) refresh();
-    };
-    // Coming back to the window re-reads what is stale; and while it stays open the list is re-read every minute, so a task finished
-    // elsewhere (Uni in the vault, another device) leaves the needs-you feed on its own.
-    const focus = () => { setDay(dayOf(new Date())); if (shouldReload(lastLoad.current, Date.now(), FOCUS_GAP_MS)) refresh(); };
-    const tick = setInterval(() => { if (document.visibilityState === "visible" && shouldReload(lastLoad.current, Date.now(), POLL_MS - 1000)) refresh(); }, POLL_MS);
-    document.addEventListener("visibilitychange", visible);
-    window.addEventListener("focus", focus);
-    return () => { clearInterval(tick); document.removeEventListener("visibilitychange", visible); window.removeEventListener("focus", focus); };
-  }, [refresh]);
+    const today = () => { if (document.visibilityState === "visible") setDay(dayOf(new Date())); };
+    const stop = reader.onPoll(() => { setDay(dayOf(new Date())); setN((x) => x + 1); });
+    document.addEventListener("visibilitychange", today);
+    window.addEventListener("focus", today);
+    return () => { stop(); document.removeEventListener("visibilitychange", today); window.removeEventListener("focus", today); };
+  }, []);
   // r19: "Couldn't check · Retry" on a row or a sheet: the failed checks read as checking again, and the list (and every source) is read again
   useEffect(() => {
     const again = () => {

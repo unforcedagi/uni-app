@@ -1,6 +1,7 @@
 // Tasks as Parachute objects (pure, unit-tested in scripts/tasks.test.ts): parse `task` and `decision` notes, build the node tree
 // from `node` notes, take a subtree, group by owner, roll counts up the tree. Nothing here fetches.
 import { ROOT } from "./treeCore.ts";
+import { metaOf } from "../vault/reader.ts";
 import { refKey, stripExt } from "./refs.ts";
 import { linkGraph, linksOf } from "./nodeLinks.ts";
 import { isAreaPath } from "./areasCore.ts";
@@ -119,7 +120,7 @@ export function parseNodes(notes: readonly RawNote[], rootTag: string = activePr
     const id = str(n.id), path = str(n.path) && stripExt(str(n.path)!);
     if (!id || !path) continue;
     const tags = Array.isArray(n.tags) ? n.tags : [];
-    const m = (n.metadata && typeof n.metadata === "object" ? n.metadata : {}) as Record<string, unknown>;
+    const m = metaOf(n, "node");
     const isRoot = tags.includes(rootTag);
     if (isRoot) rootPath = path;
     if (/\/(Brief|app)$/.test(path)) continue;
@@ -240,7 +241,7 @@ export function askSig(next: unknown, detail: unknown): string {
 export function parseTask(n: RawNote, tree: TaskTree): Task | null {
   const id = str(n.id), path = str(n.path) && stripExt(str(n.path)!);
   if (!id || !path) return null;
-  const m = (n.metadata && typeof n.metadata === "object" ? n.metadata : {}) as Record<string, unknown>;
+  const m = metaOf(n, "task", "decision");
   // 0.3.0: a new decision is one note tagged `task` and `decision` (closed by its answer, state -> done): a task; an old `Decisions/`
   // note is tagged `decision` only (open -> decided)
   const kind = Array.isArray(n.tags) && n.tags.includes("decision") && !n.tags.includes("task") ? "decision" : "task";

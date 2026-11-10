@@ -2,7 +2,7 @@
 // vault call: `state_transition` for state (an atomic compare-and-set), a guarded metadata merge for snooze.
 // Nothing is cached here beyond one session's memory; the node view reconciles with each server answer.
 import { invoke } from "@tauri-apps/api/core";
-import { buildTaskTree, isTaskRow, failureKind, groupOf, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
+import { buildTaskTree, isTaskRow, failureKind, groupOf, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { ROOT } from "./treeCore.ts";
 import { taskTitle } from "./whereCore.ts";
 import { askFromContent, askOrder, closedBy, hasDeps, isListLine, linkedRefs, questionCount, questionsFrom, refName, stepText, taskDeps, wouldNeedYou, type Assessed, type CheckRecord, type CheckState, type SourceRef, type SourceStamp } from "./simpleCore.ts";
@@ -10,32 +10,13 @@ import { askFromContent, askOrder, closedBy, hasDeps, isListLine, linkedRefs, qu
 /** A supporting note couldn't be read (r19): the row says "Couldn't check · Retry", never "nothing there". */
 export class Unavailable extends Error {}
 import { activeProfile } from "./profile.ts";
+import { allPages, createReader, reader as appReader, type Reader } from "../vault/reader.ts";
 
 export type Call = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
 const LIMIT = 200;
-/** A list longer than this many pages (2000 notes) is read no further and said to be incomplete. */
-const MAX_PAGES = 10;
 
-/**
- * Read a list page by page (200 at a time) until a short page. `complete` only when that last page came back short: a list that stops at
- * MAX_PAGES, or a vault that ignores `offset` (a page with nothing new), is incomplete, never taken for the whole.
- */
-export async function allPages(page: (offset: number) => Promise<RawNote[]>): Promise<{ rows: RawNote[]; complete: boolean }> {
-  const rows: RawNote[] = []; const seen = new Set<string>();
-  for (let i = 0; i < MAX_PAGES; i++) {
-    const got = await page(i * LIMIT);
-    let fresh = 0;
-    for (const r of Array.isArray(got) ? got : []) {
-      const id = typeof r.id === "string" ? r.id : null;
-      if (id && seen.has(id)) continue;
-      if (id) seen.add(id);
-      rows.push(r); fresh++;
-    }
-    if (!Array.isArray(got) || got.length < LIMIT) return { rows, complete: true };
-    if (!fresh) return { rows, complete: false };
-  }
-  return { rows, complete: false };
-}
+// (the paging read lives with the one reader now: src/vault/reader.ts)
+export { allPages };
 /** Reads of supporting notes and questions run this many at a time (r20: bounded in concurrency, never in coverage: the whole queue is read). */
 const ASK_PARALLEL = 6;
 const ASK_KEEP = 150;
@@ -62,6 +43,8 @@ export function changedBy(t: Pick<Task, "lastUpdatedBy" | "lastUpdatedVia">, me:
   return t.lastUpdatedVia === "mcp" ? "Uni" : null;
 }
 const ok = (note: unknown): WriteResult => {
+  // a write landed: the next read of any list goes to the vault, not to what this tick already read
+  appReader.invalidate();
   const st = stamp(note);
   if (st.lastUpdatedBy) try { localStorage.setItem(WRITER_KEY, st.lastUpdatedBy); } catch { /* this session only */ }
   return { ok: true, ...st };
@@ -76,11 +59,15 @@ const stamp = (note: unknown) => {
 };
 
 /** `vault` is a name, or a function read on every call (the singleton follows the selected vault's profile). */
-export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), vaultOf: string | (() => string) = () => activeProfile().vault) {
+/** `call`: the vault door (a test's fake); with none, the app's door and its one reader (shared reads, one poller). */
+export function createVaultTasks(callIn?: Call, vaultOf: string | (() => string) = () => activeProfile().vault) {
+  const call: Call = callIn ?? ((cmd, args) => invoke(cmd, args));
+  // a test's own door gets its own reader, every read going to it (the app's reader shares a tick's reads: src/vault/reader.ts)
+  const read: Reader = callIn ? createReader(callIn, undefined, { share: false }) : appReader;
   const name = () => (typeof vaultOf === "function" ? vaultOf() : vaultOf);
   /** The whole tree, metadata only: every `node` note (areas, projects, the Uni root). */
   async function loadTree(): Promise<TaskTree & { truncated: boolean }> {
-    const { rows, complete } = await allPages((offset) => call("vault_query", { vault: name(), tag: "node", includeContent: false, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>);
+    const { rows, complete } = await read.nodes(name());
     const { nodes, rootPath } = parseNodes(rows);
     return { ...buildTaskTree(nodes, rootPath), truncated: !complete };
   }
@@ -94,16 +81,15 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   async function loadClosed(treeIn: TaskTree | Promise<TaskTree>, since: string): Promise<Task[] | null> {
     try {
       const t = await treeIn;
-      const { rows } = await allPages((offset) => call("vault_query_meta", { vault: name(), tag: "task", metadata: { state: { in: ["done", "archived"] } }, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>);
+      const { rows } = await read.closedTasks(name());
       return rows.filter(isTaskRow).map((n) => parseTask(n, t)).filter((x): x is Task => !!x && (x.state === "done" || x.state === "archived") && !!x.closed && x.closed.slice(0, 10) >= since);
     } catch { return null; }
   }
 
-  /** Every note with `tag`, metadata only (the dispatch ledger `run`, the `draft` notes). A vault with none, or one that refuses, reads as empty: these are extras on the page. */
-  async function loadTagged(tag: string): Promise<RawNote[] | null> {
-    // null = the read failed: the caller keeps what it had rather than wiping Running/Drafts on a transient error
-    try { return (await allPages((offset) => call("vault_query", { vault: name(), tag, includeContent: false, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>)).rows; } catch { return null; }
-  }
+  /** The runs that matter now (every running one, and those started in the last 60 days) and the `draft` notes, metadata only: extras on the
+   *  page. null = the read failed: the caller keeps what it had rather than wiping Running/Drafts on a transient error. */
+  async function loadRuns(): Promise<RawNote[] | null> { try { return (await read.runs(name())).rows; } catch { return null; } }
+  async function loadDrafts(): Promise<RawNote[] | null> { try { return (await read.drafts(name())).rows; } catch { return null; } }
 
   /** Full questions already read, by note id, with the note's `updatedAt` they were read at: a refresh shows them at once, and so does the next
    *  launch (kept on the device, per identity, newest 150). v2 (r14): v1 kept 280-character previews, which are never taken for the question. */
@@ -178,12 +164,8 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
       if (!known.length) return { tasks: [], truncated: false };
       keys = nodeFilterKeys(tree, known);
     }
-    const where = keys ? { node: { in: keys } } : {};
     // past the first 200: every page is read before the list is taken for the whole
-    const [tasks, decisions] = await Promise.all([
-      allPages((offset) => call("vault_query_meta", { vault: name(), tag: "task", metadata: { ...where, state: { in: [...LIVE_STATES] } }, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>),
-      allPages((offset) => call("vault_query_meta", { vault: name(), tag: "decision", metadata: { ...where, state: { in: ["open"] } }, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>),
-    ]);
+    const [tasks, decisions] = await Promise.all([read.liveTasks(name(), keys), read.openDecisions(name(), keys)]);
     // (0.3.0: a `tag: task` page may hold old decision-only notes once `decision` is a child of `task`; they come with the decisions)
     return finish(tasks.rows.filter(isTaskRow), decisions.rows, !tasks.complete || !decisions.complete);
   }
@@ -399,7 +381,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     askCache.clear(); checkCache.clear(); askOwner = ""; checkOwner = "\u0000";
     try { for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && /^uni\.(asks|checks|support)\.v\d+:/.test(k)) localStorage.removeItem(k); } } catch { /* nothing kept */ }
   }
-  return { prioritize, forgetKept, setAskOwner, loadTree, loadTagged, loadClosed, loadAsks, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, answer, seen, decide, snooze, setPriority };
+  return { prioritize, forgetKept, setAskOwner, loadTree, loadRuns, loadDrafts, loadClosed, loadAsks, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, answer, seen, decide, snooze, setPriority };
 }
 
 export const vaultTasks = createVaultTasks();

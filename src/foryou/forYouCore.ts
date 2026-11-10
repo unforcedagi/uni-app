@@ -14,6 +14,8 @@
 // one quiet line, "N waiting on their rooms", never listed. The daily read (uni-tasks for_you.py) and the rooms' handback use the same rule.
 
 /** A vault note as the query returns it (metadata only). */
+import { metaOf } from "../vault/reader.ts";
+
 export type Note = { id?: unknown; path?: unknown; tags?: unknown; metadata?: unknown; updatedAt?: unknown; createdAt?: unknown };
 /** Where a node sits: its area's name, the node's room name (no `#`), and whether it is in a private area. */
 export type Place = { area: string | null; room: string | null; private: boolean; /** the area's node path (the home's door it belongs to) */ areaPath?: string | null;
@@ -113,7 +115,8 @@ const DAY = 86_400_000;
 export const FRESH_DAYS = 7;
 const SKEW = 5 * 60_000;
 const s = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
-const meta = (n: Note): Record<string, unknown> => (n.metadata && typeof n.metadata === "object" ? n.metadata as Record<string, unknown> : {});
+/** For you reads asks (tasks, decisions) and cards: their metadata as the vault declares those kinds (src/vault/reader.ts). */
+const meta = (n: Note) => metaOf(n, "task", "decision", "card");
 const tagsOf = (n: Note): string[] => (Array.isArray(n.tags) ? n.tags.filter((t): t is string => typeof t === "string") : []);
 /** `[[Cards/A/B]]`, `Cards/A/B.md` or `Cards/A/B`: the path. */
 export const refPath = (v: unknown): string | null => { const r = s(v); return r ? r.replace(/^\[\[|\]\]$/g, "").replace(/\|.*$/, "").replace(/\.md$/i, "") : null; };

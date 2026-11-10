@@ -1,12 +1,14 @@
 // "Steer, don't chat" (T-122, pure, unit-tested in scripts/steer.test.ts): what a steer changed (the diff between the load before it and
 // the load after), the Running ledger and Drafts read from their notes. Nothing here fetches.
 import { ROOT } from "./treeCore.ts";
+import { metaOf } from "../vault/reader.ts";
 import { refKey, stripExt } from "./refs.ts";
 import { subtreePaths, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { redactRaw } from "../projects/sessionWords.ts";
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
-const meta = (n: RawNote) => (n.metadata && typeof n.metadata === "object" ? n.metadata : {}) as Record<string, unknown>;
+/** Running reads runs and Drafts reads drafts: their metadata as the vault declares those kinds (src/vault/reader.ts). */
+const meta = (n: RawNote) => metaOf(n, "run", "draft");
 const leaf = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 
 // ---------------------------------------------------------------------------------------------- the effect of a steer
