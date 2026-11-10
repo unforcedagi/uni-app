@@ -3,7 +3,8 @@
 //   - every command the screens can invoke (tauri::generate_handler! in src-tauri/src/lib.rs), with its arguments and
 //     result as written (names and types; a change inside a returned struct still needs a bump by hand);
 //   - the plugins and URI schemes the shell registers;
-//   - the capability files (what the screens are allowed to call), by hash.
+//   - the capability files (what the screens are allowed to call), by hash;
+//   - the Android plugins' commands and argument classes (Kotlin), and the tauri and tauri-plugin-* crate versions.
 // src-tauri/shell-api.txt records this text for each API number. scripts/shellApi.test.ts fails when today's text
 // differs from the block for SHELL_API, or when a block an earlier release shipped was edited instead of a new number.
 //   node --experimental-strip-types scripts/shellApi.ts   prints today's block, for a new number's entry
@@ -62,6 +63,17 @@ export function shellContract(root: string): string[] {
   }
   for (const m of lib.matchAll(/\.plugin\(/g)) lines.push(`plugin ${collapse(balanced(lib, m.index + m[0].length - 1).slice(1, -1))}`);
   for (const m of lib.matchAll(/register_[a-z_]*uri_scheme_protocol\(\s*"([^"]+)"/g)) lines.push(`protocol ${m[1]}`);
+  // The Android plugins' commands and argument classes (Kotlin), as written.
+  const kt = join(root, "src-tauri/gen/android/app/src/main/java/org/unforced/uni");
+  for (const f of readdirSync(kt).filter((f) => f.endsWith("Plugin.kt")).sort()) {
+    const src = readFileSync(join(kt, f), "utf8");
+    for (const m of src.matchAll(/@Command\s+fun\s+(\w+)/g)) lines.push(`kotlin ${f} command ${m[1]}`);
+    const args = [...src.matchAll(/@InvokeArg\s+class\s+(\w+)\s*\{([^}]*)\}/g)].map((m) => `${m[1]}{${collapse(m[2].replace(/\/\/[^\n]*/g, ""))}}`);
+    for (const a of args) lines.push(`kotlin ${f} args ${a}`);
+  }
+  // The versions of tauri and its plugins: their commands and JS packages change with them.
+  const lock = readFileSync(join(root, "Cargo.lock"), "utf8");
+  for (const m of lock.matchAll(/^name = "(tauri|tauri-plugin-[a-z-]+)"\nversion = "([^"]+)"/gm)) lines.push(`crate ${m[1]} ${m[2]}`);
   const caps = join(root, "src-tauri/capabilities");
   for (const f of readdirSync(caps).filter((f) => f.endsWith(".json")).sort()) {
     const canon = JSON.stringify(JSON.parse(readFileSync(join(caps, f), "utf8")));

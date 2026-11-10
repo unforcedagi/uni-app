@@ -16,6 +16,9 @@ export type OtaStatus = {
 /** Coming back to the app looks for new screens (one small signed file); at most once a minute, so flicking between
  *  apps doesn't fetch it again and again. */
 export const RESUME_CHECK_MS = 60 * 1000;
+/** New screens go in on coming back only after this long away: a quick switch to another app keeps the page as it was
+ *  (a send or upload under way, where you were), and the new screens wait for the next longer absence or start. */
+export const APPLY_AWAY_MS = 2 * 60 * 1000;
 
 const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -47,10 +50,11 @@ function check(now: number) {
   void invoke("ota_check").catch(() => {});
 }
 
-/** When the app comes back to the foreground: new screens staged earlier are put in now, with a reload, before the
- *  person has done anything (never over an open recording); otherwise look for newer ones (at most once a minute). */
-export async function otaResumed(now = Date.now(), reload = () => location.reload()): Promise<"reloaded" | "checked" | "idle"> {
-  if (!recordingHolder() && await invoke<boolean>("ota_apply").catch(() => false)) {
+/** When the app comes back to the foreground after APPLY_AWAY_MS or more: new screens staged earlier are put in now, with a
+ *  reload, before the person has done anything (never over an open recording). Either way, look for newer ones (at most
+ *  once a minute). */
+export async function otaResumed(now = Date.now(), away = 0, reload = () => location.reload()): Promise<"reloaded" | "checked" | "idle"> {
+  if (away >= APPLY_AWAY_MS && !recordingHolder() && await invoke<boolean>("ota_apply").catch(() => false)) {
     reload();
     return "reloaded";
   }
@@ -65,7 +69,11 @@ export function otaRendered(): () => void {
   if (!inTauri()) return () => {};
   void invoke("ota_ready").catch(() => {});
   lastCheck = Date.now();
-  const back = () => { if (document.visibilityState === "visible") void otaResumed(); };
+  let hiddenAt = 0;
+  const back = () => {
+    if (document.visibilityState === "hidden") hiddenAt = Date.now();
+    else if (hiddenAt) void otaResumed(Date.now(), Date.now() - hiddenAt);
+  };
   document.addEventListener("visibilitychange", back);
   return () => document.removeEventListener("visibilitychange", back);
 }

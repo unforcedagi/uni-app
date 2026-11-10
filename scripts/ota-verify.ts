@@ -29,6 +29,10 @@ export function checkChannel(channel: string, archive: Buffer, pubkeyHex: string
   }
   const m = JSON.parse(outer.manifest) as Manifest;
   if (m.v !== 1 || m.app !== "org.unforced.uni") throw new Error(`the manifest is for ${m.app} v${m.v}`);
+  // As the app reads it (src-tauri/src/ota.rs verify_channel): a plain X.Y.Z version, a hex sha256, whole numbers.
+  if (!/^\d+\.\d+\.\d+$/.test(m.version)) throw new Error("the manifest's version isn't X.Y.Z");
+  if (!/^[0-9a-f]{64}$/.test(m.sha256)) throw new Error("the manifest's sha256 isn't 64 hex characters");
+  if (![m.api, m.bytes, m.issued, m.expires].every((n) => Number.isSafeInteger(n) && n >= 0)) throw new Error("the manifest's numbers aren't whole");
   if (m.archive !== `web-${m.version}.tar.gz`) throw new Error("the manifest's archive name isn't web-<version>.tar.gz");
   if (archive.length !== m.bytes || createHash("sha256").update(archive).digest("hex") !== m.sha256) {
     throw new Error("the archive is not the one the manifest names");

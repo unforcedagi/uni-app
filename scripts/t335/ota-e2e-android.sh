@@ -28,7 +28,7 @@ launch() { # <n> <label>: a cold start
   $E shell monkey -p org.unforced.uni -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
   sleep "${WAIT:-25}"; shot "$1-$2"; record "$1" "$2"
 }
-resume() { # <n> <label>: home, then back to the running app (no restart)
+resume() { # <n> <label>: home, then back to the running app (no restart). New screens go in only after 2 min away.
   $E shell input keyevent KEYCODE_HOME; sleep "${AWAY:-5}"
   $E shell monkey -p org.unforced.uni -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
   sleep "${WAIT:-25}"; shot "$1-$2"; record "$1" "$2"
@@ -43,7 +43,7 @@ $E logcat -c
 publish n1;         launch 01 built-in-0.4.0-finds-0.4.1
 launch 02 serves-0.4.1-no-apk
 publish n2;         AWAY=40 resume 03 resume-finds-0.4.2
-resume 04 resume-puts-in-0.4.2
+AWAY=130 resume 04 resume-puts-in-0.4.2
 publish tampered;   launch 05 tampered-refused
 publish expired
 NOW=$($E shell date +%s | tr -d '\r')

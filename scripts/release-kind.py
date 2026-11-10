@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parent.parent
 # crates/, Cargo files, the Android project, pnpm-lock.yaml, ...) is the shell or can change it: an APK.
 SCREENS = re.compile(r"(src/|public/|docs/|scripts/|\.github/).*|index\.html|vite\.config\.ts|tsconfig[^/]*\.json"
                      r"|playwright[^/]*\.ts|[^/]*\.md|\.gitignore")
+# Under those, what builds or shapes the APK itself: a change here needs an APK to take effect.
+APK_TOOLING = re.compile(r"scripts/(android-release-build\.sh|build-mac-hosted\.sh|install-updater-timer\.sh)")
 # package.json's fields that change what the screens run on; its "scripts" (the test list) and "version" don't.
 PACKAGE_DEPS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "pnpm", "overrides",
                 "resolutions", "packageManager", "engines", "type")
@@ -68,7 +70,7 @@ def kind(last_apk: Path, head: str) -> str:
         if path == "package.json":
             if deps(at(sha, path)) != deps(at(head, path)) or deps(at(head, path)) is None:
                 return "apk package.json's dependencies changed"
-        elif not SCREENS.fullmatch(path):
+        elif not SCREENS.fullmatch(path) or APK_TOOLING.fullmatch(path):
             return f"apk {path} changed since {version}"
     return f"bundle {version} {now}"
 

@@ -2,7 +2,7 @@
 //! when the Rust shell changes.
 //!
 //! - **Shell API.** The shell's commands are its contract with the screens. [`SHELL_API`] names that contract; it must
-//!   change whenever a command is added, removed or changes shape (`scripts/shell-api.test.ts` fails the build
+//!   change whenever a command is added, removed or changes shape (`scripts/shellApi.test.ts` fails the build
 //!   otherwise). A bundle declares the API it was built against (`uni-bundle.json` inside the archive, and the signed
 //!   manifest); the shell serves it only when the two are equal, and the bundle's own code checks again at boot
 //!   (`src/ota.ts`): on a mismatch it doesn't start, so it is dropped like any bundle that never reports ready.
@@ -46,7 +46,7 @@ use tauri::{Assets, Manager, Runtime};
 
 /// The shell's command API, as seen by the screens. Bump it with any change to the command set or a command's
 /// arguments or result. `src/ota.ts` holds the same number, and `src-tauri/shell-api.txt` the commands it stands for
-/// (both checked by `scripts/shell-api.test.ts`).
+/// (both checked by `scripts/shellApi.test.ts`).
 pub const SHELL_API: u32 = 1;
 
 /// The public half of the sealed screens bundle key (uni-ops `sealed/bundle.py` PUBKEY_HEX), raw Ed25519, hex.
@@ -344,6 +344,12 @@ fn move_slot(dir: &Path, from: &str, to: &str) -> bool {
         && std::fs::rename(dir.join(format!("{from}.tar.gz")), dir.join(format!("{to}.tar.gz"))).is_ok()
 }
 
+/// The staged bundle's version, from its signed channel file (a few KB; the archive isn't unpacked for this).
+fn staged_version(dir: &Path, pubkey: &str) -> Option<semver::Version> {
+    let text = std::fs::read(dir.join("next.json")).ok()?;
+    semver::Version::parse(&verify_channel(pubkey, &text).ok()?.version).ok()
+}
+
 /// Version a stored archive claims, for bookkeeping when it fails its checks (best effort, unverified).
 fn claimed_version(archive: &[u8]) -> Option<String> {
     unpack(archive).ok().map(|(m, _)| m.version)
@@ -464,7 +470,13 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
             }
         }
     }
-    state.save(dir);
+    if !state.save(dir) {
+        if let Some(b) = chosen.as_ref().filter(|b| state.trial.as_deref() == Some(b.meta.version.as_str())) {
+            // Its start couldn't be counted: serving it could serve a bundle that never starts, forever.
+            log(format!("could not record a start of {} (on trial); not serving it this time", b.meta.version));
+            chosen = None;
+        }
+    }
     match &chosen {
         Some(b) => log(format!("serving bundle {} (shell API {shell_api}, built-in {builtin})", b.meta.version)),
         None => log(format!("serving the built-in screens {builtin}")),
@@ -545,7 +557,7 @@ pub async fn check(
         return Err(format!("manifest for {} is older than one already taken here (a replay?)", manifest.version));
     }
     let offered = semver::Version::parse(&manifest.version).map_err(|e| e.to_string())?;
-    let staged = read_slot(dir, "next").and_then(|(_, a)| claimed_version(&a)).and_then(|v| semver::Version::parse(&v).ok());
+    let staged = staged_version(dir, pubkey);
     if let Some(newest) = not_new(&state, builtin, active, staged.as_ref(), &offered) {
         return Ok(CheckResult::UpToDate { version: newest.to_string() });
     }
@@ -562,7 +574,7 @@ pub async fn check(
     if manifest.issued < state.issued {
         return Err(format!("manifest for {} is older than one already taken here", manifest.version));
     }
-    let staged = read_slot(dir, "next").and_then(|(_, a)| claimed_version(&a)).and_then(|v| semver::Version::parse(&v).ok());
+    let staged = staged_version(dir, pubkey);
     if let Some(newest) = not_new(&state, builtin, active, staged.as_ref(), &offered) {
         return Ok(CheckResult::UpToDate { version: newest.to_string() });
     }
@@ -623,15 +635,19 @@ impl Ota {
 
     fn init(&self, dir: PathBuf, builtin: semver::Version) {
         let _ = std::fs::create_dir_all(&dir);
+        // Chosen without holding the setup lock, so a page request waiting for it times out after SETUP_WAIT.
+        let chosen = if self.pubkey.is_empty() {
+            None
+        } else {
+            let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
+            activate(&dir, self.pubkey, &builtin, SHELL_API)
+        };
         let (lock, cvar) = &self.setup;
         let mut setup = lock.lock().unwrap_or_else(|e| e.into_inner());
         if *setup == Setup::TimedOut {
             log("setup came after the first page request timed out; the built-in screens stay for this launch");
-        } else if !self.pubkey.is_empty() {
-            let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
-            self.set_active(activate(&dir, self.pubkey, &builtin, SHELL_API));
-            *setup = Setup::Done;
         } else {
+            self.set_active(chosen);
             *setup = Setup::Done;
         }
         let _ = self.dir.set(dir);
@@ -807,13 +823,13 @@ pub fn ota_status(app: tauri::AppHandle, ota: tauri::State<'_, Arc<Ota>>) -> Sta
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ota_ready(ota: tauri::State<'_, Arc<Ota>>) {
     ota.ready();
 }
 
 /// Apply a staged bundle now. True when the page must reload (the caller does it, once nothing would be lost).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ota_apply(ota: tauri::State<'_, Arc<Ota>>) -> bool {
     ota.apply()
 }
@@ -1189,6 +1205,24 @@ mod tests {
         assert_eq!(served, None, "not served without its trial recorded");
         assert!(dir.path().join("next.tar.gz").exists(), "still staged");
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"), "promoted once it can be recorded");
+    }
+
+    #[test]
+    fn a_trial_bundle_whose_start_cannot_be_counted_is_not_served() {
+        use std::os::unix::fs::PermissionsExt;
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        let served = act(dir.path(), &k);
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(served, None, "a start that isn't counted could repeat forever");
+        ready(dir.path());
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        let served = act(dir.path(), &k);
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(served.as_deref(), Some("0.3.8"), "a bundle that proved itself needs no count");
     }
 
     /// A channel on 127.0.0.1: path -> body. `hook` runs when a path is asked for, before the answer (a launch or an

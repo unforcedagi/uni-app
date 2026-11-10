@@ -1,6 +1,7 @@
 # The shell's contract with the screens, for each SHELL_API number (src-tauri/src/ota.rs, src/ota.ts). A screens bundle
 # runs only on a shell with its number. scripts/shellApi.test.ts fails the build when today's contract (commands with
-# their arguments and results, plugins, URI schemes, capability files) differs from the block for SHELL_API, or when a
+# their arguments and results, plugins, URI schemes, capability files, the Android plugins' commands and argument
+# classes, the tauri crate versions) differs from the block for SHELL_API, or when a
 # block that shipped in a release is edited. To change the contract: bump SHELL_API in both files and add a new block
 # below with the output of `node --experimental-strip-types scripts/shellApi.ts`. Never edit a shipped block.
 
@@ -153,6 +154,33 @@ command secret_requesters(app: tauri::AppHandle) -> Vec<String>
 command t76::t76_read(name: String) -> Result<Option<String>, String>
 command t76::t76_write(name: String, contents: String) -> Result<(), String>
 command webview_runtime() -> String
+crate tauri 2.11.6
+crate tauri-plugin-barcode-scanner 2.4.6
+crate tauri-plugin-clipboard-manager 2.3.3
+crate tauri-plugin-dialog 2.7.1
+crate tauri-plugin-fs 2.5.2
+crate tauri-plugin-notification 2.3.3
+crate tauri-plugin-opener 2.5.5
+crate tauri-plugin-process 2.3.1
+crate tauri-plugin-updater 2.12.0
+kotlin FilesPlugin.kt args OpenFileArgs{lateinit var path: String var mime: String? = null}
+kotlin FilesPlugin.kt args SaveFileArgs{lateinit var path: String lateinit var name: String var mime: String? = null}
+kotlin FilesPlugin.kt args SaveTextArgs{lateinit var name: String lateinit var text: String var mime: String? = null}
+kotlin FilesPlugin.kt args ShareTextArgs{lateinit var name: String lateinit var text: String var title: String? = null var mime: String? = null}
+kotlin FilesPlugin.kt command openFile
+kotlin FilesPlugin.kt command saveTextToDownloads
+kotlin FilesPlugin.kt command saveToDownloads
+kotlin FilesPlugin.kt command shareText
+kotlin KeystorePlugin.kt args AuthenticateArgs{var title: String? = null lateinit var reason: String lateinit var authenticationId: String}
+kotlin KeystorePlugin.kt args CancelAuthenticationArgs{lateinit var authenticationId: String}
+kotlin KeystorePlugin.kt args NameArgs{lateinit var name: String}
+kotlin KeystorePlugin.kt args SaveSecretArgs{lateinit var name: String lateinit var secret: String}
+kotlin KeystorePlugin.kt command authenticate
+kotlin KeystorePlugin.kt command cancelAuthenticate
+kotlin KeystorePlugin.kt command clearSecret
+kotlin KeystorePlugin.kt command lifecycle
+kotlin KeystorePlugin.kt command loadSecret
+kotlin KeystorePlugin.kt command saveSecret
 plugin files::init()
 plugin secure_store::init()
 plugin tauri_plugin_barcode_scanner::init()

@@ -394,6 +394,7 @@ class ReleaseKindTests(unittest.TestCase):
         cases = [("src-tauri/src/lib.rs", "x", "apk src-tauri/src/lib.rs changed since 0.3.7"),
                  ("crates/uni-core/src/a.rs", "x", "apk crates/uni-core/src/a.rs changed"),
                  ("pnpm-lock.yaml", "x", "apk pnpm-lock.yaml changed"),
+                 ("scripts/android-release-build.sh", "x", "apk scripts/android-release-build.sh changed"),
                  ("package.json", '{"scripts": {"test": "a"}, "dependencies": {"x": "2"}}', "apk package.json's dependencies"),
                  ("src/ota.ts", "export const SHELL_API = 4;\n", "apk the shell API changed (3 -> 4)")]
         for path, text, why in cases:
