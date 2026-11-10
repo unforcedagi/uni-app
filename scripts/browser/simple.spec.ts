@@ -3667,11 +3667,11 @@ test.describe('r27', () => {
     await boot(page);
     await add(page, { id: 'long1', title: 'T-801 Placeholder asks', node: 'Areas/Techne', meta: { next: 'Forward Casey the asks listed in this task\'s detail', state: 'waiting', waiting_on: 'aaron',
       detail: 'Casey owes: (1) A very long first ask that keeps going and going with many words about the venue and the dates and the budget and the parking and the signage and the schedule for the whole week; (2) short one; (3) another short one' } });
+    // (T-335: at the old side panel's width, so the first ask is too long for two lines there; set before the panel draws and measures)
+    await page.addStyleTag({ content: '.fx-cp .cp-list { max-width: 236px !important; }' });
     await refresh(page, NOW);
     await openPlaceF(page, 'Techne');
     await openDetails(page);
-    // (T-335: at the old side panel's width, so the first ask is too long for two lines there)
-    await page.addStyleTag({ content: '.fx-cp .cp-list { max-width: 236px !important; }' });
     const prow = page.locator('.fx-cp .cp-item').filter({ hasText: 'Forward Casey the asks' });
     const lines = await itemsAreWhole(prow, 3);
     expect(lines.join(' ')).not.toContain('A very long first ask that keeps going');
