@@ -19,7 +19,7 @@ export const RESUME_CHECK_MS = 60 * 1000;
 
 const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-/** A bundle refuses a shell with another API: the shell drops it and reloads the last good screens. */
+/** A bundle refuses a shell with another API (it doesn't start). */
 export function refusesShell(status: Pick<OtaStatus, "shell_api" | "active">, ours = SHELL_API): boolean {
   return status.active !== null && status.shell_api !== ours;
 }
@@ -30,12 +30,12 @@ export function otaStatus(): Promise<OtaStatus | null> {
   return status;
 }
 
-/** Before the first render. False when this bundle refused the shell (the page is about to reload). */
+/** Before the first render. False when these screens were built for another shell: they don't start, so the shell
+ *  drops them after a few tries (as any bundle that never reports ready) and goes back to the last good screens. */
 export async function otaBoot(): Promise<boolean> {
   const s = await otaStatus();
-  if (!s) return true;
-  if (refusesShell(s)) {
-    await invoke("ota_reject", { reason: `bundle built for shell API ${SHELL_API}, shell has ${s.shell_api}` }).catch(() => {});
+  if (s && refusesShell(s)) {
+    console.warn(`screens built for shell API ${SHELL_API}, shell has ${s.shell_api}: not starting`);
     return false;
   }
   return true;
@@ -59,14 +59,15 @@ export async function otaResumed(now = Date.now(), reload = () => location.reloa
   return "checked";
 }
 
-/** After the first render: keep the bundle on trial, look for a newer one, and again whenever the app comes back. */
+/** After the first render: keep the bundle on trial, and look for newer screens whenever the app comes back (the shell
+ *  itself looks a few seconds after launch). */
 export function otaRendered(): () => void {
   if (!inTauri()) return () => {};
   void invoke("ota_ready").catch(() => {});
-  const soon = window.setTimeout(() => check(Date.now()), 3000);
+  lastCheck = Date.now();
   const back = () => { if (document.visibilityState === "visible") void otaResumed(); };
   document.addEventListener("visibilitychange", back);
-  return () => { window.clearTimeout(soon); document.removeEventListener("visibilitychange", back); };
+  return () => document.removeEventListener("visibilitychange", back);
 }
 
 /** "Screens 0.3.8 · over the air" or "Screens built in"; null outside the app or where there is no channel. */

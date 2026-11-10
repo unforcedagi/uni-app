@@ -9,7 +9,7 @@
 #   tampered 0.4.3   signed, then one byte of the archive flipped  -> refused
 #   expired 0.4.4    valid one day; the phone's clock is moved on  -> refused
 #   api2 0.4.5       signed for shell API 2                        -> refused: needs a newer app
-#   neverready 0.4.6 signed, its page never starts                 -> dropped after two starts, back to 0.4.2
+#   neverready 0.4.6 signed, its page never starts                 -> dropped after three starts, back to 0.4.2
 set -euo pipefail
 OUT=${1:?out dir}; OPS=${2:-$HOME/Code/uni-ops}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)

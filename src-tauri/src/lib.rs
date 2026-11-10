@@ -3260,7 +3260,6 @@ pub fn run() {
             android_update_manifest,
             ota::ota_status,
             ota::ota_ready,
-            ota::ota_reject,
             ota::ota_apply,
             ota::ota_check,
             #[cfg(feature = "messages")]

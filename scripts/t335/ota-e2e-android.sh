@@ -58,6 +58,8 @@ publish api2;       launch 07 api2-needs-newer-app
 publish neverready; launch 08 finds-0.4.6
 launch 09 0.4.6-on-trial-1
 launch 10 0.4.6-on-trial-2
-launch 11 back-to-last-good-0.4.2
+launch 11 0.4.6-on-trial-3
+launch 12 back-to-last-good-0.4.2
+$E shell dumpsys package org.unforced.uni | grep -E 'versionName|lastUpdateTime' | sed 's/^/== at the end, still the one install: /' | tee -a "$OUT/steps.log"
 grep -h '"GET' "$OUT/channel.log" > "$OUT/channel-requests.log" || true
 echo "done: $OUT/steps.log"

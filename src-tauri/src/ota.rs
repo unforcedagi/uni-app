@@ -5,7 +5,7 @@
 //!   change whenever a command is added, removed or changes shape (`scripts/shell-api.test.ts` fails the build
 //!   otherwise). A bundle declares the API it was built against (`uni-bundle.json` inside the archive, and the signed
 //!   manifest); the shell serves it only when the two are equal, and the bundle's own code checks again at boot
-//!   (`src/ota.ts`) and asks to be dropped on a mismatch.
+//!   (`src/ota.ts`): on a mismatch it doesn't start, so it is dropped like any bundle that never reports ready.
 //! - **Trust.** The channel publishes `web.json`: a manifest and its Ed25519 signature, made by the sealed broker only
 //!   after the owner's tap (uni-ops `sealed/bundle.py`). The public key is compiled in ([`PUBKEY_HEX`]); nothing from
 //!   the channel or the webview can change it. The manifest names the archive by SHA-256 and size, the version and the
@@ -17,11 +17,11 @@
 //!   bundle, and a device that lost its state accepts only a manifest signed in the last [`MAX_VALID_DAYS`] days.
 //! - **Serving.** [`OtaAssets`] wraps the assets built into the binary. With a verified bundle active it serves the
 //!   bundle's files instead, on the same `tauri://` origin, so IPC, capabilities and CSP are unchanged.
-//! - **Updating.** A check (at launch and when the app comes back to the foreground) downloads a newer bundle into
+//! - **Updating.** A check (by the shell a few seconds after launch, and by the screens when the app comes back to the
+//!   foreground) downloads a newer bundle into
 //!   `next.*`. It is applied at the next launch, or when the app next comes back to the foreground (the page reloads
 //!   then, before the user has done anything). A new bundle is on trial until its page reports ready (`ota_ready`); one
-//!   that is started [`MAX_UNCONFIRMED_BOOTS`] times without doing so, or that refuses this shell, is dropped and never
-//!   fetched again.
+//!   that is started [`MAX_UNCONFIRMED_BOOTS`] times without doing so is dropped and never fetched again.
 //! - **Fallback.** The last bundle that reported ready is kept as `previous.*`. When the current one is dropped, the
 //!   app goes back to it; with none, to the screens built in.
 //! - **Versions.** A bundle carries a release version (`0.3.8`). It is used only while it is newer than the screens
@@ -69,7 +69,7 @@ const PACKAGE: &str = "org.unforced.uni";
 /// The longest a manifest may be valid (bundle.py VALID_DAYS_MAX, plus a day of slack for clocks).
 pub const MAX_VALID_DAYS: u64 = 31;
 /// A bundle started this many times without reporting ready is dropped.
-pub const MAX_UNCONFIRMED_BOOTS: u32 = 2;
+pub const MAX_UNCONFIRMED_BOOTS: u32 = 3;
 
 const META_FILE: &str = "uni-bundle.json";
 const MAX_CHANNEL_BYTES: u64 = 16 * 1024;
@@ -293,17 +293,21 @@ impl State {
             Err(e) => Err(format!("state.json: {e}")),
         }
     }
-    fn save(&self, dir: &Path) {
+    /// Written whole and synced, then renamed into place. False if it couldn't be: the caller doesn't act on it.
+    fn save(&self, dir: &Path) -> bool {
+        fn put(path: &Path, bytes: &[u8]) -> bool {
+            let tmp = path.with_extension("tmp");
+            let ok = std::fs::File::create(&tmp)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, bytes).and_then(|_| f.sync_all()))
+                .and_then(|_| std::fs::rename(&tmp, path));
+            ok.is_ok()
+        }
         // The floor is also kept on its own (`floor`: "<version> <issued>"), so damage to state.json alone can't lose it.
-        if let Some(f) = &self.floor {
-            if std::fs::write(dir.join("floor.tmp"), format!("{f} {}", self.issued)).is_ok() {
-                let _ = std::fs::rename(dir.join("floor.tmp"), dir.join("floor"));
-            }
-        }
-        let tmp = dir.join("state.json.tmp");
-        if std::fs::write(&tmp, serde_json::to_vec(self).unwrap_or_default()).is_ok() {
-            let _ = std::fs::rename(&tmp, dir.join("state.json"));
-        }
+        let floor_ok = match &self.floor {
+            Some(f) => put(&dir.join("floor"), format!("{f} {}", self.issued).as_bytes()),
+            None => true,
+        };
+        floor_ok && put(&dir.join("state.json"), &serde_json::to_vec(self).unwrap_or_default())
     }
     fn floor(&self) -> Option<semver::Version> {
         self.floor.as_deref().and_then(|v| semver::Version::parse(v).ok())
@@ -382,23 +386,32 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
             _ => Ok(b),
         }) {
             Ok(b) => {
-                // The current bundle becomes the fallback only if it proved itself (reported ready).
-                if dir.join("current.tar.gz").exists() {
-                    if state.trial.is_none() {
-                        move_slot(dir, "current", "previous");
-                    } else {
-                        remove_slot(dir, "current");
-                    }
-                }
-                if move_slot(dir, "next", "current") {
-                    log(format!("promoted staged bundle {} (on trial)", b.meta.version));
-                    state.trial = Some(b.meta.version.clone());
-                    state.boots = 0;
-                    state.floor = Some(b.meta.version.clone());
-                    state.issued = state.issued.max(b.manifest.issued);
+                // Recorded first (on trial, the new floor): a promotion that can't be recorded doesn't happen, so a bundle
+                // is never served without its trial counting.
+                let was_good = state.trial.is_none();
+                let mut promoted = state.clone();
+                promoted.trial = Some(b.meta.version.clone());
+                promoted.boots = 0;
+                promoted.floor = Some(b.meta.version.clone());
+                promoted.issued = state.issued.max(b.manifest.issued);
+                if !promoted.save(dir) {
+                    log(format!("could not record the promotion of {}; it stays staged", b.meta.version));
                 } else {
-                    log("could not promote the staged bundle");
-                    remove_slot(dir, "next");
+                    state = promoted;
+                    // The current bundle becomes the fallback only if it proved itself (reported ready).
+                    if dir.join("current.tar.gz").exists() {
+                        if was_good {
+                            move_slot(dir, "current", "previous");
+                        } else {
+                            remove_slot(dir, "current");
+                        }
+                    }
+                    if move_slot(dir, "next", "current") {
+                        log(format!("promoted staged bundle {} (on trial)", b.meta.version));
+                    } else {
+                        log("could not promote the staged bundle");
+                        remove_slot(dir, "next");
+                    }
                 }
             }
             Err(e) => {
@@ -519,6 +532,7 @@ pub async fn check(
     active: Option<&semver::Version>,
     shell_api: u32,
     now: u64,
+    files: &Mutex<()>,
 ) -> Result<CheckResult, String> {
     let base = url::Url::parse(channel).map_err(|e| format!("channel: {e}"))?;
     uni_core::init_crypto();
@@ -541,9 +555,22 @@ pub async fn check(
     }
     let archive = fetch(&client, &base.join(&manifest.archive).map_err(|e| e.to_string())?, MAX_ARCHIVE_BYTES.min(manifest.bytes)).await?;
     let bundle = open(pubkey, &text, &archive, builtin, shell_api)?;
+    // From here the bundle directory is shared with launch, apply and ready: decide again on its state as it is now, and
+    // never write back a state read before the download.
+    let _files = files.lock().unwrap_or_else(|e| e.into_inner());
+    let state = State::load_checked(dir)?;
+    if manifest.issued < state.issued {
+        return Err(format!("manifest for {} is older than one already taken here", manifest.version));
+    }
+    let staged = read_slot(dir, "next").and_then(|(_, a)| claimed_version(&a)).and_then(|v| semver::Version::parse(&v).ok());
+    if let Some(newest) = not_new(&state, builtin, active, staged.as_ref(), &offered) {
+        return Ok(CheckResult::UpToDate { version: newest.to_string() });
+    }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     // state.json first: bundles on disk without it read as lost state at the next launch.
-    state.save(dir);
+    if !dir.join("state.json").exists() && !state.save(dir) {
+        return Err("could not write state.json".into());
+    }
     for (name, bytes) in [("next.json.tmp", text.as_slice()), ("next.tar.gz.tmp", archive.as_slice())] {
         std::fs::write(dir.join(name), bytes).map_err(|e| e.to_string())?;
     }
@@ -651,18 +678,15 @@ impl Ota {
         }
     }
 
-    /// The bundle's own code refused this shell: drop it and fall back (the last good bundle, else built in). The caller
-    /// reloads the page.
-    fn reject(&self, reason: &str) {
-        let (Some((dir, builtin)), Some(b)) = (self.ready_dir(), self.active()) else { return };
-        let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
-        log(format!("bundle {} refused by its own code: {reason}", b.meta.version));
-        if let Ok(mut state) = State::load_checked(dir) {
-            state.reject(&b.meta.version);
-            state.save(dir);
+    /// Look for a newer bundle on the build's channel and stage it.
+    async fn check(&self) -> Result<CheckResult, String> {
+        let (Some(channel), Some((dir, builtin))) = (CHANNEL, self.ready_dir()) else { return Ok(CheckResult::Off) };
+        let active = self.active().map(|b| b.version.clone());
+        let r = check(dir, channel, self.pubkey, builtin, active.as_ref(), SHELL_API, now(), &self.files).await;
+        if let Err(e) = &r {
+            log(format!("check failed: {e}"));
         }
-        remove_slot(dir, "current");
-        self.set_active(activate(dir, self.pubkey, builtin, SHELL_API));
+        r
     }
 
     /// A staged bundle, applied now (the app came back to the foreground). True when the screens changed and the caller
@@ -719,7 +743,18 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
         self.builtin.setup(app);
         let builtin = app.package_info().version.clone();
         match app.path().app_data_dir() {
-            Ok(d) => self.ota.init(d.join("ota"), builtin),
+            Ok(d) => {
+                self.ota.init(d.join("ota"), builtin);
+                // The shell looks for new screens itself a few seconds after launch, so a bundle whose own update code
+                // is broken can still be replaced over the air. (Coming back to the app checks too: src/ota.ts.)
+                if CHANNEL.is_some() && !self.ota.pubkey.is_empty() {
+                    let ota = self.ota.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_secs(3));
+                        let _ = tauri::async_runtime::block_on(ota.check());
+                    });
+                }
+            }
             Err(e) => {
                 log(format!("no app data dir ({e}); serving the built-in screens"));
                 let (lock, cvar) = &self.ota.setup;
@@ -777,13 +812,6 @@ pub fn ota_ready(ota: tauri::State<'_, Arc<Ota>>) {
     ota.ready();
 }
 
-/// The bundle's own code refused this shell (its API differs): drop it, fall back, reload.
-#[tauri::command]
-pub fn ota_reject(window: tauri::WebviewWindow, ota: tauri::State<'_, Arc<Ota>>, reason: String) -> Result<(), String> {
-    ota.reject(&reason);
-    window.eval("location.reload()").map_err(|e| e.to_string())
-}
-
 /// Apply a staged bundle now. True when the page must reload (the caller does it, once nothing would be lost).
 #[tauri::command]
 pub fn ota_apply(ota: tauri::State<'_, Arc<Ota>>) -> bool {
@@ -793,13 +821,7 @@ pub fn ota_apply(ota: tauri::State<'_, Arc<Ota>>) -> bool {
 /// Look for a newer bundle on the build's channel and stage it.
 #[tauri::command]
 pub async fn ota_check(ota: tauri::State<'_, Arc<Ota>>) -> Result<CheckResult, String> {
-    let (Some(channel), Some((dir, builtin))) = (CHANNEL, ota.ready_dir()) else { return Ok(CheckResult::Off) };
-    let active = ota.active().map(|b| b.version.clone());
-    let r = check(dir, channel, ota.pubkey, builtin, active.as_ref(), SHELL_API, now()).await;
-    if let Err(e) = &r {
-        log(format!("check failed: {e}"));
-    }
-    r
+    ota.check().await
 }
 
 #[cfg(test)]
@@ -1120,7 +1142,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_swaps_in_a_staged_bundle_and_reject_falls_back() {
+    fn apply_swaps_in_a_staged_bundle() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
         put(dir.path(), "current", &signed(&k, "0.3.8", 1));
@@ -1132,10 +1154,8 @@ mod tests {
         put(dir.path(), "next", &signed(&k, "0.3.9", 1));
         assert!(o.apply());
         assert_eq!(o.active().unwrap().meta.version, "0.3.9");
-        // 0.3.9's own code refuses this shell: back to 0.3.8, the last good one.
-        o.reject("test");
-        assert_eq!(o.active().unwrap().meta.version, "0.3.8");
-        assert!(State::load_checked(dir.path()).unwrap().rejected.contains(&"0.3.9".to_string()));
+        assert!(!dir.path().join("next.tar.gz").exists());
+        assert_eq!(State::load_checked(dir.path()).unwrap().trial.as_deref(), Some("0.3.9"), "on trial after an apply too");
     }
 
     #[test]
@@ -1155,6 +1175,101 @@ mod tests {
         Arc::get_mut(&mut on_time).unwrap().pubkey = pk;
         on_time.init(dir.path().to_path_buf(), v("0.3.7"));
         assert_eq!(on_time.active().unwrap().meta.version, "0.3.8");
+    }
+
+    #[test]
+    fn a_promotion_that_cannot_be_recorded_does_not_happen() {
+        use std::os::unix::fs::PermissionsExt;
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        let served = act(dir.path(), &k);
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(served, None, "not served without its trial recorded");
+        assert!(dir.path().join("next.tar.gz").exists(), "still staged");
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"), "promoted once it can be recorded");
+    }
+
+    /// A channel on 127.0.0.1: path -> body. `hook` runs when a path is asked for, before the answer (a launch or an
+    /// apply happening while a check downloads).
+    fn channel_server(files: HashMap<String, Vec<u8>>, hook: Option<(String, Box<dyn Fn() + Send>)>) -> String {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/", l.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for conn in l.incoming() {
+                let Ok(mut c) = conn else { continue };
+                let mut buf = [0u8; 4096];
+                let n = std::io::Read::read(&mut c, &mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = req.split_whitespace().nth(1).unwrap_or("/").trim_start_matches('/').to_string();
+                if let Some((p, f)) = &hook {
+                    if *p == path {
+                        f();
+                    }
+                }
+                let (status, body) = match files.get(&path) {
+                    Some(b) => ("200 OK", b.clone()),
+                    None => ("404 Not Found", Vec::new()),
+                };
+                let head = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = std::io::Write::write_all(&mut c, head.as_bytes());
+                let _ = std::io::Write::write_all(&mut c, &body);
+            }
+        });
+        base
+    }
+
+    fn publish(k: &Key, version: &str, issued: u64, days: u64) -> HashMap<String, Vec<u8>> {
+        let a = bundle(version, 1);
+        let c = channel_for(k, version, 1, &a, issued, days);
+        HashMap::from([("web.json".to_string(), c), (format!("web-{version}.tar.gz"), a)])
+    }
+
+    fn run_check(dir: &Path, k: &Key, base: &str, now: u64) -> Result<CheckResult, String> {
+        let lock = Mutex::new(());
+        tauri::async_runtime::block_on(check(dir, &format!("{base}web.json"), &k.pk, &v("0.3.7"), None, 1, now, &lock))
+    }
+
+    #[test]
+    fn a_check_stages_a_fresh_newer_bundle_and_refuses_expired_or_replayed_ones() {
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        let base = channel_server(publish(&k, "0.3.9", T0, 14), None);
+        assert!(run_check(dir.path(), &k, &base, T0 + 15 * 86400).unwrap_err().contains("expired"));
+        assert!(!dir.path().join("next.tar.gz").exists());
+        assert_eq!(run_check(dir.path(), &k, &base, T0 + 60), Ok(CheckResult::Staged { version: "0.3.9".into() }));
+        assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
+        assert_eq!(run_check(dir.path(), &k, &base, T0 + 120), Ok(CheckResult::UpToDate { version: "0.3.9".into() }));
+        // A newer version, but under a manifest signed before the one already taken: a held-back signing, replayed.
+        let base = channel_server(publish(&k, "0.3.10", T0 - 3600, 14), None);
+        assert!(run_check(dir.path(), &k, &base, T0 + 180).unwrap_err().contains("older than one already taken"));
+        // Another key's manifest.
+        let base = channel_server(publish(&key(2), "0.3.11", T0 + 7200, 14), None);
+        assert!(run_check(dir.path(), &k, &base, T0 + 7300).unwrap_err().contains("signature"));
+        assert!(!dir.path().join("next.tar.gz").exists());
+    }
+
+    #[test]
+    fn a_check_never_writes_back_a_state_read_before_its_download() {
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "current", &signed(&k, "0.3.8", 1));
+        let mut s = State::default();
+        s.floor = Some("0.3.8".into());
+        s.save(dir.path());
+        // While the archive downloads, an apply puts a bundle on trial and raises the floor and the issued time.
+        let d = dir.path().to_path_buf();
+        let hook = move || {
+            let mut s = State::load_checked(&d).unwrap();
+            s.trial = Some("0.3.8".into());
+            s.issued = T0 + 100;
+            s.save(&d);
+        };
+        let base = channel_server(publish(&k, "0.3.9", T0 + 200, 14), Some(("web-0.3.9.tar.gz".into(), Box::new(hook))));
+        assert_eq!(run_check(dir.path(), &k, &base, T0 + 300), Ok(CheckResult::Staged { version: "0.3.9".into() }));
+        let s = State::load_checked(dir.path()).unwrap();
+        assert_eq!((s.trial.as_deref(), s.issued), (Some("0.3.8"), T0 + 100), "the apply's state stands");
     }
 
     #[test]
