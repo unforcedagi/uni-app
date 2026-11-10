@@ -235,11 +235,17 @@ pub fn unpack(archive: &[u8]) -> Result<(Meta, HashMap<String, Vec<u8>>), String
 /// Verifies a stored or downloaded bundle (its channel file's signature, then the archive against the manifest),
 /// unpacks it and checks it fits this shell: the same API, and newer than the built-in screens. Expiry is not checked
 /// here: a bundle that was fresh when it was fetched stays usable.
-pub fn open(pubkey: &str, channel: &[u8], archive: &[u8], builtin: &semver::Version, shell_api: u32) -> Result<Bundle, String> {
+/// The channel file's manifest, if it is signed by `pubkey` and names exactly these archive bytes (nothing unpacked).
+pub fn verify_archive(pubkey: &str, channel: &[u8], archive: &[u8]) -> Result<Manifest, String> {
     let manifest = verify_channel(pubkey, channel)?;
     if archive.len() as u64 != manifest.bytes || sha256_hex(archive) != manifest.sha256 {
         return Err(format!("archive for {} is not the one its signed manifest names", manifest.version));
     }
+    Ok(manifest)
+}
+
+pub fn open(pubkey: &str, channel: &[u8], archive: &[u8], builtin: &semver::Version, shell_api: u32) -> Result<Bundle, String> {
+    let manifest = verify_archive(pubkey, channel, archive)?;
     let (meta, files) = unpack(archive)?;
     if meta.version != manifest.version || meta.api != manifest.api {
         return Err(format!("archive says {} for API {}, its manifest {} for API {}", meta.version, meta.api, manifest.version, manifest.api));
@@ -366,6 +372,16 @@ fn staged_version(dir: &Path, pubkey: &str) -> Option<semver::Version> {
     slot_version(dir, "next", pubkey)
 }
 
+/// A slot, opened and checked as `open` does, and refused if its version was dropped here: the one way every launch
+/// path reads a bundle, so a dropped version is never served again, whatever a kill left behind. None: no such slot.
+fn open_slot(dir: &Path, slot: &str, pubkey: &str, builtin: &semver::Version, shell_api: u32, rejected: &[String]) -> Option<Result<Bundle, String>> {
+    let (channel, archive) = read_slot(dir, slot)?;
+    Some(open(pubkey, &channel, &archive, builtin, shell_api).and_then(|b| match rejected.contains(&b.meta.version) {
+        true => Err(format!("bundle {} was dropped here", b.meta.version)),
+        false => Ok(b),
+    }))
+}
+
 /// After a kill mid-way: finish a slot move that was cut between its two renames (the channel file moves first), then
 /// drop what is left half: a slot with one of its two files, and a check's temporary files.
 fn tidy(dir: &Path) {
@@ -422,10 +438,10 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
     };
     tidy(dir);
     let mut promoted_now = None; // opened just above: not read and opened again below
-    if let Some((channel, archive)) = read_slot(dir, "next") {
+    if let Some(opened) = open_slot(dir, "next", pubkey, builtin, shell_api, &state.rejected) {
         // A promotion a kill cut short after it was recorded: the state already has this version on trial, as the floor.
         let unfinished = |b: &Bundle| state.trial.as_deref() == Some(b.meta.version.as_str()) && state.floor().as_ref() == Some(&b.version);
-        match open(pubkey, &channel, &archive, builtin, shell_api).and_then(|b| match state.floor() {
+        match opened.and_then(|b| match state.floor() {
             _ if unfinished(&b) => Ok(b),
             Some(f) if b.version <= f => Err(format!("bundle {} is not newer than {f}, already used here", b.meta.version)),
             _ if b.manifest.issued < state.issued => Err(format!("manifest for {} is older than one already taken", b.meta.version)),
@@ -441,8 +457,13 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                     // itself (the trial doesn't name it: it reported ready) and wasn't dropped; otherwise it goes and the
                     // fallback stays. (A read error just now counts as not opening: the fallback is the safer keep.)
                     let proven = read_slot(dir, "current")
-                        .and_then(|(c, a)| verify_channel(pubkey, &c).ok().filter(|m| a.len() as u64 == m.bytes && sha256_hex(&a) == m.sha256))
-                        .is_some_and(|m| state.trial.as_deref() != Some(m.version.as_str()) && !state.rejected.contains(&m.version));
+                        .and_then(|(c, a)| verify_archive(pubkey, &c, &a).ok())
+                        .is_some_and(|m| {
+                            m.api == shell_api
+                                && semver::Version::parse(&m.version).is_ok_and(|v| v > *builtin)
+                                && state.trial.as_deref() != Some(m.version.as_str())
+                                && !state.rejected.contains(&m.version)
+                        });
                     let stepped_aside = if proven {
                         move_slot(dir, "current", "previous")
                     } else {
@@ -452,21 +473,22 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                     if !stepped_aside {
                         log(format!("could not keep the current bundle as the fallback; {} stays staged", b.meta.version));
                         false
-                    } else if let Some(promoted) = Some(State {
-                        trial: Some(b.meta.version.clone()),
-                        boots: 0,
-                        floor: Some(b.meta.version.clone()),
-                        issued: state.issued.max(b.manifest.issued),
-                        ..state.clone()
-                    })
-                    .filter(|p| p.save(dir))
-                    {
-                        state = promoted;
-                        true
                     } else {
-                        log(format!("could not record the promotion of {}; it stays staged (the bundle it replaces has \
-                                     already stepped aside)", b.meta.version));
-                        false
+                        let promoted = State {
+                            trial: Some(b.meta.version.clone()),
+                            boots: 0,
+                            floor: Some(b.meta.version.clone()),
+                            issued: state.issued.max(b.manifest.issued),
+                            ..state.clone()
+                        };
+                        if promoted.save(dir) {
+                            state = promoted;
+                            true
+                        } else {
+                            log(format!("could not record the promotion of {}; it stays staged (the bundle it replaces has \
+                                         already stepped aside)", b.meta.version));
+                            false
+                        }
                     }
                 };
                 if recorded {
@@ -481,7 +503,7 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
             }
             Err(e) => {
                 log(format!("staged bundle refused: {e}"));
-                if let Some(v) = claimed_version(&archive) {
+                if let Some(v) = read_slot(dir, "next").and_then(|(_, a)| claimed_version(&a)) {
                     state.reject(&v);
                 }
                 remove_slot(dir, "next");
@@ -490,14 +512,9 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
     }
     let mut chosen = None;
     // A dropped version is never served again, even if a kill left its files behind.
-    let rejected = state.rejected.clone();
-    let not_dropped = |b: Bundle| match rejected.contains(&b.meta.version) {
-        true => Err(format!("bundle {} was dropped here", b.meta.version)),
-        false => Ok(b),
-    };
     let current = match promoted_now {
-        Some(b) => Some(Ok(b)),
-        None => read_slot(dir, "current").map(|(c, a)| open(pubkey, &c, &a, builtin, shell_api).and_then(not_dropped)),
+        Some(b) => Some(Ok(b)), // opened through open_slot above, and checked against the floor
+        None => open_slot(dir, "current", pubkey, builtin, shell_api, &state.rejected),
     };
     if let Some(opened) = current {
         match opened {
@@ -523,8 +540,8 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
         }
     }
     if chosen.is_none() {
-        if let Some((channel, archive)) = read_slot(dir, "previous") {
-            match open(pubkey, &channel, &archive, builtin, shell_api).and_then(not_dropped) {
+        if let Some(opened) = open_slot(dir, "previous", pubkey, builtin, shell_api, &state.rejected) {
+            match opened {
                 Ok(b) => {
                     // Recorded, then moved (as a promotion): the trial is over (and a drop above is kept) before the
                     // last good bundle moves back, so a kill mid-move leaves nothing stale for tidy() to trip on.
@@ -552,7 +569,7 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
             // Its start couldn't be counted: serving it could serve a bundle that never starts, forever. The last good
             // bundle instead, as it is (nothing can be moved or recorded now), else the built-in screens.
             log(format!("could not record a start of {} (on trial); not serving it this time", b.meta.version));
-            chosen = read_slot(dir, "previous").and_then(|(c, a)| open(pubkey, &c, &a, builtin, shell_api).ok());
+            chosen = open_slot(dir, "previous", pubkey, builtin, shell_api, &state.rejected).and_then(Result::ok);
         }
     }
     match &chosen {
@@ -791,15 +808,18 @@ impl Ota {
             return false;
         }
         let reason: String = reason.chars().take(200).collect();
-        log(format!("bundle {} refused this shell: {reason:?}; dropped", b.meta.version));
-        // Recorded, then removed: a drop that can't be recorded doesn't happen, and files a kill leaves behind are never
-        // served again (a rejected version isn't).
+        // Recorded, then removed: files a kill leaves behind are never served again (a rejected version isn't).
         state.reject(&b.meta.version);
-        if !state.save(dir) {
-            return false;
+        if state.save(dir) {
+            log(format!("bundle {} refused this shell: {reason:?}; dropped", b.meta.version));
+            remove_slot(dir, "current");
+            self.set_active(activate(dir, self.pubkey, builtin, SHELL_API));
+        } else {
+            // Not recorded: it stays on trial on disk (its starts still count), but this session goes back to the last
+            // good screens rather than a blank page.
+            log(format!("bundle {} refused this shell: {reason:?}; the drop couldn't be recorded, falling back for now", b.meta.version));
+            self.set_active(open_slot(dir, "previous", self.pubkey, builtin, SHELL_API, &state.rejected).and_then(Result::ok));
         }
-        remove_slot(dir, "current");
-        self.set_active(activate(dir, self.pubkey, builtin, SHELL_API));
         true
     }
 
@@ -1491,6 +1511,24 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("current.json/blocked")).unwrap();
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
         assert!(dir.path().join("previous.tar.gz").exists(), "still there for the next launch");
+    }
+
+    #[test]
+    fn screens_that_refuse_the_shell_fall_back_for_the_session_even_if_the_drop_cannot_be_recorded() {
+        let k = key(1);
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        let o = ota_for(dir.path(), &k);
+        assert_eq!(o.active().unwrap().meta.version, "0.3.9");
+        if !read_only(dir.path()) {
+            return;
+        }
+        let reload = o.refused("0.3.9", "test");
+        writable(dir.path());
+        assert!(reload);
+        assert_eq!(o.active().unwrap().meta.version, "0.3.8", "the last good screens for this session");
+        assert!(dir.path().join("current.tar.gz").exists(), "nothing removed that wasn't recorded");
     }
 
     fn ota_for(dir: &Path, k: &Key) -> Arc<Ota> {
