@@ -232,9 +232,6 @@ pub fn unpack(archive: &[u8]) -> Result<(Meta, HashMap<String, Vec<u8>>), String
     Ok((meta, files))
 }
 
-/// Verifies a stored or downloaded bundle (its channel file's signature, then the archive against the manifest),
-/// unpacks it and checks it fits this shell: the same API, and newer than the built-in screens. Expiry is not checked
-/// here: a bundle that was fresh when it was fetched stays usable.
 /// The channel file's manifest, if it is signed by `pubkey` and names exactly these archive bytes (nothing unpacked).
 pub fn verify_archive(pubkey: &str, channel: &[u8], archive: &[u8]) -> Result<Manifest, String> {
     let manifest = verify_channel(pubkey, channel)?;
@@ -244,6 +241,9 @@ pub fn verify_archive(pubkey: &str, channel: &[u8], archive: &[u8]) -> Result<Ma
     Ok(manifest)
 }
 
+/// Verifies a stored or downloaded bundle (its channel file's signature, then the archive against the manifest),
+/// unpacks it and checks it fits this shell: the same API, and newer than the built-in screens. Expiry is not checked
+/// here: a bundle that was fresh when it was fetched stays usable.
 pub fn open(pubkey: &str, channel: &[u8], archive: &[u8], builtin: &semver::Version, shell_api: u32) -> Result<Bundle, String> {
     let manifest = verify_archive(pubkey, channel, archive)?;
     let (meta, files) = unpack(archive)?;
@@ -798,7 +798,8 @@ impl Ota {
 
     /// The screens on trial don't fit this shell (their own code says so at boot): drop them now rather than after
     /// MAX_UNCONFIRMED_BOOTS blank starts, and fall back. Only a bundle still on trial: a script in it can do no more
-    /// than not reporting ready would. True when the page must reload.
+    /// than not reporting ready would. True when the page must reload onto the fallback: the drop is recorded then, or,
+    /// if the state can't be written, only this session falls back (on disk it stays on trial and its starts count).
     fn refused(&self, version: &str, reason: &str) -> bool {
         let (Some((dir, builtin)), Some(b)) = (self.ready_dir(), self.active()) else { return false };
         let _files = self.files.lock().unwrap_or_else(|e| e.into_inner());
