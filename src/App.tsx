@@ -15,7 +15,6 @@ import { forgetWork, setWorkOwner } from "./projects/store";
 import { forgetUsage } from "./usage/usageNote";
 import { useLifeOsVault } from "./areas/useLifeOsVault";
 import { activeProfile, effectiveLifeVault, showUniGlue } from "./areas/profile";
-import { clearProjectBodies } from "./areas/projectBody";
 import { VaultProfileProvider } from "./areas/ProfileContext";
 import AreaSelfTest from "./interface/selftest/SelfTest";
 import LifeOsVaultSetting from "./areas/LifeOsVaultSetting";
@@ -84,7 +83,7 @@ import { useSealedWaiting } from "./sealedLive";
 import { parseEnrollment } from "./sealedCore";
 import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, secretCardsOn, withoutSecretBlock } from "./secretRequest";
 import NotePane, { usePaneShape } from "./NotePane";
-import { APPROVAL_WINDOW_S, ApprovalsContext, useApprovals } from "./approvalsLive";
+import { APPROVAL_WINDOW_S, useApprovals } from "./approvalsLive";
 import { ApprovalBanner } from "./shape/ApprovalBanner";
 import { ShapeSurface, type StoryOpen } from "./shape/ShapeSurface";
 import { useShape } from "./shape/useShape";
@@ -96,7 +95,9 @@ import { Recipes } from "./shape/Recipes";
 import { Studio } from "./shape/Studio";
 import { useToPostCount } from "./shape/useToPostCount";
 import { useLifeProfile } from "./shape/useLifeProfile";
-import { BUILT_IN, totalCount, visibleApplets, type AppletManifest } from "./interface/applets";
+import { BUILT_IN, joinApplets, totalCount, visibleApplets, type AppletManifest } from "./interface/applets";
+import { SealedApplet, startSealedApplet } from "./shape/SealedApplet";
+import { useSealedApplets } from "./shape/useSealedApplets";
 import type { Where } from "./shape/searchScope";
 import { openLink } from "./openLink";
 import { parseApproval, type Approval } from "./approvals";
@@ -427,7 +428,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const secretReceipts = useMemo(() => secretCards ? receiptsByRequest(messages) : new Map(), [secretCards, messages]);
   const [members, setMembers] = useState<Member[]>([]);
   const [identity, setIdentity] = useState<string | null>(null);
-  useLayoutEffect(() => { clearProjectBodies(); setWorkOwner(identity); }, [identity]);
+  useLayoutEffect(() => { setWorkOwner(identity); }, [identity]);
   // T-335: the composer's text (draftBox.ts): a keystroke redraws the composer field only; this view redraws when it turns empty or blank
   const [box] = useState(() => draftBox());
   const setDraft = box.set;
@@ -2480,7 +2481,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   /** An applet's Back: the drawer again, over home. */
   function backToDrawer() { goHome(() => setDrawerOpen(true)); }
-  const isApplet = (t: TabTarget | null | undefined) => !!t && ["mail", "calendar", "messages", "posts", "arcade", "studio", "recipes", "vault"].includes(t.kind);
+  const isApplet = (t: TabTarget | null | undefined) => !!t && ["mail", "calendar", "messages", "posts", "arcade", "studio", "recipes", "vault", "applet"].includes(t.kind);
   const asideRoom = channel && chatOnScreen(activeTab(tabs), channel, notes.length) && listEl?.isConnected && asides[channel] ? channel : null;
   const asideShown = !!asideRoom;
   const goBack = useRef<() => void>(() => {});
@@ -2586,6 +2587,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setDraft(next);
     requestAnimationFrame(() => input.current?.focus());
   };
+  /** A sealed applet's draft (the user tapped Add to draft): into that room's composer, and the room comes up; never sends. */
+  const composeInRoom = (room: string, text: string) => {
+    const key = keyFor(room, null);
+    const next = appendDraft(scopeDraft(key), text);
+    editDraft(key, next);
+    if (scope() === key) setDraft(next);
+    openRoom(room, { keys: true });
+  };
   /** T-161: an approval prompt opens its room at the prompt with the composer focused; the user answers there (nothing is sent for them) */
   const openApproval = (a: Approval) => {
     // a Hermes prompt is answered in the composer; Uni's approval card (T-234) on the card itself
@@ -2595,7 +2604,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // a prompt posted as a reply is in its thread, never the room's timeline: it opens there, as a search hit does
     openRoom(a.channel, { ref: a.ref, root: a.root ?? null, keys: typed });
   };
-  const approvalsView = { list: approvals, open: openApproval, roomName: (id: string) => rooms.find((r) => r.id === id)?.name ?? null };
   const primaryVault = vaults.includes(lifeVault) ? lifeVault : vaults.includes("uni") ? "uni" : vaults.length === 1 ? vaults[0] : null;
   const otherVaults = vaults.filter((vault) => vault !== primaryVault);
   function toggleOtherVaults() {
@@ -2610,17 +2618,24 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   // ── T-335 the shape: the applets drawer, its applets, and search where you are ──
   const toPostCount = useToPostCount(lifeVault, glue && !!identity);
-  const applets = useMemo(() => visibleApplets(BUILT_IN, { calendar: calOn, messages: msgsOn, uniGlue: glue }), [calOn, msgsOn, glue]);
+  // sealed applets: interface notes tagged `applet` in the primary vault (a sealed `recipes` takes the placeholder's slot)
+  const sealed = useSealedApplets(primaryVault);
+  const sealedOf = (id: string | undefined) => sealed.entries.find((e) => e.manifest.id === id) ?? null;
+  const applets = useMemo(() => visibleApplets(joinApplets(BUILT_IN, sealed.entries.map((e) => e.manifest)), { calendar: calOn, messages: msgsOn, uniGlue: glue }), [calOn, msgsOn, glue, sealed.entries]);
   const appletCounts = { topost: toPostCount, mail: held + unreadMail };
   const appletsTotal = totalCount(appletCounts, applets);
   const APPLET_TAB: Record<string, Tab["kind"]> = { arcade: "arcade", studio: "studio", topost: "posts", recipes: "recipes", calendar: "calendar", vault: "vault", mail: "mail", messages: "messages" };
   const appletOf = (t: TabTarget | null | undefined): AppletManifest | null => {
     if (!t) return null;
+    // a sealed applet's kind line says where its data lives; while the vault hasn't answered, its tab's title stands in
+    if (t.kind === "applet") { const m = sealedOf(t.applet)?.manifest; return m ? { ...m, note: m.where } : { contract: 1, id: t.applet ?? "", name: t.title, kind: "vault", host: "sealed", where: "", searches: [], glyph: "◇", note: "your vault" }; }
     const id = Object.entries(APPLET_TAB).find(([, k]) => k === t.kind)?.[0];
     return id ? BUILT_IN.find((a) => a.id === id) ?? null : null;
   };
   function openApplet(id: string) {
     setDrawerOpen(false);
+    const se = sealedOf(id);
+    if (se) { startSealedApplet(se.noteId); openTarget({ kind: "applet", applet: id, title: se.manifest.name }); return; }
     const kind = APPLET_TAB[id];
     if (!kind) return;
     const name = BUILT_IN.find((a) => a.id === id)?.name ?? id;
@@ -2641,6 +2656,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (active?.kind === "vault" && active.vault && active.vault !== VAULT_CHOOSER) return { kind: "vault", vault: active.vault };
     const a = appletOf(active);
     // To Post's posts and Calendar's events are notes in the main vault; the others have no notes of their own here
+    if (active?.kind === "applet" && a) { const p = sealedOf(active.applet)?.prefixes ?? []; return { kind: "applet", id: a.id, name: a.name, vault: p.length ? primaryVault : null, pathPrefix: p[0] ?? null }; }
     if (a) return { kind: "applet", id: a.id, name: a.name, vault: a.id === "topost" || a.id === "calendar" ? primaryVault : null };
     return { kind: "home" };
   }
@@ -2666,6 +2682,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       case "posts": return <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} />;
       case "studio": return <Studio looks={shape.looks} onOpenLink={(url) => void openLink(url).catch(() => {})} />;
       case "recipes": return <Recipes />;
+      case "applet": return <SealedApplet key={active.applet} id={active.applet ?? ""} entry={sealedOf(active.applet)} listed={sealed.loaded} vault={primaryVault} rooms={rooms}
+        onOpenNote={(ref) => { if (primaryVault) openNote({ hub: null, vault: primaryVault, ref }, null); }} onCompose={composeInRoom} />;
       case "vault": return active.vault && active.vault !== VAULT_CHOOSER
         ? <VaultBrowser key={active.vault} vault={active.vault} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix, query = "") => openFind({ kind: "vault", vault: active.vault!, pathPrefix: prefix || null }, query)} />
         : <section className="vault-sidebar sh-vaults" aria-label="Vaults"><div className="vault-heading"><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Look for new vaults</button></div>
@@ -2681,7 +2699,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   };
   const roomChat = focus && homeOpen && channel === focus.room && (root ?? null) === focus.root && currentRoom
     ? (tail: ReactNode) => roomPane(currentRoom, null, `Message ${currentRoom.name.replace(/^#/, "")}`, currentRoom.name, tail) : null;
-  return <ApprovalsContext.Provider value={approvalsView}><VaultProfileProvider profile={profile}><NoteOpener.Provider value={openNote}><main className={`shell sh-shell in-room${barAside ? " sh-bar-aside" : ""}${roomShown ? " sh-in-room" : ""} ${topNote ? "note-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
+  return <VaultProfileProvider profile={profile}><NoteOpener.Provider value={openNote}><main className={`shell sh-shell in-room${barAside ? " sh-bar-aside" : ""}${roomShown ? " sh-in-room" : ""} ${topNote ? "note-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
     <Bar place={place} wants={shape.wants} applets={appletsTotal} drawerOpen={drawerOpen}
       onRooms={() => goHome()} onJournal={() => { setDrawerOpen(false); setStory(null); openTarget({ kind: "journal", title: "Journal" }); }} onApplets={() => { setSearchOpen(false); setPanel(null); setStory(null); setDrawerOpen((o) => !o); }} />
     <section className="conversation" aria-label={journalOpen ? "Journal" : applet ? applet.name : roomShown ? "Room" : homeOpen ? "Rooms" : active?.kind === "note" ? "Note" : "Conversation"}>
@@ -2747,7 +2765,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {creating && <SurfaceModal onCancel={() => { if (!createBusy) setCreating(null); }}><form role="dialog" aria-modal="true" aria-label="New note" onSubmit={(e) => { e.preventDefault(); void createNote(); }}><h2>New note in {creating.vault}</h2><label>Name, with any folders before it<input autoFocus placeholder="Projects/Glaze Tests/Firing notes" value={creating.path} disabled={createBusy} onChange={(e) => setCreating({ ...creating, path: e.target.value })} /></label>{createError && <p className="error" role="alert">{createError}</p>}<button disabled={createBusy} type="submit">{createBusy ? "Creating…" : "Create note"}</button><button disabled={createBusy} type="button" onClick={() => setCreating(null)}>Cancel</button></form></SurfaceModal>}
     {confirmation && <SurfaceModal onCancel={() => setConfirmation(null)}><div role="alertdialog" aria-modal="true" aria-label="Unsaved changes">{confirmation.notice && <p role="status">{confirmation.notice}</p>}<p>{confirmation.text}</p><button autoFocus onClick={() => setConfirmation(null)}>Keep editing</button><button onClick={() => { const run = confirmation.run; setConfirmation(null); run(); }}>{confirmation.go}</button></div></SurfaceModal>}
     {toast && <div className="toast" role="status">{toast}</div>}
-  </main></NoteOpener.Provider></VaultProfileProvider></ApprovalsContext.Provider>;
+  </main></NoteOpener.Provider></VaultProfileProvider>;
 }
 
 export default App;

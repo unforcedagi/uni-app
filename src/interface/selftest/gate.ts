@@ -1,7 +1,7 @@
-// Platform gate for live area apps. The constant stays empty until a
+// Platform gate for sealed applets (once area apps). The constant stays empty until a
 // platform's webview is proven by hand; until then a platform is allowed only
 // by a stored in-app sandbox self-test pass for this platform AND this app
-// version AND webview user agent (Settings → Area apps → Run sandbox self-test).
+// version AND webview user agent (Settings → Developer → Applets → Run sandbox self-test).
 // A failed re-run clears the pass; a webview upgrade changes the user agent and
 // so forces a re-test.
 export const LIVE_AREA_PLATFORMS: readonly string[] = [];

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { answersLine, approvalOutcomes, parseApproval, parseOutcome, pendingApprovals, type ApprovalSource } from "../src/approvals.ts";
-import { uniPanel, withApprovals, type NeedsFeed } from "../src/areas/simpleCore.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
 // Synthetic copies of the gateway's shapes as stored on the relay (T-161 findings): regenerate when the gateway's wording changes.
@@ -94,14 +93,6 @@ check("Codex P2: in one second, the prompt comes before the outcome whatever the
 check("order and duplicates in the input don't matter", () => {
   const a = msg(P.three_answers_5min, 1000), o = msg(O.approved, 1010);
   assert.equal(pendingApprovals([o, a, a], 1011).length, 0);
-});
-check("Uni's panel shows its approval prompts itself: they are counted once, and never also in \"Show N more\"", () => {
-  const none: NeedsFeed = { rows: [], privates: [], total: 0 };
-  const two = pendingApprovals([msg(P.three_answers_5min, 1000), msg(P.once_or_deny_30min, 1001, { channel: "ch-2" })], 1002);
-  const p = uniPanel(withApprovals(none, two));
-  assert.equal(p.total, 2);
-  assert.equal(p.rest, 0, "nothing else is owed: no stray \"1 more\" under the prompts");
-  assert.equal(p.rows.length + (p.approvals?.length ?? 0) + p.rest, p.total, "what is shown plus 'Show N more' is exactly the count");
 });
 check("T-335: how each prompt ended, for its one line in the room", () => {
   const out = (ms: ApprovalSource[], now: number) => Object.fromEntries([...approvalOutcomes(ms, now, ME)].map(([k, v]) => [k, [v.outcome, v.at]]));

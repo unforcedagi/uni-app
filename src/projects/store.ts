@@ -1,10 +1,9 @@
-// T-302: the projects and sessions the app shows, read from the vault the app already reads (the same signed door as every note:
-// `vault_query`), and what a person has asked the room to do to them. Nothing here changes a session: an action is a message in the
-// room (actions.ts); this store only remembers that it was asked, until the run notes say it happened.
+// T-302: the projects and sessions the app shows (a room's runs and their stories), read from the vault the app already reads (the same
+// signed door as every note: `vault_query`). Nothing here changes a session.
 //
 // Round 3 (the review's findings):
 // - The work belongs to one identity on one vault: the device copy and every read are keyed by both, and Forget (or another identity)
-//   drops the copy, what is in memory, the pending asks and any read still out (a late answer can't put it back).
+//   drops the copy, what is in memory and any read still out (a late answer can't put it back).
 // - A read that stops short (a list longer than the pages read) says so ("Some older sessions aren't loaded"), and run notes are read in
 //   date windows, newest first, so the recent and working ones are whole even in a large vault.
 // - T-304: a session's steps (feed.ts) follow the same owner: adopt() hands it on, so Forget and a change of owner drop them too.
@@ -14,36 +13,28 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useSyncExternalStore } from "react";
 import { activeProfile, onVaultChange } from "../areas/profile";
 import type { RawNote } from "../vault/rawNote";
-import { POLL_MS, reader } from "../vault/reader";
+import { reader } from "../vault/reader";
 import { freshen, workFrom, type LiveWork, type Sources } from "./live";
 import { isHome } from "./model";
-import type { Action } from "./actions";
 import { setFeedOwner } from "./feed";
 
-export type Asked = { kind: Action["kind"]; at: number; state: string | null };
 export type WorkState = {
   work: LiveWork; ready: boolean; error: string | null;
   /** When the work on screen was read (a saved copy: when that copy was read); null before any. */
   at: number | null;
   /** What the last read couldn't cover, in words ("Some older sessions aren't loaded"); empty when it covered everything. */
   partial: string[];
-  asked: ReadonlyMap<string, Asked>;
 };
 
 const EMPTY: LiveWork = { areas: [], projects: [], sessions: [], gaps: [] };
-/** The work is read again on the app's one poller (src/vault/reader.ts: a minute apart while the window is visible). A read older than
- *  this (two ticks), or a failed one, is "as of" its time, and the working counts say so. */
-export const FRESH_MS = 2 * POLL_MS;
 /** How often what is on screen is aged by the clock (working → silent), between reads too. */
 const CLOCK_MS = 60_000;
 /** Tasks change slowly and only name sessions: read at most this often. */
 const TASKS_MS = 5 * 60_000;
-/** "Asked the room" stays this long at most, if the run notes never show the change. */
-const ASKED_MS = 15 * 60_000;
 /** The device keeps the last read's sessions from this far back (all live ones), so a cold start paints at once. */
 const KEEP_MS = 30 * 86_400_000;
 
-const BLANK: WorkState = { work: EMPTY, ready: false, error: null, at: null, partial: [], asked: new Map() };
+const BLANK: WorkState = { work: EMPTY, ready: false, error: null, at: null, partial: [] };
 let state: WorkState = BLANK;
 const listeners = new Set<() => void>();
 const emit = () => { for (const l of listeners) l(); };
@@ -59,7 +50,6 @@ let identity: string | null = null;
 let loadedFor: string | null = null;
 /** Bumped by Forget and by a change of owner: a read begun under an older generation is dropped when it lands. */
 let generation = 0;
-const later = new Set<ReturnType<typeof setTimeout>>();
 /** The owner the app is on now (identity and the active vault, read at this moment). */
 const currentOwner = () => ownerOf(identity, activeProfile().vault);
 
@@ -162,7 +152,7 @@ export function refreshWork(fromVault = true): Promise<void> {
       const partial = [...(nodes.complete ? [] : ["Some projects aren't loaded"]), ...runs.partial,
         ...(missing ? [`${missing} session${missing === 1 ? "" : "s"} couldn't be placed under a project`] : [])];
       writeCache(owner, { work, at: t0, partial });
-      set({ work, ready: true, error: null, at: t0, partial, asked: settle(state.asked, work) });
+      set({ work, ready: true, error: null, at: t0, partial });
     } catch (e) {
       if (current()) set({ error: String(e), ready: state.ready || state.work.areas.length > 0, work: freshen(state.work) });
     } finally { if (inflight === p) inflight = null; }
@@ -180,10 +170,8 @@ function adopt(owner: string | null, notify = true) {
   loadedFor = owner; tasks = null; inflight = null; lastRead = null;
   // T-304: a session's steps are the same owner's, and go with the work
   setFeedOwner(owner, owner ? activeProfile().vault : "");
-  for (const t of later) clearTimeout(t);
-  later.clear();
   const saved = owner ? readCache(owner) : null;
-  state = { ...BLANK, asked: new Map(), ...(saved ? { work: freshen(saved.work), at: saved.at, partial: saved.partial } : {}) };
+  state = { ...BLANK, ...(saved ? { work: freshen(saved.work), at: saved.at, partial: saved.partial } : {}) };
   if (notify) emit();
 }
 
@@ -222,51 +210,13 @@ export function setWorkRooms(rooms: readonly { id: string; name: string }[] | nu
   set({ work });
 }
 
-/** Forget this device key: the device copies (every owner's), the work in memory, the pending asks, and any read still out. */
+/** Forget this device key: the device copies (every owner's), the work in memory, and any read still out. */
 export function forgetWork() {
   reader.forget();
   identity = null;
   hubRooms = null;
   adopt(null);
   dropCaches();
-}
-
-/** An ask is settled when the run notes show something new for it (the session ended, a project changed status), or after a while. */
-function settle(asked: ReadonlyMap<string, Asked>, w: LiveWork): Map<string, Asked> {
-  const out = new Map<string, Asked>();
-  for (const [key, a] of asked) {
-    if (Date.now() - a.at > ASKED_MS) continue;
-    if (now(key, w) !== a.state) continue;
-    out.set(key, a);
-  }
-  return out;
-}
-/** What an ask is waiting to see change: a session's state, or a project's status and how many sessions it has. */
-function now(key: string, w: LiveWork): string | null {
-  // "add:<project>": the ask is answered when the project has another session
-  if (key.startsWith("add:")) { const id = key.slice(4); return String(w.sessions.filter((x) => x.project === id).length); }
-  const s = w.sessions.find((x) => x.id === key);
-  if (s) return s.state;
-  const p = w.projects.find((x) => x.id === key);
-  return p ? p.status : null;
-}
-
-/** Remembers that the room was asked (shown as "Asked the room" on the session or project), and reads again soon after. The key is the
- *  session's id (Stop, Fresh start), the project's id (Archive, Bring back), or `add:<project id>` (Add a session). */
-export function noteAsked(key: string, kind: Action["kind"]) {
-  const asked = new Map(state.asked);
-  asked.set(key, { kind, at: Date.now(), state: now(key, state.work) });
-  set({ asked });
-  // (the work's own reads only are read fresh: the rest of the tick stays shared)
-  for (const ms of [4000, 15000, 45000]) { const t = setTimeout(() => { later.delete(t); reader.invalidate("run", "node", "task-all"); void refreshWork(false); }, ms); later.add(t); }
-}
-
-/** "as of 10:32" when the work on screen isn't a fresh read (a failed one, or a saved copy not read again yet); null when it is fresh. */
-export function asOf(s: Pick<WorkState, "at" | "error">, nowMs = Date.now()): string | null {
-  if (s.at === null) return null;
-  if (!s.error && nowMs - s.at <= FRESH_MS) return null;
-  const d = new Date(s.at), today = new Date(nowMs).toDateString() === d.toDateString();
-  return (today ? "" : `${d.toLocaleDateString(undefined, { weekday: "short" })} `) + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };

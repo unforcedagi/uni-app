@@ -3,8 +3,8 @@
 // one the vault declares (a saved copy of the tag schemas, when one is given).
 // Run: node --experimental-strip-types scripts/vaultReader.test.ts
 import assert from "node:assert/strict";
-import { createReader, LIVE, OLD_RUNS_MS, RUN_WINDOWS } from "../src/vault/reader.ts";
-import { LIVE_STATES } from "../src/areas/taskCore.ts";
+import { allPages, createReader, OLD_RUNS_MS, RUN_WINDOWS } from "../src/vault/reader.ts";
+import { failureKind } from "../src/vault/rawNote.ts";
 import { SCHEMA } from "../src/vault/schema.gen.ts";
 
 let failed = 0;
@@ -50,7 +50,6 @@ await check("the live tasks and open decisions are asked by state (and node), an
   assert.deepEqual(d.calls[0].args.metadata, { state: { in: ["open", "doing", "waiting"] } });
   assert.deepEqual(d.calls[1].args.metadata, { node: { in: ["Areas/A"] }, state: { in: ["open", "doing", "waiting"] } });
   assert.deepEqual([d.calls[2].args.tag, d.calls[2].args.metadata], ["decision", { state: { in: ["open"] } }]);
-  assert.deepEqual([...LIVE], [...LIVE_STATES], "the reader's live states are the task list's");
 });
 
 await check("a failed read is not shared: the next asker in the same tick reads again", async () => {
@@ -195,6 +194,25 @@ await check("the generated schema declares what the needs-you path reads (needs_
   assert.equal(SCHEMA.task.needs_aaron.type, "boolean");
   assert.ok("needs_aaron_why" in SCHEMA.task && "kind" in SCHEMA.task && "card" in SCHEMA.task);
   assert.ok("open_asks" in SCHEMA.card && "needs_you" in SCHEMA.card && "status" in SCHEMA.node);
+});
+
+// moved from the retired tasks test (T-335): the paging every list read uses, and how a failed write is named
+await check("r12 paging: a list is read 200 at a time until a short page; a vault that ignores offset, or 10 full pages, is never called complete", async () => {
+  const rows = Array.from({ length: 450 }, (_, i) => ({ id: `n${i}` }));
+  const asked: number[] = [];
+  const all = await allPages(async (offset) => { asked.push(offset); return rows.slice(offset, offset + 200); });
+  assert.deepEqual(asked, [0, 200, 400]); assert.equal(all.rows.length, 450); assert.equal(all.complete, true);
+  const exact = await allPages(async (offset) => rows.slice(0, 400).slice(offset, offset + 200));
+  assert.equal(exact.rows.length, 400); assert.equal(exact.complete, true, "an empty last page ends it");
+  const deaf = await allPages(async () => rows.slice(0, 200));
+  assert.equal(deaf.rows.length, 200); assert.equal(deaf.complete, false, "the same page twice: offset is not honoured");
+  const huge = await allPages(async (offset) => Array.from({ length: 200 }, (_, i) => ({ id: `h${offset + i}` })));
+  assert.equal(huge.rows.length, 2000); assert.equal(huge.complete, false);
+});
+await check("failure kinds: 409 transition_conflict, 422 schema_validation, other", () => {
+  assert.equal(failureKind("MCP error -32600: [transition_conflict] conflict: note x"), "conflict");
+  assert.equal(failureKind("[schema_validation] state is not one of"), "invalid");
+  assert.equal(failureKind("hub unreachable"), "error");
 });
 
 if (failed) { console.log(`${failed} failed`); process.exit(1); }

@@ -1,4 +1,4 @@
-// T-335 one home: the one rooms registry, as the app reads it (pure, unit-tested in scripts/oneHome.test.ts). The registry is kept by
+// T-335 one home: the one rooms registry, as the app reads it (pure, unit-tested in scripts/shape.test.ts). The registry is kept by
 // uni-tasks (rooms.json) and published to the vault note `System/Rooms` (its metadata `registry`): the live rooms (channel id, area, whether
 // private, old names), retired room names (where their work went, or `none`: the name means no room, so an item naming it belongs to its
 // node's room) and archived channel ids. The app keeps no room list, private-room list or channel id of its own; this module only reads that
@@ -65,9 +65,6 @@ export function isPrivateRoomName(reg: RoomsRegistry, x: string | null | undefin
   const priv = (n: string) => !!(reg.rooms[n]?.private || reg.retired[n]?.private);
   return priv(k) || priv(aliasOf(reg, k)) || priv(canonRoom(reg, k));
 }
-
-/** The channel ids of rooms that mean no room (the old main room, archived): never a place to send anything. */
-export const noneIds = (reg: RoomsRegistry | null): ReadonlySet<string> => new Set(reg ? Object.entries(reg.foldedIds).filter(([, into]) => into === null).map(([id]) => id) : []);
 
 /** A retired room's live successor by name (its old name, or where its work went), when the registry says; null otherwise. */
 export function successorOf(reg: RoomsRegistry, x: string | null | undefined): string | null {

@@ -1,10 +1,10 @@
 // The code injected into every sealed frame, after the CSP meta: `window.uni`.
 // It runs inside the frame, so it is a string. Kept free of backticks and `${`.
-//   uni.ready()                      → Promise of the host's context (area name, title, purpose…)
+//   uni.ready()                      → Promise of the host's context ({applet: {id, name}}, contract, theme)
 //   uni.frameFetch(url, init)        → fetch over the frame (pfr envelope), what VaultClient uses
 //   uni.VaultClient / uni.vault      → surface-client's VaultClient on frameFetch (read-only subset)
 //   uni.chat.recent(limit) / .draft(text, room?)
-//   uni.chat.onMessage(cb)           → live messages for the area's room(s), needs chat.read; returns an unsubscribe
+//   uni.chat.onMessage(cb)           → live messages pushed by the host (needs chat.read; a drawer applet gets none today); returns an unsubscribe
 //   uni.note.open(path)
 //   uni.theme.get() / .on(cb)        → host colours; CSS vars --text, --accent… are also set on <html>
 // In-page #anchor links scroll in place. chat.draft and note.open only create a pending suggestion that the user must tap in the host UI.

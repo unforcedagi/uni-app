@@ -1,7 +1,22 @@
 import assert from "node:assert/strict";
-import { splitMarkers, isWorkerStatus } from "../src/chatMarkers.ts";
+import { splitMarkers, isWorkerStatus, isMaintenance, staleStatus } from "../src/chatMarkers.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
+// moved from the retired simpleR17/R18 tests (T-335): the room still mutes maintenance notes and dims past progress pings
+check("maintenance notes are one muted line; a mention of a review is not one", () => {
+  assert.equal(isMaintenance("Self-improvement review: Skill 'client-site-copy' patched."), true);
+  assert.equal(isMaintenance("💾 Self-improvement review — memory updated"), true);
+  assert.equal(isMaintenance("Let's do a self-improvement review of the site tomorrow"), false);
+});
+check("a progress ping older than an hour is a past update; an edited one that is still the newest message may be live", () => {
+  const now = Date.parse("2026-10-14T12:00:00Z") / 1000;
+  const monday = { ts: Date.parse("2026-10-12T12:29:00Z") / 1000, edited: false };
+  assert.equal(staleStatus(monday, now, false), true);
+  assert.equal(staleStatus(monday, now, true), true, "the newest, never edited: still stale");
+  assert.equal(staleStatus({ ...monday, edited: true }, now, true), false, "edited in place and nothing after it: may be live");
+  assert.equal(staleStatus({ ...monday, edited: true }, now, false), true, "something came after it");
+  assert.equal(staleStatus({ ts: now - 600, edited: false }, now, false), false, "ten minutes old");
+});
 check("none: text unchanged", () => assert.deepEqual(splitMarkers("Hello [there]\nworld"), { text: "Hello [there]\nworld", markers: [] }));
 check("trailing line", () => assert.deepEqual(splitMarkers("Shipped it.\n\n[done T-124]"), { text: "Shipped it.", markers: [{ state: "done", task: "T-124" }] }));
 check("trailing on the same line", () => assert.deepEqual(splitMarkers("Shipped it. [decision T-9]  "), { text: "Shipped it.", markers: [{ state: "decision", task: "T-9" }] }));

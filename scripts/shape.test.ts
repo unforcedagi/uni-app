@@ -2,7 +2,7 @@
 // Made-up rooms and notes only; "sanctum" is the fixtures' private area.
 import assert from "node:assert/strict";
 import { decisionsFrom, hiddenRooms, nodeTree, privateRooms, sweepOldKeys } from "../src/shape/shapeCore.ts";
-import { parseRegistry } from "../src/areas/roomsRegistry.ts";
+import { canonRoom, isPrivateRoomName, parseRegistry, successorOf } from "../src/areas/roomsRegistry.ts";
 
 const room = (id: string, name: string) => ({ id, name, last_message: null, last_ts: null });
 const rooms = [room("c-uni", "Uni"), room("c-kiln", "kiln-studio"), room("c-old", "old-barn"), room("c-fold", "potting-shed"), room("c-quiet", "sanctum"), room("c-sub", "garden/sanctum"), room("c-den", "den")];
@@ -79,5 +79,26 @@ const kept = new Map(Object.entries({ "uni.areas.cache.v2": "x", "uni.areas.cach
 const store = { get length() { return kept.size; }, key: (i: number) => [...kept.keys()][i] ?? null, removeItem: (k: string) => { kept.delete(k); } };
 sweepOldKeys(store);
 assert.deepEqual([...kept.keys()].sort(), ["uni.areas.cachedthing", "uni.asks.owed.v1:me|uni", "uni.tabs.v2"]);
+
+// the registry (moved from the retired oneHome test): a private room in it is private under any old name; an old name means the room it
+// became; a name meaning none is no room. A made-up registry, in the shape uni-tasks publishes (rooms.json under the note's `registry`).
+{
+  const REG = parseRegistry({ registry: {
+    schema: "rooms/1", home: "commons",
+    rooms: { commons: { id: "c-commons", area: "Glade", was: ["old-commons"] }, hearth: { id: "c-hearth", area: "Hearth", private: true, own: true, was: ["ember"] } },
+    retired: { hall: { none: true, was: ["front"] }, attic: { private: true, into: "hearth" }, shed: { into: "commons" } },
+    folded_ids: { "c-hall": null, "c-shed": "commons" },
+  } })!;
+  for (const r of ["hearth", "#Hearth", "room:hearth", "ember", "attic"]) assert.equal(isPrivateRoomName(REG, r), true, r);
+  for (const r of ["commons", "old-commons", "shed", "hall", ""]) assert.equal(isPrivateRoomName(REG, r), false, r);
+  assert.equal(canonRoom(REG, "old-commons"), "commons");
+  assert.equal(canonRoom(REG, "front"), "", "an old name of the room meaning none");
+  assert.equal(canonRoom(REG, "c-hall"), "");
+  assert.equal(canonRoom(REG, "c-shed"), "commons");
+  assert.equal(successorOf(REG, "shed"), "commons");
+  assert.equal(successorOf(REG, "attic"), "hearth");
+  assert.equal(successorOf(REG, "hall"), null);
+  assert.equal(parseRegistry({ nope: 1 }), null);
+}
 
 console.log("shape: ok");

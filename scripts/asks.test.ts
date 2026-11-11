@@ -3,7 +3,7 @@
 process.env.TZ = "UTC";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { answerBody, answerMeta, askButtons, asksByRoom, asksFrom, seenBody, seenCloses, seenMeta, visibleAsks, type VaultAsk } from "../src/shape/asksCore.ts";
+import { answerBody, answerMeta, askButtons, asksByRoom, asksFrom, seenBody, seenCloses, seenMeta, splitTitle, visibleAsks, whenLabel, type VaultAsk } from "../src/shape/asksCore.ts";
 import type { ShapeRoom } from "../src/shape/types.ts";
 import type { Note } from "../src/vault/reader.ts";
 
@@ -163,6 +163,20 @@ check("answered or seen here: hidden at once; a seen ask its room asks again sho
   const reasked = from([task("d", "T-32 Do this", { kind: "do", confirmed_at: iso(NOW + H) })]);
   assert.deepEqual(visibleAsks(reasked, new Map([["d", { at: NOW, seen: true }]])).map((x) => x.id), ["d"]);
   assert.deepEqual(visibleAsks(reasked, new Map([["d", { at: NOW, seen: false }]])), []);
+});
+
+// moved from the retired For you test (T-335): the same functions, now here
+check("the default's date in a few words, in the device's time; a task's id read off its title", () => {
+  const NOW = Date.parse("2026-11-11T12:00:00Z");
+  assert.equal(whenLabel("2026-11-13T17:00:00Z", NOW), "Fri 5pm");
+  assert.equal(whenLabel("2026-11-11T17:30:00Z", NOW), "today 5:30pm");
+  assert.equal(whenLabel("2026-11-12T09:00:00Z", NOW), "tomorrow 9am");
+  assert.equal(whenLabel("2026-11-20", NOW), "Nov 20");
+  assert.equal(whenLabel("2026-11-14", NOW), "Sat");
+  assert.equal(whenLabel("2026-11-05T12:00:00Z", NOW), "Nov 5 12pm");
+  assert.equal(whenLabel(null, NOW), null);
+  assert.equal(whenLabel("soon", NOW), null);
+  assert.deepEqual(splitTitle("Tasks/T-77b Fix it"), { tid: "T-77B", rest: "Fix it" });
 });
 
 console.log(failed ? `\n${failed} failed` : "\nall asks checks passed");

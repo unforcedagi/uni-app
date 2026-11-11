@@ -1,4 +1,4 @@
-// The tree of nodes under Uni (pure, unit-tested in scripts/lifeos.test.ts): the Uni root, area notes, and project
+// The tree of nodes under Uni (pure, unit-tested in scripts/nodeTree.test.ts and scripts/links.test.ts): the Uni root, area notes, and project
 // notes whose `metadata.parent` names their parent's path. Built from the notes of one tagged query and a parent index;
 // nothing here fetches.
 import { sortAreas, type Area } from "./areasCore.ts";
@@ -49,19 +49,6 @@ export function buildTree(list: readonly Area[]): Tree {
   return { nodes, children, parent: g.parent, chain: g.chain, scope, links: g.links, areasOf: g.areasOf, archived };
 }
 
-export const childrenOf = (tree: Tree, path: string): Area[] => tree.children.get(path) ?? [];
-
-/** The area `path` is reached through: `via` when the node is linked to it, else its primary parent (its first linked area by name). */
-export const upFrom = (tree: Tree, path: string, via?: string | null): string => via && tree.areasOf.get(path)?.includes(via) ? via : tree.parent.get(path) ?? ROOT;
-
-/** From the top level down to `path` (inclusive), through the area `via` when the node sits in it; empty for an unknown path. */
-export function trail(tree: Tree, path: string, via?: string | null): Area[] {
-  const out: Area[] = [];
-  let at: string | undefined = path;
-  for (let first = true; at && at !== ROOT && tree.nodes.has(at) && out.length <= tree.nodes.size; first = false) { out.unshift(tree.nodes.get(at)!); at = upFrom(tree, at, first ? via : null); }
-  return tree.nodes.has(path) ? out : [];
-}
-
 /** The node and its ancestors up to the top level, nearest first. Stops at a repeat, so bad data cannot loop. */
 export function ancestry(tree: Tree, path: string): Area[] {
   const out: Area[] = [];
@@ -69,16 +56,3 @@ export function ancestry(tree: Tree, path: string): Area[] {
   for (let at: string | undefined = path; at && at !== ROOT && !seen.has(at) && tree.nodes.has(at); at = tree.chain.get(at)) { seen.add(at); out.push(tree.nodes.get(at)!); }
   return out;
 }
-
-/** The path a node's Back goes to: the area it was reached through (else its first area), or Uni (ROOT). */
-export const parentPath = (tree: Tree, path: string, via?: string | null): string => upFrom(tree, path, via);
-
-/** The Uni root as a node, so the same page component draws it. */
-export function rootNode(rooms: readonly string[]): Area {
-  return {
-    id: "uni-root", path: ROOT, name: "Uni", purpose: "What is going on.", status: "foreground",
-    channels: [...rooms], rooms: [...rooms], since: null, title: "Uni", body: "", metadata: {}, updatedAt: null, kind: "area", parent: null,
-  };
-}
-
-export const isRoot = (a: Pick<Area, "path">) => a.path === ROOT;

@@ -5,10 +5,10 @@
 
 import type { VaultRef } from "./vaultlinks.ts";
 
-export type TabKind = "note" | "journal" | "vault" | "areas" | "area" | "mail" | "calendar" | "messages" | "posts" | "all" | "arcade" | "studio" | "recipes";
+export type TabKind = "note" | "journal" | "vault" | "areas" | "area" | "mail" | "calendar" | "messages" | "posts" | "all" | "arcade" | "studio" | "recipes" | "applet";
 /** `channel` on the `all` tab is the room in focus over All (`root`: a thread of it; `path`: the place it is open for, when the room is one
  *  that place borrows). An `area` tab is a node's work, for a vault without rooms. */
-export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; /** `area`: the node's note path (an `Areas/<Name>` area, or a project under one). */ path?: string; title: string };
+export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; /** `area`: the node's note path (an `Areas/<Name>` area, or a project under one). */ path?: string; /** `applet`: a sealed applet's id (its note in the vault joins the drawer). */ applet?: string; title: string };
 export type TabTarget = Omit<Tab, "id">;
 /** `recent`: tab ids by last activation, most recent last (drives the cap and close). */
 export type Tabs = { tabs: Tab[]; active: string | null; recent: string[] };
@@ -40,6 +40,7 @@ export function sameTarget(a: TabTarget, b: TabTarget): boolean {
     // T-335: the To post queue, all of it or one area's
     case "posts": return (a.path ?? "") === (b.path ?? "");
     case "vault": return a.vault === b.vault;
+    case "applet": return a.applet === b.applet;
     case "note": return !!a.note && !!b.note && a.note.vault === b.note.vault && a.note.ref === b.note.ref;
   }
 }
@@ -139,7 +140,7 @@ export function serializeTabs(s: Tabs): string {
   return JSON.stringify({ v: 1, tabs: s.tabs, active: s.active, recent: s.recent });
 }
 
-const KINDS: TabKind[] = ["note", "journal", "vault", "areas", "area", "mail", "calendar", "messages", "posts", "all", "arcade", "studio", "recipes"];
+const KINDS: TabKind[] = ["note", "journal", "vault", "areas", "area", "mail", "calendar", "messages", "posts", "all", "arcade", "studio", "recipes", "applet"];
 const str = (x: unknown): x is string => typeof x === "string" && x.length > 0;
 
 function validTab(x: unknown): Tab | null {
@@ -160,6 +161,7 @@ function validTab(x: unknown): Tab | null {
   // T-335 the shape: the applets drawer's Studio board and Recipes
   if (kind === "studio") return { id: t.id, kind, title: "Studio" };
   if (kind === "recipes") return { id: t.id, kind, title: "Recipes" };
+  if (kind === "applet") return typeof t.applet === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(t.applet) && t.applet.length <= 40 ? { id: t.id, kind, applet: t.applet, title: title || t.applet } : null;
   if (kind === "posts") return { id: t.id, kind, title: "To post", ...(typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { path: t.path } : {}) };
   // The areas tab is Uni's home (saved tabs from before were titled "Areas").
   // (T-335: Uni's own level with its room is gone; Uni is its home)

@@ -1,15 +1,11 @@
 // T-161: the Hermes approval prompts waiting in any room, kept current for every surface (Needs you, the room, the room list) and
 // notified once each. Read from the store (`approval_messages`), decided by `pendingApprovals`; re-read on every live message, and once
 // more when the earliest prompt's own window ends (the time it states, not a guess).
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { commandLine, readApprovals, type Approval, type ApprovalOutcome, type ApprovalSource } from "./approvals";
 import { notifyPlain } from "./desktopNotify";
-
-export type ApprovalsView = { list: Approval[]; /** opens the prompt's room at its message, the composer focused */ open: (a: Approval) => void; roomName: (id: string) => string | null };
-export const ApprovalsContext = createContext<ApprovalsView>({ list: [], open: () => {}, roomName: () => null });
-export const useApprovalList = () => useContext(ApprovalsContext);
 
 const NOTIFIED_KEY = "uni:approvals-notified";
 const readNotified = (): string[] => { try { const v = JSON.parse(localStorage.getItem(NOTIFIED_KEY) ?? "[]"); return Array.isArray(v) ? v.filter((x) => typeof x === "string") : []; } catch { return []; } };

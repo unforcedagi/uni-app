@@ -1,85 +1,19 @@
-/* Uni 0.2: one home, one calm language. Last in the bundle, so it is the final word over the glow-up and the finishing pass.
-   The one home: the day's sentence is the head (oversized, the way the old home said it), and a tap on it pulls down everything the old
-   home held: what needs you, To post, the places. The rooms' stream stays under it, where it was. */
+/* Uni 0.2: one calm language. Last in the bundle, so it is the final word over the glow-up and the finishing pass. */
 
 /* times and hints read in greyscale (4.5:1 on the ground once the Daylight takes the colour out) */
 :root:root { --g-ink-3: #6b6358; }
 
-/* ── the one home ─────────────────────────────────────────── */
-.fd.fd-home { padding-top: clamp(16px, 3.4vh, 40px); }
-.fd-head.fd-homehead { flex: none; display: block; width: 100%; max-width: 720px; margin: 0 auto; padding: 0 0 6px; border: 0; }
-.fd-homehead .fd-mark { margin: 0 0 8px; }
-.fd-pull { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: pointer; border-radius: 14px; -webkit-tap-highlight-color: transparent; }
-.fd-pull:disabled { cursor: default; }
-.fd-pull:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 6px; }
-.fd-pull .fd-statement { display: block; font: 520 clamp(26px, 4.4vw, 46px)/1.06 var(--g-font-display); font-variation-settings: "SOFT" 100, "opsz" 144; letter-spacing: -.02em; text-wrap: balance; color: var(--g-ink); }
-.fd-pull .fd-statement > span { display: block; }
-.fd-pull-row { display: flex; align-items: center; gap: 12px; height: 26px; margin-top: 8px; }
-.fd-pull-row .fd-weave { flex: 1; }
-/* 0.3.1: For you's head is the day's line now; the pull is the places' thread and the word that says what it opens */
-.fd-pull-word { flex: none; font: 500 13px/1 var(--g-font-ui); color: var(--g-ink-2); }
-.fd-pull > .fd-pull-row:first-child { margin-top: 0; }
-.fd-pull-row .ps-chev { flex: none; width: 9px; height: 9px; margin: 0 4px 4px 0; border-right: 1.5px solid var(--g-ink-2); border-bottom: 1.5px solid var(--g-ink-2); transform: rotate(45deg); transition: transform var(--g-t-state) var(--g-ease); }
-.fd-pull[aria-expanded="true"] .ps-chev { transform: rotate(225deg); margin-bottom: -4px; }
-@media (hover: hover) { .fd-pull:not(:disabled):hover .fd-weave path { stroke: var(--g-ink-2); } }
-/* the stream and, pulled down over it, the drawer: the stream keeps its place underneath */
-.fd-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.fd-drawer { position: absolute; inset: 0; z-index: 4; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(-1 * clamp(20px, 5vw, 64px)); padding: 6px clamp(20px, 5vw, 64px) 32px; background: var(--g-ground); border-top: var(--g-hair) solid var(--g-line); }
-.fd-drawer > * { max-width: 720px; margin-left: auto; margin-right: auto; }
-:root:not([data-motion="calm"]) .fd-drawer { animation: fd-drop 260ms var(--g-ease); }
-@keyframes fd-drop { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
-.fd-sec-h { margin: 22px auto 6px; font: 500 13.5px/1.3 var(--g-font-ui); color: var(--g-ink-2); letter-spacing: 0; }
-.fd-drawer .fd-needs { margin-bottom: 0; }
-.fd-needs-shown .fd-needs-list { margin-top: 0; }
-.fd-needs-shown .fd-sec-h::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--g-needs); vertical-align: 1px; }
-.fd-lines { margin-top: 18px; border-top: var(--g-hair) solid var(--g-line); }
-.fd-drawer .fd-topost { margin: 0; }
-.fd-drawer .fd-topost .tp-line { min-height: 48px; border-bottom: var(--g-hair) solid var(--g-line); }
-.fd-drawer .fd-doors { margin-top: 0; }
-.fd-drawer .fd-door { padding-top: 12px; padding-bottom: 12px; }
-.fd-drawer .fd-new { margin-top: 18px; }
-.fd-home .fd-retry { margin-top: 12px; }
-@media (max-width: 599px) {
-  .fd.fd-home { padding-top: 14px; }
-  .fd-pull .fd-statement { font-size: 25px; }
-  .fd-drawer { margin: 0 -20px; padding: 4px 20px 28px; }
-}
-:root[data-screen="ink"] .fd-pull-row .ps-chev { border-color: #000; }
-:root[data-screen="ink"] .fd-needs-shown .fd-sec-h::before { background: #000; }
-:root[data-screen="ink"] .fd-drawer { border-top: 1.5px solid #000; }
-
-/* ── the rail: a tablet (the Daylight) gets the phone's few places and More too; the rest open in a sheet beside the rail ── */
-@media (min-width: 600px) and (max-width: 1099px) {
-  .rail { position: relative; overflow: visible !important; z-index: 42; }
-  .rail .rail-more { display: flex; }
-  .rail:has(.rail-extras.open) { z-index: 120; }
-  .rail-extras { display: none; }
-  .rail-extras.open {
-    display: grid; position: absolute; left: calc(100% + 8px); bottom: 12px; z-index: 1; width: 336px;
-    grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 10px;
-    background: var(--g-paper); border: var(--g-hair) solid var(--g-line); border-radius: 22px; box-shadow: var(--g-shadow-2);
-    animation: rail-sheet var(--g-t-state) var(--g-ease); transform-origin: 0 100%;
-  }
-  .rail-extras.open button { width: 100%; min-height: 84px; margin: 0; gap: 6px; flex: none; border-radius: 16px; }
-  .rail-extras.open button i { width: 44px; height: 36px; }
-  .rail-extras.open button span { font-size: 13px; display: inline; }
-  .rail-more-scrim { display: block; position: fixed; inset: 0; z-index: 41; border: 0; padding: 0; background: var(--g-scrim); animation: rail-scrim var(--g-t-state) linear; }
-  :root[data-screen="ink"] .rail-extras.open { box-shadow: none; border: 1.5px solid #000; animation: none; }
-  :root[data-screen="ink"] .rail-more-scrim { background: rgba(255, 255, 255, .7); animation: none; }
-}
-
-/* ── one page head for every place on the rail: the place's name on the left in the display serif, a small line under it, one quiet
+/* ── one page head for every place: the place's name on the left in the display serif, a small line under it, one quiet
    action on the right (a panel's is its ×). No Back pill on a place the rail opens; a page opened over one (a note, a thread) keeps its Back. ── */
 .mail-bar, .cal-bar, .tp-bar, .msgs-bar, .page-bar { display: flex !important; flex-wrap: nowrap !important; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding-top: 10px; padding-bottom: 8px; border-bottom: var(--g-hair) solid var(--g-line); background: var(--g-ground); }
 .mail-bar > :first-child, .cal-bar > :first-child, .tp-bar > :first-child, .msgs-bar > :first-child, .page-bar > :first-child { margin-right: auto; }
 .mail-title, .cal-title, .tp-title, .msgs-title, .journal-bar > div { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; text-align: left; }
-.mail-title strong, .cal-title strong, .tp-title strong, .msgs-title strong, .journal-bar strong, .vault-browser > .page-bar > strong, .panel-head h1 {
+.mail-title strong, .cal-title strong, .tp-title strong, .msgs-title strong, .journal-bar strong, .vault-browser > .page-bar > strong {
   font: 560 24px/1.1 var(--g-font-display) !important; font-variation-settings: "SOFT" 60, "opsz" 72; letter-spacing: -.01em; color: var(--g-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mail-title small, .cal-title small, .tp-title small, .msgs-title small, .journal-bar small { font: 400 12.5px/1.3 var(--g-font-ui) !important; color: var(--g-ink-2) !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .cal-title { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 6px; }
 .journal-bar { min-height: 64px; }
 .journal-bar > div { flex: 1; }
-.panel-head { padding: 14px 12px 8px 22px; min-height: 52px; }
 .page-bar .note-refresh, .mail-bar .note-refresh, .cal-bar .note-refresh, .tp-bar .note-refresh { width: 44px; height: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; border: 0; background: none; border-radius: 50%; color: var(--g-ink-2); }
 .page-bar .note-refresh:hover, .mail-bar .note-refresh:hover, .cal-bar .note-refresh:hover, .tp-bar .note-refresh:hover { background: var(--g-sunk); color: var(--g-ink); }
 :root[data-screen="ink"] .mail-bar, :root[data-screen="ink"] .cal-bar, :root[data-screen="ink"] .tp-bar, :root[data-screen="ink"] .msgs-bar, :root[data-screen="ink"] .page-bar { border-bottom: 1.5px solid #000; }
@@ -91,7 +25,6 @@
 
 /* ── papercuts the sweep found ── */
 /* a room's name is a real target (it opens the details) */
-.all-focus-open { padding-block: 5px; }
 /* Settings: the key reads, and its copy mark is a target */
 .identity { opacity: 1; color: var(--g-ink-2); }
 .identity-copy { opacity: 1; min-width: 32px; min-height: 32px; color: var(--g-ink-2); border-radius: 8px; }
@@ -110,4 +43,3 @@
 /* Messages: Sign out at the foot of the list */
 .msgs-signout { margin: 18px 0 28px; text-align: center; }
 .msgs-signout .note-quiet { min-height: 40px; color: var(--g-ink-2); }
-.fd-stream { flex: 1; min-height: 0; display: flex; flex-direction: column; }

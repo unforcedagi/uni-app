@@ -1,24 +1,22 @@
-// T-301/T-302: the work model's rules. A project lives in exactly one area and has a folder; a project holds any number of sessions, and
-// any number of them may be live; stop and finish change only the session they name; archiving is for projects, and an archived project
-// has no live sessions. Then the same rules on the vault's own shapes (workFrom), and the words the room is sent.
+// T-301/T-302: the work model the run strip and a run's story read (src/projects/model.ts, live.ts, sessionWords.ts). A project lives in
+// exactly one area and has a folder; any number of its sessions may be live. Then the same rules on the vault's own shapes (workFrom),
+// which runs are private (src/shape/privacy.ts), the steps note, and redaction.
 import assert from "node:assert/strict";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree } from "../src/areas/treeCore.ts";
-import { privateRunIds } from "../src/areas/treeRooms.ts";
-import { ModelError, UNFILED, ago, roomRuns, waitsOnYou, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
-import { HEARD_MS, freshen, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
-import { actionMessage } from "../src/projects/actions.ts";
-import { DASHES, FOLD, HIDDEN, LABEL, PHRASES, REDACT_RULES, answerDraft, askOf, endWords, feedPages, HELD_MAX, labelOk, leftItems, parseFeed, partBefore, redactRaw, safeStep, withHead, withPart, type FeedItem } from "../src/projects/sessionWords.ts";
+import { privateRunIds } from "../src/shape/privacy.ts";
+import { ModelError, UNFILED, ago, isLive, liveSessions, makeProject, problems, span, stateWords, type Area, type Session, type Work } from "../src/projects/model.ts";
+import { HEARD_MS, freshen, plainTitle, plainWords, resultWords, sessionState, workFrom, endWhy } from "../src/projects/live.ts";
+import { DASHES, FOLD, HIDDEN, LABEL, PHRASES, REDACT_RULES, feedPages, HELD_MAX, labelOk, parseFeed, partBefore, redactRaw, safeStep, withHead, withPart, type FeedItem } from "../src/projects/sessionWords.ts";
 import { existsSync, readFileSync } from "node:fs";
-import { parseRuns } from "../src/areas/steerCore.ts";
-import { buildTaskTree, parseNodes } from "../src/areas/taskCore.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { endWhy } from "../src/projects/live.ts";
 import { DEMO_AREAS, demoVault } from "./browser/projectsWorld.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
 const NOW = 1_800_000_000_000;
+/** The live sessions of an area's projects (a test helper: how many runs the area's room has going). */
+const liveInArea = (w: Work, area: string) => { const here = new Set(w.projects.filter((p) => p.area === area).map((p) => p.id)); return w.sessions.filter((x) => here.has(x.project) && isLive(x)); };
 const MIN = 60_000;
 const areas: Area[] = [{ id: "a1", name: "Larder", path: "Areas/Larder", room: "r1" }, { id: "a2", name: "Loft", path: "Areas/Loft", room: "r2" }];
 const empty = (): Work => ({ areas, projects: [makeProject({ id: "p", area: "a1", name: "Jam labels", folder: "~/jam/labels" }, areas)], sessions: [] });
@@ -40,88 +38,14 @@ check("the whole model's rules: a project in two areas, in no area or with no fo
   assert.deepEqual(problems(w), []);
 });
 check("two areas can't share a room (one area, one room)", () => assert.deepEqual(problems({ ...empty(), areas: [areas[0], { ...areas[1], room: "r1" }] }), ["Loft and Larder share a room"]));
-check("many sessions per project, any number live at once; starting one leaves the others as they were", () => {
-  let w = startSession(empty(), "p", "Print the labels", NOW, "s1");
-  w = finishSession(w, "s1", NOW + MIN, "Printed.");
-  w = startSession(w, "p", "Try a second font", NOW + 2 * MIN, "s2");
-  w = startSession(w, "p", "Try a third font", NOW + 3 * MIN, "s3");
-  w = startSession(w, "p", "And a fourth", NOW + 4 * MIN, "s4");
-  assert.deepEqual(liveSessions(w, "p").map((s) => s.id), ["s2", "s3", "s4"]);
-  assert.equal(w.sessions.find((s) => s.id === "s1")!.state, "finished");
-  assert.equal(liveInArea(w, "a1").length, 3);
-  assert.equal(liveInArea(w, "a2").length, 0);
-  assert.deepEqual(problems(w), []);
-});
-check("a session needs a project that exists, something to do, and a project that isn't archived", () => {
-  assert.throws(() => startSession(empty(), "nope", "x", NOW, "s"), /no project/);
-  assert.throws(() => startSession(empty(), "p", "  ", NOW, "s"), /something to do/);
-  const archived = { ...empty(), projects: [{ ...empty().projects[0], status: "archived" as const }] };
-  assert.throws(() => startSession(archived, "p", "x", NOW, "s"), /archived/);
-  assert.match(cannotStart(archived.projects[0]) ?? "", /bring it back/);
-  assert.equal(cannotStart(empty().projects[0]), null);
-});
-check("stop changes only the session it names, and only a live one", () => {
-  let w = startSession(startSession(empty(), "p", "One", NOW, "s1"), "p", "Two", NOW, "s2");
-  w = stopSession(w, "s1", NOW + MIN);
-  assert.equal(w.sessions[0].state, "stopped"); assert.equal(w.sessions[0].endedAt, NOW + MIN);
-  assert.ok(isLive(w.sessions[1]));
-  const again = stopSession(w, "s1", NOW + 9 * MIN);
-  assert.equal(again.sessions[0].endedAt, NOW + MIN);
-  assert.throws(() => stopSession(w, "ghost", NOW), /no session/);
-});
-check("archive is for projects: refused while sessions are live (stop them first), then kept with its folder and history, and can come back", () => {
-  let w = startSession(startSession(empty(), "p", "One", NOW, "s1"), "p", "Two", NOW + MIN, "s2");
-  assert.deepEqual(archivePlan(w, "p").stopFirst.map((s) => s.id), ["s1", "s2"]);
-  assert.throws(() => archiveProject(w, "p"), /stop its 2 live sessions first/);
-  w = stopSession(stopSession(w, "s1", NOW + 2 * MIN), "s2", NOW + 2 * MIN);
-  const a = archiveProject(w, "p");
-  assert.equal(a.projects[0].status, "archived"); assert.equal(a.projects[0].folder, "~/jam/labels");
-  assert.deepEqual(sessionsOf(a, "p").map((s) => s.id).sort(), ["s1", "s2"], "the history stays");
-  assert.deepEqual(problems(a), []);
-  assert.deepEqual(problems({ ...a, sessions: [...a.sessions, { ...a.sessions[0], id: "s3", state: "running", endedAt: null }] }), ["Jam labels is archived but has live sessions"]);
-  assert.equal(restoreProject(a, "p").projects[0].status, "active");
-});
-check("a project's sessions read live first (newest first), then the rest by when they ended", () => {
-  let w = startSession(empty(), "p", "Old", NOW, "old");
-  w = finishSession(w, "old", NOW + MIN, "ok");
-  w = startSession(w, "p", "Stopped", NOW + 2 * MIN, "stp");
-  w = stopSession(w, "stp", NOW + 3 * MIN);
-  w = startSession(w, "p", "Live A", NOW + 4 * MIN, "la");
-  w = startSession(w, "p", "Live B", NOW + 5 * MIN, "lb");
-  assert.deepEqual(sessionsOf(w, "p").map((s) => s.id), ["lb", "la", "stp", "old"]);
-});
-check("a live session's step changes its one line and counts; a stopped one takes no step", () => {
-  let w = startSession(empty(), "p", "Go", NOW, "s");
-  w = stepSession(w, "s", "Reading the folder.", NOW + MIN);
-  assert.equal(w.sessions[0].now, "Reading the folder."); assert.equal(w.sessions[0].steps, 1);
-  w = stopSession(w, "s", NOW + 2 * MIN);
-  const after = stepSession(w, "s", "Sneaking on.", NOW + 3 * MIN);
-  assert.equal(after.sessions[0].now, "Reading the folder."); assert.equal(after.sessions[0].steps, 1);
-});
 check("states are said in words, never ids", () => {
-  let w = startSession(empty(), "p", "Go", NOW, "s");
-  assert.equal(stateWords(w.sessions[0], NOW + 49 * MIN), "Working · 49 min");
-  w = finishSession(w, "s", NOW + 50 * MIN, "Done.");
-  assert.equal(stateWords(w.sessions[0], NOW + 50 * MIN + 3 * 86_400_000), "Finished 3 days ago");
-  assert.equal(stateWords({ ...w.sessions[0], state: "waiting" }, NOW + 60 * MIN), "Needs you · ended 10 min ago");
+  const s: Session = { id: "s", project: "p", state: "running", ask: "Go", now: null, nowAt: null, startedAt: NOW, endedAt: null, steps: 0, result: null, video: null, why: null, end: null, feed: null };
+  assert.equal(stateWords(s, NOW + 49 * MIN), "Working · 49 min");
+  const done: Session = { ...s, state: "finished", endedAt: NOW + 50 * MIN, result: "Done." };
+  assert.equal(stateWords(done, NOW + 50 * MIN + 3 * 86_400_000), "Finished 3 days ago");
+  assert.equal(stateWords({ ...done, state: "waiting" }, NOW + 60 * MIN), "Needs you · ended 10 min ago");
   assert.equal(ago(10_000), "just now"); assert.equal(ago(5 * MIN), "5 min ago");
   assert.equal(span(70 * MIN), "1 h 10 min"); assert.equal(span(5 * 60 * MIN + 10 * MIN), "5 h"); assert.equal(span(23 * 60 * MIN + 40 * MIN), "1 day"); assert.equal(span(20_000), "just now");
-});
-check("the timeline places runs and talk inside its window, and clips what falls outside", () => {
-  let w = startSession(empty(), "p", "Go", NOW - 60 * MIN, "s");
-  w = startSession(w, "p", "Long ago", NOW - 9 * 86_400_000, "old");
-  w = finishSession(w, "old", NOW - 9 * 86_400_000 + MIN, "ok");
-  const win = timelineWindow(w.sessions, NOW);
-  assert.equal(win.from, NOW - 8 * 60 * MIN, "a session ran in the last 8 hours: the window is those hours");
-  const t = timeline(w.sessions, [NOW - 30 * MIN, NOW - 20 * 86_400_000], win.from, win.to);
-  assert.deepEqual(t.runs.map((r) => r.id), ["s"]);
-  assert.ok(Math.abs(t.runs[0].x - 7 / 8) < 1e-9 && Math.abs(t.runs[0].x + t.runs[0].w - 1) < 1e-9 && t.runs[0].live);
-  assert.equal(t.talk.length, 1);
-  const busy = startSession(startSession(w, "p", "Beside it", NOW - 30 * MIN, "b"), "p", "After", NOW - 5 * MIN, "c");
-  const both = timeline(stopSession(busy, "b", NOW - 10 * MIN).sessions, [], win.from, win.to).runs;
-  assert.deepEqual(both.map((r) => [r.id, r.lane]), [["s", 0], ["b", 1], ["c", 1]], "runs at the same time get lanes; a lane is reused once free");
-  const quiet = timelineWindow([w.sessions[1]], NOW);
-  assert.equal(quiet.from, NOW - 96 * 60 * MIN, "nothing recent: back to the latest session, at most 4 days");
 });
 // ------------------------------------------------------------------------------------------ the vault's own shapes (T-302)
 const vault = demoVault(NOW);
@@ -433,39 +357,6 @@ check("review finding 7: an area note with no room keeps its projects named, as 
   assert.deepEqual(w.gaps.filter((g) => g.areaPath === "Areas/Engine Room").map((g) => [g.name, g.why]), [["Mail move", "area has no room"], ["Nightly backups", "area has no room"]]);
   assert.deepEqual(problems(w), []);
 });
-check("round 2: why a session started, from its run note: a fresh start of an earlier one, a pick-up, or one beside others", () => {
-  const don = S("run-donate");
-  assert.deepEqual(don.why, { kind: "fresh", of: "run-donate-old" });
-  assert.equal(whyWords(don, live.sessions), "A fresh start of “Try a donate button”, with a handoff");
-  assert.equal(S("run-events").why, null, "the first one working says nothing");
-  const base = vault.runs.find((r) => r.id === "run-events")!;
-  const at = (min: number) => new Date(NOW - min * MIN).toISOString();
-  const runs = [
-    { ...base, id: "r-a", metadata: { ...base.metadata, started_at: at(50), doing_at: at(1) } },
-    { ...base, id: "r-b", metadata: { ...base.metadata, started_at: at(40), doing_at: at(1) } },
-    { ...base, id: "r-c", metadata: { ...base.metadata, started_at: at(30), doing_at: at(1) } },
-    { ...base, id: "r-d", path: "Runs/2026-10-20 Pick it up (resume abcd1234)", metadata: { ...base.metadata, started_at: at(20), doing_at: at(1) } },
-    { ...base, id: "r-e", metadata: { ...base.metadata, attempt: "abcd1234", state: "failed", started_at: at(90), ended_at: at(60) } },
-  ];
-  const w = workFrom({ nodes: vault.nodes, runs, tasks: vault.tasks }, NOW);
-  const st = (id: string) => w.sessions.find((x) => x.id === id)!;
-  assert.deepEqual([st("r-a").why, st("r-b").why, st("r-c").why], [null, { kind: "alongside", others: 1 }, { kind: "alongside", others: 2 }]);
-  assert.equal(whyWords(st("r-c"), w.sessions), "Started alongside 2 other sessions working here");
-  assert.deepEqual(st("r-d").why, { kind: "resume", of: "r-e" });
-  assert.match(whyWords(st("r-d"), w.sessions)!, /^Picks up where “.+” stopped$/);
-  assert.doesNotMatch(w.sessions.map((x) => whyWords(x, w.sessions) ?? "").join(" "), /abcd1234|r-[a-e]\b/);
-});
-check("the room is sent plain words: the project, the session's line and when it started; never an id", () => {
-  const coop = P("Riverbend co-op site"), ev = S("run-events");
-  const stop = actionMessage({ kind: "stop", project: coop, session: ev }, NOW);
-  assert.match(stop, /^Stop the session on “Make the events page read like a noticeboard” \(started .+\) on Riverbend co-op site\.$/);
-  assert.match(actionMessage({ kind: "fresh", project: coop, session: ev }, NOW), /^Fresh start on Riverbend co-op site: end the session on “Make the events page.*” \(started .+\) and start a new session on the same project, with a short handoff/);
-  assert.equal(actionMessage({ kind: "add", project: coop, ask: " Print  the\nposter " }, NOW), "Add a session on Riverbend co-op site, in ~/work/riverbend-site, alongside any already running: Print the poster");
-  assert.equal(actionMessage({ kind: "archive", project: coop, live: liveSessions(live, coop.id) }, NOW), "Archive the project Riverbend co-op site. It has 2 live sessions: stop them first. Keep its folder and its history.");
-  assert.equal(actionMessage({ kind: "archive", project: P("Seed library catalogue"), live: [] }, NOW), "Archive the project Seed library catalogue. Keep its folder and its history.");
-  assert.equal(actionMessage({ kind: "restore", project: P("Old zine archive") }, NOW), "Bring back the project Old zine archive from the archive.");
-  for (const s of live.sessions) assert.ok(!actionMessage({ kind: "stop", project: P("Mail move"), session: s }, NOW).includes(s.id));
-});
 // ------------------------------------------------------------------------------------------ a session, zoomed in (T-304)
 check("why it ended: mts's word when the note has it; the closing line and the state for notes written before", () => {
   assert.equal(endWhy("limit", "mts abcd1234: failed", "failed"), "limit");
@@ -492,39 +383,6 @@ check("from the vault: the report mts copied onto the run note, in its four part
   assert.equal(S("run-about").end!.needs, null, "a part that says none says nothing");
   const other = workFrom({ nodes: vault.nodes, runs: vault.runs.map((r) => (r.id === "run-catalogue" ? { ...r, metadata: { ...r.metadata, report: { summary: "完了", open: "✅ n/a" } } } : r)), tasks: vault.tasks }, NOW);
   assert.equal(other.sessions.find((s) => s.id === "run-catalogue")!.end!.did, "完了", "words in any script are words");
-});
-check("didn't finish says why, in a sentence: stopped on purpose, failed, ran out of room (and when it picks up again), lost", () => {
-  const head = (id: string) => endWords(S(id), NOW)!.head;
-  assert.equal(head("run-donate-old"), "Didn't finish: it was stopped on purpose.");
-  assert.equal(head("run-labels"), "Didn't finish: it ran out of room: the Claude account reached its session limit.");
-  assert.match(endWords(S("run-labels"), NOW)!.more!, /^It picks up again by itself at /);
-  assert.equal(head("run-catalogue"), "Stopped to ask you something.");
-  assert.equal(head("run-handbook"), "Says it finished, but nothing it left could be checked yet.");
-  assert.equal(head("run-about"), "Finished.");
-  const s = { ...S("run-donate-old"), end: { why: "failed" as const, note: "exit status 1", resumesAt: null, did: null, left: null, checks: null, needs: null } };
-  assert.equal(endWords(s, NOW)!.more, "What went wrong: exit status 1");
-  for (const why of ["turns", "context"] as const) assert.match(endWords({ ...s, end: { ...s.end, why } }, NOW)!.head, /ran out of room/);
-  assert.match(endWords({ ...s, end: { ...s.end, why: "lost" } }, NOW)!.head, /worker was lost/);
-  assert.match(endWords({ ...s, state: "silent", end: null }, NOW)!.head, /nothing has been heard from it/);
-  assert.equal(endWords(S("run-events"), NOW), null);
-});
-check("one that needs you: the exact ask, and the words that answer it in the room (which session, what it asked)", () => {
-  assert.equal(askOf(S("run-catalogue")), "Should a variety with two names be one entry or two? I need that before I can count them.");
-  assert.match(askOf(S("run-handbook")), /^It says it finished, but nothing it left could be checked/);
-  assert.equal(askOf({ ...S("run-catalogue"), end: null }), "It ended needing you, but its note doesn't say what.");
-  assert.equal(answerDraft(S("run-catalogue"), "Seed library catalogue"),
-    "About the session on “Estimate a catalogue from the spreadsheet” (Seed library catalogue), which asks: “Should a variety with two names be one entry or two? I need that before I can count them.” — ");
-  const long = { ...S("run-catalogue"), end: { ...S("run-catalogue").end!, needs: "word ".repeat(80) } };
-  assert.ok(answerDraft(long, "X").length < 260, "a long ask is cut short in the draft");
-});
-check("what it left: one item a line, a link only where the line holds an https link; bullets and backticks go; none is nothing", () => {
-  assert.deepEqual(leftItems(S("run-about").end!.left), [
-    { text: "ABOUT.md in ~/work/riverbend-site", url: null },
-    { text: "https://example.com/riverbend/about (the preview)", url: "https://example.com/riverbend/about" },
-    { text: "commit 1a2b3c4", url: null }]);
-  assert.deepEqual(leftItems("none"), []);
-  assert.deepEqual(leftItems("javascript:alert(1); http://example.com/x").map((i) => i.url), [null, null], "only https opens");
-  assert.deepEqual(leftItems("1. the PR https://example.com/pr/7."), [{ text: "the PR https://example.com/pr/7.", url: "https://example.com/pr/7" }]);
 });
 check("the steps note, read back: time, step or said, words; anything else in the note is left out; secrets are hidden", () => {
   const items = parseFeed(vault.feeds.find((f) => f.id === "feed-events")!.content);
@@ -626,7 +484,7 @@ function leaks(c: { in: string; out: string }, out: string): string[] {
   return [...gone.matchAll(/[\p{L}\p{N}_]{4,}/gu)].map((m) => m[0])
     .filter((w) => !shown.includes(w) && new RegExp(`(?<![\\p{L}\\p{N}_])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_])`, "u").test(out));
 }
-check("redaction, the full real path: a run note holding each case in every field, read by workFrom, and all the view says of it", () => {
+check("redaction, the full real path: a run note holding each case in every field, read by workFrom", () => {
   const base = vault.runs.find((r) => r.id === "run-catalogue")!;
   for (const c of vcases.filter((x) => x.out !== x.in)) {
     const one = c.in.replace(/\n/g, " ");
@@ -635,25 +493,12 @@ check("redaction, the full real path: a run note holding each case in every fiel
         end_note: c.in, video: `https://example.com/${c.in}`, ended: "failed", report: { summary: c.in, artifacts: c.in, checks: c.in, open: c.in } } }));
     const w = workFrom({ nodes: vault.nodes, runs, tasks: vault.tasks }, NOW);
     const shown: string[] = [];
-    for (const s of w.sessions) {
-      const e = endWords(s, NOW);
-      shown.push(s.ask, s.now ?? "", s.result ?? "", s.video ?? "", ...Object.values(s.end ?? {}).map((v) => (typeof v === "string" ? v : "")),
-        e?.head ?? "", e?.more ?? "", askOf(s), answerDraft(s, "A project"), ...leftItems(s.end?.left).flatMap((i) => [i.text, i.url ?? ""]));
-    }
+    for (const s of w.sessions) shown.push(s.ask, s.now ?? "", s.result ?? "", s.video ?? "", ...Object.values(s.end ?? {}).map((v) => (typeof v === "string" ? v : "")));
     assert.equal(w.sessions.length, 2, c.name);
     // the words this test wraps around each case (the link's host, the closing line's) and the view's own words (the Answer draft's
     // "About the session on … which asks") are not the case's
     const wrap = new Set(["https", "example", "evidence", "file", "completed", "abcd1234", "About", "session", "which", "asks"]);
     assert.deepEqual(leaks(c, shown.join("\n")).filter((x) => !wrap.has(x)), [], `${c.from}: ${c.name}`);
-  }
-});
-check("redaction, the full real path: the area's running list (parseRuns) reads a run note's words through redactRaw too", () => {
-  const { nodes, rootPath } = parseNodes([{ id: "u", path: "Uni", tags: ["uni"], metadata: {} }, { id: "a", path: "Areas/Larder", tags: ["area"], metadata: { parent: "Uni" } }] as never, "uni");
-  const tree = buildTaskTree(nodes, rootPath);
-  for (const c of vcases.filter((x) => x.out !== x.in)) {
-    const runs = parseRuns([{ id: "r1", path: "Runs/x", tags: ["run"], metadata: { state: "running", node: "Areas/Larder", summary: c.in, result: c.in } }] as never, tree);
-    assert.equal(runs.length, 1, c.name);
-    assert.deepEqual(leaks(c, `${runs[0].what}\n${runs[0].result ?? ""}`), [], `${c.from}: ${c.name}`);
   }
 });
 check("redaction, the full real path: a steps note holding each case, read by parseFeed", () => {
@@ -663,33 +508,5 @@ check("redaction, the full real path: a steps note holding each case, read by pa
     assert.equal(items.length, 2, c.name);
     assert.deepEqual(leaks(c, items.map((i) => i.text).join("\n")), [], `${c.from}: ${c.name}`);
   }
-});
-check("T-335 runs visible: a room's line is its newest live run's live line, and its newest run waiting on you, never one waiting on someone else", () => {
-  const vault = demoVault(NOW);
-  const iso = (m: number) => new Date(NOW - m * MIN).toISOString();
-  const r = (id: string, md: Record<string, unknown>) => ({ id, path: `Runs/2026-11-10 ${id}`, tags: ["run"], createdAt: iso(300), updatedAt: iso(1), metadata: { node: "area-hearth", channel: "demo-hearth", ...md } });
-  const runs = [
-    r("h-old-live", { state: "running", started_at: iso(90), doing_at: iso(2), doing_now: "Running git" }),
-    r("h-live", { state: "running", started_at: iso(20), doing_at: iso(1), doing_now: "Running pnpm", live_line: "Wire the [[Areas/Hearth|hearth]] list (T-77) api_key=zz-made-up-0001" }),
-    r("h-bare", { state: "running", started_at: iso(10), doing_at: iso(1), doing_now: "Running pnpm", live_line: "Running pnpm", node: "area-desk", channel: "demo-desk" }),
-    r("h-ask", { state: "blocked", started_at: iso(200), waiting_on: "Aaron", waiting_for: "Tap the card for the shelf order" }),
-    r("h-newer-uni", { state: "blocked", started_at: iso(100), waiting_on: "uni", waiting_for: "Merge the branch" }),
-    r("h-decision", { state: "decision", started_at: iso(250) }),
-    r("h-gone", { state: "superseded", started_at: iso(50), waiting_on: "aaron", waiting_for: "Old ask" }),
-  ];
-  const w = workFrom({ nodes: vault.nodes, runs, tasks: vault.tasks }, NOW);
-  const hearth = w.areas.find((a) => a.path === "Areas/Hearth")!;
-  const got = roomRuns(w, hearth.id);
-  assert.equal(got.live?.id, "h-live");
-  // free words, redacted, one plain line: no wiki brackets, no task numbers, no key
-  assert.equal(got.live?.now, "Wire the Areas/Hearth|hearth list [hidden]");
-  assert.equal(got.waiting?.id, "h-ask");
-  assert.deepEqual(got.waiting?.waiting, { on: "aaron", what: "Tap the card for the shelf order" });
-  assert.equal(waitsOnYou(w.sessions.find((s) => s.id === "h-newer-uni")!), false);
-  assert.equal(w.sessions.find((s) => s.id === "h-decision")!.waiting?.on, "aaron");
-  assert.equal(w.sessions.find((s) => s.id === "h-gone")!.waiting ?? null, null);
-  // with no PROGRESS.md step, the live line is the tool step as before (safeStep's known phrases)
-  const desk = w.areas.find((a) => a.path === "Areas/Writing Desk")!;
-  assert.equal(roomRuns(w, desk.id).live?.now, "Running pnpm");
 });
 if (failed) process.exit(1);

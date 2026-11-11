@@ -6,7 +6,7 @@
 //   (focus, visible) after FOCUS_GAP_MS. Every screen part that keeps a list fresh subscribes to it instead of running its own timer.
 // - Each read is shared within a tick: the same kind and query asked twice in one tick (the tasks and the work both want the nodes) is one
 //   vault call. A write, a Retry or a manual refresh calls `invalidate()`: the next read goes to the vault.
-// The parsing stays with the screens' pure cores (taskCore, forYouCore, projects/live); this module only reads.
+// The parsing stays with the screens' pure cores (shape/asksCore, projects/live); this module only reads.
 import { invoke } from "@tauri-apps/api/core";
 import type { Meta } from "./schema.gen.ts";
 
@@ -108,6 +108,8 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
   const cards = (vault: string): Promise<Rows<"card">> => share(keyOf("card", vault), () => allPages(query<"card">(vault, "card")));
   /** Every draft note, metadata only. */
   const drafts = (vault: string): Promise<Rows<"draft">> => share(keyOf("draft", vault), () => allPages(query<"draft">(vault, "draft")));
+  /** Every applet note (a sealed interface that joins the applets drawer), metadata only: its HTML is read when it opens. */
+  const applets = (vault: string): Promise<Rows> => share(keyOf("applet", vault), () => allPages(query(vault, "applet")));
   /**
    * The runs that matter now: every one still live (running, queued, stalled, blocked, waiting on a decision, lost: whenever it started), and those started in the last 60 days, a window at a time (newest first).
    * `partial` says which part a short read left out. Runs older than two days have mostly ended and change rarely: their windows are read at
@@ -195,10 +197,9 @@ export function createReader(call: Call = (cmd, args) => invoke(cmd, args), cloc
     };
   }
 
-  return { nodes, liveTasks, openDecisions, allTasks, closedTasks, cards, drafts, runs, invalidate, forget, onPoll, tick, subscribers: () => subs.size };
+  return { nodes, liveTasks, openDecisions, allTasks, closedTasks, cards, drafts, applets, runs, invalidate, forget, onPoll, tick, subscribers: () => subs.size };
 }
 
-export type Reader = ReturnType<typeof createReader>;
 /** The app's one reader. */
 export const reader = createReader();
 

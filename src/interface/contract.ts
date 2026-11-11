@@ -1,5 +1,5 @@
 // The interface contract, version 1: the only door between the host and a
-// sealed interface (an area app, later others). Pure data in, data out: no
+// sealed interface (a sealed applet in the drawer). Pure data in, data out: no
 // React, no Tauri, no imports from the app, so it can be lifted into a package.
 //
 // Two envelopes cross the frame boundary, both validated here:

@@ -3,7 +3,7 @@
 // background), a failed read is tried again, and the cache keeps the newest 300.
 import { useEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { capped, refKey, settle, shouldRead, splitRefs, titleOfPath, titlesKey, KEEP, type NoteRef, type TitleEntry } from "./noteRefsCore";
+import { capped, refKey, settle, shouldRead, titleOfPath, titlesKey, KEEP, type NoteRef, type TitleEntry } from "./noteRefsCore";
 
 /** r18: titles are kept per signed-in identity (keyed by vault and note inside), never shared across identities, and cleared by Forget. */
 const OWNER_KEY = "uni.noteTitles.owner";
@@ -66,9 +66,6 @@ function load(r: NoteRef) {
     .finally(() => { if (reading.get(k) === g) reading.delete(k); if (g === gen) listeners.forEach((f) => f()); });
 }
 
-/** Read (or check again) the titles of the notes a text mentions, ahead of showing it: called with every refresh of the work. */
-export function warmTitles(texts: readonly string[], vault: string) { for (const t of texts) for (const p of splitRefs(t, vault)) if ("id" in p) load(p); }
-
 /** A linked note's title; `null` while it is first being read (callers show a quiet neutral, never a placeholder that later flips), "a note"
  *  when it can't be read (tried again on the next look after a short wait). */
 export function useNoteTitle(r: NoteRef): string | null {
@@ -77,22 +74,4 @@ export function useNoteTitle(r: NoteRef): string | null {
   // r18: also when the entry goes (another identity's titles were cleared), so it is read again for this one
   useEffect(() => { load(r); }, [k, e === undefined]); // eslint-disable-line react-hooks/exhaustive-deps
   return e === undefined ? null : e.title || "a note";
-}
-/** r18: the last read of this note failed, so its title is the last one known (said quietly, and read again shortly). */
-export function useNoteUnread(r: NoteRef): boolean {
-  const k = refKey(r);
-  return useSyncExternalStore(subscribe, () => !!titles.get(k)?.failed);
-}
-
-export function RefName({ r, onNote }: { r: NoteRef; onNote?: (ref: NoteRef) => void }) {
-  const t = useNoteTitle(r);
-  const off = useNoteUnread(r);
-  if (t === null) return <span className="cp-ref-wait">the linked note</span>;
-  const hint = off ? "Couldn't read this note just now; this is its last known title" : undefined;
-  return onNote ? <button type="button" className={`cp-ref${off ? " cp-ref-off" : ""}`} title={hint} onClick={() => onNote(r)}>{t}</button> : <span className={off ? "cp-ref-off" : undefined} title={hint}>{t}</span>;
-}
-
-/** Plain text with its note ids as titles (buttons when `onNote` is given). `vault`: where the text lives, for an id written without one. */
-export function RefText({ text, vault, onNote }: { text: string; vault: string; onNote?: (ref: NoteRef) => void }) {
-  return <>{splitRefs(text, vault).map((p, i) => "id" in p ? <RefName key={i} r={p} onNote={onNote} /> : <span key={i}>{p.text}</span>)}</>;
 }

@@ -52,8 +52,6 @@ export function publishDecisions(list: readonly KnownDecision[]): void {
 }
 /** How a decision's sheet is opened (the room shell on screen); null when it goes. */
 export function setDecisionOpener(fn: ((id: string) => void) | null): void { opener = fn; bump(); }
-export const openDecision = (id: string): void => { opener?.(id); };
-
 const subscribe = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f); }; };
 /** The chat's view: the decisions it may link to (none while no shell can open them), and a version for its memo. */
 export function useDecisionLinks(): { known: readonly KnownDecision[]; version: number } {

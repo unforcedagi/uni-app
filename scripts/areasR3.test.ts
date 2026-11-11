@@ -1,4 +1,4 @@
-// Carried over from T-73c round 3: the checks that outlive the area bridge (gate, path cache, tabs, draft append, Tauri CSP).
+// Carried over from T-73c round 3: the checks that outlive the area bridge (gate, tabs, draft append, Tauri CSP).
 // Run: node --experimental-strip-types scripts/areasR3.test.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -6,7 +6,6 @@ import * as gate from "../src/interface/selftest/gate.ts";
 
 type Any = any; // eslint-disable-line @typescript-eslint/no-explicit-any
 const opt = async (p: string): Promise<Any> => import(p).catch(() => ({}));
-const cache: Any = await opt("../src/areas/pathCache.ts");
 
 let failed = 0;
 async function check(name: string, fn: () => void | Promise<void>) {
@@ -47,35 +46,16 @@ await check("P2-1 clearSelfTest removes the stored pass", () => {
   } finally { delete (globalThis as Any).localStorage; }
 });
 
-// ---------------------------------------------------------------- P2-4
-await check("P2-4 path listing is cached for 10 s, shared and de-duplicated in flight", async () => {
-  let t = 0, n = 0;
-  const c = cache.createPathCache(async () => { n++; await tick(); return [{ id: String(n), path: "Areas/X" }]; }, 10_000, () => t);
-  const [a, b] = await Promise.all([c.get(), c.get()]);
-  assert.equal(n, 1, "in-flight request shared");
-  assert.equal(a, b);
-  t = 9_999; await c.get(); assert.equal(n, 1, "fresh");
-  t = 10_001; await c.get(); assert.equal(n, 2, "expired");
-  await c.get(true); assert.equal(n, 3, "forced");
-});
-await check("P2-4 a failed listing is not cached", async () => {
-  let n = 0;
-  const c = cache.createPathCache(async () => { n++; if (n === 1) throw new Error("down"); return []; }, 10_000, () => 0);
-  await assert.rejects(c.get(), /down/);
-  await c.get(); assert.equal(n, 2);
-});
-await check("P2-4 visibility reload is debounced to once per 30 s", () => {
-  const s = cache.shouldReload as Any;
-  assert.equal(s(null, 1000), true);
-  assert.equal(s(1000, 20_000), false);
-  assert.equal(s(1000, 31_001), true);
-});
 
 await check("compose draft is appended after a blank line, never replacing", async () => {
   const { appendDraft } = await import("../src/areas/composeDraft.ts");
   assert.equal(appendDraft(undefined, "hi"), "hi");
   assert.equal(appendDraft("   ", "hi"), "hi");
   assert.equal(appendDraft("old draft ", "hi"), "old draft\n\nhi");
+  // "Say it" with no words leaves the draft alone (from the retired simpleR17 test)
+  assert.equal(appendDraft("half a thought", ""), "half a thought");
+  assert.equal(appendDraft(undefined, ""), "");
+  assert.equal(appendDraft("a", "b"), "a\n\nb");
 });
 await check("P3-5 areas tab dedupes on Back (replace of an area tab with an Areas tab elsewhere)", async () => {
   const { openTab, EMPTY_TABS } = await import("../src/tabs.ts");

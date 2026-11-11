@@ -1,4 +1,4 @@
-// Back and Forward over the places visited (pure, unit-tested in scripts/navtree.test.ts). One entry per place: Uni, All (a room in focus
+// Back and Forward over the places visited (pure, unit-tested in scripts/navHistory.test.ts). One entry per place: Uni, All (a room in focus
 // there is All's own step: Back leaves it first), the Journal. A note or a vault browser opens over a place and has its own Back, so it is never an entry.
 import type { Tab, TabTarget } from "./tabs.ts";
 import { isSurface, sameTarget } from "./tabs.ts";
@@ -19,8 +19,6 @@ export function visit(h: History, target: TabTarget | Tab): History {
   const entries = [...h.entries.slice(0, h.index + 1), t].slice(-MAX_HISTORY);
   return { entries, index: entries.length - 1 };
 }
-export const canBack = (h: History): boolean => h.index > 0;
-export const canForward = (h: History): boolean => h.index >= 0 && h.index < h.entries.length - 1;
 export const step = (h: History, by: -1 | 1): { history: History; target: TabTarget } | null => {
   const i = h.index + by;
   return i < 0 || i >= h.entries.length ? null : { history: { ...h, index: i }, target: h.entries[i] };

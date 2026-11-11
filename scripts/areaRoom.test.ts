@@ -1,4 +1,5 @@
-// T-75: an area includes its room. Red tests written before the code.
+// T-75: an area included its room. What still applies to the contract: the manifest's layout hint, live pushes into a frame (chatPush),
+// the kit's onMessage, tabs. (T-335: the area host is gone; sealed applets in the drawer are tested in scripts/sealedApplets.test.ts.)
 // Run: node --experimental-strip-types scripts/areaRoom.test.ts
 import assert from "node:assert/strict";
 
@@ -8,7 +9,6 @@ const manifest: Any = await opt("../src/interface/manifest.ts");
 const session: Any = await opt("../src/interface/session.ts");
 const push: Any = await opt("../src/interface/modules/chatPush.ts");
 const kits: Any = await opt("../src/interface/kits/index.ts");
-const layout: Any = await opt("../src/areas/areaLayout.ts");
 const tabs: Any = await opt("../src/tabs.ts");
 const routerMod: Any = await opt("../src/interface/router.ts");
 const chatMod: Any = await opt("../src/interface/modules/chat.ts");
@@ -50,30 +50,7 @@ await check("layout: a prototype-polluting layout object is harmless", () => {
   assert.equal(m.ok, true); assert.equal(m.manifest.layout.chat, null);
 });
 
-// ------------------------------------------------------------ layout decision (pure)
-await check("new messages: the first list is only recorded; later refs come out oldest first; refs are never pushed twice", () => {
-  const seen = layout.createSeen();
-  const m = (ref: string, ts: number) => ({ ref, ts });
-  assert.deepEqual(seen.fresh([m("a", 1), m("b", 2)]), [], "the room as it was when the area opened");
-  assert.deepEqual(seen.fresh([m("a", 1), m("b", 2)]), []);
-  assert.deepEqual(seen.fresh([m("a", 1), m("b", 2), m("d", 4), m("c", 3)]).map((x: Any) => x.ref), ["c", "d"]);
-  assert.deepEqual(seen.fresh([m("a", 1), m("b", 2), m("d", 4), m("c", 3)]), []);
-  assert.deepEqual(seen.fresh([m("old", 0), m("a", 1), m("b", 2), m("d", 4), m("c", 3)]), [], "an older page loaded later is not news");
-  seen.reset(); assert.deepEqual(seen.fresh([m("z", 9)]), [], "after reset the next list is a baseline again");
-});
-await check("new messages: judged by position, not by timestamp (a slow clock or a far-future ts neither drops nor mutes live pushes)", () => {
-  const m = (ref: string, ts: number) => ({ ref, ts });
-  const a = layout.createSeen();
-  a.fresh([m("a", 1000)]);
-  assert.deepEqual(a.fresh([m("a", 1000), m("late", 990)]).map((x: Any) => x.ref), ["late"], "a sender whose clock is behind");
-  const b = layout.createSeen();
-  b.fresh([m("a", 1000), m("future", 9999999999)]);
-  assert.deepEqual(b.fresh([m("a", 1000), m("future", 9999999999), m("real", 2000)]).map((x: Any) => x.ref), ["real"], "a baseline message with a far-future ts");
-  assert.deepEqual(b.fresh([m("older", 5), m("a", 1000), m("future", 9999999999), m("real", 2000)]), [], "an older page prepended later is still not news");
-  const c = layout.createSeen();
-  assert.deepEqual(c.fresh([]), []);
-  assert.deepEqual(c.fresh([m("first", 1)]).map((x: Any) => x.ref), ["first"], "an empty room's first message is news");
-});
+// (T-335: the area's "new messages" decision, createSeen, went with the area host: a drawer applet has no room on screen to push from)
 // ------------------------------------------------------------ push into the frame
 const msg = (over: Any = {}) => ({ ref: "m1", author: "b".repeat(64), author_name: "Uni", ts: 1_700_000_000, body: "hello", ...over });
 const harness = (grant: Any, now = { v: 0 }) => {

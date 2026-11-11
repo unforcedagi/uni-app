@@ -53,9 +53,9 @@ same tab and spot in the list.
 
 ## Beside Uni's rooms
 
-Uni's rooms and Messages are the two sides of the app, and the rail is the switch between them:
+Uni's rooms and Messages are the two sides of the app. Home is the rooms; Messages is a door in the Applets drawer:
 
-- **Uni** (the rooms): you, Uni and the agents, the work, the areas. Uni reads these.
+- **Uni** (the rooms): you, Uni and the agents, and the work. Uni reads these.
 - **Messages**: you and other people, on their networks. Uni can't read these, and every conversation says so.
 
 Each side keeps its own place. Going from a room to Messages and back lands you in the same room, at the same spot,

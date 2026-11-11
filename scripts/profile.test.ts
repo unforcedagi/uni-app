@@ -1,11 +1,8 @@
-// Life OS profile: defaults equal today's Uni values; the profile note; vault choice; the vault parameter reaching the data layer.
+// Life OS profile: defaults equal today's Uni values; the profile note; vault choice; discovery.
 // Run: node --experimental-strip-types scripts/profile.test.ts
 import assert from "node:assert/strict";
 import { showUniGlue, defaultProfile, packProfile, readProfileNote, resolveProfile, readVaultChoice, writeVaultChoice, vaultChoices, setActiveProfile, activeProfile } from "../src/areas/profile.ts";
-import { groupOf, parseNodes, sortTasks } from "../src/areas/taskCore.ts";
 import { nodeStatus } from "../src/areas/areasCore.ts";
-import { createAreasCache } from "../src/areas/areasCache.ts";
-import { createVaultTasks } from "../src/areas/vaultTasks.ts";
 
 let failed = 0;
 const pending: Promise<void>[] = [];
@@ -42,59 +39,9 @@ check("vault choice persists; invalid or missing falls back to uni; uni listed f
   writeVaultChoice(store, "bad name!"); assert.equal(readVaultChoice(store), "scratch-1");
   assert.deepEqual(vaultChoices(["z", "uni", "a"]), ["uni", "a", "z"]);
 });
-check("vaultTasks: singleton follows the active profile's vault; an explicit vault wins", async () => {
-  const seen: unknown[] = [];
-  const call = async (_c: string, a: Record<string, unknown>) => { seen.push(a.vault); return []; };
-  const t = createVaultTasks(call);
-  await t.loadTree();
-  setActiveProfile(packProfile("scratch", "root"));
-  await t.loadTree();
-  await createVaultTasks(call, "fixed").loadTree();
-  setActiveProfile(defaultProfile());
-  assert.deepEqual(seen, ["uni", "scratch", "fixed"]);
-  assert.equal(activeProfile().vault, "uni");
-});
 
-check("review: the device cache keeps one slot per vault; uni keeps the original key", async () => {
-  const { createAreasCache, CACHE_KEY, cacheKeyFor } = await import("../src/areas/areasCache.ts");
-  const m = new Map<string, string>(); const store = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), key: (i: number) => [...m.keys()][i] ?? null, get length() { return m.size; } };
-  const c = createAreasCache(store); const area = { id: "a", path: "Areas/A", name: "A", purpose: "", status: "foreground", channels: [], rooms: [], kind: "area", parent: null, since: null, title: "A", body: "", metadata: {}, updatedAt: null } as never;
-  const uni = { identity: "i", vault: "uni" }, other = { identity: "i", vault: "scratch" };
-  c.write({ areas: [area], briefs: {} }, uni);
-  c.write({ areas: [area, area], briefs: {} }, other);
-  assert.equal(cacheKeyFor("uni"), CACHE_KEY);
-  assert.equal(c.read(uni)?.areas.length, 1, "uni's slot survives opening another vault");
-  assert.equal(c.read(other)?.areas.length, 2);
-  c.clear(); assert.equal(m.size, 0, "forget clears every vault's slot");
-});
 check("review: profile note strings are capped", () => {
   assert.equal(readProfileNote({ metadata: { me: "x".repeat(500) } })!.me!.length, 120);
-});
-check("PR2: root tag follows the profile; uni default unchanged", () => {
-  const notes = [{ id: "r", path: "Life", tags: ["root", "node"] }, { id: "a", path: "Areas/A", tags: ["area", "node"], metadata: { parent: "r" } }];
-  assert.equal(parseNodes(notes, "root").rootPath, "Life");
-  assert.equal(parseNodes(notes, "uni").rootPath, null);
-  assert.equal(parseNodes([{ id: "u", path: "Uni", tags: ["uni"] }]).rootPath, "Uni");
-  setActiveProfile(packProfile("s", "root"));
-  assert.equal(parseNodes(notes).rootPath, "Life");
-  setActiveProfile(defaultProfile());
-});
-check("PR2: me / agentOwners / room prefix drive groups and sort", () => {
-  const d = defaultProfile(); const p = packProfile("s", "root");
-  assert.equal(groupOf({ owner: "aaron", waitingOn: null, kind: "task" }, d), "you");
-  assert.equal(groupOf({ owner: "me", waitingOn: null, kind: "task" }, d), "others");
-  assert.equal(groupOf({ owner: "room:x", waitingOn: null, kind: "task" }, d), "rooms");
-  assert.equal(groupOf({ owner: "room:atlas/teach", waitingOn: "Aaron", kind: "task" }, d), "you");
-  assert.equal(groupOf({ owner: "room:atlas/teach", waitingOn: "person:aaron", kind: "task" }, d), "you");
-  assert.equal(groupOf({ owner: "room:atlas/teach", waitingOn: "external", kind: "task" }, d), "rooms");
-  assert.equal(groupOf({ owner: "me", waitingOn: null, kind: "task" }, p), "you");
-  assert.equal(groupOf({ owner: "x", waitingOn: "me", kind: "task" }, p), "you");
-  assert.equal(groupOf({ owner: "room:x", waitingOn: null, kind: "task" }, p), "others");
-  assert.equal(groupOf({ owner: "agent", waitingOn: null, kind: "task" }, p), "rooms");
-  setActiveProfile(p);
-  const mk = (title: string, waitingOn: string | null) => ({ title, waitingOn, kind: "task", state: "open", due: null }) as never;
-  assert.equal(sortTasks([mk("b", null), mk("a", "me")])[0].title, "a");
-  setActiveProfile(d);
 });
 check("PR2: pack statuses map (pack vaults only): active is foreground, dormant and incubating are background", () => {
   assert.equal(nodeStatus("active"), "background", "uni (the default profile) keeps today's reading");
@@ -105,16 +52,6 @@ check("PR2: pack statuses map (pack vaults only): active is foreground, dormant 
   assert.equal(nodeStatus("incubating"), "background");
   assert.equal(nodeStatus("archived"), "archived");
   assert.equal(nodeStatus(undefined), "background");
-});
-check("PR2: the device cache accepts every status the parser can produce (active/dormant nodes are not rejected)", () => {
-  const m = new Map<string, string>(); const store = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) };
-  const c = createAreasCache(store); const owner = { identity: "i", vault: "s" };
-  const area = (status: string) => ({ id: status, path: "Areas/" + status, name: status, purpose: "", status: nodeStatus(status), channels: [], since: null, title: status, body: "", metadata: {}, updatedAt: null, kind: "area", parent: null, rooms: [] }) as never;
-  c.write({ areas: ["active", "dormant", "incubating", "done"].map(area), briefs: {} }, owner);
-  assert.equal(c.read(owner)?.areas.length, 4);
-  // a raw pack status that slipped through unnormalised is also accepted
-  c.write({ areas: [{ ...(area("x") as object), status: "active" } as never, { ...(area("y") as object), status: "dormant" } as never], briefs: {} }, owner);
-  assert.equal(c.read(owner)?.areas.length, 2);
 });
 
 check("PR4: discover — uni reads only the profile note (no tag queries); other vaults probe node and root", async () => {
@@ -137,14 +74,5 @@ check("PR6: a saved vault that left the list falls back to uni, in the shell and
   assert.equal(effectiveLifeVault("gone", ["uni", "s"]), "uni");
 });
 
-check("chat null: room:* owners group under Others (no roomOwnerPrefix), the uni profile groups them under Rooms; only buzz profiles have chat", () => {
-  const t = { owner: "room:cohere", waitingOn: null, kind: "task" as const };
-  assert.equal(groupOf(t, packProfile("s", "root")), "others");
-  assert.equal(groupOf(t, defaultProfile()), "rooms");
-  assert.equal(packProfile("s", "root").chat.provider, null);
-  assert.equal(defaultProfile().chat.provider, "buzz");
-  assert.equal(readProfileNote({ metadata: { chat: { provider: null } } })?.chat?.provider, null);
-  assert.equal(resolveProfile("uni", { chat: { provider: null } }, false).chat.provider, null);
-});
 await Promise.all(pending);  // an async check must finish before the exit code is decided
 if (failed) { console.log(`${failed} failed`); process.exit(1); } else console.log("all passed");

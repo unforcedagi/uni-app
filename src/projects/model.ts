@@ -138,83 +138,9 @@ export function problems(w: Work): string[] {
 }
 
 export const isLive = (s: Session) => s.state === "running";
-export const projectsIn = (w: Work, area: string) => w.projects.filter((p) => p.area === area);
-export const areaOf = (w: Work, project: Project) => w.areas.find((a) => a.id === project.area) ?? null;
 export const liveSessions = (w: Work, project: string) => w.sessions.filter((s) => s.project === project && isLive(s));
-export const liveInArea = (w: Work, area: string) => {
-  const here = new Set(projectsIn(w, area).map((p) => p.id));
-  return w.sessions.filter((s) => here.has(s.project) && isLive(s));
-};
-
 /** T-335 runs visible: a session waiting on you (blocked on you, or a decision that is yours). */
 export const waitsOnYou = (s: Session) => s.state === "waiting" && s.waiting?.on === "aaron";
-/** T-335 runs visible: what a room's line and head say of its runs: the newest live one (its live line), and the newest waiting on you.
- *  Each opens its run note (the session's id). */
-export function roomRuns(w: Work, area: string): { live: Session | null; waiting: Session | null } {
-  const here = new Set(projectsIn(w, area).map((p) => p.id));
-  const newest = (f: (s: Session) => boolean) => w.sessions.filter((s) => here.has(s.project) && f(s)).sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;
-  return { live: newest(isLive), waiting: newest(waitsOnYou) };
-}
-
-/** A project's sessions in the order a person reads them: live ones first (newest first), then the rest by when they ended. */
-export function sessionsOf(w: Work, project: string): Session[] {
-  const mine = w.sessions.filter((s) => s.project === project);
-  const live = mine.filter(isLive).sort((a, b) => b.startedAt - a.startedAt);
-  const done = mine.filter((s) => !isLive(s)).sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
-  return [...live, ...done];
-}
-
-const put = (w: Work, id: string, change: (s: Session) => Session): Work => {
-  if (!w.sessions.some((s) => s.id === id)) throw new ModelError(`no session ${id}`);
-  return { ...w, sessions: w.sessions.map((s) => (s.id === id ? change(s) : s)) };
-};
-
-/** Why a project can't take a new session, or null when it can (any number may run at once: the others are never in the way). */
-export function cannotStart(p: Project): string | null {
-  return p.status === "archived" ? `${p.name} is archived; bring it back before starting a session` : null;
-}
-
-/** Starts a fresh session on a project. The project's other sessions, live or not, are left as they are. */
-export function startSession(w: Work, project: string, ask: string, at: number, id: string): Work {
-  const p = w.projects.find((x) => x.id === project);
-  if (!p) throw new ModelError(`no project ${project}`);
-  const no = cannotStart(p);
-  if (no) throw new ModelError(no);
-  if (!ask.trim()) throw new ModelError("a session needs something to do");
-  if (w.sessions.some((s) => s.id === id)) throw new ModelError(`a session ${id} already exists`);
-  const s: Session = { id, project, state: "running", ask: ask.trim(), now: null, nowAt: null, startedAt: at, endedAt: null, steps: 0, result: null, video: null, why: null, end: null, feed: null };
-  return { ...w, sessions: [...w.sessions, s] };
-}
-
-/** A live session takes a step: its one line says what it is doing now. A session that isn't live takes none. */
-export const stepSession = (w: Work, id: string, text: string, at: number): Work =>
-  put(w, id, (s) => (isLive(s) ? { ...s, now: text, nowAt: at, steps: s.steps + 1 } : s));
-
-/** Stops a live session where it is. Stopping one that isn't live changes nothing. */
-export const stopSession = (w: Work, id: string, at: number): Work =>
-  put(w, id, (s) => (isLive(s) ? { ...s, state: "stopped", endedAt: at } : s));
-
-/** A live session finishes with what it came back with. */
-export const finishSession = (w: Work, id: string, at: number, result: string, video: string | null = null): Work =>
-  put(w, id, (s) => (isLive(s) ? { ...s, state: "finished", endedAt: at, result, video } : s));
-
-/** What archiving a project asks first: nothing, or to stop its live sessions (an archived project has none). */
-export function archivePlan(w: Work, project: string): { stopFirst: Session[] } {
-  if (!w.projects.some((p) => p.id === project)) throw new ModelError(`no project ${project}`);
-  return { stopFirst: liveSessions(w, project) };
-}
-
-/** Archives a project: refused while it has live sessions (they are stopped first). Its folder and its sessions are kept. */
-export function archiveProject(w: Work, project: string): Work {
-  const { stopFirst } = archivePlan(w, project);
-  if (stopFirst.length) throw new ModelError(`stop its ${stopFirst.length} live session${stopFirst.length === 1 ? "" : "s"} first`);
-  return { ...w, projects: w.projects.map((p) => (p.id === project ? { ...p, status: "archived" } : p)) };
-}
-
-/** Brings an archived project back: active again, its history as it was. */
-export const restoreProject = (w: Work, project: string): Work =>
-  ({ ...w, projects: w.projects.map((p) => (p.id === project && p.status === "archived" ? { ...p, status: "active" } : p)) });
-
 /** How long, said plainly: "4 min", "1 h 10 min", "5 h", "2 days" (minutes only while they matter). */
 export function span(ms: number): string {
   const m = Math.max(0, Math.round(ms / 60000));
@@ -236,50 +162,4 @@ export function stateWords(s: Session, now: number): string {
   const when = s.endedAt ? ago(now - s.endedAt) : "";
   const word = { running: "Working", finished: "Finished", stopped: "Stopped", waiting: "Needs you · ended", failed: "Didn't finish ·", silent: "Silent · last heard" }[s.state];
   return `${word} ${when}`.trim();
-}
-
-/** Why a session started, in plain words, naming the earlier one by its line (null: nothing to say). */
-export function whyWords(s: Session, all: readonly Session[]): string | null {
-  const w = s.why;
-  if (!w) return null;
-  if (w.kind === "alongside") return `Started alongside ${w.others} other session${w.others === 1 ? "" : "s"} working here`;
-  const of = w.of ? all.find((x) => x.id === w.of) : undefined;
-  if (w.kind === "fresh") return of ? `A fresh start of “${of.ask}”, with a handoff` : "A fresh start of an earlier session, with a handoff";
-  return of ? `Picks up where “${of.ask}” stopped` : "Picks up where an earlier session stopped";
-}
-
-/** Sessions that ran at the same time each get a lane of their own (the first lane free when it started). */
-function lanes(sessions: readonly Session[], to: number) {
-  const ends: number[] = [];
-  return [...sessions].sort((a, b) => a.startedAt - b.startedAt).map((s) => {
-    let lane = ends.findIndex((e) => e <= s.startedAt);
-    if (lane < 0) lane = ends.length;
-    ends[lane] = s.endedAt ?? to;
-    return { s, lane };
-  });
-}
-
-/**
- * The thin timeline under a project: when its sessions ran, against when the room talked. Everything is placed as a fraction of the
- * window [from, to], clipped to it.
- */
-export function timeline(sessions: readonly Session[], talk: readonly number[], from: number, to: number) {
-  const len = Math.max(1, to - from);
-  const at = (t: number) => Math.min(1, Math.max(0, (t - from) / len));
-  return {
-    runs: lanes(sessions.filter((s) => (s.endedAt ?? to) >= from && s.startedAt <= to), to).map(({ s, lane }) => ({ id: s.id, live: isLive(s), lane, x: at(s.startedAt), w: Math.max(0.006, at(s.endedAt ?? to) - at(s.startedAt)) })),
-    talk: talk.filter((t) => t >= from && t <= to).map(at),
-  };
-}
-
-const HOUR = 3_600_000;
-/**
- * The window the timeline shows: the last 8 hours when a session ran in them; otherwise back to the latest session's start (with a
- * little before it), never more than 4 days.
- */
-export function timelineWindow(sessions: readonly Session[], now: number, recent = 8 * HOUR, longest = 96 * HOUR): { from: number; to: number } {
-  if (sessions.some((s) => (s.endedAt ?? now) >= now - recent)) return { from: now - recent, to: now };
-  const latest = [...sessions].sort((a, b) => (b.endedAt ?? now) - (a.endedAt ?? now))[0];
-  if (!latest) return { from: now - recent, to: now };
-  return { from: Math.max(now - longest, Math.min(now - recent, latest.startedAt - HOUR / 2)), to: now };
 }

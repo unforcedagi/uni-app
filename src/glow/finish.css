@@ -1,36 +1,8 @@
-/* T-335 as Aaron: the finishing pass. One back button, one refresh, one composer send, one rail, on the glow-up's tokens. Loaded last. */
+/* T-335 as Aaron: the finishing pass. One back button, one refresh, one composer send, on the glow-up's tokens. Loaded last. */
 
 /* ── Short words on a phone, the whole name on a wider screen (the button's aria-label says it for the ear either way) ── */
 .only-narrow { display: none; }
 @media (max-width: 599px) { .only-wide { display: none; } .only-narrow { display: inline; } }
-
-/* ── The phone's bar: four places and More; the rest in a sheet above it ── */
-.rail .rail-more, .rail-more-scrim { display: none; }
-.rail-extras { display: contents; }
-@media (max-width: 599px) {
-  .rail { overflow: visible !important; z-index: 42; }
-  .rail > button, .rail-more { flex: 1 1 0; }
-  .rail .rail-more { display: flex; }
-  .rail:has(.rail-extras.open) { z-index: 120; }
-  .rail-extras { display: none; }
-  .rail-extras.open {
-    display: grid; position: absolute; left: 8px; right: 8px; bottom: calc(100% + 8px); z-index: 1;
-    grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 10px;
-    background: var(--g-paper); border: var(--g-hair) solid var(--g-line); border-radius: 22px; box-shadow: var(--g-shadow-2);
-    animation: rail-sheet var(--g-t-state) var(--g-ease);
-    transform-origin: 90% 100%;
-  }
-  .rail-extras.open button { width: 100%; min-height: 76px; gap: 4px; flex: none; border-radius: 16px; }
-  .rail-extras.open button i { width: 44px; height: 36px; }
-  .rail-extras.open button span { font-size: 13px; display: inline; }
-  .rail-extras.open button .rail-count, .rail-extras.open button .rail-dot { font-size: 11px; }
-  .rail-more-scrim { display: block; position: absolute; inset: 0; z-index: 41; border: 0; padding: 0; background: var(--g-scrim); animation: rail-scrim var(--g-t-state) linear; }
-}
-@keyframes rail-sheet { from { opacity: 0; transform: translateY(8px) scale(.97); } }
-@keyframes rail-scrim { from { opacity: 0; } }
-:root[data-screen="ink"] .rail-extras.open { box-shadow: none; border-color: #000; animation: none; }
-:root[data-screen="ink"] .rail-more-scrim { background: rgba(255, 255, 255, .7); animation: none; }
-.rail svg.mono-icon { width: 22px; height: 22px; }
 
 /* ── One back button, one refresh ── */
 .note-back { min-height: 40px; padding: 0 14px 0 10px; gap: 6px; border: var(--g-hair) solid var(--g-line-strong); background: transparent; box-shadow: none !important; font: 500 14px/1 var(--g-font-ui); color: var(--g-ink); border-radius: 999px; }
@@ -61,13 +33,6 @@
 .older button { border: 0; background: none; color: var(--g-ink-3); font: 500 13px/1 var(--g-font-ui); }
 @media (hover: hover) { .older button:hover { color: var(--g-ink); background: var(--g-sunk); } }
 
-/* ── The home: each place in its own colour ── */
-.fd-door[data-sign="quiet"] .fd-sign i, .fd-door[data-sign="new"] .fd-sign i { background: var(--room-tint, var(--g-line-strong)); }
-.fd-door[data-sign="quiet"] .fd-sign i { opacity: .55; }
-.fd-door[data-sign="running"] .fd-sign i { box-shadow: inset 0 0 0 2px var(--room-tint, var(--g-accent)); }
-:root[data-screen="ink"] .fd-door .fd-sign i { opacity: 1; }
-:root[data-screen="ink"] .fd-door[data-sign="quiet"] .fd-sign i, :root[data-screen="ink"] .fd-door[data-sign="new"] .fd-sign i { background: #000; }
-
 /* ── Settings: sections with air, the dangerous one small and last ── */
 .connection[data-fine="true"] { position: absolute; width: 1px; height: 1px; min-height: 0; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); margin: 0; }
 .settings-device { display: grid; gap: 8px; margin-top: 18px; }
@@ -91,48 +56,6 @@
 .vault-folder-actions.marks svg { width: 16px; height: 16px; }
 @media (pointer: coarse) { .vault-folder-actions.marks button { width: 44px; height: 44px; min-height: 44px; } }
 
-/* ── The project sheet: dashes were saying "not real yet" ── */
-.pj-more { border: var(--g-hair) solid var(--g-line-strong) !important; }
-.pj-folder { border: var(--g-hair) solid var(--g-line) !important; }
-
-/* ── The places on one thread: a knot each, in its room's colour; the mark breathes while something is moving ── */
-.fd-places-h { display: flex; align-items: center; gap: 12px; }
-.fd-weave { position: relative; flex: 1; min-width: 0; height: 24px; }
-.fd-weave svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.fd-weave path { fill: none; stroke: var(--g-line-strong); stroke-width: 1; }
-.fd-knot { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--room-tint, var(--g-ink-3)); opacity: .55; }
-.fd-knot.fresh { width: 8px; height: 8px; margin: -4px 0 0 -4px; opacity: 1; }
-.fd-knot.live { width: 10px; height: 10px; margin: -5px 0 0 -5px; opacity: 1; background: var(--g-ground); box-shadow: inset 0 0 0 2px var(--room-tint, var(--g-accent)); }
-.fd-knot.needs { width: 10px; height: 10px; margin: -5px 0 0 -5px; opacity: 1; background: var(--g-needs); box-shadow: 0 0 0 3px var(--g-needs-soft); }
-@keyframes uni-breathe { 50% { transform: scale(1.22); } }
-:root:not([data-motion="calm"]) .fd-knot.live { animation: uni-breathe 3.6s ease-in-out infinite; }
-:root:not([data-motion="calm"]) .fd-head[data-moving="true"] .enso { animation: uni-breathe 5s ease-in-out infinite; }
-:root[data-screen="ink"] .fd-weave path { stroke: #000; }
-:root[data-screen="ink"] .fd-knot { opacity: 1; background: #000; box-shadow: none; }
-:root[data-screen="ink"] .fd-knot.live { background: #fff; box-shadow: inset 0 0 0 2px #000; }
-@media (hover: hover) { .fd-door:hover .fd-name { color: var(--room-tint, var(--g-ink)); } }
-
-/* ── The More sheet: each place on a soft well in its own earth colour ── */
-@media (max-width: 599px) {
-  .rail-extras.open button i { background: color-mix(in srgb, var(--tile, var(--g-accent)) 13%, transparent); color: color-mix(in srgb, var(--tile, var(--g-accent)) 75%, var(--g-ink)) !important; border-radius: 14px; }
-  .rail-extras.open button:nth-child(6n+1) { --tile: #4f6b3a; }
-  .rail-extras.open button:nth-child(6n+2) { --tile: #a8571c; }
-  .rail-extras.open button:nth-child(6n+3) { --tile: #3e6a78; }
-  .rail-extras.open button:nth-child(6n+4) { --tile: #7c4a7a; }
-  .rail-extras.open button:nth-child(6n+5) { --tile: #8a6d1f; }
-  .rail-extras.open button:nth-child(6n) { --tile: #5a5f8c; }
-  :root[data-screen="ink"] .rail-extras.open button i { background: none; color: #000 !important; }
-}
-
-.fd-retry { margin-top: 10px; }
-
-/* ── A rail dot is a dot, top right of its glyph, wherever it is ── */
-.rail i .rail-dot { top: 2px; left: auto; right: 9px; width: 8px; height: 8px; background: var(--g-accent); box-shadow: 0 0 0 2px var(--g-ground); }
-:root[data-screen="ink"] .rail i .rail-dot { background: #000; }
-
 /* ── A many-pane place's header runs the width of its panes; only a page you read keeps to the reading column ── */
 .mail-bar, .msgs-bar, .cal-bar, .vault-browser .note-bar { padding-inline: 14px; }
-@media (min-width: 600px) { .shell.panel-settings .rooms { width: 420px; max-width: calc(100% - 64px); flex-basis: 420px; } }
-
-.wv-gaps { width: min(100%, 720px); margin: 0 auto; padding: 0 16px 32px; box-sizing: border-box; font: 400 13px/1.45 var(--g-font-ui); color: var(--g-ink-3); }
 .cal-tag.tag-free { border-color: transparent; background: none; color: var(--g-ink-3); font-weight: 500; padding: 0; }

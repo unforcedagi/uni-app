@@ -168,19 +168,4 @@ export function ageText(iso: string | null, now: Date): string {
   return m < 1 ? "just now" : m < 90 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
 }
 
-/** A paused account on the front door: "paused at 96%", the higher of its paused meters. */
-const pausedText = (r: Row) => `paused at ${[r.session, r.week].filter((m) => m.paused).reduce((a, m) => ((m.pct ?? 0) > (a.pct ?? 0) ? m : a)).text}`;
-
-/** The front door's line: "Claude: A 34% of the week · B 12% of the week · new work to B · as of 6 min ago" (a full account says so;
- *  T-335: one at the pacing stop says "paused at 95%").
- *  T-319: an old reading is never shown as current. With none fresh, the line says so instead of numbers; an account whose own reading is
- *  old says so in its place, and "as of" is the oldest of the numbers shown. */
-export function usageLineText(v: View | null, now: Date): string | null {
-  if (!v || !v.rows.length) return null;
-  if (v.stale) return v.readAt ? `Claude: no fresh usage reading; the last one is from ${ageText(v.readAt, now)}` : "Claude: no usage reading yet";
-  const parts = v.rows.map((r) => `${r.name.toUpperCase()} ${r.out ? "signed out" : r.missing ? "no reading" : r.stale ? `no fresh reading (${ageText(r.readAt, now).replace(/ ago$/, " old")})`
-    : r.week.full || r.session.full ? "full" : r.week.paused || r.session.paused ? pausedText(r) : `${r.week.text} of the week`}`);
-  return `Claude: ${parts.join(" · ")}${v.next ? ` · new work to ${v.next.label.replace(/^Account /, "")}` : ""} · as of ${ageText(v.readAt, now)}`;
-}
-
 export const howText = (how: string) => (how === "preference" ? "your choice" : how === "auto" ? "auto" : how === "default" ? "default" : how);

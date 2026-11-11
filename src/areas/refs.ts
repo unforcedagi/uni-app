@@ -1,4 +1,4 @@
-// References between notes (pure, unit-tested in scripts/tasks.test.ts): a `parent`, `node` or `brief` field holds a note id (a ULID),
+// References between notes (pure, unit-tested in scripts/ids.test.ts): a `parent`, `node` or `brief` field holds a note id (a ULID),
 // a path or a `[[link]]`, and for a while a vault may hold all three. One resolver reads them all and answers with the node's path,
 // which is what the app navigates and displays by.
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);

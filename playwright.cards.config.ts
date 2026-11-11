@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test';
 const port = Number(process.env.CARDS_TEST_PORT ?? 5744);
 export default defineConfig({
   outputDir: 'test-results/cards',
-  testDir: './scripts/browser', testMatch: /sealed(Cards|NeedsYou)\.spec\.ts/, reporter: 'list', workers: 1, retries: 1,
+  testDir: './scripts/browser', testMatch: /sealedCards\.spec\.ts/, reporter: 'list', workers: 1, retries: 1,
   use: { baseURL: `http://127.0.0.1:${port}`, colorScheme: 'light', reducedMotion: 'reduce' },
   projects: [
     { name: 'desktop', use: { browserName: 'chromium', viewport: { width: 1440, height: 900 } } },

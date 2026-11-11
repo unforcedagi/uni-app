@@ -6,7 +6,6 @@ import { refKey } from "./refs.ts";
 import { activeProfile, UNI_VAULT } from "./profile.ts";
 import { linksOf } from "./nodeLinks.ts";
 
-export const AREAS_ROOT = "Areas";
 export type AreaStatus = "foreground" | "background" | "archived" | "done";
 export type Area = {
   id: string; path: string; name: string; purpose: string; status: AreaStatus;
@@ -112,18 +111,4 @@ export const appPathOf = (areaPath: string) => `${stripExt(areaPath)}/app`;
 export function findAppRow(rows: PathRow[], areaPath: string): PathRow | null {
   const want = appPathOf(areaPath);
   return rows.find((r) => !!r.path && stripExt(r.path) === want && (r.extension ?? (/\.html$/i.test(r.path ?? "") ? "html" : "")).toLowerCase().replace(/^\./, "") === "html") ?? null;
-}
-
-/**
- * The Brief a node's `brief` field points to, if it may be trusted: the reference (an id, a path or a link) must resolve to a note
- * whose path is `<node path>/Brief`. Anything else is refused, so a node cannot adopt another node's brief by naming it; the caller
- * then keeps the Brief found by path. The Uni root (path "") has no Brief: its old one, the `Areas/Today` roll-up, was retired 11-09
- * (T-335), and the home shows its own `stands` line instead.
- */
-export function trustedBrief<T extends { id: string; path?: string | null }>(nodePath: string, ref: unknown, notes: readonly T[]): T | null {
-  const key = refKey(ref);
-  if (!key || nodePath === "") return null;
-  const want = `${stripExt(nodePath)}/Brief`;
-  const hit = notes.find((n) => n.id === key || (!!n.path && stripExt(n.path) === key));
-  return hit && !!hit.path && stripExt(hit.path) === want ? hit : null;
 }

@@ -1,4 +1,4 @@
-// T-124 r22 (Codex 5): what a failed pairing step says, in words (pure, tested in scripts/simpleR22.test.ts).
+// T-124 r22 (Codex 5): what a failed pairing step says, in words (pure, tested in scripts/pairing.test.ts).
 /**
  * What a failed pairing step says (r22, Codex 5): plain words and the way on; the raw error goes under Details. A message written for people
  * (the camera permission, a QR code that isn't a pairing link) is kept as it is.

@@ -52,12 +52,12 @@ export default function SelfTest() {
   const mode = gateMode(platform, version, stored, userAgent, undefined, runtime);
 
   return <div className="area-selftest">
-    <span className="update-version">Area apps</span>
-    <p className="selftest-status" role="status">{mode !== "closed" ? `Live area apps enabled for ${platform}: ${MODE_LABEL[mode]} (self-test ${stored!.passedAt.slice(0, 10)}).` : stored ? "Self-test is stale for this app version, webview or platform." : "Live area apps are off until the sandbox self-test passes."}</p>
+    <span className="update-version">Applets</span>
+    <p className="selftest-status" role="status">{mode !== "closed" ? `Applets from your vault run on ${platform}: ${MODE_LABEL[mode]} (self-test ${stored!.passedAt.slice(0, 10)}).` : stored ? "Self-test is stale for this app version, webview or platform." : "Applets from your vault are off until the sandbox self-test passes."}</p>
     <button className="pairing-secondary" disabled={running || !version} onClick={() => { report.current = {}; setTimedOut(false); setResult(null); setStage(0); }}>{running ? "Running…" : "Run sandbox self-test"}</button>
     {running && <div className="selftest-frame" aria-hidden="true"><ProbeFrame key={STAGES[stage].id} html={STAGES[stage].html} nav={STAGES[stage].nav} router={STUB_ROUTER} onDone={(o) => onStage(stage, o)} /></div>}
     {result && <>
-      <p className={`selftest-status ${result.pass ? "pass" : result.mode === "approved-code" ? "approved" : "fail"}`} role="status">{result.pass ? `Passed. Live area apps are now on: ${MODE_LABEL.sealed}.` : result.mode === "approved-code" && version ? `Only the WebRTC checks failed. ${MODE_LABEL["approved-code"]}: apps run only while the code you approved is unchanged.` : timedOut ? "Failed: the probe did not finish. Live area apps are off." : "Failed. Live area apps are off."}</p>
+      <p className={`selftest-status ${result.pass ? "pass" : result.mode === "approved-code" ? "approved" : "fail"}`} role="status">{result.pass ? `Passed. Applets from your vault are now on: ${MODE_LABEL.sealed}.` : result.mode === "approved-code" && version ? `Only the WebRTC checks failed. ${MODE_LABEL["approved-code"]}: applets run only while the code you approved is unchanged.` : timedOut ? "Failed: the probe did not finish. Applets from your vault are off." : "Failed. Applets from your vault are off."}</p>
       <ul className="selftest-list" aria-label="Self-test checks">{result.checks.map((c) => <li key={c.id} className={c.ok ? "pass" : "fail"}><span aria-hidden="true">{c.ok ? "✓" : "✗"}</span> {c.label}<span className="sr-only">{c.ok ? " passed" : " failed"}</span></li>)}</ul>
     </>}
   </div>;

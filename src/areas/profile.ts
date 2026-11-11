@@ -82,10 +82,6 @@ export function setActiveProfile(p: VaultProfile): void {
   if (p.vault !== was) for (const l of profileListeners) l();
 }
 
-/** Owner classification helpers shared by taskCore and the labels. */
-export const isMe = (owner: string, p: VaultProfile = active) => owner === p.me;
-export const isAgentOwner = (owner: string, p: VaultProfile = active) => p.agentOwners.includes(owner) || (!!p.roomOwnerPrefix && owner.startsWith(p.roomOwnerPrefix));
-
 // ── Which vault the Life OS surface shows. Persisted on the device (not in vault.json, which also decides where the journal writes).
 export const VAULT_CHOICE_KEY = "uni.lifeos.vault";
 type Store = Pick<Storage, "getItem" | "setItem">;

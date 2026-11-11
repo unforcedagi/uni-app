@@ -1,5 +1,6 @@
 /* Uni — one look (T-124): the Field Book. Bone paper, graphite ink, one dry ochre (--th-sap); Fraunces for voice, Quattro for reading.
-   The tokens live in areas/tree.css; the names below (--bg, --text, --accent...) are the app's own and read them. */
+   The tokens live in glow/glow.css (--g-*, and the older --th-* names it maps); the names below (--bg, --text, --accent...) are the
+   app's own and read them. */
 @import "./assets/fonts/fonts.css";
 
 :root {
@@ -9,7 +10,7 @@
   --earth: #8b7355;
   --sky: #b8d4e3;
 
-  /* One look (T-124): the base tokens read the Field Book tokens (tree.css, light and dark), so chat, rooms, journal and settings are one app. */
+  /* One look (T-124): the base tokens read the Field Book tokens (glow.css, light and dark), so chat, rooms, journal and settings are one app. */
   --bg: var(--th-paper);
   --surface: var(--th-card);
   --surface-2: var(--th-paper);
@@ -91,9 +92,6 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .room-text strong { font-weight: 500; font-size: 15px; }
 .room-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; }
 
-.rooms-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-.rooms-body[hidden] { display: none; }
-
 /* ── Conversation ──────────────────────────────────────────── */
 .conversation { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); padding-top: env(safe-area-inset-top); }
 .conversation-header { min-height: 68px; border-bottom: 1px solid var(--line); background: var(--bg); display: flex; align-items: center; gap: 10px; padding: 8px max(20px, calc((100% - 760px) / 2)); }
@@ -104,7 +102,6 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .message-list { flex: 1; overflow-y: auto; padding: 24px max(20px, calc((100% - 720px) / 2)) 32px; overscroll-behavior: contain; }
 .welcome { margin: auto; text-align: center; color: var(--muted); max-width: 320px; line-height: 1.7; padding: 24px; }
 .welcome h2 { font-family: var(--serif); font-weight: 500; font-size: 30px; color: var(--text); margin: 8px 0; }
-.welcome-mark { font-size: 44px; color: var(--turquoise); display: block; }
 .empty { padding: 28px 24px; color: var(--muted); line-height: 1.6; text-align: center; font-family: var(--serif); font-style: italic; font-size: 17px; }
 
 /* ── Messages ──────────────────────────────────────────────── */
@@ -743,34 +740,19 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .pair-source button { margin: 0.25rem; }
 
 /* B · Rail: the reading surface owns all width beyond the navigation strip. */
-.rail, .panel-scrim { display: none; }
 .journal-writing-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .journal-compose textarea { min-height: calc(40dvh + 1px); font-size: 26px; }
 .journal-prompt { font-size: 30px; }
 .journal-tab-content { overflow-y: auto; }
 .journal-list { flex: none; overflow: visible; }
-.shell.journal-focus .rail, .shell.journal-focus .conversation-header { display: none; }
+.shell.journal-focus .conversation-header { display: none; }
 .shell.journal-focus .rooms { display: none; }
 @media (min-width: 0px) {
-  .rail { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0; width: 64px; flex: 0 0 64px; border-right: 1px solid var(--line); background: var(--surface-2); z-index: 42; }
-  .rail button { position: relative; width: 52px; min-height: 56px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; border-radius: 12px; background: transparent; color: var(--text-soft); font-size: 10px; }
-  .rail button i { position: relative; width: 48px; height: 30px; border-radius: 999px; display: grid; place-items: center; font-style: normal; font-size: 22px; color: var(--text-soft); }
-  .rail button:hover, .rail button[aria-current="page"], .rail button[aria-expanded="true"] { background: var(--surface); box-shadow: var(--shadow); }
   /* Active: a rounded pill behind the icon, label tinted; the button itself stays clear. */
-  .rail button[aria-current="page"], .rail button[aria-expanded="true"] { background: transparent; color: var(--accent); font-weight: 600; box-shadow: none; }
-  .rail button[aria-current="page"] i, .rail button[aria-expanded="true"] i { color: var(--accent); background: var(--accent-soft); }
-  .rail .rail-settings { margin-top: auto; }
-  .rail-count:empty { display: none; }
-  .rail-count { position: absolute; right: -2px; top: -4px; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; border-radius: 9px; background: var(--forest-deep); color: var(--th-card); font: 600 10px/1 var(--sans); }
-  .rail-dot { position: absolute; top: 8px; right: 10px; width: 6px; height: 6px; border-radius: 50%; background: none; box-shadow: inset 0 0 0 1.5px var(--text-soft); }
-  .rail i .rail-dot { top: 3px; left: 11px; right: auto; }
   .shell .rooms, .shell.in-room .rooms { display: none; position: absolute; left: 64px; top: 0; bottom: 0; width: 336px; max-width: calc(100% - 64px); z-index: 41; box-shadow: var(--shadow-lift); }
-  .shell.panel-open .rooms, .shell.search-open .rooms { display: flex; }
-  .panel-scrim { display: block; position: absolute; inset: 0 0 0 64px; background: var(--g-scrim); border: 0; z-index: 40; }
   .shell .conversation { display: flex; }
   .note-sheet { left: 64px; }
   .back { display: none; }
-  .panel-settings .rooms-body { display: none; }
   .shell.journal-focus .conversation { width: 100%; }
 }
 
@@ -778,11 +760,9 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .journal-actions .mic .mono-icon { width: 28px; height: 28px; color: var(--th-card); }
 
 /* Navigation panels and reading surfaces at every viewport. */
-.panel-close { flex-shrink: 0; align-self: flex-end; margin: 6px 10px 0; }
 .rooms { overflow-y: auto; }
 .connection, .identity, .vault-sidebar { flex-shrink: 0; }
 .identity { white-space: normal; overflow: visible; line-height: 1.7; overflow-wrap: anywhere; }
-.rooms-body { overflow-y: auto; }
 .message-list { padding-inline: max(20px, calc((100% - 760px) / 2)); }
 .composer { padding-inline: max(10px, calc((100% - 760px) / 2)); flex-shrink: 0; }
 .journal-list { width: min(100%, 760px); margin-inline: auto; padding-inline: 20px; }
@@ -795,27 +775,20 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 }
 @media (max-width: 599px) {
   .shell { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
-  .rail { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: calc(56px + env(safe-area-inset-bottom)); padding: 0 4px env(safe-area-inset-bottom); flex-direction: row; justify-content: space-around; border-right: 0; border-top: 1px solid var(--line); gap: 0; overflow: visible; }
   /* T-45: the places share the bar evenly, however many there are (Mail made seven) */
-  .rail button { flex: 1 1 0; width: auto; min-width: 0; min-height: 56px; border-radius: 8px; }
-  .rail .rail-settings { margin-top: 0; }
   .shell.composer-focused, .shell.journal-focus { padding-bottom: 0; }
-  .shell.composer-focused .rail { display: none; }
-  /* r14: a utility panel stops above the bottom rail, so the app's places stay in reach while it is open */
+  /* r14: a utility panel stops above the bottom bar, so the app's places stay in reach while it is open */
   .shell .rooms, .shell.in-room .rooms { left: 0; width: 100%; max-width: 100%; bottom: calc(56px + env(safe-area-inset-bottom)); z-index: 50; border-right: 0; }
-  .shell.composer-focused .rooms, .shell.rail-off .rooms { bottom: 0; }
+  .shell.composer-focused .rooms { bottom: 0; }
   .shell .conversation { display: flex; }
   .back { display: grid; }
-  .panel-scrim { inset: 0; }
   .note-sheet { left: 0; bottom: calc(56px + env(safe-area-inset-bottom)); }
   .shell:not(.in-room) .note-sheet { display: flex; }
   .composer { padding-inline: 6px; padding-bottom: 8px; }
   .message-list { padding-inline: 16px; }
   .toast { bottom: calc(68px + env(safe-area-inset-bottom)); }
 }
-/* r14: the rail is hidden by one rule (RAIL_HIDDEN_QUERY in homeLayout.ts), set on the shell as .rail-off; the room then offers Places */
-.shell.rail-off { padding-bottom: 0; }
-.shell.rail-off .rail { display: none; }
+/* r14: a short, narrow window (phone landscape): the shell keeps no room for a bottom bar */
 @media (max-height: 499px) and (max-width: 950px) {
   .shell { padding-bottom: 0; }
   .shell .rooms, .shell.in-room .rooms { left: 0; width: 100%; max-width: 100%; z-index: 50; }
@@ -826,10 +799,6 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
   .composer { padding-block: 4px; }
   .message-list { padding-block: 8px; }
   .compose-row textarea { max-height: 64px; overflow-y: auto; }
-}
-
-@media (max-height: 499px) and (max-width: 950px) {
-  .shell.search-open .search-view { flex: 1 0 auto; min-height: 280px; }
 }
 
 /* bookkeeping markers on a message ([done T-NN]) as quiet chips */
@@ -848,9 +817,6 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .settings-dev-line { margin: 4px 0 8px; font-size: 13px; color: var(--text-soft); overflow-wrap: anywhere; }
 .room-loading { color: var(--text-soft); }
 /* r14: one utility-panel frame (Settings, Search, Vault): the destination's title and Close */
-.panel-head { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 10px 8px 24px; }
-.panel-head h1 { margin: 0; font-size: 20px; font-weight: 600; }
-.panel-head .panel-close { margin: 0; align-self: center; }
 /* r14: pipe tables in chat */
 .md-table-wrap { max-width: 100%; overflow-x: auto; margin: 6px 0; }
 .md-table { border-collapse: collapse; font-size: .94em; }
@@ -858,10 +824,7 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .md-table th { font-weight: 600; background: var(--surface-2); }
 
 /* r25: "Check in" keeps the sheet's question over the composer, one line, cut at a whole word by the app and never drawn with "…" */
-.checking-banner { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 4px 8px; font: 500 12.5px/1.3 var(--sans, inherit); color: var(--muted, inherit); border-left: 2px solid var(--line); }
 /* r27: one line, cut by the app at a whole word (no trailing comma, no "…"): `SmallLine` measures and drops what doesn't fit */
-.checking-text { flex: 1; min-width: 0; display: block; overflow: hidden; white-space: normal; overflow-wrap: normal; word-break: normal; }
-.checking-x { border: 0; background: none; color: inherit; font: inherit; font-size: 16px; line-height: 1; padding: 0 4px; cursor: pointer; }
 
 /* r26: the message being sent, in its thread, until it is delivered */
 .message.outgoing { opacity: .7; }
@@ -900,4 +863,4 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .md a.pub-open, .pub-open { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
 .pub-error { margin: 6px 0 0; color: var(--danger); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 .pub-error .pub-act { margin-left: 6px; }
-.decision-media .pub-media, .task-media .pub-media { margin: 8px 0; }
+.decision-media .pub-media { margin: 8px 0; }

@@ -3,11 +3,9 @@
 // shell reads. Each pattern names a key family the old home wrote (src/areas/areasCache.ts, savedTasks.ts, vaultTasks.ts, noteRefs.tsx,
 // homeLayout.ts) or this shell writes (useShape.ts: the registry).
 import { reader } from "../vault/reader.ts";
-import { clearProjectBodies } from "../areas/projectBody.ts";
 import { sweepOldKeys } from "./shapeCore.ts";
 
 export function forgetOldHome(): void {
   reader.forget();
-  clearProjectBodies();
   try { sweepOldKeys(localStorage); } catch { /* unavailable storage */ }
 }

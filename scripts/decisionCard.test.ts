@@ -4,8 +4,20 @@ import { chatText, cleanNote, decisionRefsIn, noteLine, parseDecisionNote, picke
 import { parseMarkdown } from "../src/markdown.ts";
 import { SHORTHAND_VAULTS } from "../src/vaultlinks.ts";
 import { makeDecisionStore } from "../src/decisionStore.ts";
+import { decisionIn } from "../src/decisionLinks.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
+// moved from the retired simpleR17 test (T-335)
+check("a message names an open decision by its marker (title id or the task it decides) or by its note id; nothing else links", () => {
+  const known = [{ id: "01M4V11N5D02YWZX918DM4FWJA", tid: null, forTask: "T-130" }, { id: "dq-12", tid: "T-12", forTask: null }];
+  assert.equal(decisionIn("Eval posted. [decision T-130]", known), "01M4V11N5D02YWZX918DM4FWJA");
+  assert.equal(decisionIn("[decision T-12] Pick one of the two", known), "dq-12");
+  assert.equal(decisionIn("See uni:01M4V11N5D02YWZX918DM4FWJA for the chat question", known), "01M4V11N5D02YWZX918DM4FWJA");
+  assert.equal(decisionIn("[done T-130]", known), null, "a done marker is not a decision");
+  assert.equal(decisionIn("[decision T-999] nothing known", known), null);
+  assert.equal(decisionIn("Hermes wants to run a command that needs your OK\n`/approve` or `/deny`", known), null, "an approval prompt is just a message now");
+  assert.equal(decisionIn("[decision T-130]", []), null);
+});
 const ID = "01M5D0000000000000000000A1";
 const note = (metadata: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ id: ID, path: "Decisions/2026-10-09 Which layout?", tags: ["decision"], updatedAt: "r1", content: "# Which layout for the garden page?\n\n- A\n- B\n", metadata, ...extra });
 

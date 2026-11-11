@@ -29,7 +29,6 @@ export function trapTab(e: { key: string; shiftKey: boolean; preventDefault: () 
 // ------------------------------------------------------------------------------------------------- r19
 /** The dialogs open now, top last: Escape and Tab belong to the top one only (r19, one contract for every foreground surface). */
 const stack: symbol[] = [];
-export const dialogOpen = (): boolean => stack.length > 0;
 /**
  * One dialog contract (r19, Codex 5): the task sheet, the companion's sheet, the Places drawer and the utility panels (Search, Settings, Vault).
  * While `open`: focus moves in (the box itself, or `initial`), Tab wraps among its reachable controls, everything around it is inert (`keep`:

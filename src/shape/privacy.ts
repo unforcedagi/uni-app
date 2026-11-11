@@ -1,6 +1,6 @@
 // T-335 the shape: the privacy rules that outlive the areas tree (moved here from src/areas/treeRooms.ts and talkCore.ts, which the
 // old home used; they re-export these names until they are deleted). A private area is recognised by a hash of its name, never named
-// (the T-111 rule; app/CLAUDE.md). Pure: no React, no Tauri. Tested through scripts/treehome.test.ts and scripts/asks.test.ts.
+// (the T-111 rule; app/CLAUDE.md). Pure: no React, no Tauri. Tested through scripts/privacy.test.ts and scripts/asks.test.ts.
 import type { Area } from "../areas/areasCore.ts";
 import { ancestry, ROOT, type Tree } from "../areas/treeCore.ts";
 import { pathResolver } from "../areas/refs.ts";

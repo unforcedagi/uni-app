@@ -2,7 +2,7 @@
 // (scripts/fixtures/usage-note.json). Run: node --experimental-strip-types scripts/usage.test.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ageText, pace, parseDoc, resetText, usageLineText, usageView } from "../src/usage/usageCore.ts";
+import { ageText, pace, parseDoc, resetText, usageView } from "../src/usage/usageCore.ts";
 
 const NOTE = JSON.parse(readFileSync(new URL("./fixtures/usage-note.json", import.meta.url), "utf8"));
 const TZ = "America/Denver";
@@ -50,17 +50,16 @@ t("a window whose reset has passed is empty until the next reading", () => {
 // T-335: at the pacing stop (95) the launcher pauses an account and keeps the rest as headroom for rooms; only a real 100 is full
 const atWeek = (used: number, stop: number | null = 95) => usageView(md((d) => { d.stop = stop; d.accounts[0].week.used = used; }), NOW, TZ)!;
 t("T-335: under the stop is neither; at or over it but under 100 is paused, not full; 100 is full", () => {
-  const cases: [number, string, boolean, boolean, string][] = [
-    [94, "94%", false, false, "A 94% of the week"],
-    [95, "95%", true, false, "A paused at 95%"],
-    [99, "99%", true, false, "A paused at 99%"],
-    [99.6, "99%", true, false, "A paused at 99%"],   // never "100%" while it isn't
-    [100, "100%", false, true, "A full"],
+  const cases: [number, string, boolean, boolean][] = [
+    [94, "94%", false, false],
+    [95, "95%", true, false],
+    [99, "99%", true, false],
+    [99.6, "99%", true, false],   // never "100%" while it isn't
+    [100, "100%", false, true],
   ];
-  for (const [used, text, paused, full, front] of cases) {
+  for (const [used, text, paused, full] of cases) {
     const v = atWeek(used), w = v.rows[0].week;
     assert.deepEqual([w.text, w.paused, w.full], [text, paused, full], `week at ${used}`);
-    assert.equal(usageLineText(v, NOW)!.split(" · ")[0], `Claude: ${front}`, `front door at ${used}`);
   }
   assert.equal(atWeek(95).rows[0].week.headroom, "keeping 5% headroom for rooms");
   assert.equal(atWeek(94).rows[0].week.headroom, null);
@@ -73,18 +72,15 @@ t("T-335: under the stop is neither; at or over it but under 100 is paused, not 
   assert.equal(parseDoc(md((d) => { d.stop = 150; }))!.stop, null);
 });
 
-t("T-335: the session pauses and fills the same way, and a full meter outranks a paused one on the front door", () => {
+t("T-335: the session pauses and fills the same way", () => {
   const v = usageView(md((d) => { d.accounts[0].session = { used: 96, resets_at: "2026-10-26T20:00:00+00:00" }; }), NOW, TZ)!;
   assert.deepEqual([v.rows[0].session.paused, v.rows[0].session.full, v.rows[1].session.paused], [true, false, false]);
-  assert.equal(usageLineText(v, NOW)!.split(" · ")[0], "Claude: A paused at 96%");
   const both = usageView(md((d) => { d.accounts[0].session = { used: 100, resets_at: "2026-10-26T20:00:00+00:00" }; d.accounts[0].week.used = 97; }), NOW, TZ)!;
-  assert.equal(usageLineText(both, NOW)!.split(" · ")[0], "Claude: A full");
   const two = usageView(md((d) => { d.accounts[0].session = { used: 96, resets_at: "2026-10-26T20:00:00+00:00" }; d.accounts[0].week.used = 98; }), NOW, TZ)!;
-  assert.equal(usageLineText(two, NOW)!.split(" · ")[0], "Claude: A paused at 98%", "the higher of the two");
 });
 
 // T-335: Claude Ultra has no 5-hour limit; the launcher says so per account (stop.session_limit false) and the session is info only
-t("T-335: a session the launcher doesn't count is never paused or full, on the card or the front door; the week still is", () => {
+t("T-335: a session the launcher doesn't count is never paused or full; the week still is", () => {
   const off = (used: number, week = 40) => usageView(md((d) => {
     d.accounts[0].session = { used, resets_at: "2026-10-26T20:00:00+00:00" }; d.accounts[0].week.used = week;
     d.accounts[0].stop = { session: null, week: 95, why: null, session_limit: false };
@@ -92,11 +88,8 @@ t("T-335: a session the launcher doesn't count is never paused or full, on the c
   for (const used of [96, 99, 100]) {
     const v = off(used), s = v.rows[0].session;
     assert.deepEqual([s.pct, s.paused, s.full, s.headroom, s.info], [used, false, false, null, true], `session at ${used}`);
-    assert.equal(usageLineText(v, NOW)!.split(" · ")[0], "Claude: A 40% of the week", `front door at ${used}`);
   }
   assert.equal(off(99, 100).rows[0].week.full, true);
-  assert.equal(usageLineText(off(99, 100), NOW)!.split(" · ")[0], "Claude: A full");
-  assert.equal(usageLineText(off(99, 96), NOW)!.split(" · ")[0], "Claude: A paused at 96%");
   // an older note (no session_limit) or the switch on: the session pauses as before
   const on = usageView(md((d) => { d.accounts[0].session = { used: 96, resets_at: "2026-10-26T20:00:00+00:00" };
     d.accounts[0].stop = { session: 95, week: 95, why: null, session_limit: true }; }), NOW, TZ)!;
@@ -111,7 +104,6 @@ t("T-335: a real session limit the launcher recorded shows the session Full unti
   }), NOW, TZ)!;
   const v = hit("2026-10-26T21:00:00+00:00"), s = v.rows[0].session;
   assert.deepEqual([s.full, s.paused, s.info, s.reset], [true, false, false, "3pm"]);
-  assert.equal(usageLineText(v, NOW)!.split(" · ")[0], "Claude: A full");
   const past = hit("2026-10-26T17:00:00+00:00").rows[0].session;   // reset passed: info again
   assert.deepEqual([past.full, past.info], [false, true]);
 });
@@ -122,7 +114,6 @@ const lifted = (used: number, stop: unknown) => usageView(md((d) => { d.accounts
 t("T-335: an account the launcher spends to 100 is not paused at 96, and says why", () => {
   const v = lifted(96, { session: 95, week: 100, why: WHY }), w = v.rows[0].week;
   assert.deepEqual([w.text, w.paused, w.full, w.headroom, w.spending, w.why], ["96%", false, false, null, 100, WHY]);
-  assert.equal(usageLineText(v, NOW)!.split(" · ")[0], "Claude: A 96% of the week");
   assert.deepEqual([lifted(99.6, { session: 95, week: 100, why: WHY }).rows[0].week.paused, lifted(100, { session: 95, week: 100, why: WHY }).rows[0].week.full], [false, true]);
   // the other account keeps the flat stop it was given
   assert.deepEqual([v.rows[1].week.spending, v.rows[1].week.why], [null, null]);
@@ -138,7 +129,6 @@ t("T-335: the session keeps its own stop; an old note, or a bad stop, behaves as
   const v = usageView(md((d) => { d.accounts[0].session = { used: 96, resets_at: "2026-10-26T20:00:00+00:00" }; d.accounts[0].week.used = 96;
     d.accounts[0].stop = { session: 95, week: 100, why: WHY }; }), NOW, TZ)!;
   assert.deepEqual([v.rows[0].session.paused, v.rows[0].week.paused], [true, false]);
-  assert.equal(usageLineText(v, NOW)!.split(" · ")[0], "Claude: A paused at 96%");
   // no stop on the account (an older mts): the note's flat stop, as today
   assert.deepEqual([lifted(96, undefined).rows[0].week.paused, lifted(96, undefined).rows[0].week.spending], [true, null]);
   // junk falls back to the note's stop; an explicit null is the launcher's "no stop"
@@ -178,9 +168,6 @@ t("Codex zwmejvyc P2: one fresh account doesn't make another's 48-hour-old readi
   assert.deepEqual(v.rows.map((r) => [r.name, r.stale]), [["a", true], ["b", false]]);
   assert.equal(v.stale, false);
   assert.equal(v.someStale, true);
-  const line = usageLineText(v, NOW)!;
-  assert.ok(!line.includes("88%"), "A's old 88% is not shown as current");
-  assert.equal(line, "Claude: A no fresh reading (2 days old) · B 71% of the week · new work to A · as of 10 min ago");
   // as of: the oldest of the numbers shown, never only the newest
   const both = usageView(md((d) => { d.accounts[0].read_at = "2026-10-26T17:20:00+00:00"; d.accounts[1].read_at = "2026-10-26T17:50:00+00:00"; }), NOW, TZ)!;
   assert.equal(ageText(both.readAt, NOW), "40 min ago");
@@ -191,7 +178,6 @@ t("a signed-out account is neither fresh nor stale: it says so, and the others d
   assert.deepEqual(v.rows.map((r) => [r.name, r.stale, r.out]), [["a", false, false], ["b", false, true]]);
   assert.equal(v.stale, false);
   assert.equal(v.someStale, false);
-  assert.equal(usageLineText(v, NOW), "Claude: A 8% of the week · B signed out · new work to A · as of 15 min ago");
 });
 
 t("not a usage note, or bad account names: nothing, or only the good ones", () => {

@@ -1,12 +1,11 @@
-// T-140: the tree from node links (`links` two-way, `parent` as a legacy link).
-// Run: node --experimental-strip-types scripts/links.test.ts
+// T-140: the tree from node links (`links` two-way, `parent` as a legacy link): src/areas/treeCore.ts, and the room each node opens
+// (src/shape/privacy.ts), which the shell's rooms and privacy read. Run: node --experimental-strip-types scripts/links.test.ts
 import assert from "node:assert/strict";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
-import { buildTree, childrenOf, parentPath, ROOT, trail, ancestry } from "../src/areas/treeCore.ts";
-import { buildTaskTree, parseNodes, subtreePaths, rollUp, tasksUnder } from "../src/areas/taskCore.ts";
-import { roomView, treeRows } from "../src/areas/treeRooms.ts";
-import { ancestorsOf, visibleRows } from "../src/areas/sidebarState.ts";
+import { buildTree, ROOT, ancestry, type Tree } from "../src/areas/treeCore.ts";
 import { linksOf } from "../src/areas/nodeLinks.ts";
+import { roomView } from "../src/shape/privacy.ts";
+const childrenOf = (t: Tree, path: string) => t.children.get(path) ?? [];
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -42,7 +41,7 @@ check("two-way: a link listed on one end only counts from either side (the area 
   const t = buildTree([area("a-bou", "Boulder", { links: ["p-reg"] }), area("a-tec", "Techne", { links: ["p-reg"] }), proj("p-reg", "RegenHub")]);
   assert.deepEqual(shape(t), { Uni: ["Boulder", "Techne"], "Areas/Boulder": ["RegenHub"], "Areas/Techne": ["RegenHub"] });
   assert.deepEqual(t.links.get("Projects/RegenHub"), ["Areas/Boulder", "Areas/Techne"]);
-  assert.deepEqual(parentPath(t, "Projects/RegenHub"), "Areas/Boulder");
+  assert.deepEqual(t.parent.get("Projects/RegenHub"), "Areas/Boulder");
 });
 check("a project linked to no area is top level under Uni (a migrated Uni parent is no link); project-to-project links only link", () => {
   const t = buildTree([area("a-par", "Parachute"), proj("p-x", "Loose", { parent: "uni-root" }), proj("p-y", "Pair", { links: ["p-z"] }), proj("p-z", "Twin")]);
@@ -66,53 +65,15 @@ check("cycle safety: parents and links in a ring, area-to-area and self links ne
   const t = buildTree([area("a1", "A1", { parent: "a2", links: ["a1"] }), area("a2", "A2", { parent: "a1" }),
     proj("p1", "P1", { parent: "p2", links: ["a1"] }), proj("p2", "P2", { parent: "p3" }), proj("p3", "P3", { parent: "p1" })]);
   assert.deepEqual(shape(t), { Uni: ["A1", "A2"], "Areas/A1": ["P1", "P2", "P3"] }, "the legacy parent ring lends A1 to P2 and P3, and ends");
-  assert.deepEqual(trail(t, "Projects/P1").map((n) => n.name), ["A1", "P1"]);
   assert.deepEqual(ancestry(t, "Projects/P3").map((n) => n.name), ["P3", "P1", "A1"]);
   assert.equal(t.nodes.size, 5);
 });
-check("a project in two areas: the breadcrumb and Back use the area you came through, else the first by name", () => {
-  const t = linksOnly();
-  assert.deepEqual(trail(t, "Projects/uni-app").map((n) => n.name), ["Parachute", "uni-app"]);
-  assert.deepEqual(trail(t, "Projects/uni-app", "Areas/Sanctum").map((n) => n.name), ["Sanctum", "uni-app"]);
-  assert.deepEqual(trail(t, "Projects/uni-app", "Areas/Boulder").map((n) => n.name), ["Parachute", "uni-app"], "an area it is not in is ignored");
-  assert.equal(parentPath(t, "Projects/uni-app", "Areas/Sanctum"), "Areas/Sanctum");
-  assert.equal(parentPath(t, "Projects/uni-app"), "Areas/Parachute");
-  assert.equal(parentPath(t, "Areas/Sanctum"), ROOT);
-});
-check("the sidebar rows list a project under each area with its own key; opening either row selects the one node", () => {
-  const t = linksOnly();
-  const rows = treeRows(t, [], null);
-  const mine = rows.filter((r) => r.path === "Projects/uni-app");
-  assert.deepEqual(mine.map((r) => r.via), ["Areas/Parachute", "Areas/Sanctum"]);
-  assert.equal(new Set(rows.map((r) => r.key)).size, rows.length, "keys are unique");
-  assert.deepEqual(ancestorsOf(rows, "Projects/uni-app").sort(), ["Areas/Parachute", "Areas/Sanctum"]);
-  assert.equal(visibleRows(rows, {}, "Projects/uni-app").filter((r) => r.path === "Projects/uni-app").length, 2, "selecting it reveals both rows");
-  assert.equal(visibleRows(rows, {}, undefined).filter((r) => r.path === "Projects/uni-app").length, 0, "folded by default");
-});
-check("the task tree reads the same links: an area's subtree is its projects; a project in two areas counts in both and once at Uni", () => {
-  const note = (id: string, path: string, tags: string[], metadata: M) => ({ id, path, tags, metadata });
-  const { nodes, rootPath } = parseNodes([note("u", "Uni", ["uni"], {}), note("a-par", "Areas/Parachute", ["area"], {}), note("a-sad", "Areas/Sanctum", ["area"], { links: ["p-app"] }),
-    note("p-app", "Projects/uni-app", ["project"], { links: ["a-par"], parent: "u" }), note("p-lone", "Projects/Lone", ["project"], {})]);
-  const t = buildTaskTree(nodes, rootPath);
-  assert.deepEqual(subtreePaths(t, "Areas/Parachute").sort(), ["Areas/Parachute", "Projects/uni-app"]);
-  assert.deepEqual(subtreePaths(t, "Areas/Sanctum").sort(), ["Areas/Sanctum", "Projects/uni-app"]);
-  assert.deepEqual(subtreePaths(t, "Projects/uni-app"), ["Projects/uni-app"]);
-  assert.equal(t.parent.get("Projects/Lone"), ROOT);
-  const task = (n: string) => ({ node: n, id: n, kind: "task", state: "open", owner: "aaron", title: "t", next: "", options: [] }) as never;
-  const r = rollUp(t, [task("Projects/uni-app")]);
-  assert.deepEqual([r.get("Areas/Parachute")!.total, r.get("Areas/Sanctum")!.total, r.get(ROOT)!.total], [1, 1, 1]);
-  assert.equal(tasksUnder(t, "Areas/Sanctum", [task("Projects/uni-app")]).length, 1);
-});
 
-// ---- fix pass: legacy parent chains keep their room and task scope; the fallback task tree keeps links; 0.1.46 equivalence on parent-only data
+
+// ---- legacy parent chains keep their room (src/shape/privacy.ts roomView); 0.1.46 equivalence on parent-only data
 const FR = [{ id: "r-uni", name: "Uni", last_ts: 1 }, { id: "r-bou", name: "boulder", last_ts: 1 }, { id: "r-coh", name: "cohere", last_ts: 1 }, { id: "r-c26", name: "cohere-2026", last_ts: 1 }];
-const tnode = (id: string, name: string, kind: "area" | "project", meta: { parent?: string; links?: string[]; room?: string }): import("../src/areas/taskCore.ts").TaskNode =>
-  ({ id, path: `${kind === "area" ? "Areas" : "Projects"}/${name}`, name, parent: meta.parent ?? null, links: meta.links, kind, room: meta.room ?? null, status: "active", isRoot: false });
 const legacyAreas = () => buildTree([area("a-bou", "Boulder", { room: "boulder" }), proj("p-coh", "COhere", { parent: "Areas/Boulder", room: "cohere" }),
   proj("p-ww", "Woven Web", { parent: "Projects/COhere" }), proj("p-c26", "COhere 2026", { parent: "p-coh", room: "cohere-2026" }), proj("p-top", "Loose", { parent: "Projects/Woven Web" })]);
-const legacyTasks = () => buildTaskTree([tnode("a-bou", "Boulder", "area", { room: "boulder" }), tnode("p-coh", "COhere", "project", { parent: "Areas/Boulder", room: "cohere" }),
-  tnode("p-ww", "Woven Web", "project", { parent: "Projects/COhere" }), tnode("p-c26", "COhere 2026", "project", { parent: "p-coh", room: "cohere-2026" }), tnode("p-top", "Loose", "project", { parent: "Projects/Woven Web" })]);
-const sorted = (l: string[]) => [...l].sort();
 check("legacy parent chain: Boulder -> COhere -> roomless Woven Web keeps #cohere and is listed flat under Boulder", () => {
   const t = legacyAreas();
   assert.deepEqual(childrenOf(t, "Areas/Boulder").map((n) => n.name), ["COhere", "COhere 2026", "Loose", "Woven Web"]);
@@ -120,33 +81,11 @@ check("legacy parent chain: Boulder -> COhere -> roomless Woven Web keeps #coher
   assert.equal(roomView(t, "Projects/Loose", FR, FR[0]).target?.name, "cohere");
   assert.equal(roomView(t, "Projects/COhere", FR, FR[0]).own, true);
 });
-check("legacy parent chain: COhere's task subtree holds Woven Web; Boulder's holds all", () => {
-  const t = legacyTasks();
-  assert.deepEqual(sorted(subtreePaths(t, "Projects/COhere")), ["Projects/COhere", "Projects/COhere 2026", "Projects/Loose", "Projects/Woven Web"]);
-  assert.deepEqual(sorted(subtreePaths(t, "Areas/Boulder")), ["Areas/Boulder", "Projects/COhere", "Projects/COhere 2026", "Projects/Loose", "Projects/Woven Web"]);
-  assert.deepEqual(subtreePaths(t, "Projects/Woven Web").sort(), ["Projects/Loose", "Projects/Woven Web"]);
-});
-check("the same three written with links only give the same subtrees (Woven Web lists Boulder and COhere)", () => {
-  const t = buildTaskTree([tnode("a-bou", "Boulder", "area", {}), tnode("p-coh", "COhere", "project", { links: ["a-bou"] }), tnode("p-ww", "Woven Web", "project", { links: ["a-bou", "p-coh"] })]);
-  assert.deepEqual(sorted(subtreePaths(t, "Projects/COhere")), ["Projects/COhere", "Projects/Woven Web"]);
-  assert.deepEqual(sorted(subtreePaths(t, "Areas/Boulder")), ["Areas/Boulder", "Projects/COhere", "Projects/Woven Web"]);
-  assert.deepEqual(subtreePaths(t, "Projects/Woven Web"), ["Projects/Woven Web"], "the project that lists the other is the one under it");
-});
 check("once a node has links, links rule: a legacy parent is ignored for its chain", () => {
   const t = buildTree([area("a-bou", "Boulder", { room: "boulder" }), proj("p-coh", "COhere", { links: ["a-bou"], room: "cohere" }), proj("p-ww", "Woven Web", { parent: "p-coh", links: ["a-bou"] })]);
   assert.equal(roomView(t, "Projects/Woven Web", FR, FR[0]).target?.name, "boulder");
 });
-check("the fallback task tree (no node tags) keeps links and kind, so a linked project's tasks stay in its area's feed", () => {
-  const nodes = [tnode("a-bou", "Boulder", "area", {}), tnode("p-reg", "RegenHub", "project", { links: ["a-bou"] })];
-  const t = buildTaskTree(nodes);
-  assert.deepEqual(sorted(subtreePaths(t, "Areas/Boulder")), ["Areas/Boulder", "Projects/RegenHub"]);
-  const task = { node: "Projects/RegenHub", state: "open", owner: "uni", priority: null } as unknown as Parameters<typeof tasksUnder>[2][number];
-  assert.equal(tasksUnder(t, "Areas/Boulder", [task]).length, 1);
-  // what AreasSurface now builds from the areas it read
-  const a = buildTree([area("a-bou", "Boulder"), proj("p-reg", "RegenHub", { links: ["a-bou"] })]).nodes.get("Projects/RegenHub")!;
-  assert.deepEqual([a.links, a.kind], [["a-bou"], "project"]);
-});
-check("0.1.46 equivalence: on a parent-only tree every node's room and subtree match the old logic", () => {
+check("0.1.46 equivalence: on a parent-only tree every node's room matches the old logic", () => {
   // 0.1.46 logic, copied: parent map (cycles broken at the smallest path), children from it, ancestry up it
   const list = [area("a-bou", "Boulder", { room: "boulder" }), area("a-par", "Parachute"), proj("p-coh", "COhere", { parent: "Areas/Boulder", room: "cohere" }), proj("p-ww", "Woven Web", { parent: "Projects/COhere" }),
     proj("p-c26", "COhere 2026", { parent: "p-coh", room: "cohere-2026" }), proj("p-x", "Deep", { parent: "[[Projects/Woven Web]]" }), proj("p-app", "uni-app", { parent: "Areas/Parachute" }), proj("p-lone", "Lone", {})];
@@ -157,12 +96,9 @@ check("0.1.46 equivalence: on a parent-only tree every node's room and subtree m
   const oldKids = new Map<string, string[]>();
   for (const [p, up] of oldParent) oldKids.set(up, [...(oldKids.get(up) ?? []), p]);
   const oldTree = { ...neu, parent: oldParent, chain: oldParent, children: new Map([...oldKids].map(([k, v]) => [k, v.map((c) => nodes.get(c)!)])), scope: new Map([...oldKids].map(([k, v]) => [k, v.map((c) => nodes.get(c)!)])) } as typeof neu;
-  const oldSub = (path: string): string[] => { const out = [path]; for (const c of oldKids.get(path) ?? []) out.push(...oldSub(c)); return out; };
-  const tt = buildTaskTree(list.map((a) => tnode(a.id, a.name, a.kind, { parent: a.parent ?? undefined, room: typeof a.metadata.room === "string" ? a.metadata.room : undefined })));
   for (const path of nodes.keys()) {
     const a = roomView(neu, path, FR, FR[0]), b = roomView(oldTree, path, FR, FR[0]);
     assert.deepEqual([a.target?.id, a.own, a.heldNode], [b.target?.id, b.own, b.heldNode], `room of ${path}`);
-    assert.deepEqual(sorted(subtreePaths(tt, path)), sorted(oldSub(path)), `subtree of ${path}`);
   }
 });
 check("parent-only project with two channels keeps its unclaimed one when a legacy child claims the other (Codex 0.1.47 review 2)", () => {
@@ -178,4 +114,4 @@ check("links-only project cycle P->Q->R->P: each opens its own room (Codex 0.1.4
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
-console.log("\nall passed");
+console.log("links: all passed");

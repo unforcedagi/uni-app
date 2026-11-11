@@ -1,27 +1,8 @@
-// T-124 r9 (pure, unit-tested in scripts/navtree.test.ts): note ids inside a task's text.
-// r15: every reference names its vault. `uni:01M…` (any lowercase `<vault>:` prefix) is that vault's note; a bare id is the text's own vault (a task's,
-// a chat message's), so the title is read and the note opened in the same place.
-const ULID = /(?:\b([a-z][a-z0-9_-]{0,63}):)?\b([0-7][0-9A-HJKMNP-TV-Z]{25})\b/g;
+// T-124 r9/r15 (pure): a linked note's title, read once and cached per vault and note (the cache rules for src/areas/noteRefs.tsx).
 /** A note in a vault: what a title is read from and what a tap opens. */
 export type NoteRef = { vault: string; id: string };
-export type RefPart = { text: string } | NoteRef;
-
 /** One key per note per vault (the title cache, React keys). */
 export const refKey = (r: NoteRef): string => `${r.vault}:${r.id}`;
-
-/** The text with its note ids picked out, each with its vault: the prefix it was written with, else `vault` (where the text lives). */
-export function splitRefs(text: string, vault: string): RefPart[] {
-  const out: RefPart[] = [];
-  let at = 0;
-  for (const m of text.matchAll(ULID)) {
-    const start = m.index ?? 0;
-    if (start > at) out.push({ text: text.slice(at, start) });
-    out.push({ vault: m[1] ?? vault, id: m[2] });
-    at = start + m[0].length;
-  }
-  if (at < text.length) out.push({ text: text.slice(at) });
-  return out;
-}
 
 /** The title of a note: the last segment of its path. */
 export const titleOfPath = (path: unknown): string | null => (typeof path === "string" ? path.split("/").pop()?.trim() || null : null);
