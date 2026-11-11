@@ -1,8 +1,10 @@
 // T-335 Taste Arcade in the app: the games (vendored from the taste-arcade library, src/arcade/kit) over the arcade door.
-// Every call goes through Rust, NIP-98 signed with the device key; Ripple's voice answers go into the journal the same
-// way the Journal's voice entries do (journal_save_voice), and the reaction carries only where the entry landed.
+// The Arcade is an applet on contract 2 (./manifest.ts): everything it reaches goes through the applet port the shell
+// hands it (src/interface/port.ts), which refuses what its grant doesn't name. This folder imports no Tauri
+// (scripts/appletV2.test.ts). Behind the port every door call is NIP-98 signed in Rust with the device key; Ripple's
+// answers go into the journal the same way the Journal's own entries do, and the reaction carries only where the
+// entry landed.
 import { useEffect, useMemo, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Arcade } from "./kit/ui/src/index.ts";
 import type { ArcadeHost, PlayGame, VoiceCapture } from "./kit/ui/src/index.ts";
 import type { LookPin } from "./kit/ui/src/host.ts"; // (the library's index does not export it yet)
@@ -10,6 +12,7 @@ import type { Card, DealOptions, GameId, Profile, Reaction, Round, Stats } from 
 import { RecorderSession } from "../recorderSession.ts";
 import { newDraft, type FlushReport } from "../journalCore.ts";
 import { arcadeError, journalRef, mediaType, typedAnswer } from "./arcadeCore.ts";
+import type { AppletPort } from "../interface/port.ts";
 import "./arcade-place.css";
 
 const GAMES: GameId[] = ["this-or-that", "gallery", "fix-it", "who-said-it", "ripple", "garden"];
@@ -18,7 +21,7 @@ type Home = { stats: Stats; fresh?: Partial<Record<PlayGame, number>>; look?: Lo
 
 /** Voice for Ripple: the app's own recorder session, saved as a journal voice entry. One recording at a time: a second
  *  start is refused, a second stop waits for the first, and cancel during a stop resolves it with nothing kept. */
-export function journalVoice(save: (blob: Blob, mime: string) => Promise<string> = saveVoiceEntry): VoiceCapture {
+export function journalVoice(save: (blob: Blob, mime: string) => Promise<string>, allowed: () => void = () => {}): VoiceCapture {
   let session: RecorderSession<null> | null = null;
   let done: ((v: { blob: Blob; mime: string } | null) => void) | null = null;
   let stopping: Promise<{ ref: string; seconds: number } | null> | null = null;
@@ -30,6 +33,7 @@ export function journalVoice(save: (blob: Blob, mime: string) => Promise<string>
   return {
     async start() {
       if (session) throw new Error("already recording");
+      allowed(); // throws unless the grant lets the Arcade record
       early = null;
       const s = new RecorderSession<null>((blob, mime) => { const d = done; done = null; if (d) d({ blob, mime }); else early = { blob, mime }; });
       session = s;
@@ -64,30 +68,29 @@ export function journalVoice(save: (blob: Blob, mime: string) => Promise<string>
   };
 }
 
-async function saveVoiceEntry(blob: Blob, mime: string): Promise<string> {
+const saveVoiceEntry = (port: AppletPort) => async (blob: Blob, mime: string): Promise<string> => {
   const draft = newDraft("", "voice");
   const bytes = new Uint8Array(await blob.arrayBuffer());
-  const r = await invoke<FlushReport>("journal_save_voice", bytes, { headers: { "x-entry": JSON.stringify(draft), "x-audio-mime": mime } });
+  const r = await port.vault.create<FlushReport>("home", draft, { bytes, mime });
   if (r.error && r.remaining === 0) throw new Error(r.error);
   return journalRef(r, draft.path);
-}
+};
 
 /** `look`: a room's look-here link to open (App, from src/openLink.ts); `n` counts the taps, so a second tap opens it again. */
-export function ArcadeView({ ownerName, onBack, onOpenNote, look }: { ownerName: string | null; onBack?: () => void; onOpenNote: (vault: string, path: string) => void; look?: { card: string; n: number } | null }) {
+export function ArcadeView({ port, ownerName, onBack, look }: { /** The Arcade's one way out: every call is checked against its grant. */ port: AppletPort; ownerName: string | null; onBack?: () => void; look?: { card: string; n: number } | null }) {
   const urls = useRef(new Map<string, Promise<string | null>>());
   useEffect(() => () => {
     for (const p of urls.current.values()) void p.then((u) => { if (u) URL.revokeObjectURL(u); });
     urls.current.clear();
   }, []);
-  const voice = useRef<VoiceCapture | null>(null);
-  voice.current ??= journalVoice();
+  const voice = useMemo(() => journalVoice(saveVoiceEntry(port), () => port.need("voice")), [port]);
   // a typed Ripple answer is filed as a journal entry; the door hears where it landed, never the words (as for voice)
   const typedRef = useRef(new Map<string, string>());
   // the home asks for stats and fresh together: stats share the answer fresh asked for
   const lastDeal = useRef<DealOptions | undefined>(undefined);
   const host = useMemo<ArcadeHost>(() => {
-    const call = async <T,>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
-      try { return await invoke<T>(cmd, args); } catch (e) { throw new Error(arcadeError(e)); }
+    const call = async <T,>(op: string, args?: Record<string, unknown>): Promise<T> => {
+      try { return await port.door<T>("arcade", op, args); } catch (e) { throw new Error(arcadeError(e)); }
     };
     const screen = (o?: DealOptions) => ({ grey: !!o?.grey, still: !!o?.still });
     let home: Promise<Home> | null = null;
@@ -96,7 +99,7 @@ export function ArcadeView({ ownerName, onBack, onOpenNote, look }: { ownerName:
       // a short cache for the home's two asks at once; another screen (the greyscale switch) is another answer
       const key = JSON.stringify(screen(o));
       if (key !== homeFor) { home = null; homeFor = key; }
-      const mine: Promise<Home> = home ??= call<Home>("arcade_home", screen(o)).then(
+      const mine: Promise<Home> = home ??= call<Home>("home", screen(o)).then(
         (h) => { setTimeout(() => { if (home === mine) home = null; }, 2000); return h; },
         (e) => { if (home === mine) home = null; throw e; },
       );
@@ -106,13 +109,13 @@ export function ArcadeView({ ownerName, onBack, onOpenNote, look }: { ownerName:
       owner: { name: ownerName ?? "you", you: false },
       games: GAMES,
       // look: a pinned card's round first (the Arcade asks this once, for the pin it opens)
-      rounds: async (game, n, o) => (await call<{ rounds: Round[] }>("arcade_rounds", { game, n, ...screen(o), ...(o?.look ? { look: o.look } : {}) })).rounds,
+      rounds: async (game, n, o) => (await call<{ rounds: Round[] }>("rounds", { game, n, ...screen(o), ...(o?.look ? { look: o.look } : {}) })).rounds,
       react: async (reactions: Reaction[]) => {
         const out = reactions.map((r) => typedAnswer(r, typedRef.current)).filter((r): r is Reaction => r !== null);
-        if (out.length) await call("arcade_react", { reactions: out });
+        if (out.length) await call("react", { reactions: out });
         home = null;
       },
-      profile: async () => (await call<{ profile: Profile }>("arcade_profile")).profile,
+      profile: async () => (await call<{ profile: Profile }>("profile")).profile,
       stats: async () => (await fetchHome(lastDeal.current)).stats,
       fresh: async (o) => { lastDeal.current = o; return (await fetchHome(o)).fresh ?? {}; },
       // look here: the cards a room pinned, from the same /home answer
@@ -123,29 +126,29 @@ export function ArcadeView({ ownerName, onBack, onOpenNote, look }: { ownerName:
         const key = `${card.id}\n${which}`;
         let p = urls.current.get(key);
         if (!p) {
-          p = invoke<ArrayBuffer>("arcade_media", { card: card.id, which })
+          p = port.door<ArrayBuffer>("arcade", "media", { card: card.id, which })
             .then((buf) => URL.createObjectURL(new Blob([buf], { type: mediaType(card, which) })))
             .catch(() => { urls.current.delete(key); return null; });
           urls.current.set(key, p);
         }
         return p;
       },
-      voice: voice.current!,
+      voice,
       saveAnswer: async (q: Card, text: string) => {
         const draft = newDraft(text, "text");
         // the same words saved twice in the Arcade are two answers: never held back as a duplicate
-        const r = await invoke<FlushReport>("journal_save_text", { entry: draft, saveAnother: true });
+        const r = await port.vault.create<FlushReport>("home", draft, undefined, { saveAnother: true });
         if (r.error && r.remaining === 0) throw new Error(r.error);
         const ref = journalRef(r, draft.path);
         typedRef.current.set(`${q.id}\n${text.trim()}`, ref);
         return { ref };
       },
-      distill: async () => { await call("arcade_distill", { deep: false }); },
+      distill: async () => { await call("distill", { deep: false }); },
       openProfile: () => {
-        void call<{ note: { vault: string; path: string } }>("arcade_profile").then((p) => onOpenNote(p.note.vault, p.note.path)).catch(() => undefined);
+        void call<{ note: { vault: string; path: string } }>("profile").then((p) => port.open(p.note.vault, p.note.path)).catch(() => undefined);
       },
     };
-  }, [ownerName, onOpenNote]);
+  }, [ownerName, port, voice]);
   // the browser tests' build may shorten This or That's minute (VITE_AREAS_TESTHOOKS); a shipped build never reads it
   const burst = import.meta.env.VITE_AREAS_TESTHOOKS === "1" ? Number((window as { __arcadeBurst?: number }).__arcadeBurst) || undefined : undefined;
   // 0.2: the Arcade is a place on the rail: no Back of its own (a host without a rail can still pass one)

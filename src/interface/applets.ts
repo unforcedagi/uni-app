@@ -3,14 +3,20 @@
 // outside through a small service on the box that holds the credentials, and the app signs each call with the
 // owner's key. Built-in applets are listed here; a sealed applet (an interface note hosted in a frame) joins by
 // declaring `applet: {contract: 1, id, name, kind, where, searches}` in its note's metadata.
+// Contract 2 (manifest2.ts) is one manifest that also says what the applet reads and writes; the shell grants exactly
+// that on one card. Arcade is on it; a note may declare it too (`applet: {contract: 2, ...}`, no `interface` beside it).
 // Pure: no React, no Tauri.
 
 import { CONTRACT_VERSION, hasHidden, hasOnly, plain } from "./contract.ts";
+import { CONTRACT_V2, parseManifest2, whereWords, type ManifestV2 } from "./manifest2.ts";
+import { ARCADE_MANIFEST } from "../arcade/manifest.ts";
 
 export type AppletKind = "vault" | "door";
 
 export type AppletManifest = {
-  contract: 1;
+  contract: 1 | 2;
+  /** Contract 2: the whole manifest (access, reach, search, screens). The words above are then the shell's, made from it. */
+  v2?: ManifestV2;
   id: string;
   name: string;
   kind: AppletKind;
@@ -38,9 +44,22 @@ export type AppletManifest = {
 // - Mail: the mail bridge on the hub's host holds the mail credentials (src-tauri/src/lib.rs, "Mail (T-45)").
 // - Messages: the Matrix door on the hub's host signs this device in with its key (crates/uni-core/src/matrix_door.rs);
 //   the Messages core on the device then keeps its own encrypted session (crates/uni-messages).
+/** A contract 2 manifest as the drawer lists it: where it lives and what search finds are the shell's words, from its access. */
+export function fromV2(m: ManifestV2, host: AppletManifest["host"]): AppletManifest {
+  // a door with no vault beside it is a door applet; anything that keeps notes is a vault applet
+  const kind: AppletKind = m.doors.length && !m.vaults.length ? "door" : "vault";
+  return { contract: 2, v2: m, id: m.id, name: m.name, kind, host, glyph: m.glyph, where: whereWords(m), searches: m.search.map((s) => s.what), ...(m.note ? { note: m.note } : {}) };
+}
+
+/** A built-in on contract 2. Its manifest goes through the same parser as a note's: a bad one fails the build's tests. */
+function builtIn2(raw: unknown): AppletManifest {
+  const r = parseManifest2(raw, "native");
+  if (!r.ok) throw new Error(`built-in applet manifest: ${r.error}`);
+  return fromV2(r.manifest, "native");
+}
+
 export const BUILT_IN: readonly AppletManifest[] = [
-  { contract: 1, id: "arcade", name: "Arcade", kind: "vault", host: "native", glyph: "◆", where: "the arcade, on the box", searches: ["games"],
-    note: "your cards and taste profile stay on the box" },
+  builtIn2(ARCADE_MANIFEST),
   { contract: 1, id: "studio", name: "Studio", kind: "vault", host: "native", glyph: "▢", where: "Uni vault, on the box", searches: ["pins"],
     note: "what Uni pinned for you on the Studio board" },
   { contract: 1, id: "topost", name: "To Post", kind: "vault", host: "native", glyph: "✎", where: "Uni vault, on the box", searches: ["posts"],
@@ -79,6 +98,12 @@ function line(x: unknown, max: number): string | null {
  */
 export function parseAppletManifest(raw: unknown): AppletParse {
   if (!plain(raw)) return { ok: false, error: "applet must be an object" };
+  if (raw.contract === CONTRACT_V2) {
+    const r = parseManifest2(raw, "sealed");
+    if (!r.ok) return r;
+    if (RESERVED.has(r.manifest.id)) return { ok: false, error: `id ${r.manifest.id} belongs to a built-in applet` };
+    return { ok: true, manifest: fromV2(r.manifest, "sealed") };
+  }
   if (!hasOnly(raw, KEYS)) return { ok: false, error: "applet has a key the contract doesn't know" };
   if (raw.contract !== CONTRACT_VERSION) return { ok: false, error: `unsupported contract ${String(raw.contract)}` };
   const id = typeof raw.id === "string" && raw.id.length <= APPLET_LIMITS.id && ID.test(raw.id) ? raw.id : null;

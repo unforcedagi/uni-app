@@ -13,10 +13,12 @@ export function kindWords(a: AppletManifest): string {
     : `Vault applet · ${a.note ?? "data lives in your vault"}`;
 }
 
-export function AppletFrame({ applet, onBack, onSearch, children }: {
+export function AppletFrame({ applet, onBack, onSearch, onAccess, children }: {
   applet: AppletManifest;
   onBack: () => void;
   onSearch: () => void;
+  /** A built-in on contract 2: opens its grant card (what it may reach, and Revoke access). */
+  onAccess?: () => void;
   children: ReactNode;
 }) {
   return <section className="sh-ap-frame" aria-labelledby={`sh-ap-h-${applet.id}`}>
@@ -25,7 +27,8 @@ export function AppletFrame({ applet, onBack, onSearch, children }: {
       <h1 id={`sh-ap-h-${applet.id}`}>{applet.name}</h1>
       <button type="button" className="sh-ap-icon" aria-label={`Search ${applet.name}`} onClick={onSearch}><SearchIcon /></button>
     </header>
-    <p className="sh-ap-kindline"><i className={`sh-ap-mark small ${applet.kind}`} aria-hidden="true" />{kindWords(applet)}</p>
+    <p className="sh-ap-kindline"><i className={`sh-ap-mark small ${applet.kind}`} aria-hidden="true" /><span className="sh-ap-kindwords">{kindWords(applet)}</span>
+      {onAccess && <button type="button" className="sh-ap-access" onClick={onAccess}>Access</button>}</p>
     <div className="sh-ap-body">{children}</div>
   </section>;
 }

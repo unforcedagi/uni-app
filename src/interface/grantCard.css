@@ -1,0 +1,35 @@
+/* The grant card (GrantCard.tsx): one card for every applet's access, in the look of the sealed approval cards
+   (a framed card, facts in two columns, the answer bottom right). Glow tokens. On the ink screen a stressed row
+   reads by weight and underline, never by tint. */
+.grant-card { box-sizing: border-box; width: min(520px, calc(100% - 32px)); margin: 8px auto 20px; padding: 14px 16px 16px; flex: none;
+  background: var(--g-paper); color: var(--g-ink); border: var(--g-hair) solid var(--g-line-strong); border-radius: 16px; box-shadow: var(--g-shadow-1);
+  font: 14px/1.45 var(--g-font-ui); }
+.grant-head { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; }
+.grant-glyph { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; font-size: 17px;
+  background: var(--g-ground); border: var(--g-hair) solid var(--g-line); font-variant-emoji: text;
+  font-family: "Noto Sans Symbols 2", "Noto Sans Symbols", "DejaVu Sans", var(--g-font-ui); }
+.grant-card h2 { margin: 0; min-width: 0; font: 600 20px/1.2 var(--g-font-display); overflow-wrap: anywhere; }
+.grant-say { margin: 0 0 8px; color: var(--g-ink-2); }
+.grant-name { font-style: normal; font-weight: 600; color: var(--g-ink); overflow-wrap: anywhere; }
+.grant-lines { margin: 0 0 8px; padding: 2px 0; border-block: var(--g-hair) solid var(--g-line); }
+.grant-line { display: grid; grid-template-columns: minmax(96px, 34%) 1fr; gap: 2px 12px; padding: 7px 0; }
+.grant-line + .grant-line { border-top: var(--g-hair) solid var(--g-line); }
+.grant-line dt { color: var(--g-ink-2); font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.grant-line dd { margin: 0; overflow-wrap: anywhere; }
+.grant-outside { color: var(--g-danger); font-weight: 600; }
+.grant-rest { margin-bottom: 4px; }
+.grant-rest strong { color: var(--g-ink); }
+.grant-meta { margin: 0; color: var(--g-ink-3); font-size: 12.5px; }
+.grant-meta code { font-family: var(--g-font-code); font-size: 12px; }
+.grant-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.grant-card .grant-go, .grant-card .grant-quiet { min-height: 44px; padding: 0 18px; border-radius: 22px; font: 600 14px/1 var(--g-font-ui); cursor: pointer; }
+.grant-card .grant-go { border: 0; background: var(--g-accent); color: var(--g-paper); }
+.grant-card .grant-quiet { border: var(--g-hair) solid var(--g-line-strong); background: var(--g-paper); color: var(--g-ink); }
+.grant-card .grant-revoke { margin-right: auto; color: var(--g-danger); }
+.grant-card button:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+@media (max-width: 420px) { .grant-line { grid-template-columns: 1fr; } }
+
+:root[data-screen="ink"] .grant-card { border: 1.5px solid #000; box-shadow: none; }
+:root[data-screen="ink"] .grant-card .grant-go { background: #000; color: #fff; }
+:root[data-screen="ink"] .grant-card .grant-quiet { border: 1.5px solid #000; color: #000; }
+:root[data-screen="ink"] .grant-outside { color: #000; text-decoration: underline; }
