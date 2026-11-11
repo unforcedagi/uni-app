@@ -83,6 +83,8 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
       task('ask-family', 'T-606 A family line that stays at the table', 4 * H, { kind: 'tell', no_default: true, reply_room: 'Family table' }),
       // the same private room by its old name, which no room on this device has (it must not land in Uni's room)
       task('ask-kitchen', 'T-607 A kitchen line that stays private', 4 * H, { kind: 'tell', no_default: true, reply_room: 'kitchen table' }),
+      // a private place's ask with no private room of its own on this device: drawn nowhere, only counted on home
+      task('ask-away', 'T-608 A line for a place this device lacks', 4 * H, { kind: 'tell', no_default: true, node: '[[Areas/Sanctum/Away]]' }),
     ];
     const run = (id: string, title: string, channel: string, room: string, sAgo: number, md: Record<string, unknown>, body: string) => ({ id, path: `Runs/2026-11-10 ${title}`, tags: ['run'], createdAt: iso(sAgo), updatedAt: iso(60),
       content: `# ${title}\n\n${body}\n\n---\n\nRun on [[Uni]], worker \`mts-${id}\`.\n`, metadata: { state: 'running', channel, room, attempt: id, worker: `mts-${id}`, started_at: iso(sAgo), doing_at: iso(60), ...md } });

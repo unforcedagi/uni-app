@@ -12,7 +12,7 @@ import { failureKind } from "../vault/rawNote.ts";
 import { activeProfile } from "../areas/profile.ts";
 import { findUniMember } from "../uniActions.ts";
 import { relayAccepted } from "../voiceOutbox.ts";
-import { answerBody, answerMeta, asksByRoom, asksFrom, seenBody, seenCloses, seenMeta, visibleAsks, type Gone, type VaultAsk } from "./asksCore.ts";
+import { answerBody, answerMeta, asksByRoom, asksPlaced, seenBody, seenCloses, seenMeta, visibleAsks, type Gone, type VaultAsk } from "./asksCore.ts";
 import type { Ask, ShapeRoom } from "./types.ts";
 import type { Tree } from "../areas/treeCore.ts";
 import type { RoomsRegistry } from "../areas/roomsRegistry.ts";
@@ -107,8 +107,9 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
     return reader.onPoll(() => void read());
   }, [on, read]);
 
-  const all = useMemo(() => asksFrom(rows, o.rooms, { uniRoom: o.uniRoom, privateRooms: o.privateRooms, tree: o.tree, reg: o.reg, hidden: o.hidden }),
+  const placed = useMemo(() => asksPlaced(rows, o.rooms, { uniRoom: o.uniRoom, privateRooms: o.privateRooms, tree: o.tree, reg: o.reg, hidden: o.hidden }),
     [rows, o.rooms, o.uniRoom, o.privateRooms, o.tree, o.reg, o.hidden]);
+  const all = placed.asks;
   // what the vault no longer lists is settled: stop hiding it by hand
   useEffect(() => {
     setGone((g) => { const live = new Set(all.map((a) => a.id)); const next = new Map([...g].filter(([id]) => live.has(id))); return next.size === g.size ? g : next; });
@@ -166,5 +167,5 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
     try { await post(p); } finally { resending.current.delete(id); }
   }, [owed, post]);
 
-  return { asks, byRoom, busy, errors, answer, seen, ready, owed, retry };
+  return { asks, byRoom, busy, errors, answer, seen, ready, owed, retry, /** Asks kept out of sight: private, with no private room of their own here. */ unseen: placed.unseen };
 }

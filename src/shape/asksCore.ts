@@ -5,7 +5,7 @@
 // Moved here from For you (src/foryou/forYouCore.ts, retired with the bands, the cards and the areas tree): the field derivations of an ask
 // (kind, what, why, options, default, action, link), the answer and Seen metadata, and the words its room is told. Whether an ask needs him
 // is the task's own `needs_aaron`, as uni-tasks wrote it (the one rule: open, owned by him, fresh, in a live place with a live room).
-import { privateWords } from "./privateWords.ts";
+import { privateWords, strings } from "./privateWords.ts";
 import type { Ask, ShapeRoom } from "./types.ts";
 import { metaOf, type Note } from "../vault/reader.ts";
 import { isPrivateName, isPrivatePath, isPrivateRoom, roomCluePrivate, roomView, type RoomRef } from "./privacy.ts";
@@ -93,7 +93,13 @@ export type AskPlacing = {
   /** Rooms home leaves out (retired, folded): no place for an ask. */ hidden?: ReadonlySet<string>;
   /** ms; default labels' dates ("Fri 5pm") are relative to it */ now?: number;
 };
+/** The asks, placed. A private one that has no private room of its own on this device is never drawn: `asksPlaced` says how many, so home can
+ *  say that something waits out of sight (a number, never a word of it). */
 export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRoom[], opts: AskPlacing): VaultAsk[] {
+  return asksPlaced(notes, rooms, opts).asks;
+}
+export function asksPlaced(notes: readonly Note<"task">[], rooms: readonly ShapeRoom[], opts: AskPlacing): { asks: VaultAsk[]; unseen: number } {
+  let unseen = 0;
   const now = opts.now ?? Date.now();
   const { tree, reg = null } = opts;
   const hidden = opts.hidden ?? new Set<string>();
@@ -143,9 +149,12 @@ export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRo
     const state = s(m.state) ?? "";
     if (!LIVE.has(state)) continue;
     seen.add(id);
-    const named = (s(m.reply_room) ?? s(m.room))?.replace(/^#/, "").trim() || null;
+    // (a field may hold a list: its first word is the room it is placed by; every word is judged for privacy below)
+    const named = (strings(m.reply_room)[0] ?? strings(m.room)[0])?.replace(/^#/, "").trim() || null;
+    /** Anything at all in a field that names a place, whatever its shape. */
+    const says = (v: unknown) => v !== undefined && v !== null && v !== "";
     // before the tree is read, a node, a card or a named room can't be judged (a room may be a private area's under any name): it waits
-    if (!tree && (named || s(m.node) || s(m.card))) continue;
+    if (!tree && (says(m.reply_room) || says(m.room) || says(m.node) || says(m.card))) continue;
     const node = resolve?.(m.node) ?? null;
     let room: ShapeRoom | null = null, direct = false, twins: ShapeRoom[] = [];
     // every name its work is said to have moved to (the registry's successor, a node's room_fallback): a private one hushes the ask
@@ -183,9 +192,11 @@ export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRo
     // and an ask the words taint is then dropped, not drawn in it)
     const targetPrivate = !!room && roomPrivate(room);
     // every word on the ask that could point at a private place: both room fields, where the work moved, the node, the card
-    const tainted = [m.reply_room, m.room, ...moved].some(words.room) || words.ref(m.node) || words.ref(m.card);
+    // (a field that says something but holds no word to read can't be judged: it counts as private)
+    const unread = [m.reply_room, m.room, m.node, m.card].some((v) => says(v) && !strings(v).length);
+    const tainted = unread || [m.reply_room, m.room, ...moved].some(words.room) || words.ref(m.node) || words.ref(m.card);
     const hush = tainted || namedPrivate || targetPrivate || gone.some(roomPrivate) || twins.some(roomPrivate) || privatePath(m.node) || privatePath(m.card);
-    if (hush && !targetPrivate) continue;
+    if (hush && !targetPrivate) { unseen++; continue; }
     const kindRaw = s(m.kind)?.toLowerCase();
     const kind: Kind = kindRaw === "choose" || kindRaw === "look" || kindRaw === "tell" ? kindRaw : tagsOf(n).includes("decision") ? "choose" : "do";
     const { tid, rest } = splitTitle(path);
@@ -209,7 +220,7 @@ export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRo
       ...(hush ? { private: true } : {}),
     });
   }
-  return out.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+  return { asks: out.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id)), unseen };
 }
 
 /** The asks by their room's channel id (an ask with no room, when there is no Uni room either, is in no room). Each room's newest first. */

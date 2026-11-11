@@ -75,7 +75,7 @@ export function ShapeSurface(p: {
     <div className="sh-scroll">
       <Home rows={shape.rows} pins={shape.pins} now={shape.now} loading={p.loading} onOpenRoom={p.onOpenRoom} onSearch={p.onSearch} onSettings={p.onSettings}
         renderAsk={(a) => ask(a, true)} renderRun={(run, r) => <RunLine run={run} where="row" onOpen={(x) => openStory(x, r.id)} />}
-        renderPin={(pin) => (pin.sealed && !pin.private ? <SealedPin pin={pin} onLapse={shape.onPinLapsed} /> : null)} onPinLapsed={shape.onPinLapsed} emptyHint={p.emptyHint} />
+        renderPin={(pin) => (pin.sealed && !pin.private ? <SealedPin pin={pin} onLapse={shape.onPinLapsed} /> : null)} onPinLapsed={shape.onPinLapsed} emptyHint={p.emptyHint} unseen={shape.unseen} />
     </div>
     {sheet}
   </>;

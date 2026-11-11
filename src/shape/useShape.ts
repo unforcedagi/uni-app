@@ -174,5 +174,5 @@ export function useShape(o: {
   const looks = useMemo(() => studioLooks(shown, roomName), [shown, roomName]);
   // (only by room: the flat list holds asks the registry hasn't vetted yet, and private ones; nothing outside a room should read them)
   const { asks: _unvetted, ...answering } = asks;
-  return { rows, pins, wants, now, onPinLapsed: lapsed, runs, asks: { ...answering, byRoom }, hidden, priv: privStable, uniRoom, looks, roomName };
+  return { rows, pins, wants, now, onPinLapsed: lapsed, runs, asks: { ...answering, byRoom }, unseen: asks.unseen, hidden, priv: privStable, uniRoom, looks, roomName };
 }

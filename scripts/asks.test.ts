@@ -3,7 +3,7 @@
 process.env.TZ = "UTC";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { answerBody, answerMeta, askButtons, asksByRoom, asksFrom, seenBody, seenCloses, seenMeta, splitTitle, visibleAsks, whenLabel, type VaultAsk } from "../src/shape/asksCore.ts";
+import { answerBody, answerMeta, askButtons, asksByRoom, asksFrom, asksPlaced, seenBody, seenCloses, seenMeta, splitTitle, visibleAsks, whenLabel, type VaultAsk } from "../src/shape/asksCore.ts";
 import type { ShapeRoom } from "../src/shape/types.ts";
 import { nodeTree } from "../src/shape/shapeCore.ts";
 import { parseRegistry } from "../src/areas/roomsRegistry.ts";
@@ -311,6 +311,45 @@ check("a private place is private however it is spelled, wherever its work moved
   // and a public ask is still placed
   assert.deepEqual(at({ node: "[[Projects/Pots]]", room: "kiln-studio" }), [["c-kiln", false]]);
   assert.deepEqual(at({ reply_room: "north-field", room: "kiln-studio" }), [["c-field", false]]);
+});
+
+check("a private place named as a link, a path, a list, a non-string value or in another script is still private", () => {
+  const n = (id: string, path: string, tags: string[], metadata: Record<string, unknown>) => ({ id, path, tags, metadata, updatedAt: "2026-11-01T00:00:00Z" });
+  const base = [n("n-s", "Areas/Sanctum", ["area"], {}), n("n-k", "Areas/Kiln", ["area"], { channel: "c-kiln" }), n("n-log", "Projects/Garden Log", ["project"], { parent: "[[Areas/Sanctum]]", channel: "c-garden" }),
+    n("n-t", "Projects/Тайна", ["project"], { parent: "[[Areas/Sanctum]]" }), n("n-c", "Projects/Caf\u00e9", ["project"], { parent: "[[Areas/Sanctum]]" }), n("n-pub", "Projects/Сад", ["project"], { parent: "[[Areas/Kiln]]" })];
+  const tree = nodeTree(base as never);
+  const here = [room("c-kiln", "kiln-studio"), room("c-uni", "Uni")];
+  const at = (m: Record<string, unknown>, o: Partial<Parameters<typeof asksFrom>[2]> = {}) => asksFrom([task("a", "T-1 x", m)], here, { uniRoom: "c-uni", now: NOW, tree, ...o }).map((a) => [a.room, a.private === true]);
+  // a room field written as a link, a path, with an alias, or as a list
+  for (const r of ["[[Areas/Sanctum]]", "[[Projects/Garden Log]]", "projects/garden log", "Sanctum|x", "Sanctum, kiln-studio", "Areas\\Sanctum", "Garden%20Log", "\uff33\uff41\uff4e\uff43\uff54\uff55\uff4d"]) {
+    assert.deepEqual(at({ room: r }), [], `room ${r}`);
+    assert.deepEqual(at({ reply_room: "kiln-studio", room: r }), [], `reply_room + room ${r}`);
+  }
+  // values that aren't strings
+  for (const v of [["sanctum"], ["garden-log"], ["c-garden"], { name: "sanctum" }]) { assert.deepEqual(at({ room: v }), [], JSON.stringify(v)); assert.deepEqual(at({ reply_room: v }), [], JSON.stringify(v)); }
+  for (const v of [["[[Projects/Garden Log]]"], ["[[Areas/Sanctum]]"], ["n-log"], { path: "Projects/Garden Log" }]) { assert.deepEqual(at({ node: v }), [], JSON.stringify(v)); assert.deepEqual(at({ card: v }), [], JSON.stringify(v)); }
+  // before the tree is read, a value of any shape that names something waits
+  for (const k of ["room", "reply_room", "node", "card"]) assert.deepEqual(at({ [k]: ["Sanctum"] }, { tree: null }), [], k);
+  // names with no ASCII letters, and the same name composed two ways
+  assert.deepEqual(at({ node: "Тайна" }), []);
+  assert.deepEqual(at({ node: "cafe\u0301" }), []);
+  const far = parseRegistry({ rooms: { "日記": { id: "c-d", private: true } }, retired: { "a-old": { into: "b-old" }, "b-old": { into: "日記" } } })!;
+  assert.deepEqual(at({ room: "a-old" }, { reg: far }), []);
+  // a long chain of moves is followed to its end
+  const retired: Record<string, unknown> = {};
+  for (let i = 0; i < 70; i++) retired[`r${i}`] = { into: i === 69 ? "secret" : `r${i + 1}` };
+  assert.deepEqual(at({ room: "r0" }, { reg: parseRegistry({ rooms: { secret: { id: "c-sec", private: true } }, retired })! }), []);
+  // and a public project with a non-ASCII name is not hidden by a private one
+  assert.deepEqual(at({ node: "[[Projects/Сад]]", room: "kiln-studio" }), [["c-kiln", false]]);
+  // a public room given as a one-item list is still placed
+  assert.deepEqual(at({ room: ["kiln-studio"] }), [["c-kiln", false]]);
+});
+
+check("asks kept out of sight are counted, so home can say something waits without a word of it", () => {
+  const got = asksPlaced([task("a", "T-1 x", { node: "[[Projects/Garden Log]]" }), task("b", "T-2 y", { room: "kiln-studio" }), task("c", "T-3 z", { room: "sanctum-absent", node: "[[Areas/Sanctum]]" })],
+    [room("c-kiln", "kiln-studio"), room("c-uni", "Uni")], { uniRoom: "c-uni", now: NOW, tree: TREE });
+  assert.deepEqual(got.asks.map((a) => a.id), ["b"]);
+  assert.equal(got.unseen, 2);
 });
 
 check("two live rooms of one name: the non-DM one, else the one the registry lists, else Uni's room (never a guess)", () => {

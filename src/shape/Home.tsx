@@ -24,6 +24,8 @@ export type HomeProps = {
   /** A pin's clock reached zero: read the pins again. */
   onPinLapsed?(): void;
   emptyHint?: ReactNode;
+  /** Asks kept out of sight (private, with no private room of their own on this device): home says how many, never a word of them. */
+  unseen?: number;
 };
 
 /** Asks shown on a row; the rest are "N more in the room". */
@@ -39,6 +41,7 @@ export function Home(p: HomeProps) {
     <button type="button" className="sh-find" onClick={p.onSearch}><SearchIcon /><span>Search rooms and the journal</span></button>
     {pins.length > 0 && <div className="sh-pins">{pins.map((pin) => <PinSlot key={pin.ref} pin={pin} renderPin={p.renderPin} onOpenRoom={p.onOpenRoom} onPinLapsed={p.onPinLapsed} />)}</div>}
     {error && <p className="sh-home-note sh-home-error" role="alert">{error}</p>}
+    {(p.unseen ?? 0) > 0 && <p className="sh-home-note sh-home-unseen" role="status" data-unseen={p.unseen}><span className="sh-mark-needs" aria-hidden="true">◆{"\uFE0E"}</span> {p.unseen === 1 ? "1 more thing waits" : `${p.unseen} more things wait`} in a private place. This device doesn't show {p.unseen === 1 ? "it" : "them"}.</p>}
     {rows.length > 0
       ? <ul className="sh-rows">{rows.map((r) => <Row key={r.room.id} row={r} now={now} onOpenRoom={p.onOpenRoom} renderAsk={p.renderAsk} renderRun={p.renderRun} />)}</ul>
       : loading

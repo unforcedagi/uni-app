@@ -3,7 +3,7 @@
 // - A retired or folded room (the rooms registry, vault note System/Rooms) is not a room any more: home leaves it out.
 // - A private room (private by the registry, or by its name: src/shape/privacy.ts) is still a room, but its asks are drawn only inside it
 //   (home shows a wordless mark), and its runs nowhere (src/projects/live.ts gives a private run no room).
-import { privateWords } from "./privateWords.ts";
+import { privateWords, strings } from "./privateWords.ts";
 import type { KnownDecision } from "../decisionLinks.ts";
 import { metaOf, type Note } from "../vault/reader.ts";
 import { isPrivateName, isPrivatePath, isPrivateRoom, roomCluePrivate, roomView } from "./privacy.ts";
@@ -107,7 +107,9 @@ export function decisionsFrom(notes: readonly Note<"decision">[], rooms: readonl
     const node = m.node !== undefined && m.node !== null ? resolve?.(m.node) ?? ref : null;
     if ([ref, node, path].some((p) => !!p && p.split("/").some((w) => isPrivateName(w)))) continue;
     if (tree && node && node !== ROOT && isPrivatePath(tree, node)) continue;
-    const named = str(m.room)?.replace(/^#/, "") ?? null;
+    // every word in the room and node fields, whatever their shape, is judged; a field that can't be read counts as private
+    if (words.room(m.room) || words.ref(m.node) || words.ref(m.card) || [m.room, m.node, m.card].some((v) => v !== undefined && v !== null && v !== "" && !strings(v).length)) continue;
+    const named = strings(m.room)[0]?.replace(/^#/, "") ?? null;
     // a room clue is private by the app's one rule for clues (a private name, a room a private place owns or names) or by the registry
     if (named && (clue(named) || words.room(named))) continue;
     if (words.ref(m.node)) continue;

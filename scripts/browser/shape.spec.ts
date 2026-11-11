@@ -76,7 +76,11 @@ test('home: rooms newest first, the moving line, the asks with their buttons, a 
   await expect(row(page, ROOM.family).locator('.sh-row-hush')).toHaveAttribute('data-hushed', '2');
   // (the same private room by an old name no room on this device has: hidden, never in Uni's room)
   await expect(row(page, ROOM.uni).locator('.sh-ask')).toHaveCount(1);
+  // an ask for a private place with no room of its own here: home says one more waits, and not a word of it
+  await expect(page.locator('.sh-home-unseen')).toHaveAttribute('data-unseen', '1');
+  await expect(page.locator('.sh-home-unseen')).toContainText("1 more thing waits in a private place. This device doesn't show it.");
   const dom = await page.evaluate(() => document.documentElement.outerHTML);
+  for (const words of ['A line for a place this device lacks', 'T-608']) expect(dom, words).not.toContain(words);
   for (const words of ['Private words about the practice', 'A quiet line that stays in its room', 'T-605', 'A family line that stays at the table', 'T-606',
     'Family words about the seating', 'A kitchen line that stays private', 'T-607']) expect(dom, words).not.toContain(words);
   // the bar counts what wants you: four asks, the three waiting in private rooms, and the pinned card

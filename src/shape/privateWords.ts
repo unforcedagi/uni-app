@@ -8,14 +8,26 @@ import type { Tree } from "../areas/treeCore.ts";
 import type { RoomsRegistry } from "../areas/roomsRegistry.ts";
 import { isPrivateName, isPrivatePath, isPrivateRoom, type RoomRef } from "./privacy.ts";
 
-const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
-/** Letters and digits only: `Seed-Log`, `seed log`, `#seed_log` are one key. */
-const squash = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, "");
-/** A room as written anywhere (`#Dev`, `room:dev`, `atlas/build`): what is left to match on. */
-const roomText = (x: string) => { let r = x.trim().replace(/^#/, "").trim(); if (/^room:/i.test(r)) r = r.slice(5).trim(); return r; };
-/** A note reference as written anywhere: `[[Projects/X|alias]]`, `Projects/X.md`, `/projects/x#part`. */
-const refText = (x: string) => x.trim().replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0].split("#")[0].trim().replace(/\.md$/i, "").replace(/^\/+|\/+$/g, "");
+/** Every string a field's value holds, whatever its shape: a string, a list (of anything), an object's values, a number. */
+export function strings(v: unknown, depth = 0): string[] {
+  if (typeof v === "string") return v.trim() ? [v] : [];
+  if (typeof v === "number" && Number.isFinite(v)) return [String(v)];
+  if (depth > 3 || !v || typeof v !== "object") return [];
+  return (Array.isArray(v) ? v : Object.values(v as Record<string, unknown>)).flatMap((x) => strings(x, depth + 1));
+}
+/** One written word made plain: composed one way (NFKC: full-width letters, accents typed either way), `\\` as `/`, `%20` read. */
+const plain = (x: string) => { let t = x.normalize("NFKC").replace(/\\/g, "/"); if (/%[0-9a-f]{2}/i.test(t)) { try { t = decodeURIComponent(t); } catch { /* as written */ } } return t; };
+/** The letters and digits of any script, lowercase: `Seed-Log`, `seed log`, `#seed_log` are one key. */
+const squash = (x: string) => plain(x).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+/** A room or a note as written anywhere (`#Dev`, `room:dev`, `[[Projects/X|alias]]`, `Projects/X.md`, `/projects/x#part`): what is left to match on. */
+const bare = (x: string) => {
+  let r = plain(x).trim().replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0].trim().replace(/^#+/, "").split("#")[0].trim();
+  if (/^room:/i.test(r)) r = r.slice(5).trim();
+  return r.replace(/\.md$/i, "").replace(/^\/+|\/+$/g, "");
+};
 const segments = (x: string) => x.split("/").map((p) => p.trim()).filter(Boolean);
+/** Each thing a value names: every string in it, and every part of a `a, b` list. */
+const parts = (v: unknown): string[] => strings(v).flatMap((t) => t.split(",")).map(bare).filter(Boolean);
 
 export type PrivateWords = {
   /** A room clue (a name however spelled, an old name, a channel id) is private: by its own words, the registry, the tree, the
@@ -34,10 +46,12 @@ export function privateWords(o: { tree: Tree | null; reg: RoomsRegistry | null; 
   const { tree, reg, rooms, uni } = o;
   /** Loose keys of private room names, and lowercase private channel ids. */
   const names = new Set<string>(), ids = new Set<string>();
-  const addName = (x: unknown) => { const t = text(x); if (!t) return false; const k = squash(roomText(t)); if (!k || names.has(k)) return false; names.add(k); return true; };
-  const addId = (x: unknown) => { const t = text(x); if (!t) return false; const k = t.toLowerCase(); if (ids.has(k)) return false; ids.add(k); return true; };
-  const wordPrivate = (x: string) => segments(roomText(x)).some((w) => isPrivateName(w));
-  const has = (x: unknown): boolean => { const t = text(x); return !!t && (wordPrivate(t) || names.has(squash(roomText(t))) || ids.has(roomText(t).toLowerCase())); };
+  const addName = (x: unknown) => { let grew = false; for (const t of parts(x)) { const k = squash(t); if (k && !names.has(k)) { names.add(k); grew = true; } } return grew; };
+  const addId = (x: unknown) => { let grew = false; for (const t of parts(x)) { const k = t.toLowerCase(); if (!ids.has(k)) { ids.add(k); grew = true; } } return grew; };
+  const wordPrivate = (t: string) => segments(t).some((w) => isPrivateName(w) || isPrivateName(w.normalize("NFKC")));
+  /** One bare word as a room: its own words, a private room's name (whole, or its first part: `area/room`), a private channel id. */
+  const roomWord = (t: string) => wordPrivate(t) || names.has(squash(t)) || names.has(squash(segments(t)[0] ?? "")) || ids.has(t.toLowerCase());
+  const has = (x: unknown): boolean => parts(x).some(roomWord);
 
   for (const k of o.known ?? []) { addName(k); addId(k); }
   // the nodes inside a private place: their names, the rooms they name, the channels they own
@@ -45,10 +59,10 @@ export function privateWords(o: { tree: Tree | null; reg: RoomsRegistry | null; 
   if (tree) for (const n of [...tree.nodes.values(), ...tree.archived]) {
     if (!isPrivatePath(tree, n.path) && !segments(n.path).some((w) => isPrivateName(w))) continue;
     if (n.id) nodeIds.add(n.id.toLowerCase());
-    nodePaths.add(segments(n.path).map(squash).join("/"));
-    const leaf = squash(segments(n.path).pop() ?? "");
-    if (leaf) nodeLeaves.add(leaf);
-    if (n.name) nodeLeaves.add(squash(n.name));
+    const path = segments(n.path).map(squash);
+    // (a part with no letters or digits at all keys nothing: it must never match every such name)
+    if (path.every(Boolean)) nodePaths.add(path.join("/"));
+    for (const leaf of [squash(segments(n.path).pop() ?? ""), squash(n.name ?? "")]) if (leaf) nodeLeaves.add(leaf);
     addName(n.name);
     if (typeof n.metadata.room === "string") addName(n.metadata.room);
     for (const c of [...n.rooms, ...n.channels]) { addId(c); addName(c); }
@@ -59,7 +73,8 @@ export function privateWords(o: { tree: Tree | null; reg: RoomsRegistry | null; 
     for (const [name, r] of Object.entries(reg.rooms)) if (r.private) { addName(name); addId(r.id); for (const w of r.was ?? []) addName(w); }
     for (const [name, r] of Object.entries(reg.retired)) if (r.private) { addName(name); for (const w of r.was ?? []) addName(w); }
     // to a fixpoint: a name and its channel id and its old names are one room; a room whose work moved to a private room is private
-    for (let changed = true, guard = 0; changed && guard < 50; guard++) {
+    // (the sets only grow and are bounded by the words there are, so it ends)
+    for (let changed = true; changed;) {
       changed = false;
       for (const [name, r] of Object.entries(reg.rooms)) {
         const all = [name, ...(r.was ?? [])];
@@ -74,18 +89,16 @@ export function privateWords(o: { tree: Tree | null; reg: RoomsRegistry | null; 
       for (const r of rooms) if (has(r.id) || has(r.name)) { changed = addId(r.id) || changed; changed = addName(r.name) || changed; }
     }
   }
+  /** One bare word as a note: a private word in its path, or a node inside a private place by id, by path, or by its last part. */
+  const refWord = (t: string) => {
+    const segs = segments(t);
+    if (segs.some((w) => isPrivateName(w) || isPrivateName(w.normalize("NFKC"))) || nodeIds.has(t.toLowerCase())) return true;
+    const path = segs.map(squash), leaf = path[path.length - 1] ?? "";
+    return (path.every(Boolean) && nodePaths.has(path.join("/"))) || (!!leaf && nodeLeaves.has(leaf));
+  };
   return {
-    room: has,
-    ref(clue) {
-      const t = text(clue);
-      if (!t) return false;
-      const r = refText(t);
-      if (!r) return false;
-      const parts = segments(r);
-      if (parts.some((w) => isPrivateName(w))) return true;
-      if (nodeIds.has(r.toLowerCase())) return true;
-      const path = parts.map(squash).join("/"), leaf = squash(parts[parts.length - 1] ?? "");
-      return nodePaths.has(path) || (!!leaf && nodeLeaves.has(leaf));
-    },
+    // a room field may hold a note's link (`[[Projects/X]]`, `projects/x`): it is judged as a note too
+    room: (clue) => parts(clue).some((t) => roomWord(t) || refWord(t)),
+    ref: (clue) => parts(clue).some(refWord),
   };
 }
