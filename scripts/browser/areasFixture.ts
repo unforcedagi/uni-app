@@ -881,8 +881,8 @@ Two proposals wait on a scope decision.
   }, data);
   await page.goto('/');
   if (opts.noWait) return;
-  // The app opens to Uni: its home page, with the Uni chat attached.
-  await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
+  // T-335 the shape: the app opens on home, the rooms list.
+  await expect(page.getByRole('heading', { name: 'Rooms', level: 1 })).toBeVisible();
 }
 
 const railOf = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
