@@ -5,7 +5,7 @@
 // Moved here from For you (src/foryou/forYouCore.ts, retired with the bands, the cards and the areas tree): the field derivations of an ask
 // (kind, what, why, options, default, action, link), the answer and Seen metadata, and the words its room is told. Whether an ask needs him
 // is the task's own `needs_aaron`, as uni-tasks wrote it (the one rule: open, owned by him, fresh, in a live place with a live room).
-import { privateWords, strings } from "./privateWords.ts";
+import { privateWords, strings, unreadable } from "./privateWords.ts";
 import type { Ask, ShapeRoom } from "./types.ts";
 import { metaOf, type Note } from "../vault/reader.ts";
 import { isPrivateName, isPrivatePath, isPrivateRoom, roomCluePrivate, roomView, type RoomRef } from "./privacy.ts";
@@ -193,7 +193,7 @@ export function asksPlaced(notes: readonly Note<"task">[], rooms: readonly Shape
     const targetPrivate = !!room && roomPrivate(room);
     // every word on the ask that could point at a private place: both room fields, where the work moved, the node, the card
     // (a field that says something but holds no word to read can't be judged: it counts as private)
-    const unread = [m.reply_room, m.room, m.node, m.card].some((v) => says(v) && !strings(v).length);
+    const unread = [m.reply_room, m.room, m.node, m.card].some(unreadable);
     const tainted = unread || [m.reply_room, m.room, ...moved].some(words.room) || words.ref(m.node) || words.ref(m.card);
     const hush = tainted || namedPrivate || targetPrivate || gone.some(roomPrivate) || twins.some(roomPrivate) || privatePath(m.node) || privatePath(m.card);
     if (hush && !targetPrivate) { unseen++; continue; }

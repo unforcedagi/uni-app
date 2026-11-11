@@ -341,6 +341,11 @@ check("a private place named as a link, a path, a list, a non-string value or in
   assert.deepEqual(at({ room: "r0" }, { reg: parseRegistry({ rooms: { secret: { id: "c-sec", private: true } }, retired })! }), []);
   // and a public project with a non-ASCII name is not hidden by a private one
   assert.deepEqual(at({ node: "[[Projects/Сад]]", room: "kiln-studio" }), [["c-kiln", false]]);
+  // other separators, a markdown link, an .html reference, and a value nested too deep to read
+  for (const r of ["kiln-studio; sanctum", "kiln-studio\nSanctum", "kiln-studio | sanctum", "kiln-studio garden-log", "[x](Areas/Sanctum.md)"]) assert.deepEqual(at({ room: r }), [], JSON.stringify(r));
+  for (const v of ["Projects/Garden Log.html", "[[Projects/Garden Log.html|x]]", "[g](Projects/Garden Log.md)"]) { assert.deepEqual(at({ node: v, room: "kiln-studio" }), [], v); assert.deepEqual(at({ card: v, room: "kiln-studio" }), [], v); }
+  assert.deepEqual(at({ room: ["kiln-studio", [[[[["Sanctum"]]]]]] }), []);
+  assert.deepEqual(at({ room: ["kiln-studio", { a: { b: { c: { d: { e: "Sanctum" } } } } }] }), []);
   // a public room given as a one-item list is still placed
   assert.deepEqual(at({ room: ["kiln-studio"] }), [["c-kiln", false]]);
 });

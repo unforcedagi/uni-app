@@ -121,6 +121,7 @@ assert.deepEqual([...hiddenRooms([room("c-b", "barn"), room("c-k", "kiln-studio"
   assert.deepEqual(at({ room: "old-beds" }), []);
   assert.deepEqual(at({ node: "projects/garden log" }), []);
   assert.deepEqual(at({ card: "[[Areas/Sanctum]]" }), []);
+  for (const card of ["Projects/Garden Log.html", "[[Projects/Garden Log.html|x]]", "Areas/Sanctum.html", "n-g.html"]) assert.deepEqual(at({ card, room: "kiln-studio" }), [], card);
   assert.deepEqual(at({ room: ["sanctum"] }), []);
   assert.deepEqual(at({ room: "[[Projects/Garden Log]]" }), []);
   // a public one is still placed

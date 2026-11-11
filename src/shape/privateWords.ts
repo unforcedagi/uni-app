@@ -12,8 +12,19 @@ import { isPrivateName, isPrivatePath, isPrivateRoom, type RoomRef } from "./pri
 export function strings(v: unknown, depth = 0): string[] {
   if (typeof v === "string") return v.trim() ? [v] : [];
   if (typeof v === "number" && Number.isFinite(v)) return [String(v)];
-  if (depth > 3 || !v || typeof v !== "object") return [];
+  if (depth > DEPTH || !v || typeof v !== "object") return [];
   return (Array.isArray(v) ? v : Object.values(v as Record<string, unknown>)).flatMap((x) => strings(x, depth + 1));
+}
+const DEPTH = 6;
+/** A field says something that can't be read as words: a value with no string in it, or nested deeper than `strings` goes. It can't be
+ *  judged, so its caller counts it as private. */
+export function unreadable(v: unknown, depth = 0): boolean {
+  if (v === undefined || v === null || v === "") return false;
+  if (typeof v === "string" || typeof v === "number") return false;
+  if (typeof v !== "object") return true;
+  if (depth > DEPTH) return true;
+  const kids = Array.isArray(v) ? v : Object.values(v as Record<string, unknown>);
+  return (depth === 0 && !strings(v).length) || kids.some((x) => x !== null && typeof x === "object" && unreadable(x, depth + 1));
 }
 /** One written word made plain: composed one way (NFKC: full-width letters, accents typed either way), `\\` as `/`, `%20` read. */
 const plain = (x: string) => { let t = x.normalize("NFKC").replace(/\\/g, "/"); if (/%[0-9a-f]{2}/i.test(t)) { try { t = decodeURIComponent(t); } catch { /* as written */ } } return t; };
@@ -23,11 +34,16 @@ const squash = (x: string) => plain(x).toLowerCase().replace(/[^\p{L}\p{N}]+/gu,
 const bare = (x: string) => {
   let r = plain(x).trim().replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0].trim().replace(/^#+/, "").split("#")[0].trim();
   if (/^room:/i.test(r)) r = r.slice(5).trim();
-  return r.replace(/\.md$/i, "").replace(/^\/+|\/+$/g, "");
+  return r.replace(/^\/+|\/+$/g, "").replace(/\.(md|html)$/i, "");
 };
 const segments = (x: string) => x.split("/").map((p) => p.trim()).filter(Boolean);
 /** Each thing a value names: every string in it, and every part of a `a, b` list. */
-const parts = (v: unknown): string[] => strings(v).flatMap((t) => t.split(",")).map(bare).filter(Boolean);
+const parts = (v: unknown): string[] => strings(v)
+  // a markdown link names its target: `[words](Areas/X.md)`
+  .flatMap((t) => { const links = [...t.matchAll(/\]\(([^)]+)\)/g)].map((m) => m[1]); return links.length ? [t.replace(/\[[^\]]*\]\([^)]*\)/g, " "), ...links] : [t]; })
+  .flatMap((t) => t.split(/[,;\n\r\t\u2028\u2029]|\s\|\s|\s&\s|\sand\s/i)).map(bare).filter(Boolean);
+/** The separate words of one part (`kiln-studio garden-log`): each may be a room of its own. */
+const tokens = (t: string) => t.split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")).filter(Boolean);
 
 export type PrivateWords = {
   /** A room clue (a name however spelled, an old name, a channel id) is private: by its own words, the registry, the tree, the
@@ -50,7 +66,9 @@ export function privateWords(o: { tree: Tree | null; reg: RoomsRegistry | null; 
   const addId = (x: unknown) => { let grew = false; for (const t of parts(x)) { const k = t.toLowerCase(); if (!ids.has(k)) { ids.add(k); grew = true; } } return grew; };
   const wordPrivate = (t: string) => segments(t).some((w) => isPrivateName(w) || isPrivateName(w.normalize("NFKC")));
   /** One bare word as a room: its own words, a private room's name (whole, or its first part: `area/room`), a private channel id. */
-  const roomWord = (t: string) => wordPrivate(t) || names.has(squash(t)) || names.has(squash(segments(t)[0] ?? "")) || ids.has(t.toLowerCase());
+  const roomWord = (t: string) => wordPrivate(t) || names.has(squash(t)) || names.has(squash(segments(t)[0] ?? "")) || ids.has(t.toLowerCase())
+    // written with others on one line: each word alone
+    || (/\s/.test(t) && tokens(t).some((w) => isPrivateName(w) || names.has(squash(w)) || ids.has(w.toLowerCase())));
   const has = (x: unknown): boolean => parts(x).some(roomWord);
 
   for (const k of o.known ?? []) { addName(k); addId(k); }
