@@ -118,6 +118,7 @@ export const SCHEMA = {
     "live_line": {"type": "string"},
     "node": {"type": "reference", "indexed": true},
     "report": {"type": "object"},
+    "reported_at": {"type": "date"},
     "resumes": {"type": "string"},
     "room": {"type": "string"},
     "started_at": {"type": "date", "indexed": true},
@@ -280,6 +281,7 @@ export type RunMeta = {
   "live_line"?: string | null;
   "node"?: string | null;
   "report"?: Record<string, unknown> | null;
+  "reported_at"?: string | null;
   "resumes"?: string | null;
   "room"?: string | null;
   "started_at"?: string | null;
