@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
+import WebVersion from "./WebVersion";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { recordingHolder } from "./recLock";
@@ -98,6 +99,7 @@ export function UpdateSettings() {
   useEffect(() => { getVersion().catch(() => invoke<string>("app_version")).then((v) => setVersion(v ? String(v) : ""), () => setVersion("")); }, []);
   return <div className="update-settings">
     <span className="update-version">{version ? `Uni ${version}` : version === "" ? "Uni" : "Uni …"}</span>
+    <WebVersion />
     {s.kind === "ready" ? <button className="pairing-secondary" onClick={() => unlessRecording(() => void restartToUpdate())}>{held ? FINISH_FIRST : `${label} — Restart`}</button>
       : s.kind === "available" ? <button className="pairing-secondary" onClick={() => unlessRecording(() => openApkDownload(s.url))}>{held ? FINISH_FIRST : `${label} — Download APK`}</button>
       : <button className="pairing-secondary" onClick={check} disabled={isBusy(s)}>{isBusy(s) ? label : "Check for updates"}</button>}

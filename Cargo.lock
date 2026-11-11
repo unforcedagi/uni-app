@@ -7561,8 +7561,11 @@ dependencies = [
 name = "uni-app-tauri"
 version = "0.1.5"
 dependencies = [
+ "base64 0.22.1",
  "block2",
  "dbus",
+ "ed25519-dalek",
+ "flate2",
  "nostr",
  "objc2",
  "objc2-app-kit",
@@ -7570,8 +7573,11 @@ dependencies = [
  "objc2-local-authentication",
  "qrcode",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-barcode-scanner",
@@ -7582,6 +7588,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-updater",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

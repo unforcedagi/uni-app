@@ -13,6 +13,7 @@ import "./chatFeel.css";
 import "./glow/finish.css";
 // Uni 0.2: one home and one calm language across the screens, the last word
 import "./v02.css";
+import { otaBoot, otaRendered } from "./ota";
 
 /** A render error in remote content must not blank the whole app. */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
@@ -40,11 +41,21 @@ startMotion();
 // T-335 glow-up: the accent's hue for the time of day
 startTide();
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <App />
-      <UpdateChecks />
-    </ErrorBoundary>
-  </React.StrictMode>,
-);
+/** T-335 OTA: mounted beside App, so it commits only when the first render did not throw. */
+function OtaReady() {
+  React.useEffect(() => otaRendered(), []);
+  return null;
+}
+
+void otaBoot().then((ok) => {
+  if (!ok) return;
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <App />
+        <UpdateChecks />
+        <OtaReady />
+      </ErrorBoundary>
+    </React.StrictMode>,
+  );
+});

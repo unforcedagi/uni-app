@@ -1,4 +1,4 @@
-"""T-335: the release waits for the owner's tap. Runs the real watch-main.sh and publish.sh in a throwaway repo with a
+"""T-335: the release waits for the owner's tap (an APK, or a screens bundle when only the screens changed). Runs the real watch-main.sh and publish.sh in a throwaway repo with a
 temporary HOME; the builds, the sealed broker, gh, aapt and apksigner are fakes. No network, no keys, no GitHub calls."""
 import os
 from pathlib import Path
@@ -25,11 +25,11 @@ FAKES = {
     # written on approval, exit 1 otherwise. FAKE_SEAL: approve (signed by $FAKE_SIGNER), decline, down (no card),
     # empty (exit 0 but writes nothing: a broken broker).
     "sealed": LOG + '''
-while [[ $# -gt 0 ]]; do case $1 in --out) out=$2; shift ;; --apk) apk=$2; shift ;; esac; shift; done
+while [[ $# -gt 0 ]]; do case $1 in --out) out=$2; shift ;; --apk) apk=$2; shift ;; --archive) archive=$2; shift ;; esac; shift; done
 [[ $FAKE_SEAL == down ]] && { echo 'broker unreachable' >&2; exit 1; }
 echo 'asked: request r-1'
 case $FAKE_SEAL in
-  approve) { cat "$apk"; echo "signed-by:$FAKE_SIGNER"; } > "$out" ;;
+  approve) if [[ -n ${archive:-} ]]; then echo "web.json for $(cat "$archive")" > "$out"; else { cat "$apk"; echo "signed-by:$FAKE_SIGNER"; } > "$out"; fi ;;
   empty) : > "$out" ;;
   *) echo 'refused: declined' >&2; exit 1 ;;
 esac
@@ -46,6 +46,8 @@ esac
 ''',
     "curl": LOG + 'printf \'{"version": "1.2.3"}\\n\'\n',
     "pnpm": LOG,
+    # scripts/ota-verify.ts, the only node call publish.sh makes: FAKE_VERIFY=fail says the manifest doesn't check out.
+    "node": LOG + '[[ ${FAKE_VERIFY:-ok} == ok ]] || { echo "ota-verify: the signature does not verify" >&2; exit 1; }\n',
     "cargo": LOG,
     # The Buzz checkout publish.sh pins; every other git call is real.
     "git": '[[ "$*" == "-C ../buzz rev-parse HEAD" ]] && { echo 5669fdc0000; exit 0; }\nexec /usr/bin/git "$@"\n',
@@ -61,8 +63,11 @@ echo "Signer #1 certificate SHA-256 digest: $(sed -n 's/^signed-by://p' "$apk")"
 # The repo's own scripts that publish.sh calls, as fakes. publish.sh, watch-main.sh and release-check.sh are the real ones.
 REPO_FAKES = {
     "scripts/next-version.py": "print('1.2.3 1102003')\n",
-    "scripts/write-release-manifest.py": "import sys, pathlib\n"
+    "scripts/write-release-manifest.py": "import os, sys, pathlib\n"
+    "open(os.environ['CALLS'], 'a').write('write-release-manifest.py ' + ' '.join(sys.argv[1:]) + '\\n')\n"
     "for f in ('latest.json', 'android.json'): (pathlib.Path(sys.argv[1]) / f).write_text('{}')\n",
+    "scripts/ota-bundle.sh": LOG + 'echo "bundle $1" > "$2/web-$1.tar.gz"; echo "1 $2/web-$1.tar.gz"\n',
+    "src/ota.ts": "export const SHELL_API = 1;\n",
     "scripts/build-mac-hosted.sh": LOG + 'for f in Uni-mac-arm64.zip Uni.app.tar.gz Uni.app.tar.gz.sig; do echo x > "$3/$f"; done\n',
     "scripts/android-release-build.sh": LOG + f'''
 [[ $UNI_ANDROID_UNSIGNED == 1 ]] || {{ echo 'publish must build unsigned' >&2; exit 9; }}
@@ -88,11 +93,13 @@ class ReleaseSignTests(unittest.TestCase):
             script(self.home / "Android/Sdk/build-tools" / name, "#!/usr/bin/env bash\n" + text)
         self.calls = root / "calls"
         self.asked = self.home / ".config/uni/updater/sign-asked"
+        self.last_apk = self.home / ".config/uni/updater/last-apk"
+        self.last_bundle = self.home / ".config/uni/updater/last-bundle"
 
         origin = root / "origin.git"
         self.repo = root / "repo"
         subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
-        for name in ("publish.sh", "watch-main.sh", "release-check.sh"):
+        for name in ("publish.sh", "watch-main.sh", "release-check.sh", "release-kind.py"):
             script(self.repo / "scripts" / name, (ROOT / "scripts" / name).read_text())
         for name, text in REPO_FAKES.items():
             script(self.repo / name, ("#!/usr/bin/env bash\n" + text) if name.endswith(".sh") else text)
@@ -118,9 +125,11 @@ class ReleaseSignTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, f"git {args}: {result.stderr}")
         return result.stdout.strip()
 
-    def commit(self, message):
+    def commit(self, message, path="change.txt"):
         """A new commit on origin/main, as a merge to main would land it."""
-        (self.repo / "change.txt").write_text(message)
+        self.git("checkout", "-q", "--detach", "origin/main") if self.git("branch", "-r") else None
+        (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / path).write_text(message)
         self.git("add", "-A")
         self.git("commit", "-q", "-m", message)
         self.git("push", "-q", "origin", "HEAD:main")
@@ -249,6 +258,162 @@ class ReleaseSignTests(unittest.TestCase):
         result, calls = self.watch()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(self.named(calls, "gh release create")), 1)
+
+
+    # --- T-335 OTA: screens-only changes go out as a signed bundle ---
+
+    def released_apk(self):
+        """An APK release went out from origin/main as it is now: publish.sh records it for the bundles after it."""
+        sha = self.git("rev-parse", "HEAD")
+        result, _ = self.watch()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.last_apk.read_text().split(), ["1.2.3", sha, "1"])
+        return sha
+
+    def test_screens_only_changes_go_out_as_a_bundle_on_one_tap_and_no_apk(self):
+        self.released_apk()
+        sha = self.commit("new screens", "src/App.tsx")
+        result, calls = self.watch()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("as new screens for phones on Uni 1.2.3 (shell API 1), no APK", result.stderr)
+        self.assertEqual(self.named(calls, "android-release-build.sh"), [])
+        [sign] = self.named(calls, "sealed ")
+        stage = f"{self.env['TMPDIR']}/uni-release-1.2.3"
+        self.assertIn(f"release bundle --archive {stage}/web-1.2.3.tar.gz --version 1.2.3 --api 1 --commit {sha} "
+                      f"--out {stage}/web.json --purpose Screens 1.2.3 for phones on Uni 1.2.3", sign)
+        [verify] = self.named(calls, "node ")
+        self.assertIn(f"scripts/ota-verify.ts {stage}/web.json {stage}/web-1.2.3.tar.gz --version 1.2.3 --api 1", verify)
+        [manifest] = self.named(calls, "write-release-manifest.py")
+        self.assertTrue(manifest.endswith("--android-from 1.2.3"), manifest)
+        [create] = self.named(calls, "gh release create")
+        self.assertIn(f"{stage}/web.json", create)
+        self.assertIn(f"{stage}/web-1.2.3.tar.gz", create)
+        self.assertNotIn("uni.apk", create)
+        self.assertLess(calls.index(sign), calls.index(verify))
+        self.assertLess(calls.index(verify), calls.index(create))
+        self.assertFalse(self.asked.exists())
+        self.assertEqual(self.last_bundle.read_text().split()[1], "1.2.3")
+
+    def test_one_bundle_a_day_then_the_commit_waits(self):
+        self.released_apk()
+        self.commit("new screens", "src/App.tsx")
+        self.watch()
+        self.commit("more screens", "src/App.tsx")
+        result, calls = self.watch()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("waits for tomorrow (one bundle a day)", result.stderr)
+        self.assertEqual(self.named(calls, "sealed "), [])
+        self.assertEqual(self.named(calls, "gh release"), [])
+        self.last_bundle.write_text("2000-01-01 1.2.2\n")  # the next day
+        result, calls = self.watch()
+        self.assertEqual(len(self.named(calls, "gh release create")), 1, result.stderr)
+
+    def test_a_shell_change_still_ships_an_apk(self):
+        self.released_apk()
+        for path in ("src-tauri/src/lib.rs", "pnpm-lock.yaml", "src-tauri/gen/android/app/build.gradle.kts"):
+            with self.subTest(path=path):
+                self.commit(f"change {path}", path)
+                result, calls = self.watch()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"an APK, because {path} changed since 1.2.3", result.stderr)
+                [sign] = self.named(calls, "sealed ")
+                self.assertIn("release sign --apk", sign)
+                self.assertIn("/uni.apk", self.named(calls, "gh release create")[0])
+
+    def test_a_declined_bundle_card_publishes_nothing_and_records_the_ask(self):
+        self.released_apk()
+        sha = self.commit("new screens", "src/App.tsx")
+        result, calls = self.watch(FAKE_SEAL="decline")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Screens signing did not complete (sealed exit 1; a card was posted): refused: declined. "
+                      "Nothing published", result.stderr)
+        self.assertEqual(self.named(calls, "gh release"), [])
+        self.assertEqual(self.asked.read_text().split()[0], sha)
+        self.assertFalse(self.last_bundle.exists())
+
+    def test_a_manifest_that_doesnt_check_out_against_the_built_in_key_is_not_published(self):
+        self.released_apk()
+        self.commit("new screens", "src/App.tsx")
+        result, calls = self.watch(FAKE_VERIFY="fail")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("doesn't check out against the app's built-in key; nothing published", result.stderr)
+        self.assertEqual(self.named(calls, "gh release"), [])
+
+    def test_a_test_key_or_channel_in_the_environment_publishes_nothing(self):
+        for var in ("UNI_OTA_PUBKEY", "UNI_OTA_CHANNEL"):
+            result, calls = self.watch(**{var: "x"})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("are for test builds", result.stderr)
+            self.assertEqual(self.named(calls, "sealed "), [])
+
+
+class ReleaseKindTests(unittest.TestCase):
+    """scripts/release-kind.py on a real repo: anything not plainly the screens is an APK."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name) / "repo"
+        (self.repo / "scripts").mkdir(parents=True)
+        shutil.copy(ROOT / "scripts/release-kind.py", self.repo / "scripts")
+        self.git("init", "-q", "-b", "main")
+        self.write("src/ota.ts", "export const SHELL_API = 3;\n")
+        self.write("package.json", '{"scripts": {"test": "a"}, "dependencies": {"x": "1"}}')
+        self.base = self.commit()
+        self.last = Path(tmp.name) / "last-apk"
+        self.last.write_text(f"0.3.7 {self.base} 3\n")
+
+    def git(self, *args):
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        return subprocess.run(["git", "-C", str(self.repo), *args], capture_output=True, text=True, env=env,
+                              check=True).stdout.strip()
+
+    def write(self, path, text):
+        (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / path).write_text(text)
+
+    def commit(self):
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "c", "--allow-empty")
+        return self.git("rev-parse", "HEAD")
+
+    def kind(self, **env):
+        return subprocess.run(["python3", str(self.repo / "scripts/release-kind.py"), str(self.last)], cwd=self.repo,
+                              capture_output=True, text=True, check=True, env={**os.environ, **env}).stdout.strip()
+
+    def test_the_screens_and_the_test_list_are_a_bundle(self):
+        self.write("src/App.tsx", "x")
+        self.write("docs/a.md", "x")
+        self.write("package.json", '{"scripts": {"test": "a && b"}, "dependencies": {"x": "1"}}')
+        self.commit()
+        self.assertEqual(self.kind(), "bundle 0.3.7 3")
+        self.assertEqual(self.kind(UNI_RELEASE_KIND="apk"), "apk UNI_RELEASE_KIND=apk")
+
+    def test_anything_else_is_an_apk(self):
+        cases = [("src-tauri/src/lib.rs", "x", "apk src-tauri/src/lib.rs changed since 0.3.7"),
+                 ("crates/uni-core/src/a.rs", "x", "apk crates/uni-core/src/a.rs changed"),
+                 ("pnpm-lock.yaml", "x", "apk pnpm-lock.yaml changed"),
+                 ("scripts/android-release-build.sh", "x", "apk scripts/android-release-build.sh changed"),
+                 ("package.json", '{"scripts": {"test": "a"}, "dependencies": {"x": "2"}}', "apk package.json's dependencies"),
+                 ("src/ota.ts", "export const SHELL_API = 4;\n", "apk the shell API changed (3 -> 4)")]
+        for path, text, why in cases:
+            with self.subTest(path=path):
+                self.git("checkout", "-q", "--detach", self.base)
+                self.write(path, text)
+                self.commit()
+                self.assertTrue(self.kind().startswith(why), self.kind())
+
+    def test_no_record_or_a_bad_one_is_an_apk(self):
+        self.write("src/App.tsx", "x")
+        self.commit()
+        for text, why in [(None, "no last APK release recorded"), ("garbage", "no last APK release recorded"),
+                          (f"0.3.7 {'f' * 40} 3", "is not behind this one"), ("0.3.7 abc 3", "malformed")]:
+            with self.subTest(text=text):
+                self.last.unlink(missing_ok=True)
+                if text:
+                    self.last.write_text(text)
+                self.assertTrue(self.kind().startswith("apk") and why in self.kind(), self.kind())
 
 
 if __name__ == "__main__":
