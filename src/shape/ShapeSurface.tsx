@@ -83,7 +83,9 @@ export function ShapeSurface(p: {
   const lastAsk = useRef<Ask | null>(null);
   if (listedAsk) lastAsk.current = listedAsk;
   const writing = !!story && "ask" in story && lastAsk.current?.id === story.ask && asks.busy.has(story.ask);
-  const openedAsk = listedAsk ?? (writing ? lastAsk.current : null);
+  // (the held copy is judged as the list is: a private room's ask only inside that room)
+  const held = writing && lastAsk.current && (!lastAsk.current.private || lastAsk.current.room === here) ? lastAsk.current : null;
+  const openedAsk = listedAsk ?? held;
   useEffect(() => { if (story && "ask" in story && !openedAsk) onStory(null); }, [story, openedAsk, onStory]);
   const sheet = story && ("run" in story
     ? <RunStory key={story.run.id} vault={p.vault} run={story.run} roomName={nameOf(story.room)} onClose={closeStory} onOpenNote={(id) => { closeStory(); p.onOpenNote(id); }} />
