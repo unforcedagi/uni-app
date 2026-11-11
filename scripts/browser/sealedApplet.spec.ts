@@ -1,7 +1,7 @@
 // T-335 a sealed applet in the drawer: an interface note from the vault, hosted on the interface contract (src/interface) by
 // src/shape/SealedApplet.tsx. End to end on the real build with Tauri faked (sealedAppletFixture.ts on shapeFixture.ts, made-up data).
 // Ported from the area app specs (interface.spec.ts, areas.spec.ts, areaRoom.spec.ts, T-74/T-75), booting through the drawer instead of an
-// area: the grant prompt and its words, the grant's key (needs, note path, html hash), Stop / Revoke / no auto-start, the frame's reach
+// area: the grant card and its words, the grant's key (needs, note path, html hash), Stop / Revoke / no auto-start, the frame's reach
 // (vault inside its prefixes only, no parent, no network, no Tauri), suggestions only by a host tap, the self-test gate and approved-code mode.
 // Run: pnpm exec playwright test --config playwright.applets.config.ts
 import { test, expect, type Page } from '@playwright/test';
@@ -23,7 +23,7 @@ const quiet = (id: string, name: string, over: Partial<FixtureApplet> = {}): Fix
 test.beforeEach(async ({ page }) => { page.on('pageerror', (e) => { throw e; }); });
 
 test.describe('the drawer hosts a sealed applet', () => {
-  test('Seed list is under "From your vault"; the grant prompt names its folder; Allow runs it; it reads inside Seeds/ and is refused outside', async ({ page }) => {
+  test('Seed list is under "From your vault"; the grant card names its folder; Allow runs it; it reads inside Seeds/ and is refused outside', async ({ page }) => {
     await bootSealed(page, { granted: false });
     await openFromDrawer(page, 'Seed list');
     await expect(page.getByRole('heading', { name: 'Seed list', level: 1 })).toBeVisible();
