@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { leaveRoom, openSettings as homeSettings } from './shapeNav';
 
-/** Settings sits behind home's gear: step out of the room the spec booted in, if it is in one. */
+/** Settings, from the bar (T-335 fixes: a place there, so a room need not be left first; leaving it is harmless). */
 async function gearSettings(page: Page) {
   if (await page.locator('.sh-room').isVisible().catch(() => false)) await leaveRoom(page);
   await homeSettings(page);

@@ -4,8 +4,10 @@ An Android-first, Telegram-like Buzz conversation client. The product contract a
 
 ## What works in this branch
 
-- Home is your rooms, newest first (since 0.4.0). A row shows the room's last line; a soft dot and a live line while a worker is moving there; and what wants you there, with its buttons inline (Seen, the choices, an action). Approval cards about to expire are pinned on top with a countdown.
-- A room is its chat with a thin strip under the head: what is moving (tap for the run's story) and what waits on you (tap to jump to the ask). Asks are messages in the room, with buttons; Seen records that you're aware of one (`seen_at`, `seen_by`).
+- Home is your rooms, newest first (since 0.4.0). A row shows the room's last line; a soft dot and a live line while a worker is moving there; and what wants you there, with its buttons inline. Approval cards about to expire are pinned on top with a countdown.
+- A room is its chat with a thin strip under the head: what is moving (tap for the run's story) and what waits on you. Asks are messages in the room, with buttons.
+- Every "waits on you" opens to its context (0.4.x): its next action, why now, its default and its note's body (Why, Steps, Links, Time) with live links. Its buttons go by kind: do → Done (back to its room for any follow-up) and Not now; choose → its options and Not now; look → Open and Seen; tell → Seen; and Archive on every ask. Seen and Not now record that you're aware of one (`seen_at`, `seen_by`).
+- The bar (Rooms, Journal, Applets, Settings) shows everywhere on a phone, in a room too; it steps aside only while the keyboard is up. Settings opens from it, with Claude usage first.
 - Journal is its own place. The Applets drawer opens the vault's applets (Arcade, Studio, To Post, Recipes, Calendar, Vault) and the doors (Mail, Messages), each with its count. Recipes is a slot that says it isn't built yet. A vault note tagged `applet` joins the drawer as a sealed applet, which asks before it runs (`src/shape/SealedApplet.tsx`). Arcade's "look here" links open in the app, on the pinned card.
 - Search starts where you are: matches are grouped by place, other places with matches are listed apart, and nothing found offers Ask Uni.
 - For you, the task and work lists, the areas tree, the cards and projects views and the All stream are gone (0.4.0): asks are messages in their room, and each room's strip says what is moving and what waits.

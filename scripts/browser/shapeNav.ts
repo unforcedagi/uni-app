@@ -1,4 +1,4 @@
-// T-335 the shape: how a spec moves around the shell. Home is the rooms list; the bar has Rooms, Journal and Applets;
+// T-335 the shape: how a spec moves around the shell. Home is the rooms list; the bar has Rooms, Journal, Applets and Settings;
 // every applet opens from the drawer; Settings is the bar's fourth place (T-335 fixes); a room opens from its row.
 import { expect, type Page } from '@playwright/test';
 

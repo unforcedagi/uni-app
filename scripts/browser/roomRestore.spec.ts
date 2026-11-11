@@ -52,8 +52,8 @@ async function inFocus(page: Page, name: string) {
   await expect(room(page).getByRole('heading', { level: 1 })).toHaveText(new RegExp(`^#?${name}`, 'i'));
   if ((page.viewportSize()?.width ?? 0) >= 600) await expect(bar(page).getByRole('button', { name: /^Rooms/ })).toHaveAttribute('aria-current', 'page');
 }
-/** To Messages from the room: straight from the rail on a wide screen; a phone's bar steps aside inside a room, so there the room's own
- *  Back to rooms comes first (the room you were in is still the one Back returns to). */
+/** To Messages from the room: straight from the rail on a wide screen; the bar shows in a room on a phone too (T-335 fixes); if it
+ *  ever doesn't, the room's own Back to rooms comes first (the room you were in is still the one Back returns to). */
 async function toMessages(page: Page) {
   if (!(await bar(page).isVisible().catch(() => false))) await leaveRoom(page);
   await openApplet(page, 'Messages');

@@ -385,7 +385,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Each tab owns its own note Back stack, even while another tab is active.
   const noteStacks = useRef(new Map<string, VaultRef[]>());
   const notesRef = useRef<VaultRef[]>([]);
-  /** Settings, over whatever is open (from home's gear). */
+  /** Settings, over whatever is open (the bar's Settings place). */
   const [panel, setPanel] = useState<"settings" | null>(null);
   /** T-335 the shape: the applets drawer, over whatever is behind it; and a run's story sheet. */
   const [drawerOpen, setDrawerOpen] = useState(false);

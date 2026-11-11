@@ -88,7 +88,7 @@
 .sh-place[aria-current="page"] i { background: var(--g-sunk); }
 .sh-count { position: absolute; top: 8px; left: calc(50% + 10px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--g-needs); color: var(--g-paper); font: 700 11px/18px var(--g-font-ui); text-align: center; font-variant-numeric: tabular-nums; }
 
-/* ── Wide: the same three places as a left rail ── */
+/* ── Wide: the same places as a left rail ── */
 @media (min-width: 900px) {
   .sh-bar { top: 0; right: auto; width: calc(var(--sh-rail-w) + env(safe-area-inset-left)); height: auto; flex-direction: column; justify-content: flex-start; gap: 6px; padding: calc(16px + env(safe-area-inset-top)) 0 16px env(safe-area-inset-left); border-top: 0; border-right: var(--g-hair) solid var(--g-line); }
   .sh-place { flex: none; height: 64px; }

@@ -1,7 +1,7 @@
 // T-335 the shape, end to end on the real build with Tauri faked (shapeFixture.ts, a made-up world): home is the rooms, newest first, with
 // what moves and what wants you; answering an ask from home writes the vault once and tells that room; the expiring card is pinned with
 // its clock and leaves once approved; a room has its strip, its asks as messages and a run's story; Back goes home; the bar switches the
-// three places; the drawer opens each applet in its frame; search starts where you are; a private room keeps its words; the ink screen
+// places (and Settings, T-335 fixes); the drawer opens each applet in its frame; search starts where you are; a private room keeps its words; the ink screen
 // reads by shape and word. Screenshots, named like the prototype's, go to test-results/shape-shots (never committed).
 // Run: pnpm test:shape
 import { test, expect, type Page } from '@playwright/test';

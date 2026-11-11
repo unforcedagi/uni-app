@@ -136,8 +136,8 @@ test('following the newest message, the list stays at it when it gets shorter (a
 // T-294 (option A, replacing T-124 r2 here): away to another screen (the Journal) and back with Uni, the room comes back where it was being
 // read, with Jump to latest; read to the end first (T-335: the room is in focus over All), and it comes back at its newest, with no Jump to latest.
 // 0.2: there is no All tab; Back (Alt+← here, the system Back on Android) is the way back to the room
-// T-335 the shape: on a wide screen the bar is beside the room and the Journal is one tap; a phone's bar steps aside in a room, so there
-// the room's Back to rooms comes first, and Back still returns to the room you were in
+// T-335 the shape: on a wide screen the bar is beside the room and the Journal is one tap; a phone's bar now shows in a room too (T-335 fixes);
+// where it doesn't, the room's Back to rooms comes first, and Back still returns to the room you were in
 test('scrolled up, then away and back: the room comes back at the same spot; at its newest, at its newest', async ({ page }) => {
   await boot(page, { history: 60, eyes: false });
   const list = page.getByRole('log', { name: 'Messages' });
