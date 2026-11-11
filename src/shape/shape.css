@@ -146,6 +146,8 @@
   .sh-shell .toast, .sh-shell.sh-bar-aside .toast { bottom: calc(24px + env(safe-area-inset-bottom)); }
   .sh-overlay { inset: 0 auto 0 calc(var(--sh-rail-w) + env(safe-area-inset-left)); width: min(560px, calc(100vw - var(--sh-rail-w))); border-right: var(--g-hair) solid var(--g-line); box-shadow: var(--g-shadow-2); }
   .sh-overlay-scrim { display: block; position: fixed; inset: 0; z-index: 54; border: 0; padding: 0; background: var(--g-scrim); }
+  /* T-335 fixes: a sheet (a run's story, an ask, the applets drawer) covers the place, never the rail beside it: the rail stays live */
+  .sh-shell .sh-story-layer, .sh-shell .sh-ap-layer { left: calc(var(--sh-rail-w) + env(safe-area-inset-left)); }
 }
 
 /* ── Ink: shape and word, heavier lines, no fills that only tint ── */

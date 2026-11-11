@@ -2,7 +2,7 @@
 // wants you); with one, it is that room: its head, the strip (what moves there, what waits on you), and the room's own chat, which the App
 // builds (one send path, one draft per room), with the room's asks drawn as messages at its end. A run's story, or an ask opened to its
 // context (T-335 fixes: every "waits on you" opens the same sheet, with its buttons and Archive), opens as a sheet over either.
-import { useCallback, useEffect, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Home } from "./Home";
 import { RoomFrame, RoomStrip } from "./RoomFrame";
 import { RunLine } from "./RunLine";
@@ -78,7 +78,12 @@ export function ShapeSurface(p: {
   const room = focus ? p.rooms.find((r) => r.id === focus.room) ?? null : null;
 
   // an ask's sheet stays while the ask is listed: answered, seen or archived, it leaves with it (a failed write brings the ask back, with why)
-  const openedAsk = story && "ask" in story ? listed.find((a) => a.id === story.ask && (!a.private || a.room === here)) ?? null : null;
+  // (while its write is out the ask is off the list: the sheet stays as it was, its buttons held; a write that fails brings the ask back with why)
+  const listedAsk = story && "ask" in story ? listed.find((a) => a.id === story.ask && (!a.private || a.room === here)) ?? null : null;
+  const lastAsk = useRef<Ask | null>(null);
+  if (listedAsk) lastAsk.current = listedAsk;
+  const writing = !!story && "ask" in story && lastAsk.current?.id === story.ask && asks.busy.has(story.ask);
+  const openedAsk = listedAsk ?? (writing ? lastAsk.current : null);
   useEffect(() => { if (story && "ask" in story && !openedAsk) onStory(null); }, [story, openedAsk, onStory]);
   const sheet = story && ("run" in story
     ? <RunStory key={story.run.id} vault={p.vault} run={story.run} roomName={nameOf(story.room)} onClose={closeStory} onOpenNote={(id) => { closeStory(); p.onOpenNote(id); }} />

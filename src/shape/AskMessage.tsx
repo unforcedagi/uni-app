@@ -41,8 +41,8 @@ export function AskMessage({ ask, busy, error, onAct, onOpen, compact = false }:
   return <article className="sh-ask sh-ask-msg" data-id={ask.id} data-kind={ask.kind} aria-busy={busy || undefined} aria-label={`Uni asks: ${ask.what}`}>
     <div className="sh-ask-meta"><b>Uni</b><span className="sh-ask-mark" aria-hidden="true">◆</span> wants you{ask.tid ? <span className="sh-ask-tid"> · {ask.tid}</span> : null}</div>
     <button type="button" className="sh-ask-body sh-ask-open" onClick={() => onOpen(ask)} aria-label={`${ask.what}. Open it`}>
-      <p className="sh-ask-what">{ask.what}<span className="sh-ask-chev" aria-hidden="true"> ›</span></p>
-      {(ask.next || ask.why) && <p className="sh-ask-why">{ask.next ?? ask.why}</p>}
+      <span className="sh-ask-what">{ask.what}<span className="sh-ask-chev" aria-hidden="true"> ›</span></span>
+      {(ask.next || ask.why) && <span className="sh-ask-why">{ask.next ?? ask.why}</span>}
     </button>
     {buttons}{err}
   </article>;

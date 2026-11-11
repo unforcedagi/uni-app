@@ -28,6 +28,8 @@ export type ShapeOpts = {
   /** Start in this room (as if the app was last left there). */ room?: string;
   /** Mail through the mail bridge double (held sends and an unread Inbox): the Mail tile counts them. */ mail?: boolean;
   /** Times the fake relay refuses a post before it takes one. */ postFails?: number;
+  /** Times the fake vault refuses an ask's write (a close or a patch) before it takes one. */ writeFails?: number;
+  /** A run in a public room (the garden's) that waits on you for the private room's ask T-605: its words must never leave that room. */ leakRun?: boolean;
 };
 
 export async function bootShape(page: Page, o: ShapeOpts = {}) {
@@ -44,6 +46,7 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
     const iso = (sAgo: number) => new Date((nowS - sAgo) * 1000).toISOString();
     w.__calls = [];
     w.__postFails = o.postFails ?? 0;
+    w.__writeFails = o.writeFails ?? 0;
     // the old home's saved places never decide where this world opens (the mail double saves Mail as an old tab)
     const setItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function (k: string, v: string) { if (k === 'uni.tabs.v1') return; return setItem.call(this, k, v); };
@@ -109,6 +112,8 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
       run('run-family', 'Seating plan', ROOM.family, 'Family table', 30 * min, { live_line: 'Family words about the seating' }, '**Working now:** Family words about the seating'),
       run('run-key', 'Setting up the boiler page', ROOM.teach, 'Teaching: Design 2', 30 * H, { state: 'blocked', waiting_on: 'aaron', waiting_for: 'The boiler portal key', task: 'T-609', ended_at: iso(29 * H) },
         '**Blocked after 40 min. Waiting on Aaron:** the boiler portal key.'),
+      ...(o.leakRun ? [run('run-leak', 'Checking the shed lock', ROOM.garden, 'Garden co-op site', 40 * min, { state: 'blocked', waiting_on: 'aaron', waiting_for: 'The shed code', task: 'T-605', ended_at: iso(30 * min) },
+        '**Blocked after 10 min. Waiting on Aaron:** the shed code.')] : []),
       run('run-quiet', 'A quiet practice log', ROOM.quiet, 'sanctum', 20 * min, { live_line: 'Private words about the practice', doing_now: 'Writing' }, '**Working now:** Private words about the practice'),
       { id: 'rooms-registry', path: 'System/Rooms', tags: [], createdAt: iso(30 * 24 * H), updatedAt: iso(H), content: '',
         metadata: { registry: { rooms: { uni: { id: ROOM.uni }, sanctum: { id: ROOM.quiet, private: true }, 'family table': { id: ROOM.family, private: true, was: ['kitchen table'] } }, retired: { 'old-barn': { none: true } }, folded_ids: {} } } },
@@ -211,6 +216,7 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
             return page(notes.filter((n) => (n.tags ?? []).includes(args.tag) && matches(n.metadata, args.metadata)), args);
           }
           case 'vault_transition': {
+            if (w.__writeFails > 0) { w.__writeFails--; throw 'vault unreachable: connection refused'; }
             const t = w.__tasks.find((x: any) => x.id === args.id);
             if (!t) throw 'note not found: ' + args.id;
             if (t.metadata.state !== args.from) throw `[transition_conflict] conflict: state is ${t.metadata.state}, not ${args.from}`;
@@ -219,6 +225,7 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
             return JSON.parse(JSON.stringify(t));
           }
           case 'vault_patch_meta': {
+            if (w.__writeFails > 0) { w.__writeFails--; throw 'vault unreachable: connection refused'; }
             const t = w.__tasks.find((x: any) => x.id === args.id);
             if (!t) throw 'note not found: ' + args.id;
             if (args.ifUpdatedAt !== t.updatedAt) throw 'conflict: note has been modified';

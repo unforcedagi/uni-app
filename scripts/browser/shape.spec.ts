@@ -356,6 +356,15 @@ test('wide: the bar is the left rail, beside home and beside a room, never over 
   await ruleClearsText(page, 'rb-card');
   await page.evaluate(() => { document.documentElement.dataset.screen = 'ink'; });
   await ruleClearsText(page, 'rb-card');
+  await page.evaluate(() => { delete document.documentElement.dataset.screen; });
+  // a sheet covers the place, never the rail: Settings on the rail opens over an ask's sheet (T-335 fixes)
+  await page.locator('.sh-room').getByRole('button', { name: 'Back to rooms' }).click();
+  await openRoomFromHome(page, ROOM.uni);
+  await page.locator('.sh-strip .sh-run[data-run="waiting"]').click();
+  await expect(page.locator('.sh-ask-sheet')).toBeVisible();
+  await bar(page).getByRole('button', { name: 'Settings' }).click();
+  await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
 });
 });
 
@@ -563,4 +572,25 @@ test('Settings is a place on the bar, from home and from inside a room, with Cla
   // home has no gear of its own: one way in
   await bar(page).getByRole('button', { name: /^Rooms/ }).click();
   await expect(page.locator('.sh-home').getByRole('button', { name: 'Settings' })).toHaveCount(0);
+});
+
+test("a write that fails keeps the ask's sheet open, with why, and the next tap goes through", async ({ page }) => {
+  await bootShape(page, { writeFails: 1 });
+  await row(page, ROOM.house).locator('.sh-ask-open').click();
+  const key = page.getByRole('dialog', { name: 'Paste the boiler portal key' });
+  await key.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(key.getByRole('alert')).toHaveText(/^Couldn't mark it done: vault unreachable/);
+  expect(await calls(page, 'post_message')).toEqual([]);
+  await key.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(key).toHaveCount(0);
+  await expect.poll(async () => (await calls(page, 'post_message')).map((c) => c.args.channel)).toEqual([ROOM.house]);
+});
+
+test("a public room's run that waits on a private room's ask opens its story, never the ask", async ({ page }) => {
+  await bootShape(page, { leakRun: true });
+  await row(page, ROOM.garden).locator('.sh-run[data-run="waiting"]').click();
+  await expect(page.getByRole('dialog', { name: 'Checking the shed lock' })).toBeVisible();
+  await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
+  const dom = await page.evaluate(() => document.documentElement.outerHTML);
+  for (const words of ['A quiet line that stays in its room', 'T-605']) expect(dom, words).not.toContain(words);
 });
