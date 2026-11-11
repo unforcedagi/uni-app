@@ -94,11 +94,17 @@ export function createAppletPort(grant: Grant, be: PortBackends, opts: PortOptio
       async create<T = unknown>(vault: string, note: NewNote, audio?: { bytes: Uint8Array; mime: string }, o?: { saveAnother?: boolean }): Promise<T> {
         check();
         const name = vaultOf(vault, "add notes");
-        const paths = [note.path, ...(note.alternates ?? [])];
-        const tags = Array.isArray(note.tags) ? note.tags : null;
-        if (!paths.every((p) => allowsNote(grant, name, "create" satisfies Verb, { path: p, tags }))) refuse("out_of_scope", `add a note at ${String(note.path).slice(0, 80)} in the ${name} vault`);
-        const out = (await be.create(name, note, audio, o)) as T;
-        for (const p of paths) made.add(p);
+        // judged and written from one copy, read once: what is checked is what the writer gets
+        let copy: NewNote;
+        try { copy = JSON.parse(JSON.stringify(note)) as NewNote; } catch { copy = { path: "" }; }
+        const alternates = Array.isArray(copy.alternates) ? copy.alternates : [];
+        const paths = [copy.path, ...alternates];
+        const tags = Array.isArray(copy.tags) ? copy.tags : null;
+        if (!paths.every((p) => typeof p === "string" && allowsNote(grant, name, "create" satisfies Verb, { path: p, tags }))) refuse("out_of_scope", `add a note at ${String(copy.path).slice(0, 80)} in the ${name} vault`);
+        const out = (await be.create(name, copy, audio, o)) as T;
+        // `own` covers a note only when it is known where it landed: with alternates it could be any of them, so none is claimed
+        // (claiming them all would let it name someone else's note as an alternate and then read it as its own)
+        if (!alternates.length) made.add(copy.path);
         return out;
       },
     },

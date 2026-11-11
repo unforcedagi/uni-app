@@ -17,16 +17,19 @@ import "./applets.css";
 const grants = deviceGrants();
 
 /** The shell's side of the port: what runs once the port has said yes. */
-function backends(home: string | null, onOpenNote: (vault: string, path: string) => void): PortBackends {
+function backends(journalVault: string | null, onOpenNote: (vault: string, path: string) => void): PortBackends {
   return {
     command: (cmd, args) => invoke(cmd, args),
     // (the vault commands list by tag; a folder alone has no listing here yet)
     query: (vault, q) => (q.type ? invoke<Record<string, unknown>[]>("vault_query", { vault, tag: q.type, includeContent: false, limit: q.limit, offset: q.offset })
       : Promise.reject(new Error("listing a folder without a type isn't built"))),
     note: (vault, ref) => invoke<{ note: Record<string, unknown> }>("vault_note", { vault, noteRef: ref }).then((d) => d.note),
-    // the one writer the shell has that queues offline and never doubles a retry is the journal's, for your own vault
+    // The one writer the shell has that queues offline and never doubles a retry is the journal's, and it writes to the journal's
+    // own vault (Journal settings), whatever it is asked. So a note is added only when the vault the grant named IS that vault:
+    // the card never says one vault while the write lands in another.
     create: (vault, note, audio, o) => {
-      if (vault !== home || !note.path.startsWith("Journal/")) return Promise.reject(new Error("the shell can only add journal entries to your own vault today"));
+      if (!journalVault || vault !== journalVault) return Promise.reject(new Error(`Not saved: your journal is kept in the ${journalVault ?? "(unknown)"} vault, and this was allowed for the ${vault} vault.`));
+      if (!note.path.startsWith("Journal/")) return Promise.reject(new Error("Not saved: the shell can only add journal entries today."));
       return audio
         ? invoke("journal_save_voice", audio.bytes, { headers: { "x-entry": JSON.stringify(note), "x-audio-mime": audio.mime } })
         : invoke("journal_save_text", { entry: note, saveAnother: !!o?.saveAnother });
@@ -35,11 +38,13 @@ function backends(home: string | null, onOpenNote: (vault: string, path: string)
   };
 }
 
-export function AppletGate({ applet, home, rooms, reviewing, onReviewDone, onAllowed, onOpenNote, children }: {
+export function AppletGate({ applet, home, journalVault, rooms, reviewing, onReviewDone, onAllowed, onOpenNote, children }: {
   /** A built-in on contract 2 (`applet.v2`). */
   applet: AppletManifest;
   /** The owner's own vault on this device. */
   home: string | null;
+  /** The vault the journal's writer saves to (Journal settings); a note is added only when the grant named that vault. */
+  journalVault: string | null;
   rooms: readonly { id: string; name: string }[];
   reviewing: boolean;
   onReviewDone: () => void;
@@ -49,19 +54,23 @@ export function AppletGate({ applet, home, rooms, reviewing, onReviewDone, onAll
   children: (port: AppletPort) => ReactNode;
 }) {
   const m = applet.v2!;
-  const roomKey = rooms.map((r) => r.id).join("\n");
-  const resolved = useMemo(() => resolveGrant(m, { home, here: null, rooms, author: "shell" }), [m, home, roomKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [key, setKey] = useState<string | null>(null);
+  // What the manifest resolves to here. Rooms come and go and reorder all day; the grant changes only when its own content does,
+  // so it is held by its content (`sig`), and a rooms list that changes nothing the grant names never restarts the applet.
+  const fresh = resolveGrant(m, { home, here: null, rooms, author: "shell" });
+  const sig = JSON.stringify(fresh);
+  const resolved = useMemo(() => fresh, [sig]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the key is kept with the grant it was made from: a key for another grant is never read as this one's
+  const [keyed, setKeyed] = useState<{ sig: string; key: string } | null>(null);
   const [declined, setDeclined] = useState(false);
   const [, setTick] = useState(0);
   const bump = () => setTick((n) => n + 1);
   useEffect(() => {
-    setKey(null);
     if (!resolved.ok) return;
     let on = true;
-    void grantKey(resolved.grant).then((k) => { if (on) setKey(k); });
+    void grantKey(resolved.grant).then((k) => { if (on) setKeyed({ sig, key: k }); });
     return () => { on = false; };
-  }, [resolved]);
+  }, [resolved]); // eslint-disable-line react-hooks/exhaustive-deps
+  const key = keyed && keyed.sig === sig ? keyed.key : null;
 
   const subject = builtinSubject(m.id);
   const allowed = !!key && grants.status(subject, key, BUILTIN_CODE) === "ok";
@@ -75,10 +84,11 @@ export function AppletGate({ applet, home, rooms, reviewing, onReviewDone, onAll
   const mounted = useRef(true);
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const openNoteRef = useRef(onOpenNote); openNoteRef.current = onOpenNote;
+  const journalRef = useRef(journalVault); journalRef.current = journalVault;
   const port = useMemo(() => {
     if (!allowed || !resolved.ok || !key) return null;
     const mine = key;
-    return createAppletPort(resolved.grant, backends(home, (v, p) => openNoteRef.current(v, p)), {
+    return createAppletPort(resolved.grant, backends(journalRef.current, (v, p) => openNoteRef.current(v, p)), {
       home,
       live: () => mounted.current && current.current === mine && grants.status(subject, mine, BUILTIN_CODE) === "ok",
       onRefused: (r) => console.warn(`[applet ${m.id}] refused (${r.code}): ${r.what}`),
@@ -95,7 +105,7 @@ export function AppletGate({ applet, home, rooms, reviewing, onReviewDone, onAll
       ? <div className="sh-ap-calm sh-ap-gate"><p className="sh-ap-calm-head">{m.name} isn't allowed to run</p>
           <button type="button" className="sh-ap-btn sh-ap-gate-ask" onClick={(e) => { if (e.isTrusted) setDeclined(false); }}>Ask again</button></div>
       : <div className="sh-ap-gate sh-ap-gate-card"><GrantCard name={m.name} glyph={m.glyph} runs="built-in" state="ask" lines={lines} fingerprint={fingerprint(key)} expires={grantExpiry(new Date())}
-          onAllow={() => { grants.grant(subject, key, BUILTIN_CODE, "sealed", grantExpiry(new Date())); bump(); }} onNotNow={() => setDeclined(true)} /></div>;
+          onAllow={() => { grants.grant(subject, key, BUILTIN_CODE, "sealed", grantExpiry); bump(); }} onNotNow={() => setDeclined(true)} /></div>;
   }
   return <>
     {reviewing && <div className="sh-ap-gate sh-ap-gate-card"><GrantCard name={m.name} glyph={m.glyph} runs="built-in" state="granted" lines={lines} fingerprint={fingerprint(key)}

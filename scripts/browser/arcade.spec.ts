@@ -73,6 +73,7 @@ async function boot(page: Page) {
       if (cmd === 'arcade_react') { w.__arcade.push(...args.reactions); return { ok: true, stored: args.reactions.length, stats: stats() }; }
       if (cmd === 'arcade_profile') return { profile: profile(), markdown: '# Taste profile', note: w.__profileNote ?? { vault: 'uni', path: 'Taste/Profile' } };
       if (cmd === 'arcade_distill') return { queued: true };
+      if (cmd === 'journal_config' && w.__journalVault) return { hub: 'https://example.invalid', vault: w.__journalVault };
       if (cmd === 'arcade_media') return new ArrayBuffer(8);
       if (cmd === 'journal_save_voice') { await new Promise((r) => setTimeout(r, w.__saveDelay ?? 0)); return { sent: [noteId], remaining: 0, error: null }; }
       if (cmd === 'journal_save_text') return { sent: [noteId], remaining: 0, error: null };
@@ -223,6 +224,34 @@ test('contract 2: Access shows what was granted; Revoke access stops the Arcade 
   await page.reload();
   await openTile(page);
   await expect(card(page)).toBeVisible();
+});
+
+test('contract 2: the rooms list changing under a running Arcade leaves the game where it was', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: /Write it instead/ }));
+  await page.getByLabel('Your answer').fill('Made-up: half an answer');
+  const homes = (await calls(page, 'arcade_home')).length;
+  // a room leaves this device and another gets a message: the Arcade's grant names no room, so nothing about it changed
+  await page.evaluate(() => { (window as any).__dropRoom('ch-techne'); });
+  await page.waitForTimeout(400);
+  await expect(page.getByLabel('Your answer')).toHaveValue('Made-up: half an answer');
+  expect((await calls(page, 'arcade_home')).length).toBe(homes);
+});
+
+test('contract 2: a journal kept in another vault than the card named is not written to', async ({ page }) => {
+  // the card says "uni vault · Add notes in Journal/"; this device's journal is set to another vault
+  await page.addInitScript(() => { (window as any).__journalVault = 'elsewhere'; });
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: /Write it instead/ }));
+  await page.getByLabel('Your answer').fill('Made-up: hold it all until Monday.');
+  await tap(page, page.getByRole('button', { name: 'Keep it' }));
+  await expect(page.getByText(/journal is kept in the elsewhere vault/)).toBeVisible();
+  expect(await calls(page, 'journal_save_text')).toHaveLength(0);
+  expect(await reactions(page)).toHaveLength(0);
 });
 
 test('the Arcade opens from the app, a burst saves each pick once, and the way back returns to where you were', async ({ page }) => {

@@ -46,7 +46,11 @@ export function createGrantStore(storage: StorageLike | null = typeof localStora
     record(noteId: string): { grantedAt: string; expires: string | null } | null { const r = read().get(noteId); return r ? { grantedAt: r.grantedAt, expires: r.expires ?? null } : null; },
     /** The gate mode the grant was made under; a record without one (or with an unknown value) counts as `sealed`. */
     grantedUnder(noteId: string): GrantedUnder | null { return read().get(noteId)?.grantedUnder ?? null; },
-    grant(noteId: string, scope: string, html: string, mode: GrantedUnder = "sealed", expires?: Date): void { read().set(noteId, { scope, html, grantedAt: new Date(now()).toISOString(), grantedUnder: mode, ...(expires ? { expires: expires.toISOString() } : {}) }); write(); },
+    /** `expires`: when it ends, made from the moment it was allowed (grant2.ts `grantExpiry`). */
+    grant(noteId: string, scope: string, html: string, mode: GrantedUnder = "sealed", expires?: (from: Date) => Date): void {
+      const at = new Date(now());
+      read().set(noteId, { scope, html, grantedAt: at.toISOString(), grantedUnder: mode, ...(expires ? { expires: expires(at).toISOString() } : {}) }); write();
+    },
     /** The user accepted the changed HTML: remember its hash. Never creates a grant. */
     acknowledge(noteId: string, html: string): void { const r = read().get(noteId); if (r) { r.html = html; write(); } },
     revoke(noteId: string): void { read().delete(noteId); write(); },

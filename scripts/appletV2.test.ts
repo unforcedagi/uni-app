@@ -180,7 +180,7 @@ await check("the grant lasts a year, and an expired or unreadable one is no gran
   const store = createGrantStore(storage, () => now);
   const subject = builtinSubject("arcade");
   assert.equal(store.status(subject, "k1", BUILTIN_CODE), "none");
-  store.grant(subject, "k1", BUILTIN_CODE, "sealed", grantExpiry(new Date(now)));
+  store.grant(subject, "k1", BUILTIN_CODE, "sealed", grantExpiry);
   assert.equal(store.status(subject, "k1", BUILTIN_CODE), "ok");
   assert.equal(store.status(subject, "k2", BUILTIN_CODE), "none", "another grant key is not this grant");
   assert.equal(store.record(subject)!.expires, "2027-11-11T12:00:00.000Z");
@@ -275,6 +275,23 @@ await check("writing outside the grant is refused: only a journal entry, and eve
   assert.equal(calls.length, 1, "none of the refused writes reached the shell");
 });
 
+await check("own is not fooled by alternates, and a note is judged and written from one copy", async () => {
+  const { be, calls } = shell();
+  const g = grantOf({ ...base, access: [{ vault: "home", allow: [{ path: "Journal/", verbs: ["create", "read"], own: true }] }] });
+  const port = createAppletPort(g, { ...be, note: async (_v, ref) => ({ id: ref, path: ref, tags: [] }) }, { home: "plot" });
+  await port.vault.create("home", { path: "Journal/new", alternates: ["Journal/2026/11-11/09-00 Private"], content: "x" });
+  assert.equal(await port.vault.note("home", "Journal/2026/11-11/09-00 Private"), null, "naming someone else's entry as an alternate doesn't make it its own");
+  assert.equal(await port.vault.note("home", "Journal/new"), null, "where it landed isn't known, so nothing is claimed");
+  // a path that reads one way to the check and another to the writer
+  let reads = 0;
+  const shifty = { get path() { return reads++ ? "Tasks/stolen" : "Journal/ok"; }, content: "x" };
+  await port.vault.create("home", shifty);
+  assert.equal((calls.filter((c) => c.what === "create").pop()!.args[1] as { path: string }).path, "Journal/ok", "the writer gets the path that was checked");
+  assert.equal(await code(port.vault.create("home", { path: "Journal/%2e%2e/Tasks/x", content: "x" })), "out_of_scope", "an encoded segment is never judged as a name");
+  const arcade = arcadePort();
+  assert.equal(await code(() => arcade.port.open("plot", "Taste/%2e%2e/Journal/x")), "out_of_scope");
+});
+
 await check("own: it can read back only the notes it made", async () => {
   const { be } = shell();
   const g = grantOf({ ...base, access: [{ vault: "home", allow: [{ path: "Journal/", verbs: ["create", "read"], own: true }] }] });
@@ -315,19 +332,45 @@ await check("a grant that has ended refuses everything, in-flight work included"
 
 // ── the boundary: a contract 2 applet's own code holds no other way out ──
 
-await check("the Arcade's folder imports no Tauri and names no shell command: the port is its only way out", () => {
+await check("the Arcade's folder has no way out but the port: no Tauri, no shell command, no network, no microphone, no grant store", () => {
   const root = new URL("../src/arcade/", import.meta.url).pathname;
   const files: string[] = [];
   const walk = (dir: string) => { for (const f of readdirSync(dir)) { const p = join(dir, f); if (statSync(p).isDirectory()) walk(p); else if (/\.(ts|tsx)$/.test(f)) files.push(p); } };
   walk(root);
   assert.ok(files.length > 10, "the folder was read");
   const cmds = [...Object.values(DOORS).flatMap((d) => Object.values(d.ops).map((o) => o.cmd)), "journal_save_text", "journal_save_voice", "vault_note", "vault_query"];
+  const direct = /@tauri-apps|__TAURI|\binvoke\s*[<(]/;
+  // The shell modules the Arcade may import, each for a reason. Anything else that leaves the folder fails here.
+  const SHELL = new Map([
+    ["src/interface/port.ts", "its port (types only)"],
+    ["src/recorderSession.ts", "the shell's recorder: it opens the microphone, after port.need(\"voice\")"],
+    ["src/journalCore.ts", "pure: how a journal entry's draft and paths are made"],
+  ]);
+  const src = new URL("../src/", import.meta.url).pathname;
   for (const f of files) {
-    const src = readFileSync(f, "utf8");
+    const text = readFileSync(f, "utf8");
     const name = f.slice(root.length);
-    assert.doesNotMatch(src, /@tauri-apps|__TAURI|\binvoke\s*[<(]/, `${name} reaches Tauri directly`);
-    for (const c of cmds) assert.ok(!src.includes(`"${c}"`) && !src.includes(`'${c}'`), `${name} names the shell command ${c}`);
-    assert.doesNotMatch(src, /\bfetch\s*\(|XMLHttpRequest|WebSocket\s*\(|sendBeacon/, `${name} reaches the network directly`);
+    assert.doesNotMatch(text, direct, `${name} reaches Tauri directly`);
+    for (const c of cmds) assert.ok(!text.includes(`"${c}"`) && !text.includes(`'${c}'`), `${name} names the shell command ${c}`);
+    assert.doesNotMatch(text, /\bfetch\s*\(|XMLHttpRequest|WebSocket\s*\(|sendBeacon/, `${name} reaches the network directly`);
+    assert.doesNotMatch(text, /getUserMedia|MediaRecorder/, `${name} opens the microphone itself`);
+    assert.doesNotMatch(text, /uni\.interface\.grants|deviceGrants|createGrantStore/, `${name} touches the grant store`);
+    // every form: `from "x"`, a bare `import "x"`, `import("x")`, `require("x")`
+    for (const m of text.matchAll(/(?:\bfrom|\bimport|\brequire)\s*\(?\s*["']([^"']+)["']/g)) {
+      const spec = m[1];
+      if (!spec.startsWith(".")) continue;
+      const target = join(f, "..", spec);
+      if (target.startsWith(root)) continue;
+      const rel = `src/${target.slice(src.length)}`;
+      assert.ok(SHELL.has(rel), `${name} imports ${rel}, which is outside the Arcade and not on the list`);
+    }
+  }
+  // and what it may import holds no command of its own, one import deep (recorderSession's own imports are checked too)
+  for (const rel of ["src/recorderSession.ts", "src/journalCore.ts"]) {
+    const file = new URL(`../${rel}`, import.meta.url).pathname;
+    const text = readFileSync(file, "utf8");
+    assert.doesNotMatch(text, direct, `${rel} reaches Tauri: the Arcade must not import it`);
+    for (const m of text.matchAll(/from\s+["'](\.[^"']+)["']/g)) assert.doesNotMatch(readFileSync(join(file, "..", m[1]), "utf8"), direct, `${rel} imports ${m[1]}, which reaches Tauri`);
   }
 });
 

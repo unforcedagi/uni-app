@@ -66,7 +66,8 @@ const hasType = (tags: readonly unknown[] | null | undefined, type: string) => A
 
 function ruleCovers(rule: Rule, verb: Verb, note: NoteFacts): boolean {
   if (!rule.verbs.includes(verb)) return false;
-  if (rule.path !== undefined && !inScope([rule.path], note.path)) return false;
+  // (a folder rule never holds a `%`, so a path with one is refused here too: no encoded segment is ever judged)
+  if (rule.path !== undefined && (!inScope([rule.path], note.path) || /%/.test(String(note.path)))) return false;
   if (rule.type !== undefined && !hasType(note.tags, rule.type)) return false;
   // a note it is making now is its own; any other is its own only when the caller knows this grant made it
   if (rule.own && verb !== "create" && note.own !== true) return false;

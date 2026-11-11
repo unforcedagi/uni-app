@@ -180,7 +180,7 @@ export function SealedApplet({ id, entry, listed, vault, rooms, onOpenNote, onCo
       {framed && router ? <InterfaceFrame html={app.html} title={name} router={router} grant={grant} ready={ready} />
         : asking ? <GrantCard name={name} glyph={host.manifest.glyph} runs={mode === "approved-code" ? "approved-code" : "sealed"} state="ask" codeChanged={codeChanged && status === "updated"}
           lines={grantLines(needsGrant(host.needs, vault, { id, name }), roomName, { ownFolder: ownFolder(app.path) })} fingerprint={fingerprint(keys.scope)} expires={grantExpiry(new Date())}
-          onAllow={() => { grants.grant(app.id, keys.scope, keys.html, mode === "approved-code" ? "approved-code" : "sealed", grantExpiry(new Date())); markStarted(app.id); bump(); }} onNotNow={() => setDeclined(true)} />
+          onAllow={() => { grants.grant(app.id, keys.scope, keys.html, mode === "approved-code" ? "approved-code" : "sealed", grantExpiry); markStarted(app.id); bump(); }} onNotNow={() => setDeclined(true)} />
         : <Calm head={granted ? `${name} is stopped` : `${name} isn't allowed to run`}>
           <div className="sh-sa-actions">
             <button type="button" className="sh-ap-btn sh-sa-open" onClick={trusted(granted ? start : () => setDeclined(false))}>{granted ? `Open ${name}` : "Ask again"}</button>

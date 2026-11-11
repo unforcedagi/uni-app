@@ -72,9 +72,10 @@ record whose expiry can't be read counts as expired. The name is not in the key:
 
 **The card** (`GrantCard.tsx`) is drawn by the shell, outside any frame, and names exactly what is granted, one row per
 place: a door's reads on one row and what it changes on the next, each vault rule, each room, the microphone. Rows that
-change something, reach a room or read outside a sealed applet's own folder are marked. Every word is the shell's (a
-door's and an op's words come from `doors.ts`); the only text from a note is a sealed applet's name, quoted and marked
-as unverified. Under the rows it says "Nothing else", when the grant ends, and a fingerprint (the key's first eight
+change something, reach a room or read outside a sealed applet's own folder are marked. Every sentence is the shell's (a
+door's and an op's words come from `doors.ts`). What a note supplies is shown as data inside those sentences: a sealed
+applet's name, quoted and marked as unverified, and the folder paths it asks for, as written (a path is a plain folder
+ending in `/`, with no hidden characters, but it can hold words: read the row's path as the note's, not the shell's). Under the rows it says "Nothing else", when the grant ends, and a fingerprint (the key's first eight
 digits) that changes whenever the access does. Only a real tap allows (`isTrusted`). Once allowed, a built-in's frame
 has an **Access** button that shows the same card with **Revoke access**.
 
@@ -83,18 +84,29 @@ has an **Access** button that shows the same card with **Revoke access**.
 `not_granted` (the grant has no such door, vault or reach) or `out_of_scope` (it has, but not this op, note or folder)
 before anything reaches a shell command. A read is judged on the note that comes back (its real path and tags), a note
 outside the grant reads as absent, a list's rows from outside are dropped, and every path a new note could land on
-(alternates too) must be inside a create rule. A revoke, an expiry or leaving the applet ends the port at once,
-in-flight work included.
+(alternates too) must be inside a create rule. A note is checked and written from one copy, a path holding `%` is
+never judged, and `own` covers a note only when the port knows where it landed (a note saved with alternates is not
+claimed). A revoke, an expiry or leaving the applet ends the port at once, in-flight work included. A rooms list that
+changes nothing the grant names leaves the running applet alone.
+
+The shell's writer behind `create` is the journal's, which saves to the journal's own vault (Journal settings). A note
+is added only when the vault the grant named is that vault; otherwise the write is refused and says so. The card never
+names one vault while the write lands in another.
 
 **What the boundary is, and isn't.** A built-in applet is code in the app's own bundle, covered by the release
 signature, in the same JavaScript realm as the shell. The port is a boundary of construction, not of isolation: it
-holds because the applet's folder has no other way out. `scripts/appletV2.test.ts` fails the build if anything under
-`src/arcade/` imports Tauri, names a shell command or reaches the network itself. It does not stop hostile code that
-someone compiles in on purpose; the frame is the boundary for code the release doesn't vouch for. A sealed applet on
-contract 2 is compiled to the frame's needs and held by the same `session.ts` and `router.ts` as contract 1, so its
-boundary is the frame. Today the frame can only read, so a sealed manifest may hold only `vault: here`, rules of
-`{path, verbs: [read]}` and rooms; a door, a write, `voice`, another vault or a type-only rule is refused with the
-reason, and the note is not listed.
+holds because the applet's folder is written with no other way out, and a test keeps it so. `scripts/appletV2.test.ts`
+fails the build if anything under `src/arcade/` imports Tauri, names a shell command, reaches the network, opens the
+microphone, touches the grant store, or imports a shell module that isn't on its short list (the port's types, the
+shell's recorder, the journal's pure path maker), and it checks that those listed modules hold no command either. What
+that does not cover: the check reads source text, one import deep, so it is a guard against drift, not a proof; the
+Arcade shares the page's `localStorage` (where grants are kept) and globals with the shell; and the microphone is
+opened by the shell's recorder, which the Arcade calls after `port.need("voice")` (asked, not enforced by the
+recorder). It does not stop hostile code that someone compiles in on purpose; the frame is the boundary for code the
+release doesn't vouch for. A sealed applet on contract 2 is compiled to the frame's needs and held by the same
+`session.ts` and `router.ts` as contract 1, so its boundary is the frame. Today the frame can only read, so a sealed
+manifest may hold only `vault: here`, rules of `{path, verbs: [read]}` and rooms; a door, a write, `voice`, another
+vault or a type-only rule is refused with the reason, and the note is not listed.
 
 **Not signed yet.** The grant is a record on this device (`localStorage`, `uni.interface.grants.v2`), as contract 1's
 was. `grantEvents(grant, expires)` builds the same grant in the shape Parachute 1.0 proposes for an owner-signed event
