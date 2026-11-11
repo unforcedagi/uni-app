@@ -1,5 +1,5 @@
 // T-335 the shape: how a spec moves around the shell. Home is the rooms list; the bar has Rooms, Journal and Applets;
-// every applet opens from the drawer; Settings opens from home's gear; a room opens from its row.
+// every applet opens from the drawer; Settings is the bar's fourth place (T-335 fixes); a room opens from its row.
 import { expect, type Page } from '@playwright/test';
 
 export const bar = (page: Page) => page.getByRole('navigation', { name: 'Places' });
@@ -21,10 +21,9 @@ export async function openApplet(page: Page, name: string) {
   await drawer.getByRole('button', { name: new RegExp(`^${name}( \\(\\d+\\))?$`) }).click();
   await expect(page.locator('.sh-ap-top h1')).toHaveText(name);
 }
-/** Settings lives behind home's gear. */
+/** Settings: the bar's fourth place, from wherever you are. */
 export async function openSettings(page: Page) {
-  if (!(await homeHead(page).isVisible().catch(() => false))) await goRooms(page);
-  await page.locator('.sh-home').getByRole('button', { name: 'Settings' }).click();
+  await bar(page).getByRole('button', { name: 'Settings' }).click();
 }
 /** A room, from home, by its channel id. */
 export async function openRoom(page: Page, id: string) {

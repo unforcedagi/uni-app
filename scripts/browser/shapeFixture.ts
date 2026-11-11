@@ -7,6 +7,7 @@
 // - Two live runs (Uni's and the garden's) whose notes carry their story; asks in Uni, Riverbend, Studio and To Post; one of Uni's approval
 //   cards in Riverbend that expires in nine minutes; journal entries; To Post's posts; Calendar through the calendar door double
 //   (scripts/calFakeDoor.ts, as scripts/browser/calMock.ts serves it); Mail through scripts/browser/mailMock.ts when asked for.
+import { readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 import { FakeDoor } from '../calFakeDoor';
 import { FIXTURE } from './calMock';
@@ -14,6 +15,10 @@ import { boot as bootMail } from './mailMock';
 
 export const ME = 'a'.repeat(64);
 export const UNI = 'c'.repeat(64);
+/** The made-up Claude accounts note (Settings shows it first). */
+const USAGE = JSON.parse(readFileSync(new URL('../fixtures/usage-note.json', import.meta.url), 'utf8'));
+/** A note cited from an ask's context by its bare id (`uni:<id>`): it opens as a note. */
+export const PLOT_NOTE = '01JC0FFEE0PXATMAP000000000';
 export const ROOM = {
   uni: 'ch-uni', river: 'ch-river', garden: 'ch-garden', studio: 'ch-studio', teach: 'ch-teach', post: 'ch-post', house: 'ch-house', arcade: 'ch-arcade',
   quiet: 'ch-quiet', barn: 'ch-barn', family: 'ch-family',
@@ -33,7 +38,7 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
     const r = door.handle(req.method(), url.pathname.replace(/^\/__door/, '') + url.search, req.method() === 'POST' ? req.postDataJSON() : undefined);
     await route.fulfill({ status: r.status, contentType: 'application/json', body: JSON.stringify(r.body) });
   });
-  await page.addInitScript(({ ME, UNI, ROOM, o }) => {
+  await page.addInitScript(({ ME, UNI, ROOM, o, USAGE, PLOT_NOTE }) => {
     const w = window as any;
     const now = Date.now(), nowS = Math.floor(now / 1000), min = 60, H = 3600;
     const iso = (sAgo: number) => new Date((nowS - sAgo) * 1000).toISOString();
@@ -71,10 +76,14 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
     w.__msgs = msgs;
 
     // ── the vault: asks (tasks that need you), runs, posts, the rooms registry, journal entries, a few notes ──
-    const task = (id: string, title: string, sAgo: number, m: Record<string, unknown>) => ({ id, path: `Tasks/${title}`, tags: ['task'], createdAt: iso(2 * H), updatedAt: iso(sAgo),
-      metadata: { state: 'open', owner: 'aaron', needs_aaron: true, ...m } });
+    const task = (id: string, title: string, sAgo: number, m: Record<string, unknown>, content = '') => ({ id, path: `Tasks/${title}`, tags: ['task'], createdAt: iso(2 * H), updatedAt: iso(sAgo),
+      content, metadata: { state: 'open', owner: 'aaron', needs_aaron: true, ...m } });
+    // an ask's context as tasks.py writes it at the end of its body (## Why, ## Steps, ## Links, ## Time, ## Already answered)
+    const context = (why: string, steps: string[], links: string[], time: string) => `Asked from its room.\n\n## Why\n\n${why}\n\n## Steps\n\n${steps.map((x, i) => `${i + 1}. ${x}`).join('\n')}\n\n## Links\n\n${links.map((l) => `- ${l}`).join('\n')}\n\n## Time\n\n${time}\n\n## Already answered\n\nChecked the rooms and the vault: nothing yet.\n`;
     w.__tasks = [
-      task('ask-summary', 'T-601 The weekly summary is ready to read', 3 * min, { kind: 'tell', no_default: true, reply_room: 'Uni', why_now: 'Read it now, or save it for Sunday.' }),
+      task('ask-summary', 'T-601 The weekly summary is ready to read', 3 * min, { kind: 'tell', no_default: true, reply_room: 'Uni', why_now: 'Read it now, or save it for Sunday.', next: 'Read the summary of the week' },
+        context("Sunday's review starts from it; three loose ends need a home.", ['Open the summary', 'Say Seen when you have read it'],
+          ['The draft: https://example.com/notes/week-45', `The plot map: uni:${PLOT_NOTE}`], 'About five minutes.')),
       task('ask-walk', 'T-602 Offer Mira Thursday at 2 for the walkthrough?', 11 * min, { kind: 'choose', options: ['Yes, Thursday 2pm', 'Friday instead'], no_default: true, reply_room: 'Riverbend Commons', reply_root: 'r3', why_now: 'Your Thursday is free from 1 to 4.' }),
       task('ask-cut', 'T-603 Cut 3 is ready to watch', 52 * min, { kind: 'look', no_default: true, link: 'https://example.com/studio/cut-3', reply_room: 'Studio' }),
       task('ask-sign', 'T-604 Sign What the garden taught us and post it?', 3 * H, { kind: 'choose', options: ['Sign and post', 'Not yet'], no_default: true, reply_room: 'To Post' }),
@@ -85,6 +94,10 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
       task('ask-kitchen', 'T-607 A kitchen line that stays private', 4 * H, { kind: 'tell', no_default: true, reply_room: 'kitchen table' }),
       // a private place's ask with no private room of its own on this device: drawn nowhere, only counted on home
       task('ask-away', 'T-608 A line for a place this device lacks', 4 * H, { kind: 'tell', no_default: true, node: '[[Areas/Sanctum/Away]]' }),
+      // a do ask (only you can do it), old enough to leave House's place on home as it is; a run in Teaching waits on you for it
+      task('ask-key', 'T-609 Paste the boiler portal key', 30 * H, { kind: 'do', no_default: true, reply_room: 'House', why_now: 'The service visit on the 18th needs the portal open.',
+        next: 'Paste the portal key into the boiler page' },
+        context('Only you can sign in to the boiler portal.', ['Sign in at the portal', 'Copy the key', 'Paste it into the boiler page'], ['The portal: https://example.com/boiler'], 'Two minutes.')),
     ];
     const run = (id: string, title: string, channel: string, room: string, sAgo: number, md: Record<string, unknown>, body: string) => ({ id, path: `Runs/2026-11-10 ${title}`, tags: ['run'], createdAt: iso(sAgo), updatedAt: iso(60),
       content: `# ${title}\n\n${body}\n\n---\n\nRun on [[Uni]], worker \`mts-${id}\`.\n`, metadata: { state: 'running', channel, room, attempt: id, worker: `mts-${id}`, started_at: iso(sAgo), doing_at: iso(60), ...md } });
@@ -94,11 +107,15 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
       run('run-plot', 'Rebuilding the plot map page', ROOM.garden, 'Garden co-op site', 94 * min, { live_line: 'Building the preview', doing_now: 'Building' },
         '**Working now:** Building the preview\n\nReproduced the overlap at 390 px wide. Moved labels outside the small plots.'),
       run('run-family', 'Seating plan', ROOM.family, 'Family table', 30 * min, { live_line: 'Family words about the seating' }, '**Working now:** Family words about the seating'),
+      run('run-key', 'Setting up the boiler page', ROOM.teach, 'Teaching: Design 2', 30 * H, { state: 'blocked', waiting_on: 'aaron', waiting_for: 'The boiler portal key', task: 'T-609', ended_at: iso(29 * H) },
+        '**Blocked after 40 min. Waiting on Aaron:** the boiler portal key.'),
       run('run-quiet', 'A quiet practice log', ROOM.quiet, 'sanctum', 20 * min, { live_line: 'Private words about the practice', doing_now: 'Writing' }, '**Working now:** Private words about the practice'),
       { id: 'rooms-registry', path: 'System/Rooms', tags: [], createdAt: iso(30 * 24 * H), updatedAt: iso(H), content: '',
         metadata: { registry: { rooms: { uni: { id: ROOM.uni }, sanctum: { id: ROOM.quiet, private: true }, 'family table': { id: ROOM.family, private: true, was: ['kitchen table'] } }, retired: { 'old-barn': { none: true } }, folded_ids: {} } } },
       { id: 'n-rubric', path: 'Teaching/Week 9 critique rubric', tags: [], createdAt: iso(3 * H), updatedAt: iso(3 * H), content: "The rubric for Thursday's critique: clarity, care, and one risk taken." },
       { id: 'n-plot', path: 'Garden/Plot map', tags: [], createdAt: iso(24 * H), updatedAt: iso(24 * H), content: 'Thirty-eight plots, labels outside the small ones.' },
+      { id: PLOT_NOTE, path: 'Garden/Plot map, printed', tags: [], createdAt: iso(24 * H), updatedAt: iso(24 * H), content: 'The printed plot map for the shed wall.' },
+      USAGE,
     ];
     const post = (id: string, title: string, sAgo: number, m: Record<string, unknown>) => ({ id, path: `Posts/${title}`, tags: ['post'], updatedAt: iso(sAgo), metadata: { platform: 'bluesky', piece: '', media: [], account: 'aaron', provenance: 'uni', ...m } });
     const posts = [
@@ -225,6 +242,7 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
           case 'messages_status': return { state: 'signed_out' };
           case 'messages_rooms': return [];
           case 'open_link': return null;
+          case 'pair_source_available': return true;
           default: return null;
         }
       },
@@ -232,7 +250,7 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
     // the mail double (when booted) installs its own; this world keeps the page's Tauri and hands it only the mail commands
     Object.defineProperty(w, '__TAURI_INTERNALS__', { configurable: true, get: () => mine, set: (v: any) => { mailInvoke = v?.invoke ?? null; } });
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
-  }, { ME, UNI, ROOM, o });
+  }, { ME, UNI, ROOM, o, USAGE, PLOT_NOTE });
   if (o.mail) await bootMail(page, 'ok', { held: true });
   else await page.goto('/');
 }

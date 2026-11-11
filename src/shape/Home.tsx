@@ -1,7 +1,7 @@
 // T-335 the shape: home is the rooms list. Presentational: every piece of data and every action comes in through props, and the
 // ask and run lines are drawn by the host (`renderAsk`, `renderRun`), so this file knows nothing of where they come from.
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { SearchIcon, SettingsIcon } from "../Icons";
+import { SearchIcon } from "../Icons";
 import "./shape.css";
 import { unreadShort, unreadWords } from "../areas/roomUnread";
 import { ago, countdown, lastLine, roomGlyph } from "./homeCore";
@@ -16,7 +16,6 @@ export type HomeProps = {
   error?: string | null;
   onOpenRoom(id: string): void;
   onSearch(): void;
-  onSettings(): void;
   renderAsk(ask: Ask, room: ShapeRoom): ReactNode;
   renderRun(run: RoomRun, room: ShapeRoom): ReactNode;
   /** The pin's card (Uni's sealed card, say); null: home draws its own plain one. */
@@ -36,7 +35,6 @@ export function Home(p: HomeProps) {
   return <div className="sh-home">
     <div className="sh-top">
       <h1>Rooms</h1>
-      <button type="button" className="sh-iconbtn" aria-label="Settings" title="Settings" onClick={p.onSettings}><SettingsIcon /></button>
     </div>
     <button type="button" className="sh-find" onClick={p.onSearch}><SearchIcon /><span>Search rooms and the journal</span></button>
     {pins.length > 0 && <div className="sh-pins">{pins.map((pin) => <PinSlot key={pin.ref} pin={pin} renderPin={p.renderPin} onOpenRoom={p.onOpenRoom} onPinLapsed={p.onPinLapsed} />)}</div>}

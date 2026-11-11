@@ -11,6 +11,7 @@ export type Ask = {
   /** The channel id of the room it belongs to; null when its room isn't one this device has (it then shows in Uni's room). */ room: string | null;
   kind: "do" | "choose" | "look" | "tell" | "decision";
   /** The one line that says what is wanted. */ what: string;
+  /** (added, T-335 fixes) Its next action as the room wrote it (`next`): what to do now, in one line; null when it says none. */ next?: string | null;
   /** Why, or the ask's context, when the ask carries it. */ why: string | null;
   /** Choices to answer with (may be empty). */ options: string[];
   /** The choice taken if the owner says nothing: its value and label. */ fallback: { value: string; label: string } | null;
@@ -28,6 +29,7 @@ export type RoomRun = {
   /** What the run is for. */ title: string;
   /** Moving: the step it is on now. Waiting: what it waits on the owner for. */ line: string;
   /** Seconds. */ startedAt: number | null;
+  /** (added, T-335 fixes) The task it works on (`T-NN`), when its note names one: a waiting run opens that task's ask when it is one. */ task?: string | null;
 };
 export type RoomRuns = { moving: RoomRun | null; waiting: RoomRun | null };
 

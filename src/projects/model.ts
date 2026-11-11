@@ -74,6 +74,8 @@ export type Session = {
   /** T-335 shape: the room the run note names (`channel`, else `starter_channel`; the first id of a list), so a room no area owns can
    *  still show its runs. Only on a run no private clue touches and whose rooms are read; left out or null otherwise. */
   channel?: string | null;
+  /** T-335 fixes: the task it works on (`T-NN`, from the run note's `task`); left out or null on a run a private clue touches. */
+  task?: string | null;
 };
 
 export type SessionWait = { on: string; what: string | null };

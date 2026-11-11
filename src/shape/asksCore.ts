@@ -208,7 +208,7 @@ export function asksPlaced(notes: readonly Note<"task">[], rooms: readonly Shape
     const updated = ms(s(n.updatedAt));
     const asked = [s(m.asked_at), s(m.confirmed_at)].map(ms).filter((t): t is number => t !== null);
     out.push({
-      id, tid, room: room?.id ?? opts.uniRoom, kind, what: rest, why: s(m.why_now),
+      id, tid, room: room?.id ?? opts.uniRoom, kind, what: rest, next: s(m.next), why: s(m.why_now),
       options: choices,
       fallback: defValue ? { value: defValue, label: [defValue, whenLabel(defAt, now)].filter(Boolean).join(" · ") } : null,
       // the plain action when there is no option to pick: Done (a do ask). A tell or look ask's one tap is Seen (T-335 Seen)
@@ -269,23 +269,75 @@ export function seenBody(ask: Pick<Ask, "tid" | "what" | "kind">): string {
   return seenCloses(ask.kind) ? `${id}: seen.` : `${id}: seen. It stays open here until it needs my steer; ask again then.`;
 }
 
+// ------------------------------------------------------------------ T-335 fixes (11-11): every ask opens to its context and an action
+
+/** "Not now" on a do or choose ask: the same write as Seen (it stays open with its room, out of his view until it is asked again). */
+export function notNowBody(ask: Pick<Ask, "tid" | "what">): string {
+  return `${ask.tid ?? ask.what}: not now. It stays open here; ask again when it needs my steer.`;
+}
+/** "Done" on a do ask: he did it. Like tasks.py handback, the ask goes back to its room (addressed to its Uni, so it wakes) for any
+ *  follow-up, and the room closes it; the app's write takes it out of his view (Seen's write: the room's handback moves the owner). */
+export function doneBody(ask: Pick<Ask, "tid" | "what">): string {
+  return ask.tid
+    ? `${ask.tid}: I did this. Hand it back to this room for any follow-up (tasks.py handback ${ask.tid}), then post [done ${ask.tid}].`
+    : `${ask.what}: I did this. Do any follow-up it needs, then close it.`;
+}
+/** "Archive": out of his view for good (state archived); one quiet line in its room, so the room sees it. */
+export function archiveBody(ask: Pick<Ask, "tid" | "what">): string {
+  return `${ask.tid ?? ask.what}: archived. It's out of my view; open a new ask if it still needs me.`;
+}
+
+/** The ask a waiting run is about: the live ask on the run's own task (`T-NN`), else none. */
+export function askForRun<A extends Pick<Ask, "tid">>(run: { task?: string | null }, asks: readonly A[]): A | null {
+  const t = run.task?.trim().toUpperCase();
+  return t ? asks.find((a) => a.tid === t) ?? null : null;
+}
+
+/** An ask with no body and no next action is a data fault (the room wrote it without its context): still shown, still answerable. */
+export const askFault = (ask: Pick<Ask, "next">, body: string | null): boolean => !ask.next?.trim() && !(body ?? "").trim();
+
+/** Kind in one word, for the sheet's head. */
+export const KIND_WORD: Record<Ask["kind"], string> = { do: "To do", choose: "Choose", look: "Look", tell: "For you to know", decision: "Choose" };
+
+/**
+ * The body of an ask's note as the sheet shows it: tasks.py's context block (## Why, ## Steps, ## Links, ## Time, ## Already answered) and
+ * whatever is above it, minus a front matter block and a first `# heading` (the sheet's own title says it).
+ */
+export function askBody(content: string | null | undefined): string {
+  let b = String(content ?? "").replace(/\r\n?/g, "\n");
+  b = b.replace(/^---\n[\s\S]*?\n---\n/, "");
+  b = b.replace(/^\s*# [^\n]*\n?/, "");
+  return b.trim();
+}
+
 // ------------------------------------------------------------------ the buttons
 
-export type AskButton = { label: string; value: string; primary: boolean; act: "answer" | "seen" | "open" };
+export type AskAct = "answer" | "done" | "notnow" | "seen" | "open" | "archive";
+export type AskButton = { label: string; value: string; primary: boolean; act: AskAct };
 /**
- * What an ask's row shows, in For you's order: its default (with its date), the other choices, the plain action (Done), Open for a link, and
- * Seen on every ask (a tell or look ask closes on it; a do or choose ask stays open with its room). The first answer is the primary one (the
- * default when there is one); with nothing to pick, its link (a look pin's point), else Seen. `open`'s value is the link.
+ * An ask's buttons, by its kind (Aaron, 11-11: "I should really be able to just mark it as seen or archive it"):
+ * - do: Done (he did it: back to its room) and Not now;
+ * - choose: one button per option (the default first, with its date), and Not now;
+ * - look: Open (its link) and Seen;
+ * - tell: Seen.
+ * `archive`: Archive last (the sheet; every ask has it there). The first is the primary one.
  */
-export function askButtons(ask: Pick<Ask, "kind" | "options" | "fallback" | "action" | "link">): AskButton[] {
+export function askButtons(ask: Pick<Ask, "kind" | "options" | "fallback" | "action" | "link">, o: { archive?: boolean } = {}): AskButton[] {
   const out: AskButton[] = [];
-  if (ask.fallback) out.push({ label: ask.fallback.label, value: ask.fallback.value, primary: false, act: "answer" });
-  for (const o of ask.options) out.push({ label: o, value: o, primary: false, act: "answer" });
-  if (ask.action) out.push({ label: ask.action, value: ask.action, primary: false, act: "answer" });
-  if (ask.link) out.push({ label: "Open", value: ask.link, primary: false, act: "open" });
-  out.push({ label: "Seen", value: "Seen", primary: false, act: "seen" });
-  const first = out.find((b) => b.act === "answer") ?? out.find((b) => b.act === "open") ?? out.find((b) => b.act === "seen")!;
-  first.primary = true;
+  const kind = ask.kind === "decision" ? "choose" : ask.kind;
+  if (kind === "do") {
+    out.push({ label: "Done", value: "Done", primary: false, act: "done" });
+    out.push({ label: "Not now", value: "Not now", primary: false, act: "notnow" });
+  } else if (kind === "choose") {
+    if (ask.fallback) out.push({ label: ask.fallback.label, value: ask.fallback.value, primary: false, act: "answer" });
+    for (const opt of ask.options) out.push({ label: opt, value: opt, primary: false, act: "answer" });
+    out.push({ label: "Not now", value: "Not now", primary: false, act: "notnow" });
+  } else {
+    if (kind === "look" && ask.link) out.push({ label: "Open", value: ask.link, primary: false, act: "open" });
+    out.push({ label: "Seen", value: "Seen", primary: false, act: "seen" });
+  }
+  if (o.archive) out.push({ label: "Archive", value: "Archive", primary: false, act: "archive" });
+  out[0].primary = true;
   return out;
 }
 /** Seen's words for a screen reader and a title: what it does to this ask. */

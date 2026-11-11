@@ -43,7 +43,8 @@ export function RunStory({ vault, run, roomName, onClose, onOpenNote }: { vault:
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(t); }, []);
   useEffect(() => {
     if (!box.current) return;
-    return openDialog(box.current, onClose, { root: layer.current, initial: box.current.querySelector<HTMLButtonElement>(".sh-story-acts button") });
+    // (T-335 fixes: the bar stays live beside it: it shows everywhere, and a place on it closes the story)
+    return openDialog(box.current, onClose, { root: layer.current, keep: [document.querySelector(".sh-bar")], initial: box.current.querySelector<HTMLButtonElement>(".sh-story-acts button") });
   }, [onClose]);
 
   const story = useMemo(() => runStory(read.body ?? "", session, feed.items), [read.body, session, feed.items]);

@@ -3,7 +3,7 @@
 process.env.TZ = "UTC";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { answerBody, answerMeta, askButtons, asksByRoom, asksFrom, asksPlaced, seenBody, seenCloses, seenMeta, splitTitle, visibleAsks, whenLabel, type VaultAsk } from "../src/shape/asksCore.ts";
+import { answerBody, answerMeta, archiveBody, askBody, askButtons, askFault, askForRun, doneBody, notNowBody, asksByRoom, asksFrom, asksPlaced, seenBody, seenCloses, seenMeta, splitTitle, visibleAsks, whenLabel, type VaultAsk } from "../src/shape/asksCore.ts";
 import type { ShapeRoom } from "../src/shape/types.ts";
 import { nodeTree } from "../src/shape/shapeCore.ts";
 import { parseRegistry } from "../src/areas/roomsRegistry.ts";
@@ -121,16 +121,20 @@ check("a look-here pin's deep link (look_url) is its link, before link and url",
   assert.equal(one({ kind: "look", url: "https://example.com/u" }).link, "https://example.com/u");
 });
 
-check("buttons: default (primary), other choices, Seen; a do ask: Done (primary), Seen", () => {
+check("buttons by kind (T-335 fixes): choose -> its options (the default first, primary) and Not now; do -> Done (primary) and Not now", () => {
   const c = one({ kind: "choose", options: ["Celadon", "Tenmoku"], default: "Celadon" });
   assert.deepEqual(askButtons(c), [
     { label: "Celadon", value: "Celadon", primary: true, act: "answer" },
     { label: "Tenmoku", value: "Tenmoku", primary: false, act: "answer" },
-    { label: "Seen", value: "Seen", primary: false, act: "seen" },
+    { label: "Not now", value: "Not now", primary: false, act: "notnow" },
   ]);
   const nd = askButtons(one({ kind: "choose", options: ["A", "B"] }));
-  assert.deepEqual(nd.map((b) => [b.label, b.primary]), [["A", true], ["B", false], ["Seen", false]], "no default: the first choice is primary");
-  assert.deepEqual(askButtons(one({ kind: "do" })).map((b) => [b.label, b.act, b.primary]), [["Done", "answer", true], ["Seen", "seen", false]]);
+  assert.deepEqual(nd.map((b) => [b.label, b.primary]), [["A", true], ["B", false], ["Not now", false]], "no default: the first choice is primary");
+  assert.deepEqual(askButtons(one({ kind: "do" })).map((b) => [b.label, b.act, b.primary]), [["Done", "done", true], ["Not now", "notnow", false]]);
+  // a do ask with a link: its link is in its context (the sheet), its buttons are still Done and Not now
+  assert.deepEqual(askButtons(one({ kind: "do", link: "https://example.com/x" })).map((b) => b.label), ["Done", "Not now"]);
+  // the sheet adds Archive, last, on every kind
+  for (const k of ["do", "choose", "look", "tell"]) assert.equal(askButtons(one({ kind: k, options: ["A", "B"] }), { archive: true }).at(-1)!.act, "archive", k);
 });
 
 check("buttons: a tell ask is Seen alone (primary); a look ask with a link: Open (primary, its value the link), Seen", () => {
@@ -139,8 +143,27 @@ check("buttons: a tell ask is Seen alone (primary); a look ask with a link: Open
     { label: "Open", value: "uni://arcade/look/1", primary: true, act: "open" },
     { label: "Seen", value: "Seen", primary: false, act: "seen" },
   ]);
-  // a do ask with a link keeps Done primary, the link beside it
-  assert.deepEqual(askButtons(one({ kind: "do", link: "https://example.com/x" })).map((b) => [b.label, b.primary]), [["Done", true], ["Open", false], ["Seen", false]]);
+  assert.deepEqual(askButtons(one({ kind: "look" })).map((b) => [b.label, b.primary]), [["Seen", true]], "a look ask with no link: Seen");
+});
+
+check("context (T-335 fixes): next is read; the body drops a front matter block and a first heading; no body and no next is a fault", () => {
+  assert.equal(one({ kind: "do", next: " Paste the key " }).next, "Paste the key");
+  assert.equal(one({ kind: "do" }).next, null);
+  assert.equal(askBody("---\na: 1\n---\n# The title\n\nAbove.\n\n## Why\n\nBecause."), "Above.\n\n## Why\n\nBecause.");
+  assert.equal(askBody(null), "");
+  assert.equal(askFault({ next: null }, ""), true);
+  assert.equal(askFault({ next: null }, "## Why\n\nx"), false);
+  assert.equal(askFault({ next: "Do it" }, null), false);
+});
+
+check("a waiting run opens the ask on its own task; Done, Not now and Archive say so in its room", () => {
+  const asks = [{ tid: "T-7", id: "a" }, { tid: "T-9", id: "b" }];
+  assert.equal(askForRun({ task: "t-9" }, asks)?.id, "b");
+  assert.equal(askForRun({ task: null }, asks), null);
+  assert.equal(askForRun({ task: "T-8" }, asks), null);
+  assert.equal(doneBody({ tid: "T-9", what: "x" }), "T-9: I did this. Hand it back to this room for any follow-up (tasks.py handback T-9), then post [done T-9].");
+  assert.equal(notNowBody({ tid: "T-9", what: "x" }), "T-9: not now. It stays open here; ask again when it needs my steer.");
+  assert.equal(archiveBody({ tid: null, what: "Paint the hive" }), "Paint the hive: archived. It's out of my view; open a new ask if it still needs me.");
 });
 
 check("answer: the metadata (a pick of a choose ask is decided too) and the room's words", () => {

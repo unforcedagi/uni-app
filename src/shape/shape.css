@@ -102,6 +102,13 @@
 .sh-shell:not(.sh-bar-aside) .conversation { padding-bottom: calc(var(--sh-bar-h) + env(safe-area-inset-bottom)); }
 .sh-shell.sh-bar-aside .sh-bar { display: none; }
 .sh-shell .note-sheet { left: 0; bottom: 0; }
+/* T-335 fixes: the bar shows everywhere on a phone, so what opens over a place stops at its top edge: a note, Settings, a run's story or an
+   ask's sheet, the applets drawer (it steps aside only while the keyboard is up: .sh-bar-aside) */
+@media (max-width: 899.98px) {
+  .sh-shell:not(.sh-bar-aside) .note-sheet, .sh-shell:not(.sh-bar-aside) .sh-overlay, .sh-shell:not(.sh-bar-aside) .sh-story-layer,
+  .sh-shell:not(.sh-bar-aside) .sh-ap-layer { bottom: calc(var(--sh-bar-h) + env(safe-area-inset-bottom)); }
+  .sh-shell:not(.sh-bar-aside) .sh-story, .sh-shell:not(.sh-bar-aside) .sh-ap-sheet { padding-bottom: 20px; }
+}
 .sh-shell .toast { bottom: calc(var(--sh-bar-h) + 12px + env(safe-area-inset-bottom)); }
 .sh-shell.sh-bar-aside .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
 .sh-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
@@ -112,8 +119,6 @@
 .sh-room-tail { display: grid; gap: 10px; margin: 6px 0 4px; }
 .sh-owed { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin: 0; padding: 8px 12px; border: var(--g-hair) dashed var(--g-line-strong); border-radius: 12px; color: var(--g-ink-2); font: 400 13.5px/1.4 var(--g-font-ui); }
 .sh-owed span { flex: 1 1 14em; min-width: 0; }
-/* "Waits on you" jumps to the ask: it is marked for a moment (an outline, so it reads on the ink screen too) */
-.sh-ask-msg.sh-flash { outline: 2px solid var(--g-needs); outline-offset: 4px; border-radius: 12px; transition: outline-color 1.6s var(--g-ease); }
 
 /* Search and Settings: full screen on a phone, a panel beside the rail on a wide screen */
 .sh-overlay { position: fixed; inset: 0; z-index: 55; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; background: var(--g-ground); color: var(--g-ink); padding-top: env(safe-area-inset-top); }
@@ -148,9 +153,8 @@
 :root[data-screen="ink"] .sh-unread-pill, :root[data-screen="ink"] .sh-count { background: #000; color: #fff; }
 :root[data-screen="ink"] .sh-place[aria-current="page"] i { background: none; outline: 1.5px solid #000; }
 :root[data-screen="ink"] .sh-strip { border-top: 0; }
-:root[data-screen="ink"] .sh-ask-msg.sh-flash { outline: 3px solid #000; transition: none; }
 :root[data-screen="ink"] .sh-owed { border: 1.5px dashed #000; }
 :root[data-screen="ink"] .sh-home *, :root[data-screen="ink"] .sh-room-top *, :root[data-screen="ink"] .sh-strip *, :root[data-screen="ink"] .sh-bar * { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
-  .sh-btn, .sh-place i, .sh-ask-msg.sh-flash { transition: none; }
+  .sh-btn, .sh-place i { transition: none; }
 }

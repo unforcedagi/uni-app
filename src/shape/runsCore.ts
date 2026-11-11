@@ -33,6 +33,7 @@ const toRun = (s: Session, state: RoomRun["state"]): RoomRun => ({
   id: s.id, state, title: s.ask,
   line: state === "moving" ? s.now ?? s.ask : s.waiting?.what ?? s.ask,
   startedAt: secs(s.startedAt),
+  task: s.task ?? null,
 });
 
 /** Each room's runs (only rooms that have one), keyed by channel id. */

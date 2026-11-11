@@ -27,6 +27,32 @@
 .sh-ask-btn:focus-visible { outline: 2px solid var(--g-ink); outline-offset: 2px; }
 .sh-ask-error { margin: 6px 0 0; font-size: 13px; color: var(--g-needs); }
 
+/* T-335 fixes: an ask's line opens its sheet (a plain button: no chrome of its own, the whole line is the target) */
+.sh-ask-open { all: unset; box-sizing: border-box; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.sh-ask-open:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; border-radius: 8px; }
+.sh-ask-wants .sh-ask-line { display: flex; gap: 8px; align-items: baseline; width: 100%; min-height: 32px; margin: 0 0 8px; font-size: 14px; line-height: 1.4; color: var(--g-ink); }
+.sh-ask-chev { flex: none; margin-left: auto; color: var(--g-ink-3); }
+.sh-ask-msg .sh-ask-open { display: block; width: 100%; font: 400 16.5px/1.6 var(--g-font-uni); color: var(--g-ink); }
+@media (hover: hover) { .sh-ask-open:hover .sh-ask-what { text-decoration: underline; text-underline-offset: 3px; } }
+
+/* the ask's sheet (AskSheet.tsx, on the run story's sheet): its kind, its facts, its context, its buttons */
+.sh-ask-sheet-kind { display: flex; align-items: baseline; gap: 6px; margin: 0 0 4px; font-size: 13px; color: var(--g-ink-2); }
+.sh-ask-sheet-kind b { color: var(--g-needs); font-weight: 600; }
+.sh-ask-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 10px 0 12px; font-size: 14.5px; line-height: 1.45; }
+.sh-ask-facts dt { color: var(--g-ink-3); font-size: 13px; padding-top: 1px; }
+.sh-ask-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--g-ink); }
+.sh-ask-facts .sh-ask-next { font-weight: 600; }
+.sh-ask-facts a { color: var(--g-ink); text-decoration: underline; text-underline-offset: 3px; }
+.sh-ask-context { margin: 0 0 14px; padding-top: 10px; border-top: var(--g-hair) solid var(--g-line); font: 400 15px/1.5 var(--g-font-uni); overflow-wrap: anywhere; }
+.sh-ask-context .md-h { margin: 12px 0 4px; font: 600 13px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
+.sh-ask-context h2 { margin: 12px 0 4px; font: 600 13px/1.3 var(--g-font-ui); color: var(--g-ink-2); text-transform: none; }
+.sh-ask-context h1, .sh-ask-context h3 { margin: 12px 0 4px; font: 600 14px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
+.sh-ask-context p, .sh-ask-context ul, .sh-ask-context ol { margin: 0 0 8px; }
+.sh-ask-context ul, .sh-ask-context ol { padding-left: 20px; }
+.sh-ask-context a { color: var(--g-ink); text-decoration: underline; text-underline-offset: 3px; }
+.sh-ask-sheet .sh-ask-acts { margin-top: 4px; }
+.sh-ask-sheet .sh-ask-btn[data-act="archive"] { margin-left: auto; }
+
 /* Daylight ink screen: no tint to lean on, borders 1.5px, no motion */
 :root[data-screen="ink"] .sh-ask-wants { background: none; border: 1.5px solid #000; }
 :root[data-screen="ink"] .sh-ask-mark { color: #000; }
@@ -34,5 +60,7 @@
 :root[data-screen="ink"] .sh-ask-btn[data-primary] { background: #000; color: #fff; }
 :root[data-screen="ink"] .sh-ask-btn:disabled { opacity: 1; border-style: dashed; }
 :root[data-screen="ink"] .sh-ask-error { color: #000; font-weight: 600; }
+:root[data-screen="ink"] .sh-ask-sheet-kind b, :root[data-screen="ink"] .sh-ask-facts dt { color: #000; }
+:root[data-screen="ink"] .sh-ask-context { border-top: 1.5px solid #000; }
 :root[data-screen="ink"] .sh-ask-btn:active:not(:disabled) { transform: none; }
 @media (prefers-reduced-motion: reduce) { .sh-ask-btn { transition: none; } .sh-ask-btn:active:not(:disabled) { transform: none; } }

@@ -1,31 +1,24 @@
 // T-335 the shape: the surface the App shows for the rooms. With no room in focus it is home (the rooms, newest first, what moves and what
 // wants you); with one, it is that room: its head, the strip (what moves there, what waits on you), and the room's own chat, which the App
-// builds (one send path, one draft per room), with the room's asks drawn as messages at its end. A run's story opens as a sheet over either.
-import { useCallback, type ReactNode } from "react";
+// builds (one send path, one draft per room), with the room's asks drawn as messages at its end. A run's story, or an ask opened to its
+// context (T-335 fixes: every "waits on you" opens the same sheet, with its buttons and Archive), opens as a sheet over either.
+import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { Home } from "./Home";
 import { RoomFrame, RoomStrip } from "./RoomFrame";
 import { RunLine } from "./RunLine";
 import { RunStory } from "./RunStory";
 import { AskMessage } from "./AskMessage";
+import { AskSheet } from "./AskSheet";
+import { askForRun, type AskButton } from "./asksCore";
 import type { Ask, Pin, RoomRun, ShapeRoom } from "./types";
 import type { ShapeData } from "./useShape";
 import { Clock } from "./Home";
 import { SealedCard } from "../SealedCard";
 import "./shape.css";
 
-/** A run's story as the App holds it: the run, and the room it is in (for the sheet's "in <room>"). */
-export type StoryOpen = { run: RoomRun; room: string };
-
-/** Scrolls the room's chat to an ask and marks it for a moment (the strip's "Waits on you"). */
-export function jumpToAsk(id: string) {
-  const el = document.querySelector<HTMLElement>(`.sh-ask-msg[data-id="${CSS.escape(id)}"]`);
-  if (!el) return;
-  el.scrollIntoView({ block: "center" });
-  el.classList.remove("sh-flash");
-  void el.offsetWidth; // the mark starts again on a second tap
-  el.classList.add("sh-flash");
-  window.setTimeout(() => el.classList.remove("sh-flash"), 1800);
-}
+/** The sheet over home or a room, as the App holds it (its Back and Escape close it): a run's story (the run, and the room it is in, for the
+ *  sheet's "in <room>"), or an ask opened to its context (T-335 fixes) by its id. */
+export type StoryOpen = { run: RoomRun; room: string } | { ask: string };
 
 /** Uni's approval card pinned over the rooms as it is in its room (never a private room's: home draws that one without words), so Approve works in place (the card reads its own checked view). It
  *  leaves when it is answered (the waiting list is read again) or when its clock runs out. */
@@ -53,7 +46,6 @@ export function ShapeSurface(p: {
   onOpenRoom: (id: string) => void;
   /** Back from the room: out of a thread first, then home. */ onBack: () => void;
   onSearch: () => void;
-  onSettings: () => void;
   onOpenNote: (id: string) => void;
   onOpenLink: (url: string) => void;
   emptyHint?: ReactNode;
@@ -61,19 +53,41 @@ export function ShapeSurface(p: {
   const { shape, focus, story, onStory } = p;
   const { asks } = shape;
   const nameOf = (id: string) => p.rooms.find((r) => r.id === id)?.name.replace(/^#/, "") ?? "";
-  const openStory = useCallback((run: RoomRun, room: string) => onStory({ run, room }), [onStory]);
   const closeStory = useCallback(() => onStory(null), [onStory]);
+  const openAsk = useCallback((a: Ask) => onStory({ ask: a.id }), [onStory]);
+  // a run that waits on you opens the ask on its own task when there is one (its context and its buttons), else its story
+  // (the vetted asks, by room; a private room's are opened only inside that room, never from home or another room)
+  const listed = useMemo(() => [...asks.byRoom.values()].flat(), [asks.byRoom]);
+  const here = focus?.room ?? null;
+  const openStory = useCallback((run: RoomRun, room: string) => {
+    const a = run.state === "waiting" ? askForRun(run, listed.filter((x) => !x.private || x.room === here)) : null;
+    onStory(a ? { ask: a.id } : { run, room });
+  }, [onStory, listed, here]);
+  const act = useCallback((a: Ask, b: AskButton) => {
+    if (b.act === "open") { p.onOpenLink(b.value); return; }
+    if (b.act === "answer") void asks.answer(a, b.value);
+    else if (b.act === "seen") void asks.seen(a);
+    else if (b.act === "notnow") void asks.notNow(a);
+    else if (b.act === "done") void asks.done(a);
+    else if (b.act === "archive") void asks.archive(a);
+  }, [asks, p.onOpenLink]); // eslint-disable-line react-hooks/exhaustive-deps
   const ask = (a: Ask, compact: boolean) => <AskMessage ask={a} compact={compact} busy={asks.busy.has(a.id)} error={asks.errors.get(a.id)}
-    onAnswer={asks.answer} onSeen={asks.seen} onOpenLink={p.onOpenLink} />;
+    onAct={act} onOpen={openAsk} />;
 
   // (a room gone from the list while it is open: the App's re-read of the rooms takes it out of focus)
   const room = focus ? p.rooms.find((r) => r.id === focus.room) ?? null : null;
 
-  const sheet = story && <RunStory key={story.run.id} vault={p.vault} run={story.run} roomName={nameOf(story.room)} onClose={closeStory} onOpenNote={(id) => { closeStory(); p.onOpenNote(id); }} />;
+  // an ask's sheet stays while the ask is listed: answered, seen or archived, it leaves with it (a failed write brings the ask back, with why)
+  const openedAsk = story && "ask" in story ? listed.find((a) => a.id === story.ask && (!a.private || a.room === here)) ?? null : null;
+  useEffect(() => { if (story && "ask" in story && !openedAsk) onStory(null); }, [story, openedAsk, onStory]);
+  const sheet = story && ("run" in story
+    ? <RunStory key={story.run.id} vault={p.vault} run={story.run} roomName={nameOf(story.room)} onClose={closeStory} onOpenNote={(id) => { closeStory(); p.onOpenNote(id); }} />
+    : openedAsk && <AskSheet key={openedAsk.id} vault={p.vault} ask={openedAsk} roomName={openedAsk.room ? nameOf(openedAsk.room) : ""} busy={asks.busy.has(openedAsk.id)}
+      error={asks.errors.get(openedAsk.id)} onAct={act} onClose={closeStory} />);
 
   if (!focus) return <>
     <div className="sh-scroll">
-      <Home rows={shape.rows} pins={shape.pins} now={shape.now} loading={p.loading} onOpenRoom={p.onOpenRoom} onSearch={p.onSearch} onSettings={p.onSettings}
+      <Home rows={shape.rows} pins={shape.pins} now={shape.now} loading={p.loading} onOpenRoom={p.onOpenRoom} onSearch={p.onSearch}
         renderAsk={(a) => ask(a, true)} renderRun={(run, r) => <RunLine run={run} where="row" onOpen={(x) => openStory(x, r.id)} />}
         renderPin={(pin) => (pin.sealed && !pin.private ? <SealedPin pin={pin} onLapse={shape.onPinLapsed} /> : null)} onPinLapsed={shape.onPinLapsed} emptyHint={p.emptyHint} unseen={shape.unseen} />
     </div>
@@ -98,7 +112,7 @@ export function ShapeSurface(p: {
       title={focus.root ? <h1>{name}<span className="sh-room-sub"> · thread</span></h1> : undefined}
       strip={focus.root ? null : <RoomStrip>
         {runs?.moving && <RunLine key="moving" run={runs.moving} where="strip" onOpen={(r) => openStory(r, id)} />}
-        {waits && <RunLine key="waits" run={waits} where="strip" onOpen={(r) => (first ? jumpToAsk(first.id) : openStory(r, id))} />}
+        {waits && <RunLine key="waits" run={waits} where="strip" onOpen={(r) => (first ? openAsk(first) : openStory(r, id))} />}
       </RoomStrip>}>
       {p.chat ? p.chat(tail) : <p className="sh-home-note" role="status">Opening the room…</p>}
     </RoomFrame>

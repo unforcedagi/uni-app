@@ -5,11 +5,10 @@
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import { leaveRoom, openSettings as homeSettings } from './shapeNav';
+import { openSettings as homeSettings } from './shapeNav';
 
-/** Settings sits behind home's gear: step out of the room the spec booted in, if it is in one. */
+/** Settings, from the bar (T-335 fixes: it is a place there, reachable from a room too). */
 async function gearSettings(page: Page) {
-  if (await page.locator('.sh-room').isVisible().catch(() => false)) await leaveRoom(page);
   await homeSettings(page);
 }
 

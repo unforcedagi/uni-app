@@ -1,9 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
-import { leaveRoom, openSettings as homeSettings } from './shapeNav';
+import { bar, leaveRoom, openSettings as homeSettings } from './shapeNav';
 
-/** Settings sits behind home's gear: step out of the room the spec booted in, if it is in one. */
+/** Settings, from the bar (T-335 fixes: it is a place there, reachable from a room too). */
 async function gearSettings(page: Page) {
-  if (await page.locator('.sh-room').isVisible().catch(() => false)) await leaveRoom(page);
   await homeSettings(page);
 }
 
@@ -86,7 +85,8 @@ test('the Mac and the Pixel keep their motion: buttons answer, the toast rises',
   await boot(page);
   expect(await calmOnRoot(page)).toBeNull();
   if (await page.locator('.sh-room').isVisible().catch(() => false)) await leaveRoom(page);
-  const button = page.locator('.sh-home').getByRole('button', { name: 'Settings', exact: true });
+  // (Settings is the bar's place now, T-335 fixes: its mark eases between states)
+  const button = bar(page).getByRole('button', { name: 'Settings', exact: true }).locator('i');
   expect(parseFloat(await button.evaluate((b) => getComputedStyle(b).transitionDuration))).toBeGreaterThan(0);
   await openSettings(page);
   await expect(page.getByRole('checkbox', { name: /Calm screen/ })).not.toBeChecked();

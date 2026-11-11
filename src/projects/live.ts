@@ -356,6 +356,8 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
       waiting: sealed || state !== "waiting" ? null : waitOf(m),
       // T-335 shape: its own room, for a room no area owns (never on a run a private clue touches, nor one whose rooms aren't read)
       channel: secret || sealed ? null : clueParts(m.channel)[0] ?? clueParts(m.starter_channel)[0] ?? null,
+      // T-335 fixes: the task it works on, so a run that waits on you opens that task's ask (never on a run a private clue touches)
+      task: secret || sealed ? null : task,
     });
     const att = attemptOf(m);
     if (att) byAttempt.set(att, id);

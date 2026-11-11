@@ -391,6 +391,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [story, setStory] = useState<StoryOpen | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
+  // T-335 fixes: a text field anywhere has focus, so a phone's keyboard is up: the bar steps aside for it (it shows otherwise)
+  const [keyboardUp, setKeyboardUp] = useState(false);
+  useEffect(() => {
+    const field = (el: Element | null) => !!el && (el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable)
+      || (el instanceof HTMLInputElement && /^(text|search|email|url|tel|password|number)$/.test(el.type)));
+    const look = () => requestAnimationFrame(() => setKeyboardUp(field(document.activeElement)));
+    document.addEventListener("focusin", look); document.addEventListener("focusout", look);
+    return () => { document.removeEventListener("focusin", look); document.removeEventListener("focusout", look); };
+  }, []);
   const [journalFocus, setJournalFocus] = useState(false);
   const lifeVault = effectiveLifeVault(useLifeOsVault(), vaults);
   /** The Uni glue (asks, runs, To Post, Studio, Arcade) is on only with Uni's own vault as the life vault. */
@@ -2742,8 +2751,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, tabId: recordingTab.tabId, controls: recorder as RecorderControls, finish: "send" as const } :
     journalRecording && journalTab ? { title: "Journal", tabId: journalTab.id, controls: journalRecording.controls, finish: "save" as const } : null;
   const roomShown = homeOpen && !!focus;
-  // the bar is the left rail on a wide screen; on a phone it steps aside for a room, a note, search, Settings and a keyboard
-  const barAside = roomShown || !!topNote || searchOpen || !!panel || composerFocused || (journalFocus && journalOpen);
+  // the bar is the left rail on a wide screen; on a phone it shows everywhere (a room, its run story, an ask's sheet, a note, Settings) and
+  // steps aside only while the keyboard is up (a field is being typed in: the composer, search, a note) and in the journal's focus mode
+  // (T-335 fixes, 11-11: "the bottom bar should show all the time; it disappears when I'm in a specific room")
+  const barAside = composerFocused || keyboardUp || searchOpen || (journalFocus && journalOpen);
   const place = journalOpen ? "journal" : appletOf(active) ? "applets" : "rooms";
   const applet = appletOf(active);
   const appletBody = (): ReactNode => {
@@ -2773,8 +2784,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const roomChat = focus && homeOpen && channel === focus.room && (root ?? null) === focus.root && currentRoom
     ? (tail: ReactNode) => roomPane(currentRoom, null, `Message ${currentRoom.name.replace(/^#/, "")}`, currentRoom.name, tail) : null;
   return <VaultProfileProvider profile={profile}><NoteOpener.Provider value={openNote}><main className={`shell sh-shell in-room${barAside ? " sh-bar-aside" : ""}${roomShown ? " sh-in-room" : ""} ${topNote ? "note-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
-    <Bar place={place} wants={shape.wants} applets={appletsTotal} drawerOpen={drawerOpen}
-      onRooms={() => goHome()} onJournal={() => { setDrawerOpen(false); setStory(null); openTarget({ kind: "journal", title: "Journal" }); }} onApplets={() => { setSearchOpen(false); setPanel(null); setStory(null); setDrawerOpen((o) => !o); }} />
+    <Bar place={place} wants={shape.wants} applets={appletsTotal} drawerOpen={drawerOpen} settingsOpen={panel === "settings"}
+      onSettings={() => { if (panel === "settings") setPanel(null); else { setStory(null); openSettings(); } }}
+      onRooms={() => { setPanel(null); goHome(); }} onJournal={() => { setDrawerOpen(false); setStory(null); setPanel(null); openTarget({ kind: "journal", title: "Journal" }); }} onApplets={() => { setSearchOpen(false); setPanel(null); setStory(null); setDrawerOpen((o) => !o); }} />
     <section className="conversation" aria-label={journalOpen ? "Journal" : applet ? applet.name : roomShown ? "Room" : homeOpen ? "Rooms" : active?.kind === "note" ? "Note" : "Conversation"}>
       {/* T-335: an update is a line at the top, in the flow: never over the composer */}
       <UpdateBanner />
@@ -2782,7 +2794,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {journalOpen ? null
       : applet ? <AppletFrame applet={active?.kind === "vault" && active.vault && active.vault !== VAULT_CHOOSER ? { ...applet, name: active.vault } : applet} onBack={backToDrawer} onSearch={() => openFind()}>{appletBody()}</AppletFrame>
       : homeOpen ? <ShapeSurface shape={shape} rooms={rooms} loading={rooms.length === 0 && synced === 0} focus={focus} vault={lifeVault} chat={roomChat}
-          story={story} onStory={setStory} onOpenRoom={(id) => openRoom(id)} onBack={stepBackInFocus} onSearch={() => openFind()} onSettings={openSettings}
+          story={story} onStory={setStory} onOpenRoom={(id) => openRoom(id)} onBack={stepBackInFocus} onSearch={() => openFind()}
           onOpenNote={(id) => openNote({ hub: null, vault: lifeVault, ref: id }, null)} onOpenLink={(url) => void openLink(url).catch((e) => setError(`Couldn't open the link: ${e}`))} />
       : null}
     </section>
@@ -2821,9 +2833,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {panel === "settings" && !searchOpen && <>
         <header className="sh-top sh-overlay-head"><h1>Settings</h1><button type="button" className="sh-btn sh-btn-small" onClick={() => setPanel(null)}>Close</button></header>
         <div className="settings">
+        {/* T-335 fixes: Claude usage first (Aaron opens Settings to see it) */}
+        <ClaudeUsage />
         <p className="connection" role="status" data-fine={/^(Up to date$|Message sent|Asked Uni)/.test(status) && (!live || live === "Live") ? "true" : undefined}>{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
         {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
-        <UpdateSettings /><ClaudeUsage /><MotionSetting /><LifeOsVaultSetting vaults={vaults} /><SealedApprovals />
+        <UpdateSettings /><MotionSetting /><LifeOsVaultSetting vaults={vaults} /><SealedApprovals />
         <section className="settings-device" aria-label="This device"><h2>This device</h2><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary settings-forget" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget. You'll need to pair again." : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep it</button>}</section>
         {/* r13: the machinery (the app sandbox's self-test, where the app connects) is for whoever builds Uni, not part of ordinary Settings */}
         <details className="settings-dev"><summary>Developer</summary>{hub && <p className="settings-dev-line">Notes hub: <code>{hub}</code></p>}{syncDetail && <p className="settings-dev-line">Last sync: {syncDetail}</p>}<JournalVaultSetting /><AreaSelfTest /></details></div>

@@ -12,7 +12,7 @@ import { failureKind } from "../vault/rawNote.ts";
 import { activeProfile } from "../areas/profile.ts";
 import { findUniMember } from "../uniActions.ts";
 import { relayAccepted } from "../voiceOutbox.ts";
-import { answerBody, answerMeta, asksByRoom, asksPlaced, seenBody, seenCloses, seenMeta, visibleAsks, type Gone, type VaultAsk } from "./asksCore.ts";
+import { answerBody, answerMeta, archiveBody, asksByRoom, asksPlaced, doneBody, notNowBody, seenBody, seenCloses, seenMeta, visibleAsks, type Gone, type VaultAsk } from "./asksCore.ts";
 import type { Ask, ShapeRoom } from "./types.ts";
 import type { Tree } from "../areas/treeCore.ts";
 import type { RoomsRegistry } from "../areas/roomsRegistry.ts";
@@ -51,17 +51,22 @@ async function postIn(channel: string, body: string, root: string | null, quiet 
 }
 
 /** The close (CONTRACT "Answering an ask"): one compare-and-set on `state` (`from` -> `done`) with the answer's (or Seen's) keys in the same
- *  write, guarded by the revision shown; Rust checks the keys. `close: false`: a guarded metadata merge (Seen on a do or choose ask). */
-async function write(vault: string, ask: VaultAsk, metadata: Record<string, unknown>, close: boolean): Promise<Result> {
+ *  write, guarded by the revision shown; Rust checks the keys. `close: false`: a guarded metadata merge (Seen on a do or choose ask).
+ *  `to`: archived (T-335 fixes, Archive): the same compare-and-set with no keys at all. */
+async function write(vault: string, ask: VaultAsk, metadata: Record<string, unknown> | null, close: boolean, to = "done"): Promise<Result> {
   if (!ask.rev) return { ok: false, kind: "conflict", message: "no revision: reload the ask first" };
   try {
-    if (close) await invoke("vault_transition", { vault, id: ask.id, from: ask.state, to: "done", ifUpdatedAt: ask.rev, metadata });
+    if (close) await invoke("vault_transition", { vault, id: ask.id, from: ask.state, to, ifUpdatedAt: ask.rev, metadata });
     else await invoke("vault_patch_meta", { vault, id: ask.id, metadata, ifUpdatedAt: ask.rev });
     // a write landed: the next read of any list goes to the vault, not to what this tick already read
     reader.invalidate();
     return { ok: true };
   } catch (e) { const message = String(e); return { ok: false, kind: failureKind(message), message }; }
 }
+
+/** What a tap does to an ask (T-335 fixes): answer it (a choice), mark it seen (tell, look), not now (do, choose: Seen's write, it stays open
+ *  with its room), done (a do ask he did: Seen's write, and the room is told, addressed, to take it back), or archive it (out of his view). */
+export type AskDo = { act: "answer"; text: string } | { act: "seen" } | { act: "notnow" } | { act: "done" } | { act: "archive" };
 
 /** Forget this device (Settings, "Forget this device key"): every owed post kept here, for every identity and vault. */
 export function forgetAsks(): void {
@@ -129,34 +134,46 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** One write, then (only once it is written) the room hears it. The ask leaves the list at once; a failed write brings it back with why. */
-  const act = useCallback(async (ask: Ask, seen: boolean, text: string) => {
+  const act = useCallback(async (ask: Ask, d: AskDo) => {
     const a = full.current.get(ask.id);
     if (!a || inFlight.current.has(a.id)) return;
     inFlight.current.add(a.id);
     setBusy((b) => new Set(b).add(a.id));
     setErr(a.id, null);
-    setGone((g) => new Map(g).set(a.id, { at: Date.now(), seen }));
+    // seen, not now and done: his again when its room asks again; an answer or an archive: gone
+    const again = d.act === "seen" || d.act === "notnow" || d.act === "done";
+    setGone((g) => new Map(g).set(a.id, { at: Date.now(), seen: again }));
     const me = activeProfile().me, at = new Date().toISOString();
     let r: Result;
     try {
-      r = seen ? await write(o.vault, a, seenMeta(me, at), seenCloses(a.kind)) : await write(o.vault, a, answerMeta(a, text, me, at), true);
+      r = d.act === "answer" ? await write(o.vault, a, answerMeta(a, d.text, me, at), true)
+        : d.act === "archive" ? await write(o.vault, a, null, true, "archived")
+        // Seen closes a tell or look ask; on a do or choose ask (Seen, Not now, Done) it is a patch: the ask stays open with its room
+        : await write(o.vault, a, seenMeta(me, at), d.act === "seen" && seenCloses(a.kind));
     } finally {
       setBusy((b) => { const n = new Set(b); n.delete(a.id); return n; });
       inFlight.current.delete(a.id);
     }
     if (!r.ok) {
       setGone((g) => { const n = new Map(g); n.delete(a.id); return n; });
-      setErr(a.id, r.kind === "conflict" ? "It changed elsewhere. Showing the latest." : `${seen ? "Couldn't mark it seen" : "Couldn't answer"}: ${words(r.message)}`);
+      const what = { answer: "Couldn't answer", seen: "Couldn't mark it seen", notnow: "Couldn't put it off", done: "Couldn't mark it done", archive: "Couldn't archive it" }[d.act];
+      setErr(a.id, r.kind === "conflict" ? "It changed elsewhere. Showing the latest." : `${what}: ${words(r.message)}`);
       reader.invalidate("task");
       void read();
       return;
     }
-    await post({ id: a.id, what: a.what, channel: a.room, root: a.replyRoot, body: seen ? seenBody(a) : answerBody(a, text), quiet: seen, error: "", at: Date.now() });
+    // an answer and Done wake the room's Uni (addressed, under its reply_root); Seen, Not now and Archive are one quiet line
+    const body = d.act === "answer" ? answerBody(a, d.text) : d.act === "done" ? doneBody(a) : d.act === "notnow" ? notNowBody(a) : d.act === "archive" ? archiveBody(a) : seenBody(a);
+    const quiet = d.act !== "answer" && d.act !== "done";
+    await post({ id: a.id, what: a.what, channel: a.room, root: a.replyRoot, body, quiet, error: "", at: Date.now() });
     void read();
   }, [o.vault, post, read]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const answer = useCallback(async (ask: Ask, text: string) => { const said = text.trim(); if (said) await act(ask, false, said); }, [act]);
-  const seen = useCallback(async (ask: Ask) => { await act(ask, true, ""); }, [act]);
+  const answer = useCallback(async (ask: Ask, text: string) => { const said = text.trim(); if (said) await act(ask, { act: "answer", text: said }); }, [act]);
+  const seen = useCallback(async (ask: Ask) => { await act(ask, { act: "seen" }); }, [act]);
+  const notNow = useCallback(async (ask: Ask) => { await act(ask, { act: "notnow" }); }, [act]);
+  const done = useCallback(async (ask: Ask) => { await act(ask, { act: "done" }); }, [act]);
+  const archive = useCallback(async (ask: Ask) => { await act(ask, { act: "archive" }); }, [act]);
   /** Send an owed post again. */
   // one send at a time per owed post: a second tap while the relay is slow must not post it twice
   const resending = useRef(new Set<string>());
@@ -167,5 +184,5 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
     try { await post(p); } finally { resending.current.delete(id); }
   }, [owed, post]);
 
-  return { asks, byRoom, busy, errors, answer, seen, ready, owed, retry, /** Asks kept out of sight: private, with no private room of their own here. */ unseen: placed.unseen };
+  return { asks, byRoom, busy, errors, answer, seen, notNow, done, archive, ready, owed, retry, /** Asks kept out of sight: private, with no private room of their own here. */ unseen: placed.unseen };
 }
