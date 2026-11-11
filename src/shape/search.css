@@ -1,0 +1,49 @@
+/* T-335 the shape: search where you are, grouped by place (src/Search.tsx). Ported from the prototype's
+   .search / .scope / .rgroup / .hit / .also / .ask-uni / .back-scope. Old .search-* classes stay for the frame. */
+.sh-find { font-family: var(--g-font-ui); background: var(--g-ground); }
+.sh-find-top { display: flex; gap: 8px; align-items: center; }
+.sh-find-top .search-field { flex: 1; min-width: 0; }
+.sh-find-cancel { border: 0; background: none; min-height: 44px; padding: 0 8px; font: 500 15px var(--g-font-ui); color: var(--g-ink); }
+.sh-find-scope { margin: 0; padding: 0 16px 8px; font-size: 12.5px; color: var(--g-ink-3); }
+.sh-find-scope b { font-weight: 600; color: var(--g-ink-2); }
+.sh-find-mode { margin: 0 16px 6px; font-size: 12.5px; color: var(--g-ink-3); }
+.sh-find-mode .search-filters { display: flex; gap: 6px; padding-top: 6px; }
+.sh-find-results { padding-bottom: 16px; }
+.sh-find-wait { margin: 10px 16px; font-size: 13.5px; color: var(--g-ink-3); }
+
+.sh-find-back { margin: 4px 16px 0; border: 0; background: none; min-height: 40px; padding: 0; font-size: 13.5px; color: var(--g-ink-2); }
+
+.sh-find-group { margin: 0; }
+.sh-find-head { margin: 14px 16px 2px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font: inherit; }
+.sh-find-head b { font: 600 15px/1.3 var(--g-font-display); color: var(--g-ink); }
+.sh-find-head span { font-size: 12px; color: var(--g-ink-3); }
+
+.sh-find .sh-find-hit { display: block; width: 100%; min-height: 44px; text-align: left; border: 0; border-radius: 0; background: none; box-shadow: none; padding: 9px 16px; border-bottom: var(--g-hair) solid var(--g-line); color: var(--g-ink); }
+.sh-find .sh-find-hit:hover, .sh-find .sh-find-hit:focus-visible { background: var(--g-sunk); box-shadow: none; }
+.sh-find-hit-title { display: flex; gap: 8px; align-items: baseline; }
+.sh-find-hit-title strong { font-weight: 600; font-size: 14.5px; color: var(--g-ink); }
+.sh-find-hit-title time { margin-left: auto; font-size: 12px; color: var(--g-ink-3); white-space: nowrap; }
+.sh-find-hit .search-path { display: block; font-size: 12px; color: var(--g-ink-3); }
+.sh-find-hit .search-snippet { display: block; font-size: 13.5px; color: var(--g-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-find mark { background: var(--g-needs-soft); color: inherit; border-radius: 3px; padding: 0 1px; }
+
+.sh-find-more { margin: 2px 16px 0; border: 0; background: none; min-height: 40px; padding: 0; font-size: 13px; color: var(--g-ink-2); text-decoration: underline; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; }
+
+.sh-find-also { margin: 14px 16px 0; padding: 10px 12px; border-radius: 12px; background: var(--g-sunk); font-size: 13.5px; color: var(--g-ink-2); display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.sh-find-also > span:first-child { font-weight: 600; margin-right: 2px; }
+.sh-find-also-place { border: 0; background: none; min-height: 40px; padding: 4px 2px; color: var(--g-ink); font-size: 13.5px; text-decoration: underline; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; }
+.sh-find-also-place b { font-weight: 600; color: var(--g-ink-2); }
+
+.sh-find-ask { margin: 18px 16px 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sh-find-ask p { margin: 0; flex: 1; min-width: 12em; font: 400 15px/1.5 var(--g-font-uni); color: var(--g-ink-2); }
+.sh-find-ask small { flex-basis: 100%; font-size: 12.5px; color: var(--g-ink-3); }
+.sh-find-ask-btn { min-height: 40px; padding: 0 16px; border-radius: 999px; border: var(--g-hair) solid var(--g-line-strong); background: var(--g-paper); color: var(--g-ink); font: 500 14.5px var(--g-font-ui); }
+.sh-find-ask-btn.is-primary { background: var(--g-ink); border-color: var(--g-ink); color: var(--g-ground); }
+.sh-find-ask-btn:disabled { opacity: .6; }
+
+/* Daylight ink: read by shape and word, not tint. */
+:root[data-screen="ink"] .sh-find mark { background: none; font-weight: 700; text-decoration: underline 2px; }
+:root[data-screen="ink"] .sh-find-also { background: none; border: 1.5px solid var(--g-ink); }
+:root[data-screen="ink"] .sh-find .sh-find-hit { border-bottom-width: 1.5px; }
+:root[data-screen="ink"] .sh-find .sh-find-hit:focus-visible { outline: 1.5px solid var(--g-ink); outline-offset: -1.5px; }
+:root[data-screen="ink"] .sh-find-ask-btn { border-width: 1.5px; }

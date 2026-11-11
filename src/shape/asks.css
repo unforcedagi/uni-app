@@ -1,0 +1,38 @@
+/* T-335 the shape: an ask as a message with buttons (AskMessage.tsx). Glow tokens only; on the ink screen it reads by shape and word. */
+.sh-ask { font-family: var(--g-font-ui); color: var(--g-ink); }
+.sh-ask-mark { color: var(--g-needs); flex: none; }
+.sh-ask-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* home: the row's "wants you" block */
+.sh-ask-wants { margin-top: 8px; padding: 9px 10px 10px 12px; border-radius: 12px; background: var(--g-needs-soft); }
+.sh-ask-line { margin: 0 0 8px; font-size: 14px; line-height: 1.4; display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.sh-ask-wants .sh-ask-what { min-width: 0; overflow-wrap: anywhere; }
+
+/* room: a message from Uni with its buttons under it */
+.sh-ask-msg { margin: 14px 0 0; max-width: 92%; }
+.sh-ask-meta { font-size: 12.5px; color: var(--g-ink-3); margin-bottom: 2px; display: flex; gap: 6px; align-items: baseline; }
+.sh-ask-meta b { color: var(--g-ink-2); font-weight: 600; }
+.sh-ask-body { font: 400 16.5px/1.6 var(--g-font-uni); }
+.sh-ask-body p { margin: 0; overflow-wrap: anywhere; }
+.sh-ask-why { color: var(--g-ink-2); font-size: 15px; margin-top: 2px !important; }
+.sh-ask-msg .sh-ask-acts { margin-top: 10px; }
+
+/* buttons: the primary a filled ink pill, the others outlined */
+.sh-ask-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.sh-ask-btn { min-height: 40px; padding: 0 14px; border-radius: 20px; border: var(--g-hair) solid var(--g-line-strong); background: var(--g-paper); color: var(--g-ink);
+  font: 500 14px/1.2 var(--g-font-ui); cursor: pointer; transition: transform var(--g-t-quick) var(--g-ease); max-width: 100%; overflow-wrap: anywhere; text-align: center; }
+.sh-ask-btn[data-primary] { background: var(--g-ink); color: var(--g-paper); border-color: var(--g-ink); }
+.sh-ask-btn:active:not(:disabled) { transform: scale(.97); }
+.sh-ask-btn:disabled { opacity: .5; cursor: default; }
+.sh-ask-btn:focus-visible { outline: 2px solid var(--g-ink); outline-offset: 2px; }
+.sh-ask-error { margin: 6px 0 0; font-size: 13px; color: var(--g-needs); }
+
+/* Daylight ink screen: no tint to lean on, borders 1.5px, no motion */
+:root[data-screen="ink"] .sh-ask-wants { background: none; border: 1.5px solid #000; }
+:root[data-screen="ink"] .sh-ask-mark { color: #000; }
+:root[data-screen="ink"] .sh-ask-btn { border: 1.5px solid #000; background: #fff; color: #000; transition: none; }
+:root[data-screen="ink"] .sh-ask-btn[data-primary] { background: #000; color: #fff; }
+:root[data-screen="ink"] .sh-ask-btn:disabled { opacity: 1; border-style: dashed; }
+:root[data-screen="ink"] .sh-ask-error { color: #000; font-weight: 600; }
+:root[data-screen="ink"] .sh-ask-btn:active:not(:disabled) { transform: none; }
+@media (prefers-reduced-motion: reduce) { .sh-ask-btn { transition: none; } .sh-ask-btn:active:not(:disabled) { transform: none; } }

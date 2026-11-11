@@ -354,6 +354,8 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
       end: sealed ? null : sessionEnd(m, state),
       feed: sealed ? null : str(m.feed),
       waiting: sealed || state !== "waiting" ? null : waitOf(m),
+      // T-335 shape: its own room, for a room no area owns (never on a run a private clue touches, nor one whose rooms aren't read)
+      channel: secret || sealed ? null : clueParts(m.channel)[0] ?? clueParts(m.starter_channel)[0] ?? null,
     });
     const att = attemptOf(m);
     if (att) byAttempt.set(att, id);

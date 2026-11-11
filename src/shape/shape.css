@@ -1,0 +1,100 @@
+/* T-335 the shape: home (the rooms), a room's frame and strip, the places bar. Ported from the approved prototype's app.css; the
+   tokens are glow.css's (--g-*). Phone first; on a wide screen the content is one centred column and the bar becomes a left rail.
+   Ink (the Daylight): states read by shape and word, never by tint; no motion. */
+:root { --sh-bar-h: 64px; --sh-rail-w: 84px; --sh-col: 640px; }
+
+/* symbols as text, never colour emoji (the ink screen is greyscale, and so is the look) */
+.sh-glyph, .sh-mark-needs, .sh-back { font-variant-emoji: text; font-family: "Noto Sans Symbols 2", "Noto Sans Symbols", "DejaVu Sans", var(--g-font-ui); }
+
+/* ── Home ── */
+.sh-home { max-width: var(--sh-col); margin: 0 auto; padding-bottom: calc(var(--sh-bar-h) + 16px + env(safe-area-inset-bottom)); color: var(--g-ink); font: 15px/1.45 var(--g-font-ui); }
+.sh-top { display: flex; align-items: center; gap: 10px; padding: calc(14px + env(safe-area-inset-top)) 16px 8px; }
+.sh-top h1 { margin: 0; flex: 1; min-width: 0; font: 600 26px/1.15 var(--g-font-display); letter-spacing: -.01em; color: var(--g-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-iconbtn { flex: none; width: 40px; height: 40px; border: 0; border-radius: 12px; background: transparent; display: grid; place-items: center; padding: 0; font-size: 22px; color: var(--g-ink-2); cursor: pointer; }
+.sh-iconbtn .mono-icon { width: 21px; height: 21px; }
+.sh-iconbtn:hover, .sh-iconbtn:active { background: var(--g-sunk); }
+.sh-find { display: flex; align-items: center; gap: 10px; margin: 2px 16px 10px; width: calc(100% - 32px); height: 42px; padding: 0 14px; border: var(--g-hair) solid var(--g-line); border-radius: 14px; background: var(--g-sunk); color: var(--g-ink-3); font: 15px/1 var(--g-font-ui); text-align: left; cursor: pointer; }
+.sh-find .mono-icon { width: 18px; height: 18px; color: var(--g-ink-2); }
+.sh-find span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-home-note { margin: 18px 16px; color: var(--g-ink-3); font: 400 15px/1.5 var(--g-font-uni); }
+.sh-home-error { color: var(--g-ink-2); }
+.sh-home-empty { margin: 30px 16px; text-align: center; color: var(--g-ink-3); font: 400 15px/1.5 var(--g-font-uni); }
+.sh-home-empty p { margin: 0; }
+
+/* Buttons (the pin's own; the asks bring theirs) */
+.sh-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.sh-btn { height: 34px; padding: 0 14px; border-radius: 17px; border: var(--g-hair) solid var(--g-line-strong); background: var(--g-paper); color: var(--g-ink); font: 500 14px/1 var(--g-font-ui); cursor: pointer; transition: transform var(--g-t-quick) var(--g-ease); }
+.sh-btn:active { transform: scale(.97); }
+.sh-btn-primary { background: var(--g-ink); color: var(--g-paper); border-color: var(--g-ink); }
+.sh-btn-small { height: 30px; padding: 0 12px; font-size: 13.5px; }
+/* a 30px pill still takes a 40px tap */
+.sh-btn-small { position: relative; }
+.sh-btn-small::after { content: ""; position: absolute; inset: -5px 0; }
+
+/* Approval cards about to expire, pinned over the rooms */
+.sh-mark-needs { color: var(--g-needs); }
+.sh-pins { padding: 4px 12px 2px; display: grid; gap: 8px; }
+.sh-pin { background: var(--g-paper); border: var(--g-hair) solid var(--g-line-strong); border-left: 4px solid var(--g-needs); border-radius: 14px; padding: 9px 12px 10px; box-shadow: var(--g-shadow-1); }
+.sh-pin-head { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; color: var(--g-ink-2); min-width: 0; }
+.sh-pin-room { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-clock { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--g-needs); white-space: nowrap; }
+.sh-pin h3 { margin: 2px 0 1px; font: 600 15px/1.3 var(--g-font-ui); color: var(--g-ink); overflow-wrap: anywhere; }
+.sh-pin p { margin: 0; color: var(--g-ink-2); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-pin .sh-acts { margin-top: 8px; }
+
+/* Rows: glyph, name and time, last line, then the run and the asks the host draws */
+.sh-rows { margin: 0; padding: 0; list-style: none; }
+.sh-row { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 12px; padding: 12px 16px; border-bottom: var(--g-hair) solid var(--g-line); cursor: pointer; }
+.sh-row:has(.sh-row-open:active) { background: var(--g-sunk); }
+.sh-row > :not(.sh-glyph) { grid-column: 2; min-width: 0; }
+.sh-glyph { grid-row: 1 / span 2; width: 40px; height: 40px; border-radius: 12px; background: var(--g-paper); border: var(--g-hair) solid var(--g-line); display: grid; place-items: center; font-size: 18px; line-height: 1; color: var(--g-ink-2); }
+.sh-row-open { display: block; width: 100%; margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 6px; }
+.sh-row-open:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 3px; }
+.sh-row-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.sh-row-name { flex: 1; min-width: 0; font: 600 16px/1.3 var(--g-font-display); color: var(--g-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-row-time { flex: none; font-size: 12px; color: var(--g-ink-3); font-variant-numeric: tabular-nums; }
+.sh-row-last { display: block; color: var(--g-ink-2); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-row-last b { font-weight: 600; color: var(--g-ink-2); }
+/* unread: a heavier name, the last line in full ink, and a count pill by the time */
+.sh-unread .sh-row-name { font-weight: 700; }
+.sh-unread .sh-row-last { color: var(--g-ink); }
+.sh-unread-pill { flex: none; align-self: center; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 9px; background: var(--g-accent); color: var(--g-paper); font: 700 11px/18px var(--g-font-ui); text-align: center; font-variant-numeric: tabular-nums; }
+.sh-row-slot { min-width: 0; }
+.sh-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sh-row-more { justify-self: start; margin-top: 4px; min-height: 32px; padding: 0; border: 0; background: none; color: var(--g-ink-2); font: 500 13px/1.3 var(--g-font-ui); text-decoration: underline; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; cursor: pointer; }
+
+/* ── A room: head, the strip, the chat ── */
+.sh-room { display: flex; flex-direction: column; height: 100%; min-height: 0; max-width: var(--sh-col); margin: 0 auto; width: 100%; color: var(--g-ink); font: 15px/1.45 var(--g-font-ui); }
+.sh-room-top { flex: none; border-bottom: var(--g-hair) solid var(--g-line); padding-bottom: 10px; }
+.sh-room-top h1 { font-size: 21px; }
+.sh-back { font-size: 26px; line-height: 1; }
+.sh-strip { flex: none; display: flex; flex-direction: column; border-bottom: var(--g-hair) solid var(--g-line); background: var(--g-paper); }
+.sh-strip > * + * { border-top: var(--g-hair) solid var(--g-line); }
+.sh-room-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* ── The places: a bottom bar on a phone ── */
+.sh-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; height: calc(var(--sh-bar-h) + env(safe-area-inset-bottom)); padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); display: flex; background: var(--g-ground); border-top: var(--g-hair) solid var(--g-line); font-family: var(--g-font-ui); }
+.sh-place { flex: 1; position: relative; border: 0; background: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 0; color: var(--g-ink-2); font: 400 12px/1.2 var(--g-font-ui); cursor: pointer; }
+.sh-place i { font-style: normal; width: 44px; height: 28px; display: grid; place-items: center; border-radius: 14px; transition: background var(--g-t-quick) var(--g-ease); }
+.sh-place .mono-icon { width: 21px; height: 21px; }
+.sh-place[aria-current="page"] { color: var(--g-ink); font-weight: 600; }
+.sh-place[aria-current="page"] i { background: var(--g-sunk); }
+.sh-count { position: absolute; top: 8px; left: calc(50% + 10px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--g-needs); color: var(--g-paper); font: 700 11px/18px var(--g-font-ui); text-align: center; font-variant-numeric: tabular-nums; }
+
+/* ── Wide: the same three places as a left rail ── */
+@media (min-width: 900px) {
+  .sh-bar { top: 0; right: auto; width: calc(var(--sh-rail-w) + env(safe-area-inset-left)); height: auto; flex-direction: column; justify-content: flex-start; gap: 6px; padding: calc(16px + env(safe-area-inset-top)) 0 16px env(safe-area-inset-left); border-top: 0; border-right: var(--g-hair) solid var(--g-line); }
+  .sh-place { flex: none; height: 64px; }
+  .sh-count { top: 4px; }
+  .sh-home { padding-bottom: 24px; }
+}
+
+/* ── Ink: shape and word, heavier lines, no fills that only tint ── */
+:root[data-screen="ink"] .sh-pin { border: 2px solid #000; border-left-width: 6px; box-shadow: none; }
+:root[data-screen="ink"] .sh-unread-pill, :root[data-screen="ink"] .sh-count { background: #000; color: #fff; }
+:root[data-screen="ink"] .sh-place[aria-current="page"] i { background: none; outline: 1.5px solid #000; }
+:root[data-screen="ink"] .sh-strip { border-top: 0; }
+:root[data-screen="ink"] .sh-home *, :root[data-screen="ink"] .sh-room-top *, :root[data-screen="ink"] .sh-strip *, :root[data-screen="ink"] .sh-bar * { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .sh-btn, .sh-place i { transition: none; }
+}

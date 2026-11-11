@@ -1,0 +1,85 @@
+/* T-335 the applets drawer and an applet's frame (AppletsDrawer.tsx, AppletFrame.tsx, Recipes.tsx, Studio.tsx).
+   Ported from the shape prototype's .sheet/.tiles/.legend/.kindline. Glow tokens only. On the ink screen the two
+   kinds read by border shape (solid, dashed) and counts are solid black pills; nothing moves. */
+
+/* ── The drawer ─────────────────────────────────────────────── */
+.sh-ap-layer { position: fixed; inset: 0; z-index: 60; }
+.sh-ap-scrim { position: absolute; inset: 0; background: var(--g-scrim); animation: sh-ap-fade var(--g-t-state) var(--g-ease); }
+.sh-ap-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; max-height: 86%; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--g-ground); color: var(--g-ink); border-radius: 22px 22px 0 0;
+  padding: 8px 16px calc(20px + env(safe-area-inset-bottom)); box-shadow: var(--g-shadow-2);
+  animation: sh-ap-rise 280ms var(--g-ease); font-family: var(--g-font-ui);
+}
+@media (min-width: 900px) {
+  .sh-ap-sheet { left: 50%; right: auto; bottom: auto; top: 50%; width: min(520px, calc(100% - 48px)); max-height: min(86%, 720px);
+    transform: translate(-50%, -50%); border-radius: 22px; padding: 18px 20px 20px; animation-name: sh-ap-pop; }
+  .sh-ap-grabber { display: none; }
+}
+@keyframes sh-ap-fade { from { opacity: 0; } }
+@keyframes sh-ap-rise { from { transform: translateY(40px); opacity: 0; } }
+@keyframes sh-ap-pop { from { transform: translate(-50%, calc(-50% + 12px)); opacity: 0; } }
+.sh-ap-grabber { width: 40px; height: 4px; border-radius: 2px; background: var(--g-line-strong); margin: 4px auto 10px; }
+.sh-ap-sheet h2 { margin: 0 0 2px; font: 600 22px/1.2 var(--g-font-display); color: var(--g-ink); }
+.sh-ap-sub { margin: 0 0 14px; color: var(--g-ink-2); font-size: 13.5px; line-height: 1.4; }
+.sh-ap-group { margin: 6px 0 4px; font: 600 13px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
+.sh-ap-why { margin: 0 0 10px; font-size: 12.5px; line-height: 1.4; color: var(--g-ink-3); }
+.sh-ap-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 8px; margin-bottom: 16px; }
+.sh-ap-tile { border: 0; background: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0; min-height: 40px;
+  font: 12.5px/1.25 var(--g-font-ui); color: var(--g-ink); position: relative; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.sh-ap-tile i { font-style: normal; width: 58px; height: 58px; border-radius: 18px; display: grid; place-items: center; font-size: 24px;
+  background: var(--g-paper); border: var(--g-hair) solid var(--g-line); color: var(--g-ink); transition: transform var(--g-t-quick) var(--g-ease);
+  font-variant-emoji: text; font-family: "Noto Sans Symbols 2", "Noto Sans Symbols", "DejaVu Sans", var(--g-font-ui); }
+.sh-ap-tile.door i { border-style: dashed; border-color: var(--g-line-strong); }
+.sh-ap-tile:active i { transform: scale(.95); }
+.sh-ap-tile:focus-visible { outline: none; }
+.sh-ap-tile:focus-visible i { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+.sh-ap-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-ap-count { position: absolute; top: -4px; left: calc(50% + 20px); min-width: 18px; height: 18px; border-radius: 9px; padding: 0 5px;
+  background: var(--g-needs); color: var(--g-paper); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.sh-ap-legend { display: flex; gap: 14px; font-size: 12px; color: var(--g-ink-3); border-top: var(--g-hair) solid var(--g-line); padding-top: 10px; }
+.sh-ap-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sh-ap-mark { width: 16px; height: 16px; border-radius: 5px; border: var(--g-hair) solid var(--g-line-strong); display: inline-block; flex: none; }
+.sh-ap-mark.small { width: 12px; height: 12px; border-radius: 4px; }
+.sh-ap-mark.door { border-style: dashed; }
+
+/* ── An applet's frame ──────────────────────────────────────── */
+.sh-ap-frame { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--g-ground); color: var(--g-ink); }
+.sh-ap-top { display: flex; align-items: center; gap: 10px; padding: calc(14px + env(safe-area-inset-top)) 16px 8px; flex: none; }
+.sh-ap-top h1 { margin: 0; flex: 1; min-width: 0; font: 600 26px/1.15 var(--g-font-display); letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-ap-icon { width: 40px; height: 40px; flex: none; border: 0; border-radius: 12px; background: transparent; display: grid; place-items: center;
+  font-size: 22px; color: var(--g-ink-2); cursor: pointer; }
+.sh-ap-icon svg { width: 22px; height: 22px; }
+.sh-ap-icon:active { background: var(--g-sunk); }
+.sh-ap-kindline { margin: -4px 16px 10px; font-size: 12.5px; line-height: 1.35; color: var(--g-ink-3); display: flex; gap: 6px; align-items: center; flex: none; }
+.sh-ap-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sh-ap-body > * { flex: 1; min-height: 0; }
+
+/* ── Calm screens (Recipes, Studio with nothing pinned) ─────── */
+.sh-ap-calm { padding: 20px 16px; color: var(--g-ink-2); font-size: 14.5px; line-height: 1.45; }
+.sh-ap-calm p { margin: 0 0 4px; }
+.sh-ap-calm .sh-ap-calm-head { font: 600 17px/1.3 var(--g-font-display); color: var(--g-ink); margin-bottom: 6px; }
+
+/* ── Studio's pins ──────────────────────────────────────────── */
+.sh-ap-looks { list-style: none; margin: 0; padding: 4px 16px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.sh-ap-look { background: var(--g-paper); border: var(--g-hair) solid var(--g-line); border-radius: 14px; padding: 10px 12px 12px; box-shadow: var(--g-shadow-1); }
+.sh-ap-look h3 { margin: 0 0 2px; font: 600 15px/1.3 var(--g-font-ui); overflow-wrap: anywhere; }
+.sh-ap-look-why { margin: 0 0 8px; color: var(--g-ink-2); font-size: 13.5px; overflow-wrap: anywhere; }
+.sh-ap-look-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sh-ap-look-room { font-size: 12.5px; color: var(--g-ink-3); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-ap-btn { min-height: 40px; padding: 0 14px; margin-left: auto; border-radius: 20px; border: var(--g-hair) solid var(--g-line-strong); background: var(--g-paper);
+  color: var(--g-ink); font: 500 14px/1 var(--g-font-ui); cursor: pointer; }
+
+/* ── Ink: shape and word, never tint; nothing moves ─────────── */
+:root[data-screen="ink"] .sh-ap-sheet { border-top: 2px solid #000; }
+@media (min-width: 900px) { :root[data-screen="ink"] .sh-ap-sheet { border: 2px solid #000; } }
+:root[data-screen="ink"] .sh-ap-tile i { border: 1.5px solid #000; }
+:root[data-screen="ink"] .sh-ap-tile.door i { border: 1.5px dashed #000; }
+:root[data-screen="ink"] .sh-ap-mark { border: 1.5px solid #000; }
+:root[data-screen="ink"] .sh-ap-mark.door { border-style: dashed; }
+:root[data-screen="ink"] .sh-ap-count { background: #000; color: #fff; }
+:root[data-screen="ink"] .sh-ap-look { border: 1.5px solid #000; box-shadow: none; }
+:root[data-screen="ink"] .sh-ap-btn { border: 1.5px solid #000; }
+:root[data-screen="ink"] .sh-ap-scrim, :root[data-screen="ink"] .sh-ap-sheet, :root[data-screen="ink"] .sh-ap-tile i { animation: none; transition: none; }
+@media (prefers-reduced-motion: reduce) { .sh-ap-scrim, .sh-ap-sheet, .sh-ap-tile i { animation: none; transition: none; } }
+.sh-ap-sheet:focus { outline: none; }

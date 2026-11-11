@@ -71,6 +71,9 @@ export type Session = {
   /** T-335 runs visible: a waiting session's who and what (mts writes them from its report: `waiting_on`, `waiting_for`); `on` is "aaron"
    *  when it waits on you, else the room or agent it waits on. Left out or null: it says no one. */
   waiting?: SessionWait | null;
+  /** T-335 shape: the room the run note names (`channel`, else `starter_channel`; the first id of a list), so a room no area owns can
+   *  still show its runs. Only on a run no private clue touches and whose rooms are read; left out or null otherwise. */
+  channel?: string | null;
 };
 
 export type SessionWait = { on: string; what: string | null };
