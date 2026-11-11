@@ -116,6 +116,15 @@ export function SealedApplet({ id, entry, listed, vault, rooms, onOpenNote, onCo
     return () => { on = false; };
   }, [app, host, grant]);
   const status = app && keys ? grants.status(app.id, keys.scope, keys.html) : "none";
+  // a grant that runs out while the applet is open: the frame goes and the card comes back then (re-armed, since a timer can't run a year)
+  const endsAt = app && status !== "none" ? grants.record(app.id)?.expires ?? null : null;
+  const [armed, setArmed] = useState(0);
+  useEffect(() => {
+    const ms = endsAt ? Date.parse(endsAt) - Date.now() : NaN;
+    if (!(ms > 0)) return;
+    const t = window.setTimeout(() => setArmed((n) => n + 1), Math.min(ms + 50, 2 ** 31 - 1));
+    return () => window.clearTimeout(t);
+  }, [endsAt, armed]);
   // Sealed: a changed applet runs with a notice until Accept. Approved-code: it does not run; it asks again.
   const decision = runDecision(mode, status, app ? grants.grantedUnder(app.id) : null);
   const granted = decision === "run" || decision === "run-notice";

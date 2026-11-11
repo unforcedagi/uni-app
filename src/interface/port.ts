@@ -107,6 +107,7 @@ export function createAppletPort(grant: Grant, be: PortBackends, opts: PortOptio
         let copy: NewNote;
         try { copy = JSON.parse(JSON.stringify(note)) as NewNote; } catch { copy = { path: "" }; }
         const alternates = Array.isArray(copy.alternates) ? copy.alternates : [];
+        copy.alternates = alternates;
         const paths = [copy.path, ...alternates];
         const tags = Array.isArray(copy.tags) ? copy.tags : null;
         if (!paths.every((p) => typeof p === "string" && allowsNote(grant, name, "create" satisfies Verb, { path: p, tags }))) refuse("out_of_scope", `add a note at ${String(copy.path).slice(0, 80)} in the ${name} vault`);

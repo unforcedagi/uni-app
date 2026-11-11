@@ -64,10 +64,14 @@ export type NoteFacts = { path: string | null | undefined; tags?: readonly unkno
 /** A note has a type when it carries that tag or one beneath it (`post/draft` is a `post`). */
 const hasType = (tags: readonly unknown[] | null | undefined, type: string) => Array.isArray(tags) && tags.some((t) => typeof t === "string" && (t === type || t.startsWith(`${type}/`)));
 
+/** A note's path as a rule may judge it: plain segments only, whatever the rule (no `..`, `.`, empty or encoded segment, no backslash, not absolute). */
+const plainPath = (path: unknown): path is string => typeof path === "string" && !/%/.test(path) && inScope([""], path);
+
 function ruleCovers(rule: Rule, verb: Verb, note: NoteFacts): boolean {
   if (!rule.verbs.includes(verb)) return false;
-  // (a folder rule never holds a `%`, so a path with one is refused here too: no encoded segment is ever judged)
-  if (rule.path !== undefined && (!inScope([rule.path], note.path) || /%/.test(String(note.path)))) return false;
+  // every rule, a type-only one too: a path that isn't plain is never judged
+  if (!plainPath(note.path)) return false;
+  if (rule.path !== undefined && !inScope([rule.path], note.path)) return false;
   if (rule.type !== undefined && !hasType(note.tags, rule.type)) return false;
   // a note it is making now is its own; any other is its own only when the caller knows this grant made it
   if (rule.own && verb !== "create" && note.own !== true) return false;

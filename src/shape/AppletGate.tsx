@@ -40,9 +40,10 @@ function backends(onOpenNote: (vault: string, path: string) => void): PortBacken
       const r = await (audio
         ? invoke<Flush>("journal_save_voice", audio.bytes, { headers: { "x-entry": JSON.stringify(note), "x-audio-mime": audio.mime } })
         : invoke<Flush>("journal_save_text", { entry: note, saveAnother: !!o?.saveAnother }));
-      // the writer names what it sent; only when that is this one entry and nothing waits is it known to be the note just made
-      const sent = Array.isArray(r?.sent) ? r.sent.filter((x): x is string => typeof x === "string") : [];
-      return { result: r, made: !r?.error && !r?.duplicate && sent.length === 1 && (r?.remaining ?? 0) === 0 ? sent : [] };
+      // `made` stays empty: the journal's writer reports what a flush sent, which can be another entry that was waiting (a retry
+      // of this one queues nothing; the Journal's own flush can send this one first). Until the save command names the note for
+      // this entry, nothing is claimed as the applet's own, so an `own` rule lets it add notes and read none back.
+      return { result: r, made: [] };
     },
     open: onOpenNote,
   };
@@ -105,12 +106,14 @@ export function AppletGate({ applet, home, rooms, reviewing, onReviewDone, onAll
 
   // a grant that runs out while the applet is open: the card comes back then, not at the next tap
   const endsAt = allowed ? grants.record(subject)?.expires ?? null : null;
+  const [armed, setArmed] = useState(0);
   useEffect(() => {
     const ms = endsAt ? Date.parse(endsAt) - Date.now() : NaN;
     if (!(ms > 0)) return;
-    const t = window.setTimeout(bump, Math.min(ms + 50, 2 ** 31 - 1));
+    // (a timer can't run a year: it re-arms until the date)
+    const t = window.setTimeout(() => setArmed((n) => n + 1), Math.min(ms + 50, 2 ** 31 - 1));
     return () => window.clearTimeout(t);
-  }, [endsAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [endsAt, armed]);
 
   const roomName = (id: string) => cleanText(rooms.find((r) => r.id === id)?.name.replace(/^#/, "") ?? id);
   if (!resolved.ok) return <div className="sh-ap-calm sh-ap-gate" role="alert"><p className="sh-ap-calm-head">{m.name} can't open</p><p>It was not run: {resolved.error}.</p></div>;

@@ -304,6 +304,16 @@ await check("own covers only what the writer says was made: never the path asked
   assert.equal(await code(() => arcade.port.open("plot", "Taste/%2e%2e/Journal/x")), "out_of_scope");
 });
 
+await check("a type-only rule judges the path too: nothing climbing, absolute or encoded", async () => {
+  const { be, calls } = shell();
+  const port = createAppletPort(grantOf({ ...base, access: [{ vault: "home", allow: [{ type: "post", verbs: ["create", "read"] }] }] }), be, { home: "plot" });
+  for (const path of ["Journal/../Private/secret", "../x", "/abs", "a\\b", "Journal/%2e%2e/x", "a//b", ""]) {
+    assert.equal(await code(port.vault.create("home", { path, tags: ["post"], content: "x" })), "out_of_scope", path);
+  }
+  await port.vault.create("home", { path: "Posts/New", tags: ["post"], content: "x" });
+  assert.equal(calls.filter((c) => c.what === "create").length, 1);
+});
+
 await check("asking whether a note could be added: the grant first, then the shell's writer, and nothing is written", async () => {
   const { port, calls } = arcadePort();
   await port.vault.writable("home", "Journal/2026/11-11/10-00");
