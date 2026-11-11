@@ -1,10 +1,11 @@
 // T-335 a sealed applet in the drawer: an interface note from the vault, hosted on the interface contract (src/interface) by
 // src/shape/SealedApplet.tsx. End to end on the real build with Tauri faked (sealedAppletFixture.ts on shapeFixture.ts, made-up data).
 // Ported from the area app specs (interface.spec.ts, areas.spec.ts, areaRoom.spec.ts, T-74/T-75), booting through the drawer instead of an
-// area: the grant prompt and its words, the grant's key (needs, note path, html hash), Stop / Revoke / no auto-start, the frame's reach
+// area: the grant card and its words, the grant's key (needs, note path, html hash), Stop / Revoke / no auto-start, the frame's reach
 // (vault inside its prefixes only, no parent, no network, no Tauri), suggestions only by a host tap, the self-test gate and approved-code mode.
 // Run: pnpm exec playwright test --config playwright.applets.config.ts
 import { test, expect, type Page } from '@playwright/test';
+import { bar } from './shapeNav';
 import { appletReads, bootSealed, HOSTILE_NEEDS, hostileApp, navApp, noteIdOf, openDeveloper, openFromDrawer, ROOM, seedListApplet, startListener, type FixtureApplet } from './sealedAppletFixture';
 
 const frame = (page: Page) => page.frameLocator('iframe.area-frame');
@@ -22,12 +23,12 @@ const quiet = (id: string, name: string, over: Partial<FixtureApplet> = {}): Fix
 test.beforeEach(async ({ page }) => { page.on('pageerror', (e) => { throw e; }); });
 
 test.describe('the drawer hosts a sealed applet', () => {
-  test('Seed list is under "From your vault"; the grant prompt names its folder; Allow runs it; it reads inside Seeds/ and is refused outside', async ({ page }) => {
+  test('Seed list is under "From your vault"; the grant card names its folder; Allow runs it; it reads inside Seeds/ and is refused outside', async ({ page }) => {
     await bootSealed(page, { granted: false });
     await openFromDrawer(page, 'Seed list');
     await expect(page.getByRole('heading', { name: 'Seed list', level: 1 })).toBeVisible();
     await expect(page.locator('.sh-ap-kindline')).toHaveText('Vault applet · Seeds folder, in your vault');
-    await expect(prompt(page)).toContainText('An applet wants to run');
+    await expect(prompt(page)).toContainText('An applet asks for access');
     await expect(prompt(page)).toContainText('Read notes in Seeds/');
     await expect(prompt(page).locator('q[data-untrusted="true"]')).toHaveText('Seed list');
     await expect(page.locator('iframe')).toHaveCount(0);
@@ -52,6 +53,49 @@ test.describe('the drawer hosts a sealed applet', () => {
     expect(Object.keys(await grants(page))).toEqual([noteIdOf(seedListApplet())]);
   });
 
+
+  test('contract 2: one manifest in the note; the card names its folder and room; the frame reads inside its grant and is refused outside', async ({ page }) => {
+    const v2 = seedListApplet({ v2: {
+      access: [{ vault: 'here', allow: [{ path: 'Seeds/', verbs: ['read'] }] }],
+      reach: [{ room: ROOM.garden, verbs: ['read'] }],
+      search: [{ what: 'seeds', vault: 'here', path: 'Seeds/' }],
+    } });
+    await bootSealed(page, { granted: false, applets: [v2] });
+    await openFromDrawer(page, 'Seed list');
+    // where it lives is the shell's sentence, made from its access (contract 1 showed the note's own claim)
+    await expect(page.locator('.sh-ap-kindline')).toHaveText('Vault applet · the vault it lives in');
+    await expect(prompt(page).locator('.grant-line dd')).toHaveText(['Read notes in Seeds/', 'Read recent messages']);
+    await expect(prompt(page).locator('.grant-line dt').last()).toHaveText('#Garden co-op site');
+    await expect(prompt(page)).toContainText(/Lasts until .*20\d\d/);
+    await expect(page.locator('iframe')).toHaveCount(0);
+    await prompt(page).getByRole('button', { name: 'Allow' }).click();
+    const R = await out(page);
+    expect(R.list.sort()).toEqual(['Seeds/Bean', 'Seeds/Tomato']);
+    expect(R.diary, 'a note outside its grant reads as not found').toBeNull();
+    expect(R.diaryById).toEqual([]);
+    expect(R.outsidePrefix.error, 'listing a folder outside its grant is refused').toMatch(/403/);
+    expect(R.recent, 'the room on its card is its to read').not.toHaveProperty('error');
+    expect(JSON.stringify(R)).not.toContain('PRIVATE-DIARY-WORDS');
+    const g = (await grants(page))[noteIdOf(v2)];
+    expect(Date.parse(g.expires) - Date.parse(g.grantedAt)).toBe(365 * 86_400_000);
+  });
+
+  test('contract 2: a note that asks for more than the frame can do is not listed; one with a second manifest beside it is refused when it opens', async ({ page }) => {
+    const access = [{ vault: 'here', allow: [{ path: 'Seeds/', verbs: ['read'] }] }];
+    await bootSealed(page, { granted: false, applets: [
+      quiet('writer', 'Seed writer', { v2: { access: [{ vault: 'here', allow: [{ path: 'Seeds/', verbs: ['read', 'update'] }] }] } }),
+      quiet('doorway', 'Doorway', { v2: { access: [{ door: 'arcade', ops: ['home'] }] } }),
+      quiet('two-faced', 'Two faced', { v2: { access }, interface: { contract: 1, needs: [{ 'vault.read': 'Journal/' }] } }),
+    ] });
+    await bar(page).getByRole('button', { name: /^Applets/ }).click();
+    const drawer = page.getByRole('dialog', { name: 'Applets' });
+    await expect(drawer.getByRole('button', { name: 'Two faced' })).toBeVisible();
+    await expect(drawer.getByRole('button', { name: 'Seed writer' })).toHaveCount(0);
+    await expect(drawer.getByRole('button', { name: 'Doorway' })).toHaveCount(0);
+    await drawer.getByRole('button', { name: 'Two faced' }).click();
+    await expect(page.locator('.sh-sa-refused')).toContainText('a contract 2 applet has one manifest');
+    await expect(page.locator('iframe')).toHaveCount(0);
+  });
   test('Not now runs nothing and is not remembered; a restored applet never starts without a tap', async ({ page }) => {
     await bootSealed(page, { granted: false });
     await openFromDrawer(page, 'Seed list');
@@ -231,11 +275,13 @@ test.describe('the grant follows the needs, the note and the code', () => {
     await expect(prompt(page, 'Seed list, renamed').locator('q[data-untrusted="true"]')).toHaveText('Seed list, renamed');
   });
 
-  test('a chat need names its room in the prompt, stressed', async ({ page }) => {
+  test('a chat need names its room on the card, stressed', async ({ page }) => {
     await bootSealed(page, { granted: false, applets: [seedListApplet({ interface: { contract: 1, needs: [{ 'vault.read': 'Seeds/' }, { 'chat.read': ROOM.garden }, { 'chat.draft': ROOM.garden }] } })] });
     await openFromDrawer(page, 'Seed list');
-    await expect(prompt(page).locator('.grant-outside')).toHaveCount(2);
-    await expect(prompt(page).locator('.grant-outside').first()).toContainText('Read recent messages in #Garden co-op site');
+    // one row for the room, read and draft together, under the room's name
+    await expect(prompt(page).locator('.grant-outside')).toHaveCount(1);
+    await expect(prompt(page).locator('.grant-line', { has: page.locator('.grant-outside') }).locator('dt')).toHaveText('#Garden co-op site');
+    await expect(prompt(page).locator('.grant-outside')).toContainText('Read recent messages and suggest drafts');
     await expect(prompt(page)).toContainText('can freeze it');
   });
 });

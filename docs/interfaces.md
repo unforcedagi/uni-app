@@ -1,17 +1,136 @@
-# Interfaces: the contract, manifests, kits and sealing
+# Interfaces: the contract, manifests, the grant card, kits and sealing
 
-An **interface** is a small app that the Uni app runs inside a sealed frame: an HTML note in the vault. It
-reaches the vault and chat only through the **interface contract** (version 1). The contract lives in
-`src/interface/` with no imports from `App.tsx`, so it can be lifted into a package.
+An **applet** is a small app in the Uni app's drawer. Two kinds of code run as applets:
 
-Since 0.4.0 its consumer is the **applets drawer**: a note tagged `applet`, with `extension: html` and both an
-`applet:` manifest (`src/interface/applets.ts`) and an `interface:` manifest in its metadata, joins the drawer as a
-sealed applet (`src/interface/sealedApplet.ts`, `src/shape/SealedApplet.tsx`). A note whose `applet:` manifest isn't valid is
-skipped and counted. One whose `interface:` needs are missing or can't be granted still gets its tile, and opening it
-shows "This applet can't open" with the reason. Until 0.4.0 the consumer was an area's app (`Areas/<Name>/app`, shown in the
-area view); the areas view is gone, and the example apps written for it
-([`areas-seed/techne.html`](../areas-seed/techne.html), [`areas-seed/unforced.html`](../areas-seed/unforced.html))
-declare `area` scopes, which a drawer applet refuses.
+- a **sealed applet**: an HTML note in the vault, run inside a sealed frame. It reaches the vault and chat only
+  through the frame's messages (the wire protocol below);
+- a **built-in applet**: compiled into the app (Arcade, Calendar, To Post, Mail ...).
+
+Both are described by a manifest on the **interface contract**, which lives in `src/interface/` with no imports from
+`App.tsx`, so it can be lifted into a package. There are two versions:
+
+- **Contract 2** (new): one manifest says what the applet reads and writes (which vault, which types or folders, which
+  door), what else it reaches, what it offers to search and its screens. The shell resolves it to a **grant**, shows
+  exactly that on **one card** the owner allows, and refuses anything outside it at runtime. Arcade is on it. A sealed
+  note may use it too.
+- **Contract 1**: a sealed note carries two manifests, `applet:` (how the drawer lists it) and `interface:` (its
+  needs). Still accepted, and it asks on the same card. Built-ins other than Arcade are listed on contract 1 and ask for
+  nothing yet.
+
+A sealed applet joins the drawer when its note is tagged `applet`, has `extension: html` and a valid manifest
+(`src/interface/sealedApplet.ts`, `src/shape/SealedApplet.tsx`). A note whose manifest isn't valid is skipped and
+counted. One whose needs can't be granted still gets its tile, and opening it shows "This applet can't open" with the
+reason. Until 0.4.0 the consumer was an area's app (`Areas/<Name>/app`, shown in the area view); the areas view is
+gone, and the example apps written for it ([`areas-seed/techne.html`](../areas-seed/techne.html),
+[`areas-seed/unforced.html`](../areas-seed/unforced.html)) declare `area` scopes, which a drawer applet refuses.
+
+## Contract 2: one manifest, one card, one grant
+
+```yaml
+applet:
+  contract: 2
+  id: arcade                         # kebab-case; a note may not take a built-in's id
+  name: Arcade
+  glyph: ◆                           # optional
+  note: your cards and taste profile stay on the box      # optional, one line
+  access:
+    - door: arcade                   # a door the shell knows (doors.ts)
+      ops: [home, rounds, profile, media, react, distill]   # only these ops of it
+    - vault: home                    # home = your own vault · here = the vault its note is in · or a vault's name
+      allow:
+        - path: Journal/             # a folder (ends in /), and/or `type: <tag>`
+          verbs: [create]            # read · create · update · delete
+          own: true                  # only the notes it made
+        - path: Taste/
+          verbs: [read]
+  reach: [voice]                     # voice · {room: <room id>, verbs: [read, draft]}
+  search: [{what: games}]            # {what, vault?, type?, path?}: over notes, it must sit inside a read rule
+  screens: [{id: home, name: Arcade}, {id: look, name: A pinned card}]   # the first is where it opens
+```
+
+That is Arcade's real manifest (`src/arcade/manifest.ts`). The words follow Parachute 1.0's grants: allow by **type**
+and **verb**, `own` for "only what this grant created". A folder (`path`) is this shell's narrowing; 1.0 grants have no
+word for it yet.
+
+| File | Role |
+|---|---|
+| `manifest2.ts` | `parseManifest2(raw, host)`: strict parser. An unknown key, door, op or verb, a rule that names no type and no folder, a climbing or hidden-character path, a repeated vault or door, or a search offer over notes it can't read is refused, never repaired. `screenOf`, `whereWords` |
+| `doors.ts` | the doors the shell knows, each op with the one shell command it reaches and the shell's words for it |
+| `grant2.ts` | `resolveGrant` (manifest + this device → `Grant`), `grantLines` (the card's rows), `allowsDoor` / `allowsNote` / `allowsQuery` / `allowsReach` (the runtime's questions), `grantKey`, `grantEvents` (the Parachute 1.0 shape) |
+| `port.ts` | `createAppletPort(grant, backends)`: a built-in applet's only way to a door, a vault, the microphone or a note. Every call asks the grant |
+| `GrantCard.tsx`, `grantCard.css` | the card: asks (Allow / Not now), and once allowed shows what was granted with Revoke access |
+| `grants.ts` | this device's grant store: subject → grant key, code hash, when allowed, when it ends |
+| `src/shape/AppletGate.tsx` | a built-in on contract 2: the card until allowed, then the applet with its port |
+| `planned2.ts` | Calendar's and To Post's contract 2 manifests, written and tested, not in use |
+
+**The grant.** `resolveGrant` turns `home` and `here` into vault names and checks that each room exists on this
+device. The result, a `Grant`, is the one value the card shows, the tap allows and the runtime checks. Its key is the
+SHA-256 of the canonical grant (and, for a note, the note's path); the store keeps the key the owner allowed, so a
+manifest that resolves to anything else (a new release that asks for more or less, another home vault) shows the card
+again. A grant lasts a year (`GRANT_DAYS`, Parachute 1.0's lean for the longest grant) and then the card comes back. A
+record whose expiry can't be read counts as expired. The name is not in the key: a rename alone asks for nothing new.
+
+**The card** (`GrantCard.tsx`) is drawn by the shell, outside any frame, and names exactly what is granted, one row per
+place: a door's reads on one row and what it changes on the next, each vault rule, each room, the microphone. Rows that
+change something, reach a room or read outside a sealed applet's own folder are marked. Every sentence is the shell's (a
+door's and an op's words come from `doors.ts`). What a note supplies is shown as data inside those sentences: a sealed
+applet's name, quoted and marked as unverified (its glyph is not shown on the card: a note could pick a tick or a
+padlock), and the folder paths it asks for, as written (a path is a plain folder
+ending in `/`, with no hidden characters, but it can hold words: read the row's path as the note's, not the shell's). Under the rows it says "Nothing else", when the grant ends, and a fingerprint (the key's first eight
+digits) that changes whenever the access does. Only a real tap allows (`isTrusted`). Once allowed, a built-in's frame
+has an **Access** button that shows the same card with **Revoke access**.
+
+**At runtime** a built-in applet gets one thing from the shell: its port. `port.door(door, op, args)`,
+`port.vault.query / note / create`, `port.open(vault, path)` and `port.need("voice")` each ask the grant first and throw
+`not_granted` (the grant has no such door, vault or reach) or `out_of_scope` (it has, but not this op, note or folder)
+before anything reaches a shell command. A read is judged on the note that comes back (its real path and tags), a note
+outside the grant reads as absent, a list's rows from outside are dropped, and every path a new note could land on
+(alternates too) must be inside a create rule. A note is checked and written from one copy. A note's path that isn't plain (a `..`, empty or absolute segment, a backslash, a percent-encoded dot or slash) is
+refused whatever the rule, a type-only rule included; a list's `pathPrefix` is held to its folder rule and each row is
+judged as a note. `own` covers only the notes the shell's writer reports this port made (by id or path); the path that was
+asked for is never taken on trust. Today's writer (the journal's) can't name the note a save made, so it reports none:
+an `own` rule lets an applet add notes and read none of them back, until the save command returns the note's id.
+The grant is asked again when the shell answers: a revoke, an expiry or leaving the applet refuses every new
+call, and a call that was in flight gets nothing back (a write already handed to the shell's writer is not undone). A
+grant that runs out while an applet is open (built-in or sealed) brings the card back then. A rooms list that changes nothing the grant
+names leaves the running applet alone.
+
+The shell's writer behind `create` is the journal's, which saves to the journal's own vault (Journal settings). The
+port's backend asks the app core where the journal is kept at every write, never from a copy, and adds the note only
+when that is the vault the grant named; otherwise it refuses and says so. `port.vault.writable(vault, path)` asks the
+same without writing, and the Arcade asks it before the microphone opens, so nothing is recorded that would then be
+refused. Limits, stated plainly: the check and the save are two calls to the app core, not one (closing that needs the
+save command itself to take the expected vault); it compares the vault's name, not the hub; and an entry queued while
+offline is sent to wherever the journal is kept when it is sent, as every journal entry is.
+
+**What the boundary is, and isn't.** A built-in applet is code in the app's own bundle, covered by the release
+signature, in the same JavaScript realm as the shell. The port is a boundary of construction, not of isolation: it
+holds because the applet's folder is written with no other way out, and a test keeps it so. `scripts/appletV2.test.ts`
+fails the build if anything under `src/arcade/` imports Tauri, names a shell command, reaches the network, opens the
+microphone, touches the grant store, or imports a shell module that isn't on its short list (the port's types, the
+shell's recorder, the journal's pure path maker), and it checks that those listed modules hold no command either. What
+that does not cover: the check reads source text, one import deep, so it is a guard against drift, not a proof; the
+Arcade shares the page's `localStorage` (where grants are kept) and globals with the shell; and the microphone is
+opened by the shell's recorder, which the Arcade calls after `port.need("voice")` (asked, not enforced by the
+recorder). It does not stop hostile code that someone compiles in on purpose; the frame is the boundary for code the
+release doesn't vouch for. A sealed applet on contract 2 is compiled to the frame's needs and held by the same
+`session.ts` and `router.ts` as contract 1, so its boundary is the frame. Today the frame can only read, so a sealed
+manifest may hold only `vault: here`, rules of `{path, verbs: [read]}` and rooms; a door, a write, `voice`, another
+vault or a type-only rule is refused with the reason, and the note is not listed.
+
+**Not signed yet.** The grant is a record on this device (`localStorage`, `uni.interface.grants.v2`), as contract 1's
+was. `grantEvents(grant, expires)` builds the same grant in the shape Parachute 1.0 proposes for an owner-signed event
+(one per vault: `d`, `vault` and `expiration` tags; content `{v:1, grantee:{kind:"applet", id, author}, allow:[{type,
+verbs, own?}], deny_markers}`), with folder-only rules listed apart as `shellOnly`. Nothing signs, stores or sends
+those events: the event kinds are not fixed. Until the vault enforces grants, only the shell holds an applet to its
+card; a script with a vault token is not held by it.
+
+**Not migrated yet.** Calendar and To Post still call shell commands directly and ask for nothing. Their manifests are
+in `planned2.ts`. Moving them needs, beyond a port of their calls: the shell's `update` writer behind the port (To
+Post's approve, edit and drop), a `links` reach for opening a posted link outside the app, and for Calendar its
+offline snapshot behind the port. Mail and Messages (doors with their own sessions) have no contract 2 manifest.
+
+## Contract 1 and the sealed frame
 
 ## How it fits together
 
@@ -37,12 +156,13 @@ declare `area` scopes, which a drawer applet refuses.
 | `modules/frameFetch.ts` | the one adapter that knows the `pfr` wire shape (swap for the published `createFrameFetch`/`serveFrameFetch`) |
 | `kits/` | `frameKit.ts` (the code injected into the frame) and the bundled `VaultClient` |
 | `srcdoc.ts`, `frame.tsx` | the srcdoc builder and the sealed frame host |
-| `consent.tsx`, `grantPrompt.tsx` | host-rendered suggestion bar and first-open grant prompt |
+| `consent.tsx`, `GrantCard.tsx` | host-rendered suggestion bar and the grant card |
 | `selftest/` | the in-app sandbox self-test and the platform gate |
 
-## The manifest
+## The contract 1 manifest
 
-In the applet note's metadata:
+In the applet note's metadata (contract 2's single manifest is above; a note carries one or the other, never
+`contract: 2` with an `interface:` beside it):
 
 ```yaml
 applet:
@@ -84,10 +204,11 @@ that does.
 
 ## Consent
 
-1. **First open: grant prompt** (`grantPrompt.tsx`, outside the frame). Lists the needs in plain words:
-   *Read notes in Seeds/ · Read recent messages in #garden · Suggest drafts for #garden*.
-   Every sentence is the host's; the only text from the note is the applet's name, quoted and marked as
-   unverified. **Allow** stores the grant; **Not now** shows the default view and is not remembered.
+1. **First open: the grant card** (`GrantCard.tsx`, outside the frame; the same card contract 2 uses). One row per
+   place: *uni vault · Read notes in Seeds/*, *#garden · Read recent messages and suggest drafts (you decide what is
+   added; nothing is sent)*. Every sentence is the host's; the only text from the note is the applet's name, quoted and
+   marked as unverified. **Allow** stores the grant, for a year; **Not now** shows the default view and is not
+   remembered. A grant stored before the card existed has no end date and stays as it was.
 2. **While running: suggestion bar** (`consent.tsx`, outside the frame). `chat.draft` and `note.open`
    only create a *pending suggestion*: "Seeds suggests a draft for #garden: … [Add to draft] [Dismiss]".
    Only a tap on that host UI adds the text to the room's composer (after any existing draft; it never
@@ -210,7 +331,7 @@ What each part really guarantees:
     turn WebRTC off is still not implemented.
 - **In-process, so an app can freeze Uni.** The frame shares the host's renderer, so `for(;;){}`, an
   allocation loop or a DOM bomb freezes the whole app on Chromium and WebKit (reproduced in review). The
-  message limiter cannot help; there is no in-process fix. Mitigations shipped: the grant prompt says so,
+  message limiter cannot help; there is no in-process fix. Mitigations shipped: the grant card says so,
   **Stop app** and **Revoke access** exist, and a restored tab never auto-starts its app. A frozen host
   cannot be tapped, so recovery is force-quit and, on relaunch, not opening the applet. **Out-of-process
   hosting (a separate webview per app) is the follow-up** that actually fixes it.
@@ -236,10 +357,10 @@ WebRTC checks revokes the stored result. `gateMode()` returns `sealed`, `approve
 | WebRTC and any other check failed or went unreported, or no result, or a different version, platform or webview | closed | never |
 
 In approved-code mode an app whose HTML hash differs from the one stored at approval (status `updated`) does
-**not** run. The applet shows the grant prompt again with a host-rendered line, "This applet's code changed since you
+**not** run. The applet shows the grant card again with a host-rendered line, "This applet's code changed since you
 allowed it. On this device applets can reach the network through WebRTC, so only code you've approved runs.", and
 **Allow this version** / **Not now**. Nothing runs until **Allow this version** stores the new hash. A
-never-approved app gets the first-open prompt, which in this mode drops the "sealed frame" and "can't reach the
+never-approved app gets the first-open card, which in this mode drops the "sealed frame" and "can't reach the
 internet" sentences for the host line "On this device applets can reach the network through WebRTC, so this applet is only as
 safe as its code. Allow it only if you trust it." A running app shows an **Approved code** chip in the host bar. The
 grant record stores `grantedUnder` (the mode it was made in; a record without it counts as `sealed`), and a grant made

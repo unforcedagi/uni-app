@@ -1,4 +1,4 @@
-/* T-335 a sealed applet (SealedApplet.tsx): the frame, and the host-rendered consent around it (the grant prompt, the suggestion bar, the
+/* T-335 a sealed applet (SealedApplet.tsx): the frame, and the host-rendered consent around it (the grant card has its own sheet, src/interface/grantCard.css; here: the suggestion bar, the
    "updated" line, Stop and Revoke). Ported from the old area app's rules (src/areas/areas.css) to the glow tokens. The draft block's
    rules are part of consent: it scrolls, keeps every line break and never grows past 40% of the screen, so all it inserts can be read. */
 .sh-sa { display: flex; flex-direction: column; min-height: 0; }
@@ -12,12 +12,6 @@
 .sh-sa-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .sh-sa-refused .sh-ap-calm-head { color: var(--g-danger); }
 
-.sh-sa .grant-prompt { max-width: 520px; margin: 8px auto 20px; padding: 0 16px; color: var(--g-ink); font: 14.5px/1.45 var(--g-font-ui); }
-.sh-sa .grant-prompt h2 { font: 600 22px/1.2 var(--g-font-display); margin: 0 0 8px; }
-.sh-sa .grant-prompt ul { margin: 8px 0 12px; padding-left: 20px; line-height: 1.6; }
-.sh-sa .grant-prompt .area-quiet { color: var(--g-ink-2); margin: 0 0 8px; }
-.sh-sa .grant-outside { color: var(--g-danger); }
-.sh-sa .grant-name { font-style: normal; font-weight: 600; }
 .sh-sa .area-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .sh-sa .suggestion-bar { flex: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 16px; border-block: var(--g-hair) solid var(--g-line); background: var(--g-paper); }
@@ -27,11 +21,11 @@
 .sh-sa .suggestion-draft { margin: 6px 0 0; padding: 8px 10px; max-width: 100%; max-height: min(40vh, 24rem); overflow: auto; border-left: 2px solid var(--g-line-strong);
   background: var(--g-ground); color: var(--g-ink-2); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .sh-sa .suggestion-ref { overflow-wrap: anywhere; }
-.sh-sa .suggestion-go, .sh-sa .grant-prompt .pairing-secondary, .sh-sa .suggestion-actions .pairing-secondary { min-height: 40px; padding: 4px 14px; border-radius: 20px; font: 600 14px/1 var(--g-font-ui); cursor: pointer; }
+.sh-sa .suggestion-go, .sh-sa .suggestion-actions .pairing-secondary { min-height: 40px; padding: 4px 14px; border-radius: 20px; font: 600 14px/1 var(--g-font-ui); cursor: pointer; }
 .sh-sa .suggestion-go { border: 0; background: var(--g-accent); color: var(--g-paper); }
 .sh-sa .suggestion-go:disabled { opacity: .5; cursor: default; }
-.sh-sa .grant-prompt .pairing-secondary, .sh-sa .suggestion-actions .pairing-secondary { border: var(--g-hair) solid var(--g-line-strong); background: var(--g-paper); color: var(--g-ink); }
+.sh-sa .suggestion-actions .pairing-secondary { border: var(--g-hair) solid var(--g-line-strong); background: var(--g-paper); color: var(--g-ink); }
 
 :root[data-screen="ink"] .sh-sa .suggestion-go { background: #000; color: #fff; }
-:root[data-screen="ink"] .sh-sa .grant-outside, :root[data-screen="ink"] .sh-sa-refused .sh-ap-calm-head { color: #000; text-decoration: underline; }
+:root[data-screen="ink"] .sh-sa-refused .sh-ap-calm-head { color: #000; text-decoration: underline; }
 :root[data-screen="ink"] .sh-sa .suggestion-bar, :root[data-screen="ink"] .sh-sa-updated { border-block-width: 1.5px; border-color: #000; }

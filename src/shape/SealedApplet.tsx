@@ -13,9 +13,9 @@ import { currentUserAgent, gateMode, platformName, runDecision } from "../interf
 import { useAppVersion, useWebviewRuntime } from "../interface/selftest/useAppVersion";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import InterfaceFrame from "../interface/frame";
-import GrantPrompt from "../interface/grantPrompt";
+import GrantCard from "../interface/GrantCard";
 import SuggestionBar from "../interface/consent";
-import { createGrantStore } from "../interface/grants";
+import { deviceGrants } from "../interface/grants";
 import { grantKey, htmlHash } from "../interface/manifest";
 import { cleanText } from "../interface/contract";
 import { isStarted, markStarted, markStopped } from "../interface/appRun";
@@ -25,12 +25,13 @@ import { createVaultModule } from "../interface/modules/vault";
 import { createChatModule, type RoomMessage } from "../interface/modules/chat";
 import { createNoteModule } from "../interface/modules/note";
 import { createThemeModule, readHostTheme } from "../interface/modules/theme";
-import { appletHostNeeds, describeAppletNeeds, type SealedEntry } from "../interface/sealedApplet";
+import { appletHostNeeds, needsGrant, ownFolder, type SealedEntry } from "../interface/sealedApplet";
+import { fingerprint, grantExpiry, grantLines } from "../interface/grant2";
 import { bridgePaths } from "../interface/bridgePaths";
 import { activeProfile } from "../areas/profile";
 import "./sealedApplet.css";
 
-const grants = createGrantStore();
+const grants = deviceGrants();
 const PLATFORM = platformName(currentUserAgent());
 const getMessages = (channel: string, limit: number) => invoke<RoomMessage[]>("get_messages", { channel, root: null, limit });
 type AppNote = { id: string; path: string; html: string; metadata: unknown };
@@ -115,6 +116,15 @@ export function SealedApplet({ id, entry, listed, vault, rooms, onOpenNote, onCo
     return () => { on = false; };
   }, [app, host, grant]);
   const status = app && keys ? grants.status(app.id, keys.scope, keys.html) : "none";
+  // a grant that runs out while the applet is open: the frame goes and the card comes back then (re-armed, since a timer can't run a year)
+  const endsAt = app && status !== "none" ? grants.record(app.id)?.expires ?? null : null;
+  const [armed, setArmed] = useState(0);
+  useEffect(() => {
+    const ms = endsAt ? Date.parse(endsAt) - Date.now() : NaN;
+    if (!(ms > 0)) return;
+    const t = window.setTimeout(() => setArmed((n) => n + 1), Math.min(ms + 50, 2 ** 31 - 1));
+    return () => window.clearTimeout(t);
+  }, [endsAt, armed]);
   // Sealed: a changed applet runs with a notice until Accept. Approved-code: it does not run; it asks again.
   const decision = runDecision(mode, status, app ? grants.grantedUnder(app.id) : null);
   const granted = decision === "run" || decision === "run-notice";
@@ -177,8 +187,9 @@ export function SealedApplet({ id, entry, listed, vault, rooms, onOpenNote, onCo
     {framed && <SuggestionBar store={suggestions} appName={name} roomName={roomName} />}
     <div className="sh-sa-stage">
       {framed && router ? <InterfaceFrame html={app.html} title={name} router={router} grant={grant} ready={ready} />
-        : asking ? <GrantPrompt name={name} codeChanged={codeChanged && status === "updated"} approvedCode={mode === "approved-code"} lines={describeAppletNeeds(host.needs, roomName, app.path)}
-          onAllow={() => { grants.grant(app.id, keys.scope, keys.html, mode === "approved-code" ? "approved-code" : "sealed"); markStarted(app.id); bump(); }} onNotNow={() => setDeclined(true)} />
+        : asking ? <GrantCard name={name} runs={mode === "approved-code" ? "approved-code" : "sealed"} state="ask" codeChanged={codeChanged && status === "updated"}
+          lines={grantLines(needsGrant(host.needs, vault, { id, name }), roomName, { ownFolder: ownFolder(app.path) })} fingerprint={fingerprint(keys.scope)} expires={grantExpiry(new Date())}
+          onAllow={() => { grants.grant(app.id, keys.scope, keys.html, mode === "approved-code" ? "approved-code" : "sealed", grantExpiry); markStarted(app.id); bump(); }} onNotNow={() => setDeclined(true)} />
         : <Calm head={granted ? `${name} is stopped` : `${name} isn't allowed to run`}>
           <div className="sh-sa-actions">
             <button type="button" className="sh-ap-btn sh-sa-open" onClick={trusted(granted ? start : () => setDeclined(false))}>{granted ? `Open ${name}` : "Ask again"}</button>

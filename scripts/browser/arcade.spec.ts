@@ -1,4 +1,4 @@
-// T-335 Taste Arcade in the app, with Rust faked (`arcade_*`, `journal_save_voice`, `journal_save_text`; the door itself
+// T-335 Taste Arcade in the app, on applet contract 2 (its grant card, its port), with Rust faked (`arcade_*`, `journal_save_voice`, `journal_save_text`; the door itself
 // is proven end to end in the taste-arcade repo). Reachable from the Applets drawer; a burst
 // of This or That saves each pick once; Gallery, Fix It and Who Said It save what was played; a Ripple voice answer files a journal voice entry and the reaction names the
 // note it landed in, never its words; the Garden's "Not me" saves a verdict and the plant moves to the Not me patch.
@@ -71,8 +71,9 @@ async function boot(page: Page) {
         return { rounds: [] };
       }
       if (cmd === 'arcade_react') { w.__arcade.push(...args.reactions); return { ok: true, stored: args.reactions.length, stats: stats() }; }
-      if (cmd === 'arcade_profile') return { profile: profile(), markdown: '# Taste profile', note: { vault: 'uni', path: 'Taste/Profile' } };
+      if (cmd === 'arcade_profile') return { profile: profile(), markdown: '# Taste profile', note: w.__profileNote ?? { vault: 'uni', path: 'Taste/Profile' } };
       if (cmd === 'arcade_distill') return { queued: true };
+      if (cmd === 'journal_config') { if (w.__journalConfigDelay && !w.__journalConfigAsked) { w.__journalConfigAsked = true; await new Promise((r) => setTimeout(r, w.__journalConfigDelay)); } if (w.__journalVault) return { hub: 'https://example.invalid', vault: w.__journalVault }; }
       if (cmd === 'arcade_media') return new ArrayBuffer(8);
       if (cmd === 'journal_save_voice') { await new Promise((r) => setTimeout(r, w.__saveDelay ?? 0)); return { sent: [noteId], remaining: 0, error: null }; }
       if (cmd === 'journal_save_text') return { sent: [noteId], remaining: 0, error: null };
@@ -93,13 +94,203 @@ const reactions = (page: Page) => page.evaluate(() => (window as any).__arcade a
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const tap = async (page: Page, loc: ReturnType<Page['locator']>, timeout?: number) => { if (test.info().project.name === 'phone') await loc.tap({ timeout }); else await loc.click({ timeout }); };
 
-async function openArcade(page: Page) {
+const card = (page: Page) => page.getByRole('region', { name: 'Arcade is asking for access' });
+const granted = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('uni.interface.grants.v2') ?? '{}')['builtin:arcade'] ?? null);
+const arcadeCalls = (page: Page) => page.evaluate(() => (window as any).__calls.filter((x: any) => /^arcade_|^journal_save/.test(x.cmd)).map((x: any) => x.cmd));
+
+/** The drawer's Arcade tile: the Arcade's frame, with its grant card on a device that hasn't allowed it. */
+async function openTile(page: Page) {
   // every applet opens from the Applets drawer, in the applet frame, on a phone as on a desktop
   await bar(page).getByRole('button', { name: /^Applets/ }).click();
   await tap(page, page.getByRole('dialog', { name: 'Applets' }).getByRole('button', { name: /^Arcade$/ }));
   await expect(page.locator('.sh-ap-top h1')).toHaveText('Arcade');
+}
+async function openArcade(page: Page) {
+  await openTile(page);
+  // contract 2: nothing of the Arcade runs until its card is allowed (a fresh device asks; one that allowed it goes straight in)
+  if (!(await granted(page))) await tap(page, card(page).getByRole('button', { name: 'Allow' }));
   await expect(page.locator('.sh-ap-frame .ta-home')).toBeVisible();
 }
+
+test('contract 2: the card names exactly what the Arcade is granted; nothing runs before Allow; Allow is remembered', async ({ page }) => {
+  await boot(page);
+  await openTile(page);
+  await expect(card(page)).toBeVisible();
+  await expect(card(page).getByRole('heading')).toHaveText('Arcade asks for access');
+  const rows = card(page).locator('.grant-line');
+  await expect(rows.locator('dt')).toHaveText(['Arcade door, on the box', 'Arcade door, on the box', 'uni vault', 'uni vault', 'This device']);
+  await expect(rows.locator('dd')).toHaveText([
+    "See what's new and your counts · deal rounds · read your taste profile · show a card's picture, sound or clip",
+    'Save your reactions · ask for a fresh taste profile',
+    'Add notes in Journal/ (only the ones it made)', 'Read notes in Taste/', 'Record your voice when you ask it to']);
+  // what changes something is marked; what only reads is not
+  await expect(card(page).locator('dd.grant-outside')).toHaveText(['Save your reactions · ask for a fresh taste profile', 'Add notes in Journal/ (only the ones it made)']);
+  // there is nothing to review or revoke yet
+  await expect(page.locator('.sh-ap-frame').getByRole('button', { name: 'Access' })).toHaveCount(0);
+  await expect(card(page)).toContainText('Nothing else. A call to any other door, vault or folder is refused.');
+  await expect(card(page)).toContainText(/Lasts until .*20\d\d, or until you revoke it · Grant [0-9a-f]{4} [0-9a-f]{4}/);
+  // the card fits the screen: both answers are in view without scrolling the page
+  await expect(card(page).getByRole('button', { name: 'Allow' })).toBeInViewport({ ratio: 1 });
+  if (process.env.T335_SHOTS) await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-grant-card.png` });
+  // nothing of the Arcade has run: no game on screen, no call to the door
+  await expect(page.locator('.ta-arcade')).toHaveCount(0);
+  expect(await arcadeCalls(page)).toEqual([]);
+  // Not now: still nothing, nothing stored, and it can be asked again
+  await tap(page, card(page).getByRole('button', { name: 'Not now' }));
+  await expect(page.locator('.sh-ap-gate')).toContainText("Arcade isn't allowed to run");
+  expect(await granted(page)).toBeNull();
+  expect(await arcadeCalls(page)).toEqual([]);
+  await tap(page, page.getByRole('button', { name: 'Ask again' }));
+  // a script's click is not the owner's tap
+  await card(page).getByRole('button', { name: 'Allow' }).evaluate((b: HTMLElement) => b.click());
+  expect(await granted(page)).toBeNull();
+  await tap(page, card(page).getByRole('button', { name: 'Allow' }));
+  await expect(page.locator('.sh-ap-frame .ta-home')).toBeVisible();
+  const g = await granted(page);
+  expect(g).toMatchObject({ html: 'builtin' });
+  expect(g.scope).toMatch(/^[0-9a-f]{64}$/);
+  expect(Date.parse(g.expires) - Date.parse(g.grantedAt)).toBe(365 * 86_400_000);
+  // remembered: after a restart the Arcade opens with no card
+  await page.reload();
+  await openTile(page);
+  await expect(page.locator('.sh-ap-frame .ta-home')).toBeVisible();
+  await expect(card(page)).toHaveCount(0);
+});
+
+test('contract 2: in the running app a call outside the grant is refused, and one inside goes through', async ({ page }) => {
+  await boot(page);
+  // the door answers with a profile note outside what the Arcade may open (it may read Taste/ in the owner's vault, nothing else)
+  await page.addInitScript(() => { (window as any).__profileNote = { vault: 'uni', path: 'Journal/2026/11-11/09-00 Made-up private entry' }; });
+  await page.reload();
+  await openArcade(page);
+  const refusals: string[] = [];
+  page.on('console', (m) => { if (m.type() === 'warning' && m.text().includes('[applet arcade] refused')) refusals.push(m.text()); });
+  await tap(page, page.locator('[data-toy="garden"]'));
+  await tap(page, page.getByRole('button', { name: 'Open the note' }));
+  await expect.poll(() => refusals.length).toBe(1);
+  expect(refusals[0]).toContain('out_of_scope');
+  await expect(page.locator('.sh-ap-frame .ta-arcade')).toBeVisible(); // still in the Arcade: no note opened
+  const opened = () => page.evaluate(() => (window as any).__calls.filter((x: any) => x.cmd === 'vault_note').map((x: any) => String(x.args.noteRef)));
+  expect((await opened()).filter((r) => /private entry|Taste\/Profile/.test(r))).toEqual([]);
+  // another vault altogether
+  await page.evaluate(() => { (window as any).__profileNote = { vault: 'elsewhere', path: 'Taste/Profile' }; });
+  await tap(page, page.getByRole('button', { name: 'Open the note' }));
+  await expect.poll(() => refusals.length).toBe(2);
+  expect(refusals[1]).toContain('not_granted');
+  // the note it was granted opens
+  await page.evaluate(() => { (window as any).__profileNote = { vault: 'uni', path: 'Taste/Profile' }; });
+  await tap(page, page.getByRole('button', { name: 'Open the note' }));
+  await expect.poll(opened).toContain('Taste/Profile');
+  expect((await opened()).filter((r) => /private entry/.test(r))).toEqual([]);
+  expect(refusals.length).toBe(2);
+});
+
+test('contract 2: Access shows what was granted; Revoke access stops the Arcade and the card comes back; other access asks again', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="garden"]'));
+  await expect(page.locator('.ta-game')).toBeVisible();
+  await tap(page, page.locator('.sh-ap-frame').getByRole('button', { name: 'Access' }));
+  const review = page.getByRole('region', { name: 'What Arcade may reach' });
+  await expect(review.locator('.grant-line')).toHaveCount(5);
+  await expect(review).toContainText(/Allowed .*20\d\d · until .*20\d\d · Grant [0-9a-f]{4} [0-9a-f]{4}/);
+  if (process.env.T335_SHOTS) await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-grant-review.png` });
+  // Done: back in the game that was open, not a fresh Arcade
+  await tap(page, review.getByRole('button', { name: 'Done' }));
+  await expect(page.locator('.ta-game')).toBeVisible();
+  await tap(page, page.locator('.sh-ap-frame').getByRole('button', { name: 'Access' }));
+  const before = (await arcadeCalls(page)).length;
+  await tap(page, review.getByRole('button', { name: 'Revoke access' }));
+  await expect(page.locator('.ta-arcade')).toHaveCount(0);
+  await expect(page.locator('.sh-ap-gate')).toContainText("Arcade isn't allowed to run");
+  await expect(page.locator('.sh-ap-frame').getByRole('button', { name: 'Access' })).toHaveCount(0);
+  expect(await granted(page)).toBeNull();
+  await tap(page, page.getByRole('button', { name: 'Ask again' }));
+  await expect(card(page)).toBeVisible();
+  expect((await arcadeCalls(page)).length).toBe(before);
+  // a grant made for other access (an older release's manifest) is not this one: the card asks again
+  await tap(page, card(page).getByRole('button', { name: 'Allow' }));
+  await expect(page.locator('.sh-ap-frame .ta-home')).toBeVisible();
+  await page.evaluate(() => { const all = JSON.parse(localStorage.getItem('uni.interface.grants.v2')!); all['builtin:arcade'].scope = 'f'.repeat(64); localStorage.setItem('uni.interface.grants.v2', JSON.stringify(all)); });
+  await page.reload();
+  await openTile(page);
+  await expect(card(page)).toBeVisible();
+  await expect(page.locator('.ta-arcade')).toHaveCount(0);
+  // and so is one past its date
+  await page.evaluate(() => { const all = JSON.parse(localStorage.getItem('uni.interface.grants.v2')!); delete all['builtin:arcade']; localStorage.setItem('uni.interface.grants.v2', JSON.stringify(all)); });
+  await tap(page, card(page).getByRole('button', { name: 'Allow' }));
+  await expect(page.locator('.sh-ap-frame .ta-home')).toBeVisible();
+  await page.evaluate(() => { const all = JSON.parse(localStorage.getItem('uni.interface.grants.v2')!); all['builtin:arcade'].expires = '2026-01-01T00:00:00.000Z'; localStorage.setItem('uni.interface.grants.v2', JSON.stringify(all)); });
+  await page.reload();
+  await openTile(page);
+  await expect(card(page)).toBeVisible();
+});
+
+test('contract 2: the rooms list changing under a running Arcade leaves the game where it was', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: /Write it instead/ }));
+  await page.getByLabel('Your answer').fill('Made-up: half an answer');
+  const homes = (await calls(page, 'arcade_home')).length;
+  // a room leaves this device and another gets a message: the Arcade's grant names no room, so nothing about it changed
+  await page.evaluate(() => { (window as any).__dropRoom('ch-techne'); });
+  await page.waitForTimeout(400);
+  await expect(page.getByLabel('Your answer')).toHaveValue('Made-up: half an answer');
+  expect((await calls(page, 'arcade_home')).length).toBe(homes);
+});
+
+test('contract 2: a journal kept in another vault than the card named is not written to', async ({ page }) => {
+  // the card says "uni vault · Add notes in Journal/"; this device's journal is set to another vault
+  await page.addInitScript(() => { (window as any).__journalVault = 'elsewhere'; });
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: /Write it instead/ }));
+  await page.getByLabel('Your answer').fill('Made-up: hold it all until Monday.');
+  await tap(page, page.getByRole('button', { name: 'Keep it' }));
+  await expect(page.getByText(/journal is kept in the elsewhere vault/)).toBeVisible();
+  expect(await calls(page, 'journal_save_text')).toHaveLength(0);
+  expect(await reactions(page)).toHaveLength(0);
+});
+
+const typeAnswer = async (page: Page, words: string) => {
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: /Write it instead/ }));
+  await page.getByLabel('Your answer').fill(words);
+  await tap(page, page.getByRole('button', { name: 'Keep it' }));
+};
+
+test('contract 2: the journal moved to another vault while the Arcade is open: the next answer is not written there', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  // Journal settings, changed after the Arcade was allowed and opened (the shell's writer reads its vault at every save)
+  await page.evaluate(() => { (window as any).__journalVault = 'elsewhere'; });
+  await typeAnswer(page, 'Made-up: hold it all until Monday.');
+  await expect(page.getByText(/journal is kept in the elsewhere vault/)).toBeVisible();
+  expect(await calls(page, 'journal_save_text')).toHaveLength(0);
+});
+
+test('contract 2: an Arcade opened before the app knew its journal vault still saves once it does', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__journalConfigDelay = 2500; });
+  await boot(page);
+  await openArcade(page);
+  await page.waitForTimeout(2600);
+  await typeAnswer(page, 'Made-up: hold it all until Monday.');
+  await expect(page.getByText('In your journal. Uni will fold it into Systems.')).toBeVisible();
+  expect(await calls(page, 'journal_save_text')).toHaveLength(1);
+});
+
+test('contract 2: with the journal in another vault, a spoken answer is refused before anything is recorded', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__journalVault = 'elsewhere'; });
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: 'Answer out loud' }));
+  await expect(page.getByText(/journal is kept in the elsewhere vault/)).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__tracks.length), 'the microphone was never opened').toBe(0);
+  expect(await calls(page, 'journal_save_voice')).toHaveLength(0);
+});
 
 test('the Arcade opens from the app, a burst saves each pick once, and the way back returns to where you were', async ({ page }) => {
   test.setTimeout(90_000); // a timed burst, played tap by tap
@@ -376,6 +567,8 @@ test('a look ask Open button opens the Arcade on the pinned card, in the app', a
   // the ask is on a home row with an Open button; it opens the card in the app (the Applets drawer is not the way in here)
   const open = page.locator('.sh-ask').getByRole('button', { name: /^Open the link for .*Look at this card/ });
   await tap(page, open);
+  // a device that hasn't allowed the Arcade sees its card first; the pinned card is still where it opens
+  await tap(page, card(page).getByRole('button', { name: 'Allow' }));
   // the Arcade, on the pinned card: its round came first because the app asked the door for it by id
   await expect(page.locator('.sh-ap-frame .ta-game')).toBeVisible();
   await expect(page.locator('.ta-gal-where')).toHaveText(/^1 of/);

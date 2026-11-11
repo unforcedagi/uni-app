@@ -99,7 +99,7 @@ export function resolveNeeds(needs: readonly Need[], ctx: HostContext): Resolved
 
 export type NeedLine = { text: string; /** A vault prefix or a room outside the area: the prompt stresses it. */ outside: boolean };
 
-/** The needs in plain words, for the grant prompt. The host writes every word; nothing here comes from the app. */
+/** The needs in plain words, for an area host (the drawer uses the grant card, grant2.ts `grantLines`). The host writes every word; nothing here comes from the app. */
 export function describeNeeds(needs: readonly Need[], ctx: HostContext, roomName: (id: string) => string): NeedLine[] {
   const rooms = (scope: string) => (scope === "area" ? ctx.channels : [scope]).map((id) => `#${roomName(id)}`).join(", ") || "no room (none is linked)";
   const outsideRoom = (scope: string) => scope !== "area" && !ctx.channels.includes(scope);

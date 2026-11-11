@@ -2,7 +2,8 @@
 // is refused when it opens (a drawer applet has no area and no room: every scope must be explicit), and the grant's key.
 // Run: node --experimental-strip-types scripts/sealedApplets.test.ts
 import assert from "node:assert/strict";
-import { appletHostNeeds, describeAppletNeeds, discoverApplets } from "../src/interface/sealedApplet.ts";
+import { appletHostNeeds, discoverApplets, needsGrant, ownFolder } from "../src/interface/sealedApplet.ts";
+import { grantLines } from "../src/interface/grant2.ts";
 import { BUILT_IN, joinApplets } from "../src/interface/applets.ts";
 import { grantKey } from "../src/interface/manifest.ts";
 import { restoreTabs, sameTarget, serializeTabs } from "../src/tabs.ts";
@@ -87,18 +88,48 @@ const ROOMS = ["ch-uni", "ch-garden"];
   assert.notEqual(k, await grantKey(r("Garden/"), "Applets/Seed list"), "another folder asks again");
 }
 
-// ── the prompt's words: a folder at or under its note's own is plain; any other folder, and every room, is stressed ──
+// ── the card's rows: a folder at or under its note's own is plain; any other folder, and every room, is stressed ──
 {
   const room = (id: string) => (id === "ch-garden" ? "Garden co-op site" : id);
   const needs = [{ cap: "vault.read", scope: "Seeds/" }, { cap: "vault.read", scope: "Seeds/Old/" }, { cap: "vault.read", scope: "Journal/" }, { cap: "chat.read", scope: "ch-garden" }, { cap: "chat.draft", scope: "ch-garden" }] as const;
-  const lines = describeAppletNeeds(needs, room, "Seeds/Seed list.html");
-  assert.deepEqual(lines.map((l) => l.outside), [false, false, true, true, true]);
+  const card = (ns: readonly { cap: "vault.read" | "chat.read" | "chat.draft"; scope: string }[], path: string) => grantLines(needsGrant(ns, "plot", { id: "seed-list", name: "Seed list" }), room, { ownFolder: ownFolder(path) });
+  const lines = card(needs, "Seeds/Seed list.html");
+  assert.deepEqual(lines.map((l) => l.stress), [false, false, true, true]);
+  assert.deepEqual(lines.map((l) => l.where), ["plot vault", "plot vault", "plot vault", "#Garden co-op site"], "each row says where: the vault, or the room");
   assert.equal(lines[0].text, "Read notes in Seeds/");
   assert.equal(lines[2].text, "Read notes outside this applet's folder, in Journal/");
-  assert.equal(lines[3].text, "Read recent messages in #Garden co-op site");
-  assert.match(lines[4].text, /^Suggest drafts for #Garden co-op site .*nothing is sent/);
-  assert.deepEqual(describeAppletNeeds([needs[0]], room, "Seed list").map((l) => l.outside), [true], "a note at the vault's top owns no folder");
-  assert.deepEqual(describeAppletNeeds([needs[0]], room, "Seedsy/App").map((l) => l.outside), [true], "a folder that merely starts the same is not its own");
+  assert.match(lines[3].text, /^Read recent messages and suggest drafts .*nothing is sent/, "a room it reads and drafts for is one row");
+  assert.equal(card([needs[4]], "Seeds/Seed list")[0].text, "Suggest drafts (you decide what is added; nothing is sent)");
+  assert.deepEqual(card([needs[0]], "Seed list").map((l) => l.stress), [true], "a note at the vault's top owns no folder");
+  assert.deepEqual(card([needs[0]], "Seedsy/App").map((l) => l.stress), [true], "a folder that merely starts the same is not its own");
+}
+
+// ── contract 2: one manifest in the note, the same needs, card and router ──
+{
+  const v2 = (over: Record<string, unknown> = {}) => ({ contract: 2, id: "seed-list", name: "Seed list",
+    access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["read"] }, { path: "Garden/Beds/", verbs: ["read"] }] }],
+    reach: [{ room: "ch-garden", verbs: ["read", "draft"] }], search: [{ what: "seeds", vault: "here", path: "Seeds/" }], ...over });
+  const h = appletHostNeeds({ applet: v2() }, ROOMS);
+  assert.ok(h.ok, h.ok ? "" : h.error);
+  if (h.ok) {
+    assert.deepEqual(h.resolved, { "vault.read": ["Seeds/", "Garden/Beds/"], "chat.read": ["ch-garden"], "chat.draft": ["ch-garden"] });
+    assert.equal(h.manifest.where, "the vault it lives in", "where it lives is the shell's sentence, not the note's claim");
+    assert.deepEqual(h.manifest.searches, ["seeds"]);
+  }
+  const why = (meta: unknown) => { const r = appletHostNeeds(meta, ROOMS); assert.equal(r.ok, false, JSON.stringify(meta)); return r.ok ? "" : r.error; };
+  assert.match(why({ applet: v2(), interface: iface({ "vault.read": "Journal/" }) }), /one manifest/, "an interface manifest beside it could only widen it: refused");
+  assert.match(why({ applet: v2({ reach: [{ room: "ch-elsewhere", verbs: ["read"] }] }) }), /room this device doesn't have/);
+  assert.match(why({ applet: v2({ access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["read", "update"] }] }] }) }), /can only read/);
+  assert.match(why({ applet: v2({ access: [{ vault: "home", allow: [{ path: "Journal/", verbs: ["read"] }] }], search: [] }) }), /vault must be here/);
+  assert.match(why({ applet: v2({ access: [{ door: "arcade", ops: ["home"] }], search: [] }) }), /can't use a door/);
+  assert.match(why({ applet: v2({ reach: ["voice"] }) }), /can't record/);
+  assert.match(why({ applet: v2({ id: "arcade" }) }), /built-in/);
+  const { entries, skipped } = discoverApplets([
+    note("v1", "Applets/Seeds v2", { applet: v2() }),
+    note("v2", "Applets/Writer", { applet: v2({ id: "writer", access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["create"] }] }], search: [] }) }),
+  ]);
+  assert.deepEqual(entries.map((e) => [e.manifest.id, e.manifest.contract, e.prefixes]), [["seed-list", 2, ["Seeds/"]]], "search looks where the manifest offers, not in every folder it reads");
+  assert.equal(skipped, 1, "a sealed manifest that asks to write is skipped, never half-shown");
 }
 
 // ── its tab: kept across a restart by id; anything else is dropped ──
