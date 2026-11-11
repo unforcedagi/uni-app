@@ -292,13 +292,15 @@ await check("vault: path traversal and encoded tricks never reach an out-of-scop
     }
   }
 });
-await check("vault: only GET; everything else is 405 and never calls the backend", async () => {
+await check("vault: a read-only grant only reads; a write is refused (403, or 405 for what is never served) and never calls the backend", async () => {
   const log: Any[] = [];
-  const mod = vaultMod.createVaultModule(vaultDeps(log));
+  const mod = vaultMod.createVaultModule({ ...vaultDeps(log), create: async (...a: Any[]) => { log.push(["create", ...a]); return { id: "x" }; }, save: async (...a: Any[]) => { log.push(["save", ...a]); return { id: "x" }; } });
   const r = routerMod.createRouter([mod]);
   for (const method of ["POST", "PUT", "PATCH", "DELETE", "get", "HEAD"]) {
-    const res = await r.call("vault", "fetch", { method, path: "/api/notes", headers: {}, body: "{}" }, GR);
-    assert.ok(res.status === 405 || res.status === 400, `${method} → ${res.status}`);
+    for (const path of ["/api/notes", "/api/notes/t1"]) {
+      const res = await r.call("vault", "fetch", { method, path, headers: {}, body: '{"path":"Areas/Techne/x","content":"x","if_updated_at":"t"}' }, GR);
+      assert.ok([400, 403, 405].includes(res.status), `${method} ${path} → ${res.status}`);
+    }
   }
   for (const p of ["/api/tags", "/api/notes/t1/attachments", "/api/storage/x", "/api/unknown", "/mcp", "http://evil.test/api/notes", "//evil.test/api/notes"]) {
     const res = await r.call("vault", "fetch", { method: "GET", path: p, headers: {}, body: null }, GR);

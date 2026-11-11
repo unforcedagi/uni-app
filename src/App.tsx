@@ -2708,8 +2708,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   // ── T-335 the shape: the applets drawer, its applets, and search where you are ──
   const toPostCount = useToPostCount(lifeVault, glue && !!identity);
-  // sealed applets: interface notes tagged `applet` in the primary vault (a sealed `recipes` takes the placeholder's slot)
-  const sealed = useSealedApplets(primaryVault);
+  // sealed applets: interface notes tagged `applet` in every vault here, the primary vault's first (a sealed `recipes` takes the placeholder's slot)
+  const appletVaults = useMemo(() => (primaryVault ? [primaryVault, ...otherVaults] : vaults), [primaryVault, vaults.join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sealed = useSealedApplets(appletVaults);
   const sealedOf = (id: string | undefined) => sealed.entries.find((e) => e.manifest.id === id) ?? null;
   const applets = useMemo(() => visibleApplets(joinApplets(BUILT_IN, sealed.entries.map((e) => e.manifest)), { calendar: calOn, messages: msgsOn, uniGlue: glue }), [calOn, msgsOn, glue, sealed.entries]);
   const appletCounts = { topost: toPostCount, mail: held + unreadMail };
@@ -2747,7 +2748,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (active?.kind === "vault" && active.vault && active.vault !== VAULT_CHOOSER) return { kind: "vault", vault: active.vault };
     const a = appletOf(active);
     // To Post's posts and Calendar's events are notes in the main vault; the others have no notes of their own here
-    if (active?.kind === "applet" && a) { const p = sealedOf(active.applet)?.prefixes ?? []; return { kind: "applet", id: a.id, name: a.name, vault: p.length ? primaryVault : null, pathPrefix: p[0] ?? null }; }
+    if (active?.kind === "applet" && a) { const p = sealedOf(active.applet)?.prefixes ?? []; return { kind: "applet", id: a.id, name: a.name, vault: p.length ? sealedOf(active.applet)?.vault ?? null : null, pathPrefix: p[0] ?? null }; }
     if (a) return { kind: "applet", id: a.id, name: a.name, vault: a.id === "topost" || a.id === "calendar" ? primaryVault : null };
     return { kind: "home" };
   }
@@ -2777,8 +2778,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       case "posts": return <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} />;
       case "studio": return <Studio looks={shape.looks} onOpenLink={(url) => void openLink(url).catch(() => {})} />;
       case "recipes": return <Recipes />;
-      case "applet": return <SealedApplet key={active.applet} id={active.applet ?? ""} entry={sealedOf(active.applet)} listed={sealed.loaded} vault={primaryVault} rooms={rooms}
-        onOpenNote={(ref) => { if (primaryVault) openNote({ hub: null, vault: primaryVault, ref }, null); }} onCompose={composeInRoom} />;
+      case "applet": { const se = sealedOf(active.applet); const sv = se?.vault ?? null; return <SealedApplet key={active.applet} id={active.applet ?? ""} entry={se} listed={sealed.loaded} vault={sv} rooms={rooms}
+        onOpenNote={(ref) => { if (sv) openNote({ hub: null, vault: sv, ref }, null); }} onCompose={composeInRoom} />; }
       case "vault": return active.vault && active.vault !== VAULT_CHOOSER
         ? <VaultBrowser key={active.vault} vault={active.vault} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix, query = "") => openFind({ kind: "vault", vault: active.vault!, pathPrefix: prefix || null }, query)} />
         : <section className="vault-sidebar sh-vaults" aria-label="Vaults"><div className="vault-heading"><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Look for new vaults</button></div>

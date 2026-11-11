@@ -1,22 +1,33 @@
-// vault module: a read-only REST subset compatible with surface-client's
-// VaultClient, served over the frame. Every request is checked against the
-// granted `vault.read` path prefixes, and so is every note that comes back
-// (whatever key it was looked up by), so search, tag and id lookups can't leak.
-//   GET /api/vault
-//   GET /api/notes?path_prefix&tag&search&limit&id&path&include_content
-//   GET /api/notes/:idOrPath
+// vault module: a REST subset compatible with surface-client's VaultClient,
+// served over the frame. Every read is checked against the granted
+// `vault.read` path prefixes, and so is every note that comes back (whatever
+// key it was looked up by), so search, tag and id lookups can't leak.
+//   GET   /api/vault
+//   GET   /api/notes?path_prefix&tag&search&limit&id&path&include_content
+//   GET   /api/notes/:idOrPath
+// Two writes, only for a grant that names them (a contract 2 sealed manifest):
+//   POST  /api/notes            {path, content}            a new note, its path inside a `vault.create` folder
+//   PATCH /api/notes/:idOrPath  {content, if_updated_at}   new content for a note inside a `vault.update` folder
+// A write sets content only (no tags, metadata, links, move or force: the shell's writer takes none), never touches an
+// HTML note or a note tagged `applet` (an applet can't rewrite itself or another), and is judged on the note as it is
+// read now. A session that has ended writes nothing.
 
-import { ContractError, ERROR_CODES, inScope, LIMITS, safePrefix, type ErrorCode } from "../contract.ts";
+import { ContractError, ERROR_CODES, hasHidden, hasOnly, inScope, LIMITS, plain, safePrefix, type ErrorCode } from "../contract.ts";
 import type { CallCtx, UniModule } from "../router.ts";
+import type { Resolved } from "../manifest.ts";
 import type { FetchResult } from "./frameFetch.ts";
 
 export type PathRow = { id: string; path: string | null; extension?: string | null; updatedAt?: string | null };
-export type VaultNote = { id: string; path?: string | null; content?: string | null; tags?: string[] | null; metadata?: Record<string, unknown> | null; createdAt?: string | null; updatedAt?: string | null };
+export type VaultNote = { id: string; path?: string | null; extension?: string | null; content?: string | null; tags?: string[] | null; metadata?: Record<string, unknown> | null; createdAt?: string | null; updatedAt?: string | null };
 export type VaultDeps = {
   listPaths(): Promise<PathRow[]>;
   /** By id or path; rejects when missing. */
   getNote(ref: string): Promise<VaultNote>;
   search(query: string, limit: number, pathPrefix: string | null): Promise<{ id: string; path: string | null; snippet: string }[]>;
+  /** A new note at `path` (refused when one is there). Absent: the host can't write, and every write is 405. */
+  create?(path: string, content: string): Promise<VaultNote>;
+  /** New content for the note `id`, only if it is still at `ifUpdatedAt`; a rejection whose message starts "conflict:" is a conflict. */
+  save?(id: string, content: string, ifUpdatedAt: string): Promise<VaultNote>;
 };
 type FetchParams = { method: string; path: string; headers: Record<string, string>; body: string | null };
 
@@ -33,9 +44,22 @@ const json = (status: number, statusText: string, data: unknown): FetchResult =>
     ? { status: 413, statusText: "too_large", headers: { "content-type": "application/json" }, body: '{"error":"too_large"}' }
     : { status, statusText, headers: { "content-type": "application/json" }, body };
 };
-const fail = (status: number, code: ErrorCode | "not_found" | "method_not_allowed") => json(status, code, { error: code });
+const fail = (status: number, code: ErrorCode | "not_found" | "method_not_allowed" | "conflict") => json(status, code, { error: code });
 const notFound = () => fail(404, "not_found");
 const safeRef = (ref: string) => ref.length > 0 && ref.length <= 300 && !/[\u0000-\u001f\\]/.test(ref) && !ref.split("/").some((s) => s === ".." || s === ".");
+/** A path a write may name: plain segments (inScope checks those), no hidden character, no encoded dot or slash, not an HTML file. */
+const writablePath = (p: unknown): p is string => typeof p === "string" && p.length <= 300 && !hasHidden(p) && !/%(?:2e|2f|5c|25)/i.test(p)
+  && !/\.html?$/i.test(p) && p.trim() === p && !p.split("/").some((s) => s.trim() !== s);
+/** A note no applet may change: an HTML note (an applet's code) or one tagged `applet`. */
+const isAppletCode = (n: VaultNote) => /\.html?$/i.test(n.path ?? "") || n.extension?.replace(/^\./, "").toLowerCase() === "html"
+  || (n.tags ?? []).some((t) => t === "applet" || t.startsWith("applet/"));
+const bodyOf = (raw: string | null, keys: readonly string[], required: readonly string[]): Record<string, string> | null => {
+  if (raw === null) return null;
+  let b: unknown;
+  try { b = JSON.parse(raw); } catch { return null; }
+  if (!plain(b) || !hasOnly(b, keys) || !required.every((k) => k in b) || !Object.values(b).every((v) => typeof v === "string")) return null;
+  return b as Record<string, string>;
+};
 
 const publicNote = (n: VaultNote, content: boolean) => {
   const out: Record<string, unknown> = { id: n.id, path: n.path ?? null, createdAt: n.createdAt ?? null, updatedAt: n.updatedAt ?? null, tags: n.tags ?? [], metadata: n.metadata ?? {} };
@@ -126,6 +150,50 @@ export function createVaultModule(deps: VaultDeps, opts: { now?: () => number } 
     return json(200, "OK", rows.slice(0, limit).map((r) => ({ id: r.id, path: r.path, updatedAt: r.updatedAt ?? null })));
   }
 
+  const forget = (...refs: (string | null | undefined)[]) => { for (const r of refs) if (r) cache.delete(r); };
+
+  /** POST /api/notes {path, content}: a new note inside a folder the grant lets it add to. */
+  async function create(body: string | null, scopes: Resolved, ctx: CallCtx): Promise<FetchResult> {
+    const folders = scopes["vault.create"] ?? [];
+    if (!folders.length || !deps.create) return fail(403, "not_granted");
+    const b = bodyOf(body, ["path", "content"], ["path", "content"]);
+    if (!b || !writablePath(b.path)) return fail(400, "bad_params");
+    if (!inScope(folders, b.path)) return fail(403, "out_of_scope");
+    if (ctx.closed()) return fail(502, "failed");
+    ctx.charge(1);
+    try {
+      const note = await deps.create(b.path, b.content);
+      forget(note.id, note.path, b.path);
+      return json(201, "Created", publicNote({ ...note, path: note.path ?? b.path }, false));
+    } catch (e) {
+      if (e instanceof ContractError) throw e;
+      return /exist|conflict/i.test(String(e)) ? fail(409, "conflict") : fail(502, "failed");
+    }
+  }
+
+  /** PATCH /api/notes/:ref {content, if_updated_at}: new content for a note inside a folder the grant lets it change, judged on the note as read now. */
+  async function update(ref: string, body: string | null, scopes: Resolved, ctx: CallCtx): Promise<FetchResult> {
+    const folders = scopes["vault.update"] ?? [];
+    if (!folders.length || !deps.save) return fail(403, "not_granted");
+    const b = bodyOf(body, ["content", "if_updated_at"], ["content", "if_updated_at"]);
+    if (!b || !b.if_updated_at) return fail(400, "bad_params");
+    if (!safeRef(ref)) return notFound();
+    ctx.charge(1);
+    let note: VaultNote;
+    try { note = await deps.getNote(ref); } catch (e) { if (e instanceof ContractError) throw e; return notFound(); }
+    // a note it can't even read is absent (no existence oracle); one it reads but may not change is refused
+    if (!inScope(folders, note.path) || isAppletCode(note)) return inScope(scopes["vault.read"] ?? [], note.path) ? fail(403, "out_of_scope") : notFound();
+    if (ctx.closed()) return fail(502, "failed");
+    try {
+      const saved = await deps.save(note.id, b.content, b.if_updated_at);
+      forget(ref, note.id, note.path, saved.id, saved.path);
+      return json(200, "OK", publicNote({ ...saved, path: saved.path ?? note.path }, false));
+    } catch (e) {
+      if (e instanceof ContractError) throw e;
+      return /^(error:\s*)?conflict:/i.test(String(e)) ? fail(409, "conflict") : fail(502, "failed");
+    }
+  }
+
   return {
     namespace: "vault",
     methods: {
@@ -137,13 +205,21 @@ export function createVaultModule(deps: VaultDeps, opts: { now?: () => number } 
         },
         async run(req: FetchParams, scopes, ctx) {
           const granted = scopes["vault.read"] ?? [];
-          if (req.method !== "GET") return fail(405, "method_not_allowed");
+          if (req.method !== "GET" && req.method !== "POST" && req.method !== "PATCH") return fail(405, "method_not_allowed");
           if (!req.path.startsWith("/") || req.path.startsWith("//") || /[\\\u0000-\u001f]/.test(req.path)) return fail(400, "bad_request" as ErrorCode);
           const cut = req.path.indexOf("?");
           const pathname = cut < 0 ? req.path : req.path.slice(0, cut);
           const query = new URLSearchParams(cut < 0 ? "" : req.path.slice(cut + 1));
           try {
             const only = (allowed: string[]) => [...query.keys()].every((k) => allowed.includes(k));
+            if (req.method === "POST") return pathname === "/api/notes" && only([]) ? await create(req.body, scopes, ctx) : fail(405, "method_not_allowed");
+            if (req.method === "PATCH") {
+              const rest = pathname.startsWith("/api/notes/") ? pathname.slice("/api/notes/".length) : "";
+              if (!rest || rest.includes("/") || !only([])) return fail(405, "method_not_allowed");
+              let ref: string;
+              try { ref = decodeURIComponent(rest); } catch { return fail(400, "bad_request" as ErrorCode); }
+              return await update(ref, req.body, scopes, ctx);
+            }
             if (pathname === "/api/vault") return only(VAULT_PARAMS) ? json(200, "OK", { name: "uni", scope: granted }) : fail(400, "bad_params");
             if (pathname === "/api/notes") return await notes(query, granted, ctx);
             if (pathname.startsWith("/api/notes/")) {

@@ -6,7 +6,9 @@
 //   runs with a host-rendered "updated since you allowed it" line until Accept;
 // - the platform gate (the sandbox self-test, src/interface/selftest/gate.ts) and `runDecision` decide as they did for an area's app;
 // - nothing starts by itself: a restored tab waits for a tap (src/interface/appRun.ts).
-// The app can only suggest: opening a note in its folders, or (with chat.draft for a named room) a draft for that room's composer.
+// Its note may be in any vault here; that vault is the only one it reaches, and the card names it. It reads, and (contract 2, folders it
+// names) adds and changes notes there through the frame's vault module; it can only suggest opening a note in its folders, or (with
+// chat.draft for a named room) a draft for that room's composer.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { currentUserAgent, gateMode, platformName, runDecision } from "../interface/selftest/gate";
@@ -112,9 +114,10 @@ export function SealedApplet({ id, entry, listed, vault, rooms, onOpenNote, onCo
     setKeys(null);
     if (!app || host?.ok !== true) return;
     let on = true;
-    void Promise.all([grantKey(grant, app.path), htmlHash(app.html)]).then(([scope, html]) => { if (on) setKeys({ scope, html }); });
+    // the vault is part of where the note is: the same folder and path in another vault is another grant
+    void Promise.all([grantKey(grant, `${vault}:${app.path}`), htmlHash(app.html)]).then(([scope, html]) => { if (on) setKeys({ scope, html }); });
     return () => { on = false; };
-  }, [app, host, grant]);
+  }, [app, host, grant, vault]);
   const status = app && keys ? grants.status(app.id, keys.scope, keys.html) : "none";
   // a grant that runs out while the applet is open: the frame goes and the card comes back then (re-armed, since a timer can't run a year)
   const endsAt = app && status !== "none" ? grants.record(app.id)?.expires ?? null : null;
@@ -144,6 +147,9 @@ export function SealedApplet({ id, entry, listed, vault, rooms, onOpenNote, onCo
       listPaths: () => bridgePaths(vault),
       getNote: (ref) => invoke<{ note: { id: string } }>("vault_note", { vault, noteRef: ref }).then((d) => d.note),
       search: (query, limit, pathPrefix) => invoke<{ id: string; path: string; snippet: string }[]>("vault_search", { query, limit, mode: "keyword", vault, pathPrefix }),
+      // the two writes, asked only for a grant that names them (modules/vault.ts holds every call to its folders)
+      create: (path, content) => invoke<{ id: string; path?: string | null; updatedAt?: string | null }>("vault_create", { vault, path, content }),
+      save: (noteId, content, ifUpdatedAt) => invoke<{ id: string; path?: string | null; updatedAt?: string | null }>("vault_save", { vault, id: noteId, content, ifUpdatedAt, force: false }),
     }),
     createChatModule({ getMessages: chatOn ? getMessages : async () => [], suggest: (s) => suggestions.add(s), roomName: (rid) => roomNameRef.current(rid) }),
     createNoteModule({ suggest: (s) => suggestions.add(s), resolve: (ref) => invoke<{ note: { id: string; path?: string | null } }>("vault_note", { vault, noteRef: ref }).then((d) => d.note) }),
@@ -188,6 +194,7 @@ export function SealedApplet({ id, entry, listed, vault, rooms, onOpenNote, onCo
     <div className="sh-sa-stage">
       {framed && router ? <InterfaceFrame html={app.html} title={name} router={router} grant={grant} ready={ready} />
         : asking ? <GrantCard name={name} runs={mode === "approved-code" ? "approved-code" : "sealed"} state="ask" codeChanged={codeChanged && status === "updated"}
+          changes={host.needs.some((n) => n.cap === "vault.create" || n.cap === "vault.update")}
           lines={grantLines(needsGrant(host.needs, vault, { id, name }), roomName, { ownFolder: ownFolder(app.path) })} fingerprint={fingerprint(keys.scope)} expires={grantExpiry(new Date())}
           onAllow={() => { grants.grant(app.id, keys.scope, keys.html, mode === "approved-code" ? "approved-code" : "sealed", grantExpiry); markStarted(app.id); bump(); }} onNotNow={() => setDeclined(true)} />
         : <Calm head={granted ? `${name} is stopped` : `${name} isn't allowed to run`}>

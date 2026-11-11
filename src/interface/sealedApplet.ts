@@ -9,17 +9,19 @@
 // Both come to the same needs, the same card and the same router. A drawer applet has no area and no room of its own, so every
 // scope must be explicit: a folder prefix it declares, or a room id this device has. The symbolic `area` scope (and the default
 // needs, which are all `area`) is refused, never guessed at.
+// A contract 2 note may also add and change notes in folders it names (`verbs: [read, create, update]`), in the vault its note is in.
+// Applets are found in every vault this device has; the vault is part of what is granted, so the card names it.
 // Pure: no React, no Tauri.
 
 import { parseAppletManifest, type AppletManifest } from "./applets.ts";
-import { plain, stripExt } from "./contract.ts";
+import { plain, stripExt, type Capability } from "./contract.ts";
 import { parseManifest, resolveNeeds, type HostContext, type Need, type Resolved } from "./manifest.ts";
 import type { ManifestV2 } from "./manifest2.ts";
 import type { Grant } from "./grant2.ts";
 
 /** An applet found in the vault: its manifest, the note that holds it, and the folders it declares it reads (where search looks when it is
  *  open; the grant is decided on the note as read when it opens, never on this list). */
-export type SealedEntry = { manifest: AppletManifest; noteId: string; path: string; prefixes: string[] };
+export type SealedEntry = { manifest: AppletManifest; /** the vault its note is in: `here`, for its grant */ vault: string; noteId: string; path: string; prefixes: string[] };
 export type Discovery = { entries: SealedEntry[]; /** notes tagged `applet` that were not shown (bad manifest, repeated id) */ skipped: number };
 type Row = { id?: unknown; path?: unknown; tags?: unknown; metadata?: unknown };
 
@@ -27,10 +29,10 @@ type Row = { id?: unknown; path?: unknown; tags?: unknown; metadata?: unknown };
 const NO_PLACE: HostContext = { areaPath: "", channels: [] };
 
 /**
- * The drawer's sealed applets from the notes tagged `applet`. A note whose `applet` manifest doesn't parse (a door, a built-in's id,
- * an unknown key ...) is skipped and counted, never half-shown; so is a second note with an id already taken. Order: by path.
+ * The drawer's sealed applets from the notes tagged `applet` in one vault. A note whose `applet` manifest doesn't parse (a door, a
+ * built-in's id, an unknown key ...) is skipped and counted, never half-shown; so is a second note with an id already taken. Order: by path.
  */
-export function discoverApplets(rows: readonly Row[]): Discovery {
+export function discoverApplets(rows: readonly Row[], vault: string): Discovery {
   const entries: SealedEntry[] = [];
   const ids = new Set<string>();
   let skipped = 0;
@@ -46,7 +48,7 @@ export function discoverApplets(rows: readonly Row[]): Discovery {
     // contract 2: search looks where the manifest offers; contract 1: in every folder it reads
     const prefixes = v2 ? [...new Set(v2.search.flatMap((o) => (o.path ? [o.path] : [])))]
       : m?.ok ? [...new Set(m.manifest.needs.filter((n) => n.cap === "vault.read" && n.scope !== "area").map((n) => n.scope))] : [];
-    entries.push({ manifest: parsed.manifest, noteId: r.id, path: r.path, prefixes });
+    entries.push({ manifest: parsed.manifest, vault, noteId: r.id, path: r.path, prefixes });
   }
   return { entries, skipped };
 }
@@ -78,16 +80,34 @@ export function appletHostNeeds(metadata: unknown, rooms: Iterable<string>): Hos
   }
   for (const n of needs) {
     if (n.scope === "area") return { ok: false, error: `it asks for ${n.cap} in "area", and an applet in the drawer has no area. It must name a folder or a room` };
-    if (n.cap !== "vault.read" && !known.has(n.scope)) return { ok: false, error: `it asks for ${n.cap} in a room this device doesn't have` };
+    if (isRoomCap(n.cap) && !known.has(n.scope)) return { ok: false, error: `it asks for ${n.cap} in a room this device doesn't have` };
   }
   const resolved = resolveNeeds(needs, NO_PLACE);
   return { ok: true, manifest: applet.manifest, needs, resolved, prefixes: resolved["vault.read"] ?? [] };
 }
 
-/** A contract 2 sealed manifest as the frame's needs. The parser already held it to what the frame can do: folders to read, rooms. */
+/**
+ * Discovery across this device's vaults: the first vault's applets first (the primary vault, so an id it holds can't be taken from
+ * elsewhere), then the others in the order given. A repeated id keeps its first note; the rest are skipped and counted.
+ */
+export function joinDiscoveries(found: readonly Discovery[]): Discovery {
+  const ids = new Set<string>();
+  const entries: SealedEntry[] = [];
+  let skipped = 0;
+  for (const d of found) {
+    skipped += d.skipped;
+    for (const e of d.entries) { if (ids.has(e.manifest.id)) { skipped++; continue; } ids.add(e.manifest.id); entries.push(e); }
+  }
+  return { entries, skipped };
+}
+
+const isRoomCap = (cap: Capability) => cap === "chat.read" || cap === "chat.draft";
+const VERB_CAP = { read: "vault.read", create: "vault.create", update: "vault.update" } as const;
+
+/** A contract 2 sealed manifest as the frame's needs. The parser already held it to what the frame can do: folders to read, add to and change; rooms. */
 function needsOfV2(m: ManifestV2): Need[] {
   const needs: Need[] = [];
-  for (const v of m.vaults) for (const r of v.allow) if (r.path !== undefined) needs.push({ cap: "vault.read", scope: r.path });
+  for (const v of m.vaults) for (const r of v.allow) if (r.path !== undefined) for (const verb of r.verbs) if (verb !== "delete") needs.push({ cap: VERB_CAP[verb], scope: r.path });
   for (const r of m.reach) if (r.kind === "room") {
     if (r.verbs.includes("read")) needs.push({ cap: "chat.read", scope: r.room });
     if (r.verbs.includes("draft")) needs.push({ cap: "chat.draft", scope: r.room });
@@ -99,12 +119,14 @@ function needsOfV2(m: ManifestV2): Need[] {
 export const ownFolder = (notePath: string): string | null => { const p = stripExt(notePath); const i = p.lastIndexOf("/"); return i > 0 ? p.slice(0, i + 1) : null; };
 
 /**
- * A sealed applet's needs as a grant, for the card (grant2.ts `grantLines`): the folders it reads in the vault its note is in,
- * and each room it reaches, read and draft on one row.
+ * A sealed applet's needs as a grant, for the card (grant2.ts `grantLines`): per folder in the vault its note is in, what it may do there
+ * (read, add, change: one row), and each room it reaches, read and draft on one row.
  */
 export function needsGrant(needs: readonly Need[], vault: string, applet: { id: string; name: string }): Grant {
-  const allow = needs.filter((n) => n.cap === "vault.read").map((n) => ({ path: n.scope, verbs: ["read" as const], own: false }));
-  const rooms = [...new Set(needs.filter((n) => n.cap !== "vault.read").map((n) => n.scope))];
+  const folders = [...new Set(needs.filter((n) => !isRoomCap(n.cap)).map((n) => n.scope))];
+  const allow = folders.map((path) => ({ path, own: false,
+    verbs: (["read", "create", "update"] as const).filter((v) => needs.some((n) => n.scope === path && n.cap === VERB_CAP[v])) }));
+  const rooms = [...new Set(needs.filter((n) => isRoomCap(n.cap)).map((n) => n.scope))];
   return {
     applet: { ...applet, author: "note" },
     vaults: allow.length ? [{ vault, allow }] : [],

@@ -11,8 +11,13 @@ export const CONTRACT_VERSION = 1;
 export const NAMESPACES = ["vault", "chat", "note", "theme"] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
-/** Capabilities an interface can ask for in its manifest. */
-export const CAPABILITIES = ["vault.read", "chat.read", "chat.draft"] as const;
+/**
+ * Capabilities an interface can ask for. The two writes come only from a contract 2 sealed manifest (manifest2.ts): a folder it may add
+ * notes to, and a folder whose notes it may change, both in the vault its note lives in. Contract 1 (manifest.ts) refuses them.
+ */
+export const CAPABILITIES = ["vault.read", "chat.read", "chat.draft", "vault.create", "vault.update"] as const;
+/** The capabilities that change a note: their scope is a folder, like vault.read's. */
+export const WRITE_CAPS = ["vault.create", "vault.update"] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
 export const ERROR_CODES = {
@@ -42,7 +47,8 @@ export const LIMITS = {
   maxNotes: 50,
   maxPath: 2000,
   maxHeaders: 20,
-  maxFetchBody: 4096,
+  /** A frame-fetch body: a written note's content rides in it, so it is most of the request (7 KB of the 8). */
+  maxFetchBody: 7 * 1024,
 };
 
 export type UniRequest = { uni: 1; id: string; ns: string; method: string; params: Record<string, unknown> };

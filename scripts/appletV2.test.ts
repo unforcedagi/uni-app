@@ -135,8 +135,11 @@ await check("a sealed applet's manifest is held to what the frame can do", () =>
   parsed({ ...base, access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["read"] }] }], reach: [{ room: "ch-garden", verbs: ["read"] }] }, "sealed");
   refused({ ...base, access: [{ door: "arcade", ops: ["home"] }] }, /door/, "sealed");
   refused({ ...base, access: [{ vault: "home", allow: [{ path: "Journal/", verbs: ["read"] }] }] }, /here/, "sealed");
-  refused({ ...base, access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["create"] }] }] }, /only read/, "sealed");
+  parsed({ ...base, access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["read", "create", "update"] }] }] }, "sealed");
+  refused({ ...base, access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["read", "delete"] }] }] }, /can't delete/, "sealed");
+  refused({ ...base, access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["create"], own: true }] }] }, /by folder/, "sealed");
   refused({ ...base, access: [{ vault: "here", allow: [{ type: "post", verbs: ["read"] }] }] }, /by folder/, "sealed");
+  refused({ ...base, access: [{ vault: "recipes", allow: [{ path: "Seeds/", verbs: ["read"] }] }] }, /here/, "sealed");
   refused({ ...base, reach: ["voice"] }, /record/, "sealed");
   refused({ ...base, access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["read"] }] }] }, /lives in no vault/, "native");
 });

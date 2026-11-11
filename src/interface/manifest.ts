@@ -4,7 +4,7 @@
 // is keyed by what the needs RESOLVE to (prefixes, room ids, area path), see
 // `grantKey`, so moving the note or editing the area's room re-asks.
 
-import { CAPABILITIES, CONTRACT_VERSION, hasHidden, plain, safePrefix, type Capability } from "./contract.ts";
+import { CAPABILITIES, CONTRACT_VERSION, hasHidden, plain, safePrefix, WRITE_CAPS, type Capability } from "./contract.ts";
 
 export type Need = { cap: Capability; scope: string };
 /** Where the host draws the area's chat: beside the interface, as a pull-up sheet, or not at all. `null` = the host's default. */
@@ -56,7 +56,7 @@ function validScope(cap: Capability, scope: unknown): string | null {
   if (typeof scope !== "string") return null;
   if (hasHidden(scope)) return null;
   if (scope === "area") return scope;
-  if (cap === "vault.read") return safePrefix(scope);
+  if (cap === "vault.read" || (WRITE_CAPS as readonly string[]).includes(cap)) return safePrefix(scope);
   // chat.*: an explicit room id
   return scope.length >= 1 && scope.length <= 100 && !/[\u0000-\u001f]/.test(scope) ? scope : null;
 }
@@ -79,6 +79,7 @@ export function parseManifest(metadata: unknown, _ctx: HostContext): ManifestRes
     if (keys.length !== 1) return { ok: false, error: "each need names one capability" };
     const cap = keys[0] as Capability;
     if (!(CAPABILITIES as readonly string[]).includes(cap)) return { ok: false, error: `unknown capability ${cap}` };
+    if ((WRITE_CAPS as readonly string[]).includes(cap)) return { ok: false, error: `${cap} needs contract 2: a contract 1 interface only reads` };
     const scope = validScope(cap, item[cap]);
     if (scope === null) return { ok: false, error: `bad scope for ${cap}` };
     needs.push({ cap, scope });
@@ -92,6 +93,7 @@ export function resolveNeeds(needs: readonly Need[], ctx: HostContext): Resolved
   const add = (cap: Capability, scopes: string[]) => { if (!scopes.length) return; out[cap] = [...new Set([...(out[cap] ?? []), ...scopes])]; };
   for (const n of needs) {
     if (n.cap === "vault.read") add(n.cap, [n.scope === "area" ? areaPrefix(ctx) : n.scope]);
+    else if ((WRITE_CAPS as readonly string[]).includes(n.cap)) add(n.cap, n.scope === "area" ? [] : [n.scope]);
     else add(n.cap, n.scope === "area" ? ctx.channels : [n.scope]);
   }
   return out;
@@ -116,6 +118,9 @@ export function describeNeeds(needs: readonly Need[], ctx: HostContext, roomName
       case "chat.draft": return outsideRoom(n.scope)
         ? { text: `Suggest drafts for a room outside this area, ${rooms(n.scope)} (you decide what is added; nothing is sent)`, outside: true }
         : { text: `Suggest drafts for ${rooms(n.scope)} (you decide what is added; nothing is sent)`, outside: false };
+      // never met: contract 1 refuses writes, and only contract 1 reaches an area's host
+      case "vault.create": return { text: `Add notes in ${n.scope}`, outside: true };
+      case "vault.update": return { text: `Change notes in ${n.scope}`, outside: true };
     }
   });
 }

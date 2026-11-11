@@ -12,10 +12,11 @@ const applet = (over: Record<string, unknown> = {}) => ({ contract: 1, id: "seed
 const iface = (...needs: Record<string, string>[]) => ({ contract: 1, needs });
 const note = (id: string, path: string, metadata: unknown, tags: unknown = ["applet"]) => ({ id, path, metadata, ...(tags === null ? {} : { tags }) });
 const ROOMS = ["ch-uni", "ch-garden"];
+const discoverIn = (rows: Parameters<typeof discoverApplets>[0]) => discoverApplets(rows, "uni");
 
 // ── discovery: what the drawer shows ──
 {
-  const { entries, skipped } = discoverApplets([
+  const { entries, skipped } = discoverIn([
     note("n1", "Applets/Seed list", { applet: applet(), interface: iface({ "vault.read": "Seeds/" }, { "vault.read": "Garden/Beds/" }) }),
     note("n2", "Applets/Door", { applet: applet({ id: "mailish", kind: "door" }) }),
     note("n3", "Applets/Fake arcade", { applet: applet({ id: "arcade", name: "Arcade" }) }),
@@ -37,7 +38,7 @@ const ROOMS = ["ch-uni", "ch-garden"];
 
 // ── the drawer's list: a sealed `recipes` takes the placeholder's slot; the rest follow the built-ins ──
 {
-  const { entries } = discoverApplets([
+  const { entries } = discoverIn([
     note("r1", "Applets/Recipes", { applet: applet({ id: "recipes", name: "Recipes", glyph: "❀" }), interface: iface({ "vault.read": "Recipes/" }) }),
     note("s1", "Applets/Seed list", { applet: applet(), interface: iface({ "vault.read": "Seeds/" }) }),
   ]);
@@ -119,14 +120,14 @@ const ROOMS = ["ch-uni", "ch-garden"];
   const why = (meta: unknown) => { const r = appletHostNeeds(meta, ROOMS); assert.equal(r.ok, false, JSON.stringify(meta)); return r.ok ? "" : r.error; };
   assert.match(why({ applet: v2(), interface: iface({ "vault.read": "Journal/" }) }), /one manifest/, "an interface manifest beside it could only widen it: refused");
   assert.match(why({ applet: v2({ reach: [{ room: "ch-elsewhere", verbs: ["read"] }] }) }), /room this device doesn't have/);
-  assert.match(why({ applet: v2({ access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["read", "update"] }] }] }) }), /can only read/);
+  assert.match(why({ applet: v2({ access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["read", "delete"] }] }] }) }), /can't delete/);
   assert.match(why({ applet: v2({ access: [{ vault: "home", allow: [{ path: "Journal/", verbs: ["read"] }] }], search: [] }) }), /vault must be here/);
   assert.match(why({ applet: v2({ access: [{ door: "arcade", ops: ["home"] }], search: [] }) }), /can't use a door/);
   assert.match(why({ applet: v2({ reach: ["voice"] }) }), /can't record/);
   assert.match(why({ applet: v2({ id: "arcade" }) }), /built-in/);
-  const { entries, skipped } = discoverApplets([
+  const { entries, skipped } = discoverIn([
     note("v1", "Applets/Seeds v2", { applet: v2() }),
-    note("v2", "Applets/Writer", { applet: v2({ id: "writer", access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["create"] }] }], search: [] }) }),
+    note("v2", "Applets/Writer", { applet: v2({ id: "writer", access: [{ vault: "here", allow: [{ path: "Seeds/", verbs: ["delete"] }] }], search: [] }) }),
   ]);
   assert.deepEqual(entries.map((e) => [e.manifest.id, e.manifest.contract, e.prefixes]), [["seed-list", 2, ["Seeds/"]]], "search looks where the manifest offers, not in every folder it reads");
   assert.equal(skipped, 1, "a sealed manifest that asks to write is skipped, never half-shown");

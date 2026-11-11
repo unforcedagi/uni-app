@@ -19,7 +19,8 @@
 //
 // Strict: an unknown key, door, op or verb, a hidden character or an over-long value is refused, never repaired.
 // Two hosts read it. `native`: an applet compiled into the app, behind the applet port (port.ts). `sealed`: an HTML
-// note run in the sealed frame, which today may only read folders of the vault it lives in and reach rooms.
+// note run in the sealed frame, which may read, add and change notes in folders of the vault it lives in (never
+// delete, never its own or another applet's note) and reach rooms.
 // Pure: no React, no Tauri.
 
 import { hasHidden, hasOnly, plain, safePrefix } from "./contract.ts";
@@ -137,8 +138,8 @@ export function parseManifest2(raw: unknown, host: HostKind): Parse2 {
     for (const r of a.allow) {
       const rule = parseRule(r);
       if (typeof rule === "string") return fail(rule);
-      if (host === "sealed" && (rule.verbs.length !== 1 || rule.verbs[0] !== "read")) return fail("a sealed applet can only read: writes are not built for the frame yet");
-      if (host === "sealed" && (rule.path === undefined || rule.type !== undefined || rule.own)) return fail("a sealed applet reads by folder: each rule is {path, verbs: [read]}");
+      if (host === "sealed" && rule.verbs.includes("delete")) return fail("a sealed applet can't delete: its verbs are read, create and update");
+      if (host === "sealed" && (rule.path === undefined || rule.type !== undefined || rule.own)) return fail("a sealed applet works by folder: each rule is {path, verbs}, with no type and no own");
       allow.push(rule);
     }
     m.vaults.push({ vault, allow });
