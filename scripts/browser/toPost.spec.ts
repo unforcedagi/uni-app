@@ -52,6 +52,25 @@ async function openQueue(page: Page) {
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const card = (page: Page, text: string) => page.locator('.tp-card').filter({ hasText: text });
 
+// T-335: the frame's head names the applet, so To Post has no title row of its own: Refresh sits in the first row of the queue, beside
+// "To review", never alone in a near-empty row above it
+test('in its frame, Refresh shares the first row with To review: no row holds only a button', async ({ page }) => {
+  await boot(page);
+  await openQueue(page);
+  const q = page.getByRole('region', { name: 'To post', exact: true });
+  const head = q.getByRole('heading', { name: 'To review · 3' });
+  const refresh = q.getByRole('button', { name: 'Refresh', exact: true });
+  await expect(head).toBeVisible();
+  const h = (await head.boundingBox())!, r = (await refresh.boundingBox())!;
+  // one row: the button's middle is level with the heading's, and nothing of the queue sits above them
+  expect(Math.abs((r.y + r.height / 2) - (h.y + h.height / 2))).toBeLessThanOrEqual(6);
+  expect(r.width).toBeGreaterThanOrEqual(40);
+  const top = (await q.boundingBox())!.y;
+  expect(Math.min(h.y, r.y) - top).toBeLessThanOrEqual(16);
+  await refresh.click();
+  await expect(head).toBeVisible();
+});
+
 test('the To Post tile in the drawer counts what waits; the queue shows each post as it will look, whose voice it is, and what it may do', async ({ page }) => {
   await boot(page);
   const tile = await toPostTile(page);

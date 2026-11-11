@@ -125,6 +125,16 @@ const none = split(groups, ["room:zz"], null);
 assert.deepEqual(none.here, []);
 assert.equal(none.also.length, groups.length);
 
+// "Search all vaults" (a note's own button): every vault's notes, the journal's among them, are here; rooms are "also in";
+// and no narrow call: the one search across every vault (vault: null) is the whole scope
+const vaults = scopeOf({ kind: "vaults" }, ctx);
+assert.deepEqual(vaults, { label: "your vaults", placeIds: [ANY_VAULT, "journal"] });
+assert.deepEqual(scopeOf({ kind: "vaults" }, { ...ctx, journal: null }), { label: "your vaults", placeIds: [ANY_VAULT] });
+assert.equal(hereNotes({ kind: "vaults" }, ctx), null);
+const allVaults = split(groups, vaults.placeIds, null);
+assert.deepEqual(allVaults.here.map((g) => g.place.id), ["journal", "vault:home", "vault:other"]);
+assert.deepEqual(allVaults.also.map((a) => a.place.id), ["room:c2", "room:c1", "room:c9"]);
+
 // the old Find (no journal known) keeps every room and every vault here
 const legacy = split(group(results, { ...ctx, journal: null }), [ANY_ROOM, ANY_VAULT], null);
 assert.deepEqual(legacy.also, []);

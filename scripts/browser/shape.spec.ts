@@ -37,19 +37,22 @@ test('home: rooms newest first, the moving line, the asks with their buttons, a 
   await expect(row(page, ROOM.uni).locator('.sh-ask-wants')).toContainText('The weekly summary is ready to read');
   await expect(row(page, ROOM.river).getByRole('button', { name: 'Yes, Thursday 2pm' })).toBeVisible();
   await expect(row(page, ROOM.river).getByRole('button', { name: 'Friday instead' })).toBeVisible();
-  // the private room is a room, with no run line and no ask, and none of their words anywhere on home
+  // the private room is a room: no run line and no ask on its row, only a wordless mark that something waits in it, and none of their
+  // words anywhere in home's DOM
   await expect(row(page, ROOM.quiet)).toBeVisible();
   await expect(row(page, ROOM.quiet).locator('.sh-run, .sh-ask')).toHaveCount(0);
-  await expect(page.getByText('Private words about the practice')).toHaveCount(0);
-  await expect(page.getByText('A quiet line that stays in its room')).toHaveCount(0);
+  await expect(row(page, ROOM.quiet).locator('.sh-row-hush')).toHaveText(/^◆\uFE0E? Something waits in here$/);
   // a room private by the rooms registry alone (its name says nothing) keeps its words the same way
   await expect(row(page, ROOM.family)).toBeVisible();
   await expect(row(page, ROOM.family).locator('.sh-run, .sh-ask')).toHaveCount(0);
-  await expect(page.getByText('A family line that stays at the table')).toHaveCount(0);
-  await expect(page.getByText('Family words about the seating')).toHaveCount(0);
-  await expect(page.getByText('A kitchen line that stays private')).toHaveCount(0);
-  // the bar counts what wants you: four asks and the pinned card
-  await expect(bar(page).getByRole('button', { name: /^Rooms, 5 things want you$/ })).toBeVisible();
+  await expect(row(page, ROOM.family).locator('.sh-row-hush')).toHaveText(/^◆\uFE0E? Something waits in here$/);
+  // (the same private room by an old name no room on this device has: hidden, never in Uni's room)
+  await expect(row(page, ROOM.uni).locator('.sh-ask')).toHaveCount(1);
+  const dom = await page.evaluate(() => document.documentElement.outerHTML);
+  for (const words of ['Private words about the practice', 'A quiet line that stays in its room', 'T-605', 'A family line that stays at the table', 'T-606',
+    'Family words about the seating', 'A kitchen line that stays private', 'T-607']) expect(dom, words).not.toContain(words);
+  // the bar counts what wants you: four asks, the two waiting in private rooms, and the pinned card
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 7 things want you$/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await shot(page, '01-home');
 });
@@ -72,7 +75,32 @@ test('answering from home: Seen and a choice each write the vault once, tell tha
   expect(answered[0].args.metadata).toMatchObject({ answer: 'Yes, Thursday 2pm', decided: 'Yes, Thursday 2pm' });
   // nothing was posted anywhere else
   expect((await calls(page, 'post_message')).map((c) => c.args.channel).sort()).toEqual([ROOM.river, ROOM.uni]);
-  await expect(bar(page).getByRole('button', { name: /^Rooms, 3 things want you$/ })).toBeVisible();
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 5 things want you$/ })).toBeVisible();
+});
+
+test('inside a private room its ask is drawn in full, in the chat and the strip, and is answered there; home still has none of its words', async ({ page }) => {
+  await bootShape(page);
+  await expect(row(page, ROOM.quiet).locator('.sh-row-hush')).toBeVisible();
+  await openRoomFromHome(page, ROOM.quiet);
+  const room = page.locator('.sh-room');
+  await expect(room.locator('.sh-strip .sh-run[data-run="waiting"]')).toContainText('A quiet line that stays in its room');
+  const ask = room.locator('.sh-room-ask .sh-ask');
+  await expect(ask).toContainText('A quiet line that stays in its room');
+  // its run stays nowhere: the work store gives a private run no room (src/projects/live.ts)
+  await expect(room.locator('.sh-run[data-run="moving"]')).toHaveCount(0);
+  await ask.locator('.sh-ask-btn[data-act="seen"]').click();
+  await expect(room.locator('.sh-room-ask')).toHaveCount(0);
+  await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body])).toEqual([[ROOM.quiet, 'T-605: seen.']]);
+  const seen = (await calls(page, 'vault_transition')).filter((c) => c.args.id === 'ask-quiet');
+  expect(seen).toHaveLength(1);
+  expect(seen[0].args).toMatchObject({ from: 'open', to: 'done', metadata: { needs_aaron: false, needs_aaron_why: 'seen' } });
+  // home again: the room's mark is gone with its one ask; the other private room's is still there, wordless
+  await page.locator('.sh-room').getByRole('button', { name: 'Back to rooms' }).click();
+  await expect(home(page)).toBeVisible();
+  await expect(row(page, ROOM.quiet).locator('.sh-row-hush')).toHaveCount(0);
+  await expect(row(page, ROOM.family).locator('.sh-row-hush')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain('A family line that stays at the table');
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 6 things want you$/ })).toBeVisible();
 });
 
 test('the expiring card is pinned with its clock, is approved in place, and leaves', async ({ page }) => {
@@ -84,7 +112,7 @@ test('the expiring card is pinned with its clock, is approved in place, and leav
   await pin.getByRole('button', { name: 'Approve' }).click();
   await expect.poll(async () => (await calls(page, 'sealed_answer')).map((c) => c.args.decision)).toEqual(['approve']);
   await expect(page.locator('.sh-pin')).toHaveCount(0);
-  await expect(bar(page).getByRole('button', { name: /^Rooms, 4 things want you$/ })).toBeVisible();
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 6 things want you$/ })).toBeVisible();
 });
 
 test("a room: its strip, its ask as a message, the run's story from the moving line, the jump to the ask, and Back to home", async ({ page }) => {
@@ -212,8 +240,11 @@ test('the ink screen: every mark reads by shape and word, not by colour', async 
   await expect(want.locator('.sh-ask-sr')).toHaveText('Wants you:');
   await expect(row(page, ROOM.uni).locator('.sh-run[data-run="moving"] .sh-run-dot')).toHaveCount(1);
   await expect(row(page, ROOM.uni).locator('.sh-run[data-run="moving"]')).toHaveAttribute('aria-label', /^Moving: Reading 14 notes/);
+  // a private room's wordless mark: the same filled diamond, and words that say only that something waits
+  await expect(row(page, ROOM.quiet).locator('.sh-row-hush .sh-mark-needs')).toHaveText(/^◆\uFE0E?$/);
+  await expect(row(page, ROOM.quiet).locator('.sh-row-hush')).toContainText('Something waits in here');
   const count = bar(page).locator('.sh-place-rooms .sh-count');
-  await expect(count).toHaveText('5');
+  await expect(count).toHaveText('7');
   expect(await count.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(0, 0, 0)');
   expect(await page.locator('.sh-pin').first().evaluate((e) => getComputedStyle(e).borderTopColor)).toBe('rgb(0, 0, 0)');
   await shot(page, '11-home-ink');

@@ -683,10 +683,50 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (room && by < 0 && asidesRef.current[room]) { backAside(room); return; }
     if (room && by > 0 && forwardAside(room)) return;
     if (by < 0 && focusStateRef.current) { if (panel || searchOpen) { setPanel(null); setSearchOpen(false); } else stepBackInFocus(); return; }
+    // T-294: Back from an applet or the Journal goes where you came from (the room you were in, at its spot)
+    const cur = activeTab(tabsRef.current);
+    if (by < 0 && cur && (isApplet(cur) || cur.kind === "journal")) {
+      // what is in front closes first (as Android's Back does), then the place
+      if (panel || searchOpen || drawerOpen || story) { setPanel(null); setSearchOpen(false); setDrawerOpen(false); setStory(null); } else backFromPlace();
+      return;
+    }
     const hop = histStep(histRef.current, by);
     if (!hop) return;
     histRef.current = hop.history; setHist(hop.history);
     openTargetRef.current(hop.target, "focus", false, true);
+  }
+  /** T-294: the room you were last in (and its thread), with the spot you were reading at (null: at its newest). Back from an applet or
+   *  the Journal brings it back; the bar's Rooms (home on purpose) forgets it. Kept on the device too, for a restart in an applet. */
+  const leftRoom = useRef<{ room: string; root: string | null; spot: (ReturnSpot & { seq: number }) | null } | null>(null);
+  /** The room in focus is going off screen: keep it, and where it was being read. */
+  function keepLastRoom() {
+    const f = focusStateRef.current;
+    if (!f) return;
+    const target: TabTarget = { kind: "all", title: "Uni", channel: f.room, ...(f.root ? { root: f.root } : {}) };
+    const now = spotNow();
+    const spot = now && now.view === viewOf(target) ? now : null;
+    leftRoom.current = { room: f.room, root: f.root, spot };
+    try { localStorage.setItem(UNI_PLACE_KEY, serializeUniPlace(target, spot)); } catch { /* private storage: this session still has it */ }
+  }
+  function forgetLastRoom() {
+    leftRoom.current = null;
+    try { localStorage.removeItem(UNI_PLACE_KEY); } catch { /* private storage */ }
+  }
+  /** Back from an applet or the Journal: the place before it; home is the room you were last in, at its spot, with its draft. */
+  function backFromPlace() {
+    // (a vault opens over a place and is never an entry of its own: the place under it is the current entry)
+    const cur = activeTab(tabsRef.current), h = histRef.current;
+    const hop = cur && !isSurface(cur) ? (h.entries[h.index] ? { history: h, target: h.entries[h.index] } : null) : histStep(h, -1);
+    if (hop) { histRef.current = hop.history; setHist(hop.history); }
+    const target = hop?.target ?? { kind: "all", title: "Uni" };
+    const r = leftRoom.current;
+    // (home's entry may still name the room it was restored with: the room left last is the one you came from)
+    if (target.kind === "all" && r && roomsRef.current.some((x) => x.id === r.room)) {
+      returnSpot.current = r.spot;
+      openTargetRef.current({ kind: "all", title: "Uni" }, "focus", false, !!hop, () => focusRoom(r.room, null, r.root));
+      return;
+    }
+    openTargetRef.current(target, "focus", false, !!hop);
   }
   function commitTabs(next: Tabs) {
     tabsRef.current = next;
@@ -699,6 +739,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     }
   }
   function switchToTab(tab: Tab | null) {
+    // T-294: leaving the room in focus for another place keeps it, at its spot, for the way back
+    if (tab && tab.kind !== "all" && activeTab(tabsRef.current)?.kind === "all") keepLastRoom();
     setComposerFocused(false);
     setPanel(null);
     setSearchOpen(false);
@@ -1042,6 +1084,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       let place = null;
       try { place = readUniPlace(localStorage.getItem(UNI_PLACE_KEY), ids); } catch { /* private storage */ }
       if (place?.spot && restored?.kind === "all" && restored.channel && place.spot.view === viewOf(restored)) returnSpot.current = { ...place.spot, seq: -1 };
+      // reopened in an applet or the Journal: Back still goes to the room left for it, at its spot
+      if (place?.target.kind === "all" && place.target.channel && restored && restored.kind !== "all") leftRoom.current = { room: place.target.channel, root: place.target.root ?? null, spot: place.spot ? { ...place.spot, seq: -1 } : null };
       // Note stacks are reconstructed from their saved top-level tab target.
       switchToTabRef.current(activeTab(next));
       commitTabs(next);
@@ -1930,8 +1974,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setFocusRef(ref);
   }
   /** Ends the focus: home again. */
-  function endFocus() {
+  /** `keep`: the room stays the one Back from an applet or the Journal returns to (false: home on purpose, the bar's Rooms). */
+  function endFocus(keep = true) {
     if (!focusStateRef.current) return;
+    if (keep) keepLastRoom();
     // the keyboard goes as the room does
     if (document.activeElement instanceof HTMLElement && document.activeElement.closest(".sh-room")) document.activeElement.blur();
     setComposerFocused(false);
@@ -2468,8 +2514,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     : journalOpen ? "Journal" : currentRoom ? (isThread ? `Thread in ${currentRoom.name}` : currentRoom.name) : searchOpen ? "Search" : "Conversations";
 
   // Android back gesture/button: step back through the app before leaving it, in one order: a full-window layer, the message sheet, search,
-  // a run's story, the applets drawer, Settings, a note, the room's note beside the chat, a thread, the room, an applet (its drawer, over
-  // home), the Journal or a vault (home). The listener is only registered while there is somewhere to go back to, so at home the system
+  // a run's story, the applets drawer, Settings, a note, the room's note beside the chat, a thread, the room, then history: an applet, a vault
+  // or the Journal goes back where it was opened from (the room you were in, at its spot; else home). The listener is only registered while there is somewhere to go back to, so at home the system
   // default runs (the app goes to the background, as usual).
   /** At home: the rooms, with no room in focus. */
   const atHome = (t: TabTarget | null | undefined) => !!t && t.kind === "all" && !focusStateRef.current;
@@ -2477,7 +2523,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** Rooms (the bar): home, with no room in focus, wherever you were. */
   function goHome(then?: () => void) {
     // (only once home is open: a note with unsaved changes asks first, and staying on it changes nothing)
-    openTarget(HOME, "focus", false, false, () => { setDrawerOpen(false); setStory(null); if (focusStateRef.current) endFocus(); then?.(); });
+    openTarget(HOME, "focus", false, false, () => { setDrawerOpen(false); setStory(null); if (focusStateRef.current) endFocus(false); forgetLastRoom(); then?.(); });
   }
   /** An applet's Back: the drawer again, over home. */
   function backToDrawer() { goHome(() => setDrawerOpen(true)); }
@@ -2499,7 +2545,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (focusStateRef.current) { stepBackInFocus(); return; }
     const cur = activeTab(tabsRef.current);
     if (atHome(cur)) return;
-    if (isApplet(cur)) { backToDrawer(); return; }
+    // then history: an applet or the Journal goes back where it was opened from (the room you were in, at its spot)
+    if (cur && (isApplet(cur) || cur.kind === "journal")) { backFromPlace(); return; }
     goHome();
   };
   // At home (nothing open over it) the system's own Back runs: the app goes to the background.
@@ -2714,7 +2761,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       : null}
     </section>
     {asideRoom && listEl && <NotePane shape={paneShape} stack={asides[asideRoom]} hub={hub} list={listEl} layoutKey={`${channel}|${root}`} onQuote={composeHere}
-      onSearch={(query) => openFind(whereHere(), query)}
+      onSearch={(query) => openFind({ kind: "vaults" }, query)}
       onOpen={(ref, href) => {
         // a link inside the note opens over it in the pane; another hub's note goes to the browser
         if (!sameHub(ref, hub, hubOrigins)) { if (href) void invoke("open_link", { url: href }).catch(() => {}); return; }
@@ -2729,7 +2776,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {pill && <RecordingPill title={pill.title} controls={pill.controls} finish={pill.finish} overSidebar={false} onJump={() => { const o = recordingOrigin.current, tab = tabsRef.current.tabs.find((t) => t.id === pill.tabId); focusTabById(pill.tabId); if (tab?.kind === "all" && o?.channel && pill.finish === "send") focusRoom(o.channel, null, o.root ?? null); }} />}
     {/* A note opens over the place you were in; Back pops the note's own stack (or closes it at the first note). */}
     {topNote && !searchOpen && <section className="note-sheet" role="region" aria-label="Note">
-      <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}`} target={topNote} onSearch={(query) => openFind({ kind: "vault", vault: topNote.vault }, query)} hub={hub} onOpen={openNote} onBack={closeNote}
+      <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}`} target={topNote} onSearch={(query) => openFind({ kind: "vaults" }, query)} hub={hub} onOpen={openNote} onBack={closeNote}
         onResolved={(id) => {
           if (tabsRef.current.active) commitTabs(updateTab(tabsRef.current, tabsRef.current.active, { note: { hub: null, vault: topNote.vault, ref: id } }));
           aliases.current[JSON.stringify([topNote.vault, topNote.ref])] = id;

@@ -106,6 +106,8 @@ function Row({ row, now, onOpenRoom, renderAsk, renderRun }: { row: HomeRow; now
     {runs.moving && <div className="sh-row-slot">{renderRun(runs.moving, room)}</div>}
     {shown.map((a) => <div key={a.id} className="sh-row-slot">{renderAsk(a, room)}</div>)}
     {more > 0 && <button type="button" className="sh-row-more" onClick={(e) => { e.stopPropagation(); open(); }}>+{more} more in the room</button>}
-    {runs.waiting && asks.length === 0 && <div className="sh-row-slot">{renderRun(runs.waiting, room)}</div>}
+    {/* a private room's asks: that something waits, never what (it is answered inside the room) */}
+    {(row.hushed ?? 0) > 0 && <p className="sh-row-slot sh-row-hush" data-hushed={row.hushed}><span className="sh-mark-needs" aria-hidden="true">◆{"︎"}</span> Something waits in here</p>}
+    {runs.waiting && asks.length === 0 && !row.hushed && <div className="sh-row-slot">{renderRun(runs.waiting, room)}</div>}
   </li>;
 }

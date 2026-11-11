@@ -14,11 +14,13 @@ const NO_RUNS: RoomRuns = { moving: null, waiting: null };
 export function homeRows(rooms: readonly ShapeRoom[], runs: ReadonlyMap<string, RoomRuns>, asks: ReadonlyMap<string, Ask[]>, opts: { hidden?: ReadonlySet<string> } = {}): HomeRow[] {
   const rows = rooms.filter((r) => !opts.hidden?.has(r.id)).map((room): HomeRow => {
     const rr = runs.get(room.id) ?? NO_RUNS;
-    const as = asks.get(room.id) ?? [];
+    const all = asks.get(room.id) ?? [];
     let at = room.last_ts ?? 0;
-    for (const a of as) at = Math.max(at, a.updatedAt);
+    for (const a of all) at = Math.max(at, a.updatedAt);
     if (rr.waiting?.startedAt) at = Math.max(at, rr.waiting.startedAt);
-    return { room, at, runs: rr, asks: as, unread: room.unread ?? 0, mention: !!room.mentions };
+    // a private room's asks stay inside it: its row only knows how many (a wordless mark), never what they say
+    const as = all.filter((a) => !a.private), hushed = all.length - as.length;
+    return { room, at, runs: rr, asks: as, ...(hushed ? { hushed } : {}), unread: room.unread ?? 0, mention: !!room.mentions };
   });
   return rows.sort((a, b) => (a.at > 0 || b.at > 0 ? b.at - a.at : a.room.name.localeCompare(b.room.name)));
 }
@@ -58,12 +60,13 @@ export function countdown(expires: number, now: number): string {
 }
 
 /**
- * The bar's count: what wants you. Each ask, each pinned approval, and a run that waits on you in a row with no asks (where there
+ * The bar's count: what wants you. Each ask (a private room's too), each pinned approval, and a run that waits on you in a row with no asks (where there
  * are asks the row shows them instead of the run, so the run is one of them and isn't counted twice).
  */
 export function wantsCount(rows: readonly HomeRow[], pins: readonly Pin[]): number {
   let n = pins.length;
-  for (const r of rows) n += r.asks.length || (r.runs.waiting ? 1 : 0);
+  // (a private room's asks want you too: counted, though home shows none of their words)
+  for (const r of rows) n += (r.asks.length + (r.hushed ?? 0)) || (r.runs.waiting ? 1 : 0);
   return n;
 }
 

@@ -3,6 +3,10 @@
 .tp-bar { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
 .tp-title small { opacity: 0.7; }
 .tp-h { font-size: 0.95rem; font-weight: 600; margin: 16px 0 0; opacity: 0.8; }
+/* the queue's first row: To review, and Refresh at its end (44 px target, no row of its own) */
+.tp-first { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
+.tp-first > :first-child { margin: 0; }
+.tp-first .note-refresh { width: 44px; height: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; border: 0; background: none; border-radius: 50%; color: var(--g-ink-2); margin-right: -10px; }
 .tp-empty, .tp-said { opacity: 0.75; margin: 4px 0; }
 .tp-card { border: 1px solid var(--border, #d8d4cc); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--surface, #fff); }
 .tp-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 0.85rem; }

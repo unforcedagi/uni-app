@@ -66,7 +66,7 @@ export function forgetAsks(): void {
   try { for (const k of Object.keys(localStorage)) if (k.startsWith("uni.asks.owed.v1:")) localStorage.removeItem(k); } catch { /* unavailable storage */ }
 }
 
-/** `privateRooms`: rooms (by channel id) whose asks stay inside them; never drawn on home or in a strip. */
+/** `privateRooms`: rooms (by channel id or name) whose asks stay inside them: drawn in full only in their own chat and strip, never on home. */
 export function useAsks(o: { vault: string; identity: string | null; rooms: ShapeRoom[]; uniRoom: string | null; on: boolean; privateRooms?: ReadonlySet<string> }) {
   const on = o.on && !!o.identity;
   const owner = `${o.identity ?? ""}|${o.vault}`;

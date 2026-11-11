@@ -29,6 +29,8 @@ export function placeKey(t: TabTarget): string {
     case "areas": return "uni";
     case "area": return `area:${t.path ?? ""}`;
     case "posts": return `posts:${t.path ?? ""}`;
+    // T-335: a sealed applet by its id (two applets are two places)
+    case "applet": return `applet:${t.applet ?? ""}`;
     default: return t.kind;
   }
 }

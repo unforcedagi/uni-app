@@ -72,8 +72,10 @@ test('search all vaults opens visible prefilled search', async ({ page }) => {
   await page.getByRole('button', { name: 'Search all vaults' }).click();
   await expect(page.getByRole('searchbox')).toBeVisible();
   await expect(page.getByRole('searchbox')).toHaveValue('Missing title');
-  // T-335 the shape: search starts where you are, so from this note it is scoped to its vault (no vault filter row; "Not what you meant?" widens it)
-  await expect(page.getByRole('region', { name: 'Search' })).toContainText('Searching the parachute vault');
+  // every vault, as the button says (T-335: the scope line names it, where the old Find had its vault filter on "all")
+  await expect(page.getByRole('region', { name: 'Search' }).locator('.sh-find-scope')).toHaveText('Searching your vaults');
+  // one search, across every vault: none narrowed to the note's own (the first call is the missing note's own lookup)
+  await expect.poll(() => page.evaluate(() => (window as any).searchCalls.slice(1).map((c: any) => c.vault))).toEqual([null]);
   await page.locator('.search-hit').filter({ hasText: 'Work plan' }).click();
   await expect(page.locator('.note-body')).toContainText('Plan body');
 });

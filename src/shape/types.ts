@@ -17,6 +17,7 @@ export type Ask = {
   /** A single action word ("Done"), when the ask is a thing to do. */ action: string | null;
   /** A link to look at. */ link: string | null;
   /** Seconds. */ updatedAt: number;
+  /** (added, T-335) Its room is private: drawn in full only inside that room (its chat and strip); home shows a wordless mark. */ private?: boolean;
 };
 
 /** What a room's worker is doing, or waiting for: one line on home and in the room's strip. */
@@ -38,5 +39,6 @@ export type HomeRow = {
   /** Seconds; what the list is sorted by, newest first. */ at: number;
   runs: RoomRuns;
   asks: Ask[];
+  /** (added, T-335) Asks waiting in this private room: counted, drawn on home only as a wordless mark (their words stay inside). */ hushed?: number;
   unread: number; mention: boolean;
 };

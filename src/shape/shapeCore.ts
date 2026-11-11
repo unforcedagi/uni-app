@@ -1,8 +1,8 @@
 // T-335 the shape: what the shell decides about rooms before home draws them, and the open decisions the chat links to. Pure: no React,
 // no Tauri (unit-tested in scripts/shape.test.ts).
 // - A retired or folded room (the rooms registry, vault note System/Rooms) is not a room any more: home leaves it out.
-// - A private room (private by the registry, or by its name: src/shape/privacy.ts) is still a room, but its runs and asks are never drawn
-//   outside it, on home or in its strip.
+// - A private room (private by the registry, or by its name: src/shape/privacy.ts) is still a room, but its asks are drawn only inside it
+//   (home shows a wordless mark), and its runs nowhere (src/projects/live.ts gives a private run no room).
 import type { KnownDecision } from "../decisionLinks.ts";
 import { metaOf, type Note } from "../vault/reader.ts";
 import { isPrivateName, isPrivatePath, roomCluePrivate, roomView } from "./privacy.ts";
@@ -12,7 +12,7 @@ import { pathResolver } from "../areas/refs.ts";
 import type { RawNote } from "../vault/rawNote.ts";
 import { canonRoom, isPrivateRoomName, successorOf, type RoomsRegistry } from "../areas/roomsRegistry.ts";
 import { refPath, roomKey, splitTitle } from "./asksCore.ts";
-import type { ShapeRoom } from "./types.ts";
+import type { Ask, ShapeRoom } from "./types.ts";
 
 /** The rooms home leaves out: a channel the registry folded (into another room, or into none), or a name it lists only as retired. */
 export function hiddenRooms(rooms: readonly ShapeRoom[], reg: RoomsRegistry | null): Set<string> {
@@ -39,6 +39,20 @@ export function privateRooms(rooms: readonly ShapeRoom[], reg: RoomsRegistry | n
   for (const r of rooms) {
     const name = r.name.trim().replace(/^#/, "");
     if (name.split("/").some((w) => isPrivateName(w.trim())) || (!!reg && isPrivateRoomName(reg, name))) out.add(r.id);
+  }
+  return out;
+}
+
+/**
+ * The asks by room, after what only the registry can tell: an ask naming a private room by a name this device has no room for (an old
+ * name, a retired private room) fell back to Uni's room, and is dropped. A private room's own ask (`private`, placed in that room by
+ * asksFrom) stays: it is drawn there in full, and on home without words.
+ */
+export function keepAsks<A extends Ask & { roomName: string | null }>(byRoom: ReadonlyMap<string, A[]>, reg: RoomsRegistry | null): Map<string, A[]> {
+  const out = new Map<string, A[]>();
+  for (const [room, list] of byRoom) {
+    const keep = list.filter((a) => a.private || !(reg && a.roomName && isPrivateRoomName(reg, a.roomName)));
+    if (keep.length) out.set(room, keep);
   }
   return out;
 }

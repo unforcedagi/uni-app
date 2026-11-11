@@ -7,7 +7,7 @@
 // Run: npx playwright test --config playwright.roomrestore.config.ts
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
-import { bar, goRooms, homeHead, leaveRoom, openApplet } from './shapeNav';
+import { bar, goJournal, goRooms, homeHead, leaveRoom, openApplet } from './shapeNav';
 
 const room = (page: Page) => page.locator('.sh-room');
 const chat = room;
@@ -47,17 +47,22 @@ async function openRoom(page: Page, name: string) {
   await expect(room(page).getByRole('heading', { level: 1 })).toHaveText(new RegExp(`^#?${name}`, 'i'));
   await expect(chat(page)).toContainText('The newest line of this room.');
 }
-/** The room is on screen. */
+/** The room is on screen; where the bar shows beside it (a wide screen's rail), Rooms is the current place. */
 async function inFocus(page: Page, name: string) {
   await expect(room(page).getByRole('heading', { level: 1 })).toHaveText(new RegExp(`^#?${name}`, 'i'));
+  if ((page.viewportSize()?.width ?? 0) >= 600) await expect(bar(page).getByRole('button', { name: /^Rooms/ })).toHaveAttribute('aria-current', 'page');
 }
-/** To Messages from the room: a phone's bar is hidden inside a room, so it steps out first. */
+/** To Messages from the room: straight from the rail on a wide screen; a phone's bar steps aside inside a room, so there the room's own
+ *  Back to rooms comes first (the room you were in is still the one Back returns to). */
 async function toMessages(page: Page) {
   if (!(await bar(page).isVisible().catch(() => false))) await leaveRoom(page);
   await openApplet(page, 'Messages');
 }
-/** Back to where you were: the history's Back (Alt+←) the way a desktop goes. */
-const toRoom = async (page: Page) => { await page.keyboard.press('Alt+ArrowLeft'); };
+/** Back to where you were: Android's Back (as the plugin delivers it) on a touch screen, Alt+← on a desktop. */
+const toRoom = async (page: Page) => {
+  if (test.info().project.name === 'mac') { await page.keyboard.press('Alt+ArrowLeft'); return; }
+  await page.evaluate(() => { const w = window as any; w.__cbs[w.__backHandler.id]({ message: {}, index: w.__backIndex ?? 0 }); w.__backIndex = (w.__backIndex ?? 0) + 1; });
+};
 
 /** Where the reader is: the first message in sight and how far below the list's top edge it starts. */
 const spot = (page: Page) => list(page).evaluate((el) => {
@@ -102,12 +107,68 @@ async function inRoomWithDraft(page: Page) {
 const messagesView = (page: Page) => page.locator('section.msgs');
 
 test.describe('T-294 back to the room you were in', () => {
-  // FIXME(T-335 app bug): from Messages (opened over a room), Back / Alt+← lands on home (the rooms list), not on the room that was open. src/App.tsx goHistory ~678-689: the focus is cleared when the applet opens and histStep's target carries no room.
-  test.fixme('a room in focus, Messages, then Back: the same room, at the same spot, with the draft', async ({ page }) => {
+  test('a room in focus, Messages, then Back: the same room, at the same spot, with the draft', async ({ page }) => {
     await boot(page);
     const was = await inRoomWithDraft(page);
     await toMessages(page);
     await expect(page.getByRole('navigation', { name: 'Conversations' })).toBeVisible();
+    await toRoom(page);
+    await expectSamePlace(page, was);
+  });
+
+  // T-335 the shape: an applet has a Back of its own, "Back to applets": it is the drawer's way, so it opens the drawer over home, not the room
+  test('Messages\' own Back to applets opens the drawer over home, and Back from Messages then stays home', async ({ page }) => {
+    await boot(page);
+    await inRoomWithDraft(page);
+    await toMessages(page);
+    await expect(page.getByRole('navigation', { name: 'Conversations' })).toBeVisible();
+    await page.locator('.sh-ap-frame').getByRole('button', { name: 'Back to applets' }).click();
+    await expect(page.getByRole('dialog', { name: 'Applets' })).toBeVisible();
+    await expect(homeHead(page)).toBeVisible();
+    await expect(room(page)).toHaveCount(0);
+    await page.getByRole('dialog', { name: 'Applets' }).getByRole('button', { name: /^Messages( \(\d+\))?$/ }).click();
+    await expect(page.getByRole('navigation', { name: 'Conversations' })).toBeVisible();
+    await toRoom(page);
+    await expect(homeHead(page)).toBeVisible(); // Back to applets went home on purpose: Back from Messages is home now
+    await expect(room(page)).toHaveCount(0);
+    await openRoom(page, 'ATLAS');
+    await expect(composer(page)).toHaveValue(DRAFT); // the draft is the room's own, whichever way it is opened
+  });
+
+  test('the bar\'s Rooms goes home, from a room and from Messages, and Back from the Journal then stays home', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    if (await bar(page).isVisible().catch(() => false)) {
+      await bar(page).getByRole('button', { name: /^Rooms/ }).click();
+      await expect(homeHead(page)).toBeVisible();
+      await expect(room(page)).toHaveCount(0);
+      await openRoom(page, 'ATLAS');
+    }
+    await toMessages(page);
+    await bar(page).getByRole('button', { name: /^Rooms/ }).click();
+    await expect(homeHead(page)).toBeVisible();
+    await expect(room(page)).toHaveCount(0);
+    await expect(bar(page).getByRole('button', { name: /^Rooms/ })).toHaveAttribute('aria-current', 'page');
+    // home on purpose: the room isn't the way back any more
+    await goJournal(page);
+    await toRoom(page);
+    await expect(homeHead(page)).toBeVisible();
+    await expect(room(page)).toHaveCount(0);
+  });
+
+  // a vault opens over the place it was opened from and is never a place of its own in history: its Back is that place, not the one before
+  test('the Vault opened from the Journal: Back is the Journal, then the room you were in, at its spot', async ({ page }) => {
+    await boot(page);
+    const was = await inRoomWithDraft(page);
+    if (!(await bar(page).isVisible().catch(() => false))) await leaveRoom(page);
+    await goJournal(page);
+    await expect(bar(page).getByRole('button', { name: /^Journal/ })).toHaveAttribute('aria-current', 'page');
+    await bar(page).getByRole('button', { name: /^Applets/ }).click();
+    await page.getByRole('dialog', { name: 'Applets' }).getByRole('button', { name: /^Vault( \(\d+\))?$/ }).click();
+    await expect(page.locator('.sh-ap-top h1')).toHaveText('uni'); // one vault: straight in, named by it
+    await toRoom(page);
+    await expect(bar(page).getByRole('button', { name: /^Journal/ })).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('.sh-ap-frame')).toHaveCount(0);
     await toRoom(page);
     await expectSamePlace(page, was);
   });
@@ -140,8 +201,7 @@ test.describe('T-294 back to the room you were in', () => {
     await expect(messagesView(page)).toBeVisible();
   });
 
-  // FIXME(T-335 app bug): same as above, after a reload in Messages.
-  test.fixme('closed by the system in Messages (a reload): Messages reopens, and Back goes to the room, at the spot, with the draft', async ({ page }) => {
+  test('closed by the system in Messages (a reload): Messages reopens, and Back goes to the room, at the spot, with the draft', async ({ page }) => {
     await boot(page);
     const was = await inRoomWithDraft(page);
     await toMessages(page);
@@ -172,11 +232,8 @@ test.describe('T-294 back to the room you were in', () => {
     await expect.poll(fromEnd).toBeGreaterThan(300);
     await page.waitForTimeout(200);
     const left = await reading();
-    // out to the room and back to Messages (T-335 the shape: Back to the drawer, home, the room, then the drawer again)
-    await page.locator('.sh-ap-frame').getByRole('button', { name: 'Back to applets' }).click();
-    await page.getByRole('dialog', { name: 'Applets' }).waitFor();
-    await page.keyboard.press('Escape');
-    await openRoom(page, 'ATLAS');
+    // Back to the room, then Messages again
+    await toRoom(page);
     await inFocus(page, 'ATLAS');
     await toMessages(page);
     await expect(page.getByRole('region', { name: 'Conversation: Kit Sample' })).toBeVisible();

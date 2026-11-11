@@ -12,7 +12,9 @@ export type Where =
   /** An applet. With a vault (and maybe a folder) its notes are its search source; without one (Mail, Messages) it has none here. */
   | { kind: "applet"; id: string; name: string; vault?: string | null; pathPrefix?: string | null }
   /** The vault browser, or a folder in it (`pathPrefix`, an optional addition: search opened on a folder). */
-  | { kind: "vault"; vault: string; pathPrefix?: string | null };
+  | { kind: "vault"; vault: string; pathPrefix?: string | null }
+  /** Every vault (a note's "Search all vaults"): the notes in all of them, the journal's among them. */
+  | { kind: "vaults" };
 
 /** A place results can live in. id: "room:<id>" | "journal" | "vault:<name>" | "applet:<id>" | "folder:<vault>:<prefix>". */
 export type Place = { id: string; name: string; /** Words for where it lives ("a room on this device", "uni vault"); may be empty when the name says it. */ where: string };
@@ -68,6 +70,8 @@ export function scopeOf(where: Where, ctx: SearchCtx): Scope {
         : { label: `the ${where.vault} vault`, placeIds: [`vault:${where.vault}`] };
     }
     case "applet": return where.vault ? { label: where.name, placeIds: [`applet:${where.id}`] } : homeScope(ctx);
+    // (the journal is a place of its own, carved out of its vault: it is one of "your vaults" too)
+    case "vaults": return { label: "your vaults", placeIds: [ANY_VAULT, ...(ctx.journal ? ["journal"] : [])] };
     default: return homeScope(ctx);
   }
 }
@@ -78,7 +82,8 @@ export function scopeOf(where: Where, ctx: SearchCtx): Scope {
  */
 export function hereNotes(where: Where, ctx: SearchCtx): { vault: string; pathPrefix: string | null } | null {
   switch (where.kind) {
-    case "room": return null;
+    // (every vault: the one search across them all is the whole scope)
+    case "room": case "vaults": return null;
     case "vault": return { vault: where.vault, pathPrefix: trimSlash(where.pathPrefix ?? "") ? where.pathPrefix! : null };
     case "applet": if (where.vault) return { vault: where.vault, pathPrefix: where.pathPrefix || null }; break;
   }

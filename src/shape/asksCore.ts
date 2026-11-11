@@ -67,7 +67,9 @@ export const roomKey = (name: string): string => name.trim().replace(/^#/, "").t
  * The asks: the reader's task notes that need him (`needs_aaron === true`, still open), newest first, each placed in its room. Its room is the
  * one it names (`reply_room`, else `room`) matched by name among `rooms`; with no match (no name, or a room this device doesn't have) it is
  * Uni's room (`opts.uniRoom`). An ask in a private place (its room, node or card named private, or its room among `privateRooms`, by channel
- * id or name) is never shown here: its words stay inside it.
+ * id or name) is marked `private` and kept only in its own private room, where it is answered: home draws it without words. With no
+ * private room of its own on this device (a private node or card in a public room, a private room this device doesn't have) it is
+ * dropped: its words never land in Uni's room or a public one.
  */
 export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRoom[], opts: { uniRoom: string | null; privateRooms?: ReadonlySet<string>; /** ms; default labels' dates ("Fri 5pm") are relative to it */ now?: number }): VaultAsk[] {
   const now = opts.now ?? Date.now();
@@ -92,7 +94,9 @@ export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRo
     const named = (s(m.reply_room) ?? s(m.room))?.replace(/^#/, "").trim() || null;
     const room = named ? byName.get(roomKey(named)) ?? null : null;
     const privatePath = (p: string | null) => !!p && p.split("/").some((w) => isPrivateName(w));
-    if ((named && (isPrivateName(named) || priv.has(roomKey(named)))) || (room && priv.has(roomKey(room.id))) || privatePath(refPath(m.node)) || privatePath(refPath(m.card))) continue;
+    const roomPrivate = !!room && (priv.has(roomKey(room.id)) || priv.has(roomKey(room.name)) || roomKey(room.name).split("/").some((w) => isPrivateName(w.trim())));
+    const hush = (named && (isPrivateName(named) || priv.has(roomKey(named)))) || roomPrivate || privatePath(refPath(m.node)) || privatePath(refPath(m.card));
+    if (hush && !roomPrivate) continue;
     const kindRaw = s(m.kind)?.toLowerCase();
     const kind: Kind = kindRaw === "choose" || kindRaw === "look" || kindRaw === "tell" ? kindRaw : tagsOf(n).includes("decision") ? "choose" : "do";
     const { tid, rest } = splitTitle(path);
@@ -113,6 +117,7 @@ export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRo
       link: s(m.look_url) ?? s(m.link) ?? s(m.url),
       updatedAt: updated === null ? 0 : Math.floor(updated / 1000),
       rev: s(n.updatedAt) ?? "", state, roomName: named, replyRoot: room ? s(m.reply_root) : null, askedAt: asked.length ? Math.max(...asked) : null,
+      ...(hush ? { private: true } : {}),
     });
   }
   return out.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));

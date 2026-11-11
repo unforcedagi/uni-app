@@ -1,7 +1,7 @@
 // T-335 the shape: what the shell decides about rooms before home draws them, and the decisions the chat links to (src/shape/shapeCore.ts).
 // Made-up rooms and notes only; "sanctum" is the fixtures' private area.
 import assert from "node:assert/strict";
-import { decisionsFrom, hiddenRooms, nodeTree, privateRooms, sweepOldKeys } from "../src/shape/shapeCore.ts";
+import { decisionsFrom, hiddenRooms, keepAsks, nodeTree, privateRooms, sweepOldKeys } from "../src/shape/shapeCore.ts";
 import { canonRoom, isPrivateRoomName, parseRegistry, successorOf } from "../src/areas/roomsRegistry.ts";
 
 const room = (id: string, name: string) => ({ id, name, last_message: null, last_ts: null });
@@ -19,6 +19,16 @@ assert.equal(hiddenRooms([room("c-x", "kiln-studio")], parseRegistry({ rooms: { 
 // private: by a private name (any segment), or by the registry; never by a public name
 assert.deepEqual([...privateRooms(rooms, reg)].sort(), ["c-den", "c-quiet", "c-sub"]);
 assert.deepEqual([...privateRooms(rooms, null)].sort(), ["c-quiet", "c-sub"]);
+
+// asks after the registry: one naming a private room by a name this device has no room for (it fell back to Uni's room) is dropped; a
+// private room's own ask stays in it (drawn there in full); an ordinary one stays
+{
+  const ask = (id: string, roomId: string, roomName: string | null, priv = false) => ({ id, tid: null, room: roomId, kind: "look" as const, what: id, why: null, options: [], fallback: null, action: null, link: null, updatedAt: 1, roomName, ...(priv ? { private: true } : {}) });
+  const kept = keepAsks(new Map([["c-uni", [ask("fell-back", "c-uni", "old-den"), ask("plain", "c-uni", "uni")]], ["c-den", [ask("own", "c-den", "den", true)]]]), reg2Early());
+  assert.deepEqual([...kept].map(([room, l]) => [room, l.map((a) => a.id)]), [["c-uni", ["plain"]], ["c-den", ["own"]]]);
+  assert.equal(keepAsks(new Map([["c-uni", [ask("x", "c-uni", "old-den")]]]), null).get("c-uni")?.length, 1, "no registry: nothing more to tell");
+}
+function reg2Early() { return parseRegistry({ rooms: { den: { id: "c-den", private: true, was: ["old-den"] }, uni: { id: "c-uni" } } })!; }
 
 // decisions: id, title's T-number, the task it decides, its room by name or id; closed ones and private ones left out
 const note = (id: string, path: string, metadata: Record<string, unknown>) => ({ id, path, tags: ["decision"], metadata });

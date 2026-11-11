@@ -188,22 +188,14 @@ export type BootOpts = {
   ids?: boolean;
   /** T-88: an `Areas/Boulder` area (room #boulder, which the metadata still calls #civics; the room is found by its channel id) with a project that has no room of its own. */
   boulder?: boolean;
-  /** r12: a Home layout choice saved by an older build (Map was `tree`). The setting is gone; it is stored once, before the first load, so the app's migration can be seen to drop it. */
-  savedLayout?: 'rooms' | 'tree' | 'octopus' | 'classic';
   /** r12: a room no node owns (#garden-club, two messages): it is listed under "Other rooms". */
   strayRoom?: boolean;
   /** r12 (with `atlas`, `steer`): the first message in #atlas/build has a thread of two replies. */
   thread?: boolean;
-  /** r12 (with `atlas`): two projects named "Workshop", one under Techne and one under Atlas, neither with a room of its own. */
-  twins?: boolean;
   /** r12: Uni is a member of every room (the composer's "Uni listening" switch shows). */
   uniMember?: boolean;
   /** 0.2.2: #Uni is archived (10-26): it is not among the rooms at all, as on the live relay */
   noUniRoom?: boolean;
-  /** r12 (with `tasks`): this many more open tasks, owned by a room (none are Aaron's), listed before the rest: the list runs past one page of 200. */
-  manyTasks?: number;
-  /** T-111: COhere 2026 sits under Boulder (as in the live vault) instead of Techne. Needs `tree` and `boulder`. */
-  underBoulder?: boolean;
   /** T-111 nested rooms: the Atlas area has room #atlas (the real channel ids), with #atlas/build and #atlas/teach, three projects (ATLAS, Learn Vibe Build, Atlas Institute). Needs `tree`. */
   atlas?: boolean;
   /** T-260: a made-up project, Garden, with its own room under Uni (for specs that should not add real names). */
@@ -214,35 +206,6 @@ export type BootOpts = {
   links?: boolean;
   /** T-124 r2: #atlas/build and #atlas/teach hold sixty messages each, so a room has history to open at the end of. */
   longChat?: boolean;
-  /** T-124 r7: T-03's next step is long (three questions and a link): it wraps to four lines with a "More". */
-  longNext?: boolean;
-  /** T-124 r7 (with tasks): a task of Aaron's with a one-word title and no next step. */
-  bareTask?: boolean;
-  /** T-124 r8 (with tasks): a decision whose title was cut short ("…"); the full question is the first line of its content. */
-  cutDecision?: boolean;
-  /** r11 (with tasks): a decision with a cut title whose full question is long (over four lines in the side panel). */
-  longAsk?: boolean;
-  /** r14: a decision whose whole question (its note's first paragraph) is longer than a row shows: a preview opens to decide. */
-  previewAsk?: boolean;
-  /** r10 (with tasks): a decision with a cut title whose note holds no full question either (its first line is cut too), and one long enough to need the 3-line clamp. */
-  cutNoAsk?: boolean;
-  /** r10 (with tasks): many tasks that need the user, with long next steps, so the panel can't hold them all. */
-  crowded?: boolean;
-  /** A task whose next step names a note by `uni:<ULID>` (the note exists, titled "Follow-up notes"), and one that names a note that can't be read. */
-  ulidNext?: boolean;
-  /** r15 (with ulidNext): the bare id in that step is a note of the life vault ("Morning pages"), and the `uni:` one is Uni's only: each is
-   *  found only in its own vault, so a title read (or a note opened) in the wrong vault is "a note" / not found. */
-  vaultNotes?: boolean;
-  /** The COhere readiness task is overdue against the pinned clock (Oct 9): due Oct 7. */
-  pastDue?: boolean;
-  /** T-124 r6 (with longChat): a worker status ping before the newest message, and a newest message taller than the list with a marker line mid-way. */
-  tallLast?: boolean;
-  /** T-111: a project (Priya) whose room is archived, with `room_fallback` naming the room that holds it. */
-  priya?: boolean;
-  /** T-111 rooms nav: Sanctum (a private area) holds tasks too. */
-  privateTasks?: boolean;
-  /** T-86b: the vault doesn't know `near[...then]`; the subtree commands answer with an unknown-parameter error. */
-  nearOff?: boolean;
   /** Pre-fill the device cache (localStorage) with this JSON string. */
   deviceCache?: string;
   /** vault_query for this tag rejects. */
@@ -265,7 +228,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, noUniRoom: !!opts.noUniRoom, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, links: !!opts.links, atlas: !!opts.atlas, garden: !!opts.garden, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, unread: opts.unread ?? null, world: opts.world ?? null, glow: !!opts.glow, runs: !!opts.runs, big: opts.big ?? 0, bigFx: opts.big ? JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8')) : null, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, ids: !!opts.ids, boulder: !!opts.boulder, strayRoom: !!opts.strayRoom, thread: !!opts.thread, uniMember: !!opts.uniMember, noUniRoom: !!opts.noUniRoom, links: !!opts.links, atlas: !!opts.atlas, garden: !!opts.garden, steer: !!opts.steer, longChat: !!opts.longChat, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, unread: opts.unread ?? null, world: opts.world ?? null, glow: !!opts.glow, runs: !!opts.runs, big: opts.big ?? 0, bigFx: opts.big ? JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8')) : null, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -299,7 +262,6 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     w.__cbs = [];
     w.__listeners = {};
     if (d.lifeVault) localStorage.setItem('uni.lifeos.vault', d.lifeVault);
-    if (d.savedLayout && !sessionStorage.getItem('test.layoutSeeded')) { localStorage.setItem('uni.home.layout.v1', d.savedLayout); sessionStorage.setItem('test.layoutSeeded', '1'); }
     // The live-frame gate opens for this platform and version through a stored self-test pass.
     if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', runtime: 'wry test tauri test', mode: d.mode, userAgent: d.passUa ?? navigator.userAgent }));
     if (d.granted && !localStorage.getItem('uni.interface.grants.v2')) {
@@ -555,8 +517,7 @@ Two proposals wait on a scope decision.
     const mk = (id: string, title: string, node: string, extra: Record<string, unknown> = {}, tag = 'task') => ({ id, path: `Tasks/${title}`, extension: 'md', tags: [tag], createdAt: T0, updatedAt: new Date((d.now - 2.9 * 86400) * 1000).toISOString(), lastUpdatedBy: 'cdf67944-c5f2-4e42-a0d8-02ce7a95bbdb', lastUpdatedVia: 'api', fixtureTask: true, metadata: { node, state: 'open', owner: 'aaron', ...extra } });
     const C26 = 'Projects/COhere/COhere 2026';
     const taskNotes: any[] = d.tasks ? [
-      mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: d.pastDue ? '2026-10-07' : '2026-10-12', next: d.longNext ? 'Try the new check-in flow at https://example.invalid/pr/12 and answer the three questions. First question: does the QR code scan on the door? Second question: is the badge printout readable from a metre away? And the third question: who carries the spare scanner on the day of the festival, and where do they stand?' : 'Check-in PR by Oct 12, see https://example.invalid/pr/12 for the diff', priority: 'now' }),
-      ...(d.bareTask ? [mk('k12', 'T-12 Taxes', 'Areas/Techne', { priority: 'now' })] : []),
+      mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: '2026-10-12', next: 'Check-in PR by Oct 12, see https://example.invalid/pr/12 for the diff', priority: 'now' }),
       mk('k2', 'T-64 COhere app spec', C26, { owner: 'room:cohere', state: 'doing' }),
       mk('k3', 'T-65 Sponsorship invoice draft', C26, { priority: 'soon', priority_by: 'weigh.py 2026-10-12', next: 'Send to Casey for the numbers' }),
       mk('k4', 'T-33 Casey call: book it', 'Areas/Techne', { priority: 'now' }),
@@ -568,21 +529,8 @@ Two proposals wait on a scope decision.
       mk('k10', 'T-98 Put away', 'Areas/Techne', { state: 'archived' }),
       mk('k11', 'T-14 A snoozed one', 'Areas/Techne', { snoozed_until: '2099-01-01' }),
       mk('dq1', 'Decide the COhere venue', C26, { priority: 'someday' }, 'decision'),
-      ...(d.ulidNext ? [mk('k13', 'T-13 Review the ATLAS follow-up', 'Areas/Techne', { priority: 'now', next: 'Read uni:01M3ZK2R6A6C62M1ANJCSQNG3M, then 01M3ZK2R6A6C62M1ANJCSQNG3N and reply.' }),
-        { id: '01M3ZK2R6A6C62M1ANJCSQNG3M', path: 'Projects/Atlas/Follow-up notes', content: 'x', tags: [], metadata: {}, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', ...(d.vaultNotes ? { inVault: 'uni' } : {}) },
-        // r20: the step's second note exists (a reference the vault doesn't have is unresolved, never read past): in the life vault, or here
-        { id: '01M3ZK2R6A6C62M1ANJCSQNG3N', path: 'Life/Morning pages', content: 'y', tags: [], metadata: {}, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', ...(d.vaultNotes ? { inVault: d.lifeVault ?? 'life' } : {}) }] : []),
-      ...(d.cutNoAsk ? [{ ...mk('dq8', 'Decision (needs your yes): a daily calendar email to people who…', C26, { priority: 'now' }, 'decision'), content: 'Decision (needs your yes): a daily calendar email to people who…' },
-        mk('dq7', 'Decision: the long one that needs a longer ask than most', C26, { priority: 'now' }, 'decision')] : []),
-      ...(d.crowded ? Array.from({ length: 7 }, (_, i) => mk(`cr${i}`, `Send the follow-up note number ${i + 1} to the whole organizing group`, C26, { priority: 'now', next: 'Edit the draft, check the dates against the calendar, and send it from the shared inbox. Then post the link in the room and tell the team it went out so nobody sends it twice.' })) : []),
-      ...(d.previewAsk ? [{ ...mk('dq11', 'Decision (needs your yes): sign the riverside barn contract this…', C26, { priority: 'now' }, 'decision'), content: 'Decision (needs your yes): Should we sign the riverside barn contract this week? It holds the date for the autumn gathering. The deposit is 1,200 dollars and comes back if we cancel by November 1. The insurance rider names the barn\'s own insurer, which the board has not seen. If the board objects to that insurer, we lose the date unless the barn names ours instead, which it will only do for an extra fee of 400 dollars.\n\nMore below.' }] : []),
-      ...(d.longAsk ? [{ ...mk('dq10', 'Decision (needs your yes): the venue contract with the riverside barn for the…', C26, { priority: 'now' }, 'decision'), content: 'Decision (needs your yes): Do we sign the venue contract with the riverside barn for the autumn gathering, including the deposit, the cancellation terms, the insurance rider, the parking plan, the noise curfew and the catering exclusivity clause, this week so the date is held?' }] : []),
-      ...(d.cutDecision ? [{ ...mk('dq9', 'Decision (default yes): Uni adds the after-event prompt to the…', C26, { priority: 'now' }, 'decision'), updatedAt: T0, content: '_Converted from a task on 2026-10-01_\n\nDecision (default yes): Should Uni add the after-event "were you there?" prompt to the companion on Wed? Say no to skip it.\n\nMore below.' }] : []),
     ] : [];
-    // T-111 rooms nav: a task in a private area (Sanctum) and tasks changed at different times, so "Where we are" has something to hide and to date.
-    if (d.tasks && d.privateTasks) taskNotes.push({ ...mk('s1', 'T-31 Sit twenty minutes daily', 'Areas/Sanctum', { priority: 'now', next: 'Before breakfast' }), updatedAt: '2026-10-09T09:00:00.000Z' }, { ...mk('s2', 'T-32 Find a teacher', 'Areas/Sanctum', { priority: 'someday' }), updatedAt: '2026-09-01T09:00:00.000Z' });
     if (d.tasks) for (const [id, at] of [['k4', '2026-10-01T08:00:00.000Z'], ['k7', '2026-09-20T08:00:00.000Z'], ['k8', '2026-09-20T08:00:00.000Z']]) { const t = taskNotes.find((x) => x.id === id); if (t) t.updatedAt = at; }
-    if (d.tasks && d.manyTasks) taskNotes.unshift(...Array.from({ length: d.manyTasks }, (_, i) => mk(`many${i}`, `T-${500 + i} Crew task ${i + 1}`, 'Areas/Techne', { owner: 'room:techne' })));
     // r19: tasks (and their notes) present from the very first read, set by an init script before boot: a fresh device's first list
     if (Array.isArray(w.__seedTasks)) taskNotes.push(...w.__seedTasks);
     w.__tasks = taskNotes;
@@ -629,13 +577,12 @@ Two proposals wait on a scope decision.
       rooms.push(room('ch-parachute', 'parachute'), room('ch-unios', 'uni-os'), room('ch-regen', 'regenhub'), room('ch-old', 'old-client'));
       const bou = rooms.find((r) => r.id === BOULDER); if (bou) { bou.last_ts = d.now - 7200; bou.last_message = 'Council agenda is out.'; }
     }
-    if (d.underBoulder) { const c = notes.find((n) => n.id === 'p-cohere'); if (c) c.metadata = { ...c.metadata, parent: 'Areas/Boulder' }; }
     if (d.atlas) {
       const ATLAS = '4994874c-9473-49b3-9c35-4cb21e22fef9', BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb', TEACH = '024dd6b1-3283-4ad3-96a8-8dc3f31f87a4';
       const a = notes.find((n) => n.id === 'a-atlas'); if (a) a.metadata = { ...a.metadata, channel: ATLAS, room: 'atlas' };
       const at = rooms.findIndex((r) => r.id === 'ch-atlas'); if (at >= 0) rooms.splice(at, 1);
       if (d.steer) msgs[BUILD] = [msg('b1', BUILD, 'Aaron', 2400, 'Where are we on the SOW?'), msg('b2', BUILD, 'Uni', 2300, 'Drafting it now; T-07 is due Tuesday.'), msg('b3', BUILD, 'Uni', 1200, 'Map labels are in a branch, waiting on your look.')];
-      if (d.longChat) for (const ch of [BUILD, TEACH]) msgs[ch] = Array.from({ length: 60 }, (_, i) => msg(`l${i}-${ch.slice(0, 4)}`, ch, i % 3 === 0 ? 'Aaron' : 'Uni', (60 - i) * 600, d.tallLast && i === 58 ? '⏳ Working — 6 min — iteration 7' : d.tallLast && i === 59 ? Array.from({ length: 30 }, (_, k) => k === 10 ? '[done T-123]' : `Paragraph ${k + 1} of a long report, with enough words in it to take a couple of lines on a phone.`).join('\n\n') : i === 59 ? 'The newest line of this room.' : `Message number ${i + 1} in the long history of this room, long enough to take a line or two of the list.`));
+      if (d.longChat) for (const ch of [BUILD, TEACH]) msgs[ch] = Array.from({ length: 60 }, (_, i) => msg(`l${i}-${ch.slice(0, 4)}`, ch, i % 3 === 0 ? 'Aaron' : 'Uni', (60 - i) * 600, i === 59 ? 'The newest line of this room.' : `Message number ${i + 1} in the long history of this room, long enough to take a line or two of the list.`));
       if (d.thread && msgs[BUILD]) {
         msgs[BUILD][0] = { ...msgs[BUILD][0], reply_count: 2, last_reply_ts: d.now - 1500 };
         threads.b1 = [msgs[BUILD][0], { ...msg('b1r1', BUILD, 'Uni', 2000, 'The scope section is done; pricing is next.'), root: 'b1', parent: 'b1' }, { ...msg('b1r2', BUILD, 'Aaron', 1500, 'Good, send it to Casey when pricing is in.'), root: 'b1', parent: 'b1' }];
@@ -643,7 +590,6 @@ Two proposals wait on a scope decision.
       rooms.push(room(ATLAS, 'atlas'), room(BUILD, 'atlas/build'), room(TEACH, 'atlas/teach'));
       const pr = (id: string, name: string, meta: Record<string, unknown>) => ({ id, path: `Projects/${name}`, extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: `${name}.`, parent: 'Areas/Atlas', ...meta }, updatedAt: '2026-10-08T00:00:00Z', content: `# ${name}\n\n${name}.` });
       notes.push(pr('p-atlas', 'ATLAS', { room: 'atlas/build', channel: BUILD }), pr('p-lvb', 'Learn Vibe Build', { room: 'atlas/teach', channel: TEACH }), pr('p-ai', 'Atlas Institute', { room: 'atlas' }));
-      if (d.twins) notes.push(pr('p-ws-a', 'Atlas/Workshop', {}), { ...pr('p-ws-t', 'Techne/Workshop', {}), metadata: { status: 'foreground', summary: 'Workshop.', parent: 'Areas/Techne' } });
     }
     if (d.garden) {
       const GARDEN = '5b0c4e8a-2f3d-4c1e-9a7b-6d8e0f1a2b3c';
@@ -677,10 +623,6 @@ Two proposals wait on a scope decision.
       /** r14: Uni rewrites a task's note (its question): new content, a new revision. */
       w.__setContent = (id: string, content: string) => { const t = taskNotes.find((x) => x.id === id); t.content = content; t.updatedAt = new Date(Date.now() + 7000).toISOString(); t.lastUpdatedVia = 'mcp'; };
       w.__setDue = (id: string, due: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.due = due; t.updatedAt = new Date(Date.now() + 5000).toISOString(); t.lastUpdatedVia = 'mcp'; };
-    }
-    if (d.priya) {
-      notes.push({ id: 'p-priya', path: 'Projects/Priya', extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: 'Priya: the long relationship.', parent: 'Areas/Unforced Development', room: 'priya', room_status: 'archived', room_fallback: 'unforced-dev' }, updatedAt: '2026-10-08T00:00:00Z', content: '# Priya\n\nA client relationship.' });
-      if (d.tasks) taskNotes.push(mk('r1', 'T-70 Priya follow-up', 'Projects/Priya'));
     }
     if (d.ids) {
       const idOf = (ref: string) => notes.find((n) => n.path === ref)?.id ?? ref;
@@ -759,14 +701,12 @@ Two proposals wait on a scope decision.
             return hits.slice(from, from + (args.limit ?? 200)).map(asked);
           }
           case 'vault_subtree_nodes': {
-            if (d.nearOff) throw 'MCP error -32602: unknown parameter: near';
             const all = [{ id: 'uni-root', path: 'Uni', tags: ['uni', 'node'], metadata: {} }, ...notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ ...n, tags: ['node', ...n.tags], content: undefined, metadata: { ...n.metadata, parent: n.metadata?.parent ?? (d.ids ? 'uni-root' : 'Uni') } }))];
             const under = new Set([pathOf(args.root)]); for (let grew = true; grew;) { grew = false; for (const n of all) if (!under.has(n.path) && under.has(pathOf(n.metadata.parent))) { under.add(n.path); grew = true; } }
             return all.filter((n) => under.has(n.path));
           }
           case 'vault_subtree_tasks': {
             if (w.__tasksDelay) await new Promise((r) => setTimeout(r, w.__tasksDelay));
-            if (d.nearOff) throw 'MCP error -32602: unknown parameter: near';
             if (!d.tasks) return [];
             const nodes = notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ path: n.path, parent: pathOf(n.metadata?.parent ?? 'Uni') }));
             const under = new Set([pathOf(args.root)]); for (let grew = true; grew;) { grew = false; for (const n of nodes) if (!under.has(n.path) && under.has(n.parent)) { under.add(n.path); grew = true; } }
@@ -883,98 +823,4 @@ Two proposals wait on a scope decision.
   if (opts.noWait) return;
   // T-335 the shape: the app opens on home, the rooms list.
   await expect(page.getByRole('heading', { name: 'Rooms', level: 1 })).toBeVisible();
-}
-
-const railOf = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
-/** Uni (the app opens there; the rail's Uni button comes back to it): the front door of the area rooms (T-302). */
-export const openAreasHome = async (page: Page) => { await railOf(page).getByRole('button', { name: 'Uni', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible(); };
-/** T-335 one surface: a room is shown only in focus over All. */
-export const focusSheet = (page: Page) => page.getByRole('region', { name: /in focus$/ });
-/** A vault without rooms has its tree of places as its home. */
-const treeRow = (page: Page, name: string) => page.locator('.th-phone-tree').locator(`.th-go[aria-label^="${name},"]`);
-/** Uni's home (All has a front door of its own, `data-view="all"`). */
-/** The home: with rooms (0.2) All's stream with the places in the drawer under its head; without the Uni glue, the places page. */
-const frontDoor = (page: Page) => page.locator('[data-place="front-door"]:not(.all-empty)');
-/** 0.2 one home: the places are in the drawer under the home's head; this pulls it down (nothing to do on a places page). */
-export async function openPlaces(page: Page) {
-  const pull = page.locator('[data-place="front-door"] .fd-pull');
-  // (the home, not the empty "Reading your rooms…" screen before it; a vault without the glue has its tree)
-  await page.locator('[data-place="front-door"]:not(.all-empty), .th-phone-tree, nav[aria-label="Rooms and areas"]').first().waitFor({ timeout: 8000 }).catch(() => {});
-  if (!(await pull.first().isVisible().catch(() => false))) return;
-  // while the rooms are still being read the drawer is simply open (and the head can't close it); it folds once the stream comes, so wait
-  // for that first (a world with no area rooms keeps it open for good)
-  await expect(pull.first()).toBeEnabled({ timeout: 4000 }).catch(() => {});
-  if ((await pull.first().getAttribute('aria-expanded')) !== 'true' && !(await pull.first().isDisabled())) await pull.first().click();
-  await page.locator('.fd-door').first().waitFor();
-}
-/** A node's way in: its door on the front door, else its row in the tree (a vault without rooms). */
-export const areaCard = (page: Page, name: string) => page.locator(`.fd-door[data-path="Areas/${name}"]`).or(treeRow(page, name));
-/** T-335: from the front door into the first room, in focus over All; elsewhere, nothing. */
-export async function leaveFrontDoor(page: Page) {
-  await page.locator('[data-place="front-door"], .th-phone-tree').first().waitFor();
-  if (await frontDoor(page).first().isVisible()) { await openPlaces(page); await page.locator('.fd-door').first().click(); await expect(focusSheet(page)).toBeVisible(); }
-}
-/** T-302: where the old home put a test, reached the way a person now does: the first room, in focus over All. */
-export async function toOldHome(page: Page) {
-  // a page that isn't on the front door (no chat, no areas, not signed in) is already where the old home put it
-  if (!(await frontDoor(page).first().waitFor({ timeout: 3000 }).then(() => true, () => false))) return;
-  await leaveFrontDoor(page);
-}
-/** T-335: the places: Uni's home (with rooms), or the tree (a vault without rooms). */
-export async function showTree(page: Page) {
-  await page.locator('[data-place="front-door"], .th-phone-tree, .wp').first().waitFor();
-  if (await page.locator('.th-phone-tree').isVisible()) return;
-  if (!(await frontDoor(page).first().isVisible()) || await focusSheet(page).isVisible()) await openAreasHome(page);
-  await openPlaces(page);
-}
-/** Opens a place's details in its focus (with rooms), from its room's head. */
-export async function openDetails(page: Page) {
-  const s = focusSheet(page);
-  if (await s.locator('.all-focus-details').isVisible()) return;
-  await s.getByRole('button', { name: /: room details$/ }).click();
-  await expect(s.locator('.all-focus-details')).toBeVisible();
-}
-/**
- * Opens a place: with rooms, its room in focus (a top-level area from its door, one inside it from the parent's details), and, when it has a
- * sealed app, its app (in the details: "Open the X app"); without rooms, its work page (and its "App ›"). `app: false` stays in the room;
- * `true` requires the app; the default opens it when it shows up.
- */
-export async function openAreaPage(page: Page, name: string, opts: { app?: boolean; parent?: string } = {}) {
-  await page.locator('[data-place="front-door"], .th-phone-tree, .all-focus, .wp').first().waitFor();
-  if (await page.locator('.th-phone-tree, .wp').first().isVisible()) {
-    if (!(await page.locator('.th-phone-tree').isVisible())) await openAreasHome(page);
-    await treeRow(page, name).click();
-    await expect(page.locator('.wp-title')).toHaveText(name);
-    if (opts.app === false) return;
-    const tab = page.locator('.wp-app');
-    if (opts.app === true || (await tab.waitFor({ state: 'visible', timeout: 1500 }).then(() => true, () => false))) await tab.click();
-    return;
-  }
-  if (!(await frontDoor(page).first().isVisible()) || await focusSheet(page).isVisible()) await openAreasHome(page);
-  await openPlaces(page);
-  const door = page.locator(`.fd-door[data-path="Areas/${name}"]`);
-  if (await door.count()) await door.click();
-  else {
-    await page.locator(`.fd-door[data-path="Areas/${opts.parent ?? ''}"]`).click();
-    await openDetails(page);
-    await focusSheet(page).locator('.fx-place', { hasText: name }).first().click();
-  }
-  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText(name);
-  if (opts.app === false) return;
-  await openDetails(page);
-  const tab = focusSheet(page).getByRole('button', { name: `Open the ${name} app ›` });
-  if (opts.app === true || (await tab.waitFor({ state: 'visible', timeout: 1500 }).then(() => true, () => false))) await tab.click();
-  else await focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click();
-}
-
-
-/** 0.3.1: For you is folded to its head on the home; this opens its bands (nothing to do when they are open, or when there is no For you). */
-export async function openForYou(page: Page) {
-  const toggle = page.getByRole('region', { name: 'For you' }).locator('.fy-toggle');
-  await toggle.first().waitFor({ timeout: 8000 });
-  // the places' drawer lies over For you: fold it first, as a person would
-  const pull = page.locator('[data-place="front-door"] .fd-pull[aria-expanded="true"]');
-  if (await pull.count() && await pull.first().isEnabled()) { await pull.first().click(); await expect(page.locator('#fd-drawer')).toHaveCount(0); }
-  if ((await toggle.first().getAttribute('aria-expanded')) !== 'true') await toggle.first().click();
-  await expect(toggle.first()).toHaveAttribute('aria-expanded', 'true');
 }

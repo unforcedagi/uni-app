@@ -133,16 +133,22 @@ export default function ToPost({ vault, node, backTo = "Uni", onBack }: { vault:
   const q = posts ? queue(posts, node ?? null) : null;
   const card = (p: PostCard) => <Card key={p.id} p={p} vault={vault} busy={busy} setBusy={setBusy} onDone={(m) => { setSaid(m); void load(); }} />;
   return <section className="tp-page" aria-label="To post">
-    <header className="note-bar tp-bar">
+    {/* T-335: the applet's frame names it; a bar only when there is more to say (a way back, the area it is for) */}
+    {(onBack || node) && <header className="note-bar tp-bar">
       {onBack && <button className="note-action" onClick={onBack}>← {backTo}</button>}
       <span className="tp-title"><strong>To post</strong>{node && <small> · {node.split("/").pop()}</small>}</span>
+    </header>}
+    {/* the first row of the queue carries Refresh, so no row holds only a button: To review once the posts are read, else what is
+        happening (reading them, or why they couldn't be read) */}
+    <div className="tp-first">
+      {q ? <h2 className="tp-h">To review{q.review.length ? ` · ${q.review.length}` : ""}</h2>
+        : problem ? <p className="note-error" role="alert">Couldn't read the posts: {problem}</p>
+        : <p className="tp-empty">Reading…</p>}
       <button className="note-action note-refresh" aria-label="Refresh" title="Refresh" onClick={() => void load()}><RefreshIcon /></button>
-    </header>
+    </div>
     {said && <p className="tp-said" role="status">{said}</p>}
-    {problem && <p className="note-error" role="alert">Couldn't read the posts: {problem}</p>}
-    {!q && !problem && <p className="tp-empty">Reading…</p>}
+    {q && problem && <p className="note-error" role="alert">Couldn't read the posts: {problem}</p>}
     {q && <>
-      <h2 className="tp-h">To review{q.review.length ? ` · ${q.review.length}` : ""}</h2>
       {q.review.length ? q.review.map(card) : <p className="tp-empty">Nothing to review.</p>}
       {q.waiting.length > 0 && <><h2 className="tp-h">Going out · {q.waiting.length}</h2>{q.waiting.map(card)}</>}
       {q.done.length > 0 && <><h2 className="tp-h">Lately</h2>{q.done.map(card)}</>}

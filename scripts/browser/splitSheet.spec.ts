@@ -202,8 +202,7 @@ test.describe('beside', () => {
     expect(Math.abs(await width(page) - w1)).toBeLessThanOrEqual(2);
   });
 
-  // FIXME(T-335 app bug?): after End the pane's width is neither the window less 520 nor the one that leaves the chat list 380: off by 16 px on a 1280 desktop, 260 on the 1600 Daylight on its side (the shell's room column, src/shape/shape.css .sh-room max-width, now sits between the pane's limit and the list; src/NotePane.tsx computes the limit)
-  test.fixme('keyboard: arrows widen and narrow it, Home and End go to its least and most, the chat kept readable', async ({ page }) => {
+  test('keyboard: arrows widen and narrow it, Home and End go to its least and most, the chat kept readable', async ({ page }) => {
     const { handle } = await openNote(page);
     const w0 = await width(page), vw = viewport(page).width;
     await handle.focus();

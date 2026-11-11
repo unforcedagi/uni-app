@@ -1,19 +1,20 @@
 // T-335 the shape: everything home, a room's strip and the bar read, in one hook the App holds for as long as it runs (so the Rooms count on
 // the bar is right in the Journal and in an applet too). It feeds the shared stores the old home used to feed (the work store's rooms, the
 // decisions the chat links to) and reads the rooms registry (System/Rooms: retired and private rooms).
-// Privacy waits for what it needs: until the registry's first read has settled, no ask or run line is drawn (a room private only by the
+// A private room's asks are drawn only inside it (home: a wordless mark). Privacy waits for what it needs: until the registry's first read has
+// settled, no ask or run line is drawn (a room private only by the
 // registry can't be told yet); until the node tree is read, no decision is published.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Approval } from "../approvals";
 import { publishDecisions, setDecidedHook, setDecisionOpener } from "../decisionLinks";
 import { findUniRoom } from "../uniActions";
-import { isPrivateRoomName, parseRegistry, REGISTRY_NOTE, type RoomsRegistry } from "../areas/roomsRegistry";
+import { parseRegistry, REGISTRY_NOTE, type RoomsRegistry } from "../areas/roomsRegistry";
 import type { Tree } from "../areas/treeCore";
 import type { RawNote } from "../vault/rawNote";
 import { reader } from "../vault/reader";
 import { pinsFrom, homeRows, wantsCount } from "./homeCore";
-import { decisionsFrom, hiddenRooms, nodeTree, privateRooms } from "./shapeCore";
+import { decisionsFrom, hiddenRooms, keepAsks, nodeTree, privateRooms } from "./shapeCore";
 import { studioLooks } from "./studioCore";
 import { useAsks } from "./useAsks";
 import { useFeedWorkRooms, useRoomRuns } from "./useRoomRuns";
@@ -127,16 +128,9 @@ export function useShape(o: {
   // a retired room is no place for an ask: one that names it goes to Uni's room, as one naming a room this device doesn't have does
   const askRooms = useMemo(() => (hidden.size ? rooms.filter((r) => !hidden.has(r.id)) : rooms), [rooms, hidden]);
   const asks = useAsks({ vault: o.vault, identity: o.identity, rooms: askRooms, uniRoom, on: o.on, privateRooms: privAsks });
-  // an ask naming a private room by a name the device has no room for (an old name, a retired private room) stays out too
-  const byRoom = useMemo(() => {
-    if (!settled) return NO_ASKS;
-    const out = new Map<string, Ask[]>();
-    for (const [room, list] of asks.byRoom) {
-      const keep = list.filter((a) => !(reg && a.roomName && isPrivateRoomName(reg, a.roomName)));
-      if (keep.length) out.set(room, keep);
-    }
-    return out;
-  }, [asks.byRoom, reg, settled]);
+  // an ask naming a private room by a name the device has no room for (an old name, a retired private room) stays out too; a private
+  // room's own asks stay in it (drawn in full inside, without words on home)
+  const byRoom: ReadonlyMap<string, Ask[]> = useMemo(() => (settled ? keepAsks(asks.byRoom, reg) : NO_ASKS), [asks.byRoom, reg, settled]);
   useDecisionsFeed({ vault: o.vault, on: o.on && !!o.identity && settled, rooms, priv: privStable, hidden, reg, uniRoom, openNote: o.openNote });
   // pins leave the moment they lapse: the clock that reads them is bumped when one reaches zero (and once a minute besides)
   const [tick, setTick] = useState(0);
@@ -148,7 +142,10 @@ export function useShape(o: {
   const pins = useMemo(() => pinsFrom(o.approvals, roomName, now), [o.approvals, roomName, now]);
   const rows = useMemo(() => homeRows(rooms, runs, byRoom, { hidden }), [rooms, runs, byRoom, hidden]);
   const wants = wantsCount(rows, pins);
-  const shown = useMemo(() => [...byRoom.values()].flat(), [byRoom]);
+  // (the Studio board is outside every room: a private room's look pins stay in the room)
+  const shown = useMemo(() => [...byRoom.values()].flat().filter((a) => !a.private), [byRoom]);
   const looks = useMemo(() => studioLooks(shown, roomName), [shown, roomName]);
-  return { rows, pins, wants, now, onPinLapsed: lapsed, runs, asks: { ...asks, byRoom }, hidden, priv: privStable, uniRoom, looks, roomName };
+  // (only by room: the flat list holds asks the registry hasn't vetted yet, and private ones; nothing outside a room should read them)
+  const { asks: _unvetted, ...answering } = asks;
+  return { rows, pins, wants, now, onPinLapsed: lapsed, runs, asks: { ...answering, byRoom }, hidden, priv: privStable, uniRoom, looks, roomName };
 }

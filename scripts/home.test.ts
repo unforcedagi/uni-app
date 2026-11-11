@@ -85,6 +85,19 @@ check("wantsCount: asks + pins + a waiting run only where the row has no asks", 
   assert.equal(wantsCount([], []), 0);
 });
 
+check("a private room's asks: on home its row carries none of them, only how many (counted on the bar, lifting the row); inside, they are its own", () => {
+  const hushedAsk = { ...ask("p1", "den", NOW - 5), what: "Words that stay inside", private: true };
+  const asks = new Map([["den", [hushedAsk, { ...hushedAsk, id: "p2" }]], ["a", [ask("x", "a", NOW - 50)]]]);
+  const rows = homeRows([room("a", "A", NOW - 100), room("den", "Den", NOW - 200)], new Map(), asks);
+  const den = rows.find((r) => r.room.id === "den")!;
+  assert.deepEqual(den.asks, []);
+  assert.equal(den.hushed, 2);
+  assert.equal(rows.find((r) => r.room.id === "a")!.hushed ?? 0, 0);
+  assert.equal(JSON.stringify(den).includes("Words that stay inside"), false);
+  assert.equal(rows[0].room.id, "den", "an ask lifts a private room too");
+  assert.equal(wantsCount(rows, []), 1 + 2);
+});
+
 check("ago: now / minutes / hours / Yesterday / weekday / date", () => {
   assert.equal(ago(NOW - 59, NOW), "now");
   assert.equal(ago(NOW + 30, NOW), "now"); // a clock a little ahead

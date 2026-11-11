@@ -63,13 +63,25 @@ check("no match (no room named, or one this device doesn't have): Uni's room; no
   assert.equal(one({ room: "kiln-studio", reply_root: "ev1" }).replyRoot, "ev1");
 });
 
-check("a private place's asks are never shown: its room by name or by privateRooms (id or name), its node or card", () => {
-  assert.equal(from([task("a", "T-1 x", { room: "sanctum" })]).length, 0);
-  assert.equal(from([task("a", "T-1 x", { room: "held-room" })], { privateRooms: new Set(["c-held"]) }).length, 0);
-  assert.equal(from([task("a", "T-1 x", { room: "#Held-Room" })], { privateRooms: new Set(["held-room"]) }).length, 0);
+check("a private room's ask is its room's own, marked private: by its name, or by privateRooms (id or name)", () => {
+  const where = (notes: Note<"task">[], extra: Partial<Parameters<typeof asksFrom>[2]> = {}) => from(notes, extra).map((a) => [a.room, a.private === true]);
+  assert.deepEqual(where([task("a", "T-1 x", { room: "sanctum" })]), [["c-sanctum", true]]);
+  assert.deepEqual(where([task("a", "T-1 x", { room: "held-room" })], { privateRooms: new Set(["c-held"]) }), [["c-held", true]]);
+  assert.deepEqual(where([task("a", "T-1 x", { room: "#Held-Room" })], { privateRooms: new Set(["held-room"]) }), [["c-held", true]]);
+  // a private node or card in a private room: still that room's
+  assert.deepEqual(where([task("a", "T-1 x", { room: "sanctum", node: "Areas/Sanctum/Garden" })]), [["c-sanctum", true]]);
+  assert.deepEqual(where([task("a", "T-1 x", { room: "held-room" })]), [["c-held", false]], "a room not marked private: an ordinary ask");
+});
+
+check("a private ask with no private room of its own on this device is never drawn: never in Uni's room, never in a public room", () => {
+  const noSanctum = ROOMS.filter((r) => r.id !== "c-sanctum");
+  assert.equal(asksFrom([task("a", "T-1 x", { room: "sanctum" })], noSanctum, { uniRoom: "c-uni", now: NOW }).length, 0);
+  assert.equal(from([task("a", "T-1 x", { room: "held-room" })], { privateRooms: new Set(["gone-room"]) }).length, 1);
+  assert.equal(from([task("a", "T-1 x", { room: "gone-room" })], { privateRooms: new Set(["gone-room"]) }).length, 0);
+  // a private node or card in a public room (or none): its words would leave the private place
   assert.equal(from([task("a", "T-1 x", { room: "kiln-studio", node: "Areas/Sanctum/Garden" })]).length, 0);
   assert.equal(from([task("a", "T-1 x", { room: "kiln-studio", card: "[[Cards/Sanctum/Notes]]" })]).length, 0);
-  assert.equal(from([task("a", "T-1 x", { room: "held-room" })]).length, 1, "a room not marked private shows");
+  assert.equal(from([task("a", "T-1 x", { node: "Areas/Sanctum/Garden" })]).length, 0);
 });
 
 check("newest first, by the note's updatedAt (seconds)", () => {

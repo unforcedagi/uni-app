@@ -111,16 +111,24 @@ export default function NotePane({ shape, stack, hub, list, onOpen, onBack, onCl
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, []);
-  // beside: the note's width and the chat's list width, measured together (as one grows the other shrinks), so the handle never takes the
-  // chat below LIST_MIN
-  const [shared, setShared] = useState(Infinity);
+  // beside: the widest the note may go and still leave the chat's own list LIST_MIN. The note and the conversation share the space right of
+  // the rail (as one grows the other shrinks); the list is the conversation less its chrome (paddings, the room's own). T-335: the room is
+  // a column of at most --sh-col, centred, so on a wide window the list stops growing as the note narrows: its centring margins are slack,
+  // not chrome, and the list alone would under-count the shared space (End then stopped short of both limits).
+  const [roomFor, setRoomFor] = useState(Infinity);
   useLayoutEffect(() => {
     if (shape !== "beside" || !box.current) return;
     const pane = box.current;
-    const measure = () => setShared(pane.getBoundingClientRect().width + list.getBoundingClientRect().width);
+    const conv = list.closest<HTMLElement>(".conversation") ?? list, column = list.closest<HTMLElement>(".sh-room");
+    const measure = () => {
+      const c = conv.getBoundingClientRect().width;
+      const centring = column ? parseFloat(getComputedStyle(column).marginLeft) + parseFloat(getComputedStyle(column).marginRight) : 0;
+      const chrome = c - list.getBoundingClientRect().width - (Number.isFinite(centring) ? centring : 0);
+      setRoomFor(pane.getBoundingClientRect().width + c - chrome);
+    };
     measure();
     const ro = new ResizeObserver(measure);
-    ro.observe(list); ro.observe(pane);
+    ro.observe(list); ro.observe(pane); if (conv !== list) ro.observe(conv);
     return () => ro.disconnect();
   }, [shape, list]);
   const keepShare = (s: number) => { const r = Math.round(s * 10000) / 10000; setShare(r); keep(SHEET_KEY, String(r)); };
@@ -145,7 +153,7 @@ export default function NotePane({ shape, stack, hub, list, onOpen, onBack, onCl
     return () => { ro.disconnect(); window.removeEventListener("resize", measure); window.visualViewport?.removeEventListener("resize", measure); };
   }, [shape, layoutKey, list]);
 
-  const besideMax = Math.max(WIDTH_MIN, Math.min(widthMax(), shared - LIST_MIN));
+  const besideMax = Math.max(WIDTH_MIN, Math.min(widthMax(), roomFor - LIST_MIN));
   // Codex a7a1r9o7: the width on screen gives way when the chat has less room than when it was set (the tree unfolded, a width kept from
   // a roomier layout); the width kept on this device stays, for when there is room again
   const shown = Math.min(live ?? width, besideMax);

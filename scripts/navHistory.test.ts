@@ -84,5 +84,14 @@ check("r12 recent: never the current place, a place once, told apart by its id, 
   assert.equal(placeKey({ kind: "all", channel: "c", root: "r", title: "All" }), "all");
 });
 
+check("T-335 sealed applets: each applet is its own place in Recent, told apart by its id", () => {
+  let h: History = EMPTY_HISTORY;
+  h = visit(h, { kind: "applet", applet: "garden-log", title: "Garden log" });
+  h = visit(h, { kind: "applet", applet: "reading-list", title: "Reading list" });
+  h = visit(h, { kind: "all", title: "Uni" });
+  assert.deepEqual(recent(h).map((t) => t.applet), ["reading-list", "garden-log"]);
+  assert.notEqual(placeKey({ kind: "applet", applet: "a", title: "Same" }), placeKey({ kind: "applet", applet: "b", title: "Same" }));
+});
+
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 console.log("navHistory: all passed");
