@@ -3,8 +3,8 @@
 // Run: DECISIONS_TEST_PORT=5731 npx playwright test --config playwright.decisions.config.ts
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, focusSheet, openDetails, openPlaces } from './areasFixture';
-import { railGo } from './railGo';
+import { bootAreas } from './areasFixture';
+import { leaveRoom, openRoom, openSettings } from './shapeNav';
 
 const BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb';
 const D1 = '01M5D0000000000000000000A1';
@@ -18,18 +18,11 @@ const seed = (page: Page, extra: Record<string, unknown> = {}) => page.addInitSc
     metadata: { node: 'Projects/ATLAS', state: 'open', options: ['A', 'B', 'C'], default: 'B', owner: 'aaron', asked: '2026-10-09', task: 'T-07', ...more } }];
 }, [D1, extra] as const);
 
-/** T-335: ATLAS is a project inside Atlas with a room of its own (#atlas/build): the Atlas door, its details, "Inside Atlas", then ATLAS in focus. */
+/** T-335 the shape: ATLAS's room (#atlas/build) is a row on home. */
 async function openAtlas(page: Page) {
   await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true });
-  await page.locator('[data-place="front-door"]').first().waitFor();
-  // 0.2: the doors are in the home's drawer (openPlaces does nothing while the home still reads its rooms, so wait for its head)
-  await page.locator('[data-place="front-door"] .fd-pull').waitFor();
-  await openPlaces(page);
-  await page.locator('.fd-door[data-path="Areas/Atlas"]').click();
-  await openDetails(page);
-  await focusSheet(page).getByRole('region', { name: 'Inside Atlas' }).locator('.fx-place').filter({ has: page.locator('span', { hasText: /^ATLAS$/ }) }).click();
-  await expect(focusSheet(page).locator('.all-focus-title')).toHaveText('ATLAS');
-  await expect(focusSheet(page).getByRole('textbox', { name: /^Message atlas\/build/ })).toBeVisible();
+  await openRoom(page, BUILD);
+  await expect(page.locator('.sh-room').getByRole('textbox', { name: /^Message atlas\/build/ })).toBeVisible();
 }
 const arrive = (page: Page, body: string, who = 'Uni') => page.evaluate(([b, n, t]) => (window as any).__arrive(b, n, t), [BUILD, who, body] as const);
 const posts = (page: Page) => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => c.args));
@@ -46,7 +39,7 @@ test.describe('decision cards in the chat', () => {
     await seed(page, { node: 'Areas/Sanctum' });
     await openAtlas(page);
     await arrive(page, ASK);
-    const msg = page.locator('.sr-chat .message').filter({ hasText: 'Your call on the garden page layout' });
+    const msg = page.locator('.sh-room .message').filter({ hasText: 'Your call on the garden page layout' });
     const card = msg.getByRole('region', { name: 'Decision: Which layout for the garden page?' });
     await expect(card).toBeVisible();
     // T-335: one short row: the question, its task and Context, the options under it; the words field behind details
@@ -72,7 +65,7 @@ test.describe('decision cards in the chat', () => {
     await openAtlas(page);
     await arrive(page, ASK);
     await arrive(page, `Reminder: the garden page layout is still open, uni:${D1}`);
-    const cards = page.locator('.sr-chat .message .decision-card');
+    const cards = page.locator('.sh-room .message .decision-card');
     await expect(cards).toHaveCount(2);
     await expect(cards.nth(1).getByRole('button', { name: 'C', exact: true })).toBeVisible();
     const before = (await posts(page)).length;
@@ -93,11 +86,11 @@ test.describe('decision cards in the chat', () => {
     expect(sent[0].channel).toBe(BUILD);
     expect(sent[0].body).toBe(`Picked: B (decision: Which layout for the garden page?) uni:${D1}`);
     expect(sent[0].recipients).toEqual(['b'.repeat(64)]); // the room's Uni hears it
-    await expect(page.locator('.sr-chat').getByText('Sent to the room.')).toBeVisible();
+    await expect(page.locator('.sh-room').getByText('Sent to the room.')).toBeVisible();
     // 3: the other card of the same decision, and the card under your own "Picked" message, show the answer, with no buttons
     await expect(cards.nth(1).locator('.decision-result')).toHaveText('Decided: B · by you');
     await expect(cards.nth(1).getByRole('group', { name: /^Pick one:/ })).toHaveCount(0);
-    const own = page.locator('.sr-chat .message').filter({ hasText: 'Picked: B' });
+    const own = page.locator('.sh-room .message').filter({ hasText: 'Picked: B' });
     await expect(own.locator('.decision-card .decision-result')).toHaveText('Decided: B · by you');
     await shot(page, '02-decided');
   });
@@ -107,7 +100,7 @@ test.describe('decision cards in the chat', () => {
     await seed(page, { options: ['A', long], default: 'A' });
     await openAtlas(page);
     await arrive(page, ASK);
-    const card = page.locator('.sr-chat .message .decision-card').first();
+    const card = page.locator('.sh-room .message .decision-card').first();
     await card.getByRole('button', { name: long, exact: true }).click();
     const line = card.locator('summary');
     await expect(line.getByRole('status')).toHaveText(`Decided: ${long} · by you`);
@@ -118,7 +111,7 @@ test.describe('decision cards in the chat', () => {
     expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     // nor does it widen the chat: the message list never scrolls sideways
-    expect(await page.locator('.sr-chat .message-list').evaluate((el) => [el.scrollWidth <= el.clientWidth + 1, el.scrollLeft])).toEqual([true, 0]);
+    expect(await page.locator('.sh-room .message-list').evaluate((el) => [el.scrollWidth <= el.clientWidth + 1, el.scrollLeft])).toEqual([true, 0]);
   });
 
   test('4. a lost race: the room decided first; the tap shows the stored pick and posts nothing', async ({ page }) => {
@@ -126,7 +119,7 @@ test.describe('decision cards in the chat', () => {
     await openAtlas(page);
     await arrive(page, ASK);
     await arrive(page, `Reminder: uni:${D1}`);
-    const card = page.locator('.sr-chat .message .decision-card').first();
+    const card = page.locator('.sh-room .message .decision-card').first();
     await expect(card.getByRole('button', { name: 'C', exact: true })).toBeVisible();
     // the room picks A in the vault after the card was read and before the tap
     await page.evaluate((d) => { const t = (window as any).__tasks.find((x: any) => x.id === d); Object.assign(t.metadata, { state: 'decided', decided: 'A', decided_by: 'room' }); t.updatedAt = '2026-10-09T09:30:00.000Z'; }, D1);
@@ -136,7 +129,7 @@ test.describe('decision cards in the chat', () => {
     await expect(card.getByText('Already decided before your tap; nothing was sent.')).toBeVisible();
     expect((await stored(page)).decided).toBe('A');
     // 3: the decision's other card shows the stored answer too, with nothing posted to refresh it
-    await expect(page.locator('.sr-chat .message .decision-card').nth(1).locator('.decision-result')).toHaveText('Decided: A · by room');
+    await expect(page.locator('.sh-room .message .decision-card').nth(1).locator('.decision-result')).toHaveText('Decided: A · by room');
     await page.waitForTimeout(500);
     expect((await posts(page)).length).toBe(before);
     await shot(page, '04-lost');
@@ -146,7 +139,7 @@ test.describe('decision cards in the chat', () => {
     await seed(page);
     await openAtlas(page);
     await arrive(page, ASK);
-    const card = page.locator('.sr-chat .message .decision-card').first();
+    const card = page.locator('.sh-room .message .decision-card').first();
     await expect(card.getByRole('button', { name: 'A', exact: true })).toBeVisible();
     await page.evaluate((d) => { const t = (window as any).__tasks.find((x: any) => x.id === d); t.content = '# Which layout for the garden page, and its menu?\n'; t.updatedAt = '2026-10-09T09:40:00.000Z'; }, D1);
     const before = (await posts(page)).length;
@@ -165,7 +158,7 @@ test.describe('decision cards in the chat', () => {
     await page.addInitScript((d) => { (window as any).__noteFails = { [d]: true }; }, D1);
     await openAtlas(page);
     await arrive(page, ASK);
-    const msg = page.locator('.sr-chat .message').filter({ hasText: 'Your call on the garden page layout' });
+    const msg = page.locator('.sh-room .message').filter({ hasText: 'Your call on the garden page layout' });
     await expect(msg.locator('.decision-loading')).toContainText("Couldn't read this note to show its decision");
     await page.evaluate(() => { (window as any).__noteFails = {}; });
     // (exact: the reply's own row has "Ask Uni to try again", T-335 chat feel)
@@ -177,37 +170,32 @@ test.describe('decision cards in the chat', () => {
     await seed(page);
     await openAtlas(page);
     // dq2 (the fixture's ATLAS hosting decision, no message names it) belongs to this room
-    const list = page.locator('.sr-chat .room-decisions');
+    const list = page.locator('.sh-room .room-decisions');
     await expect(list.locator('summary')).toHaveText(/^\d+ open decisions? for this room$/);
     await list.locator('summary').click();
     await expect(list.getByRole('region', { name: /Decide the ATLAS hosting/ }).getByRole('group', { name: /^Pick one:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
     await arrive(page, 'The garden page layout is yours. [decision T-07]');
-    const msg = page.locator('.sr-chat .message').filter({ hasText: 'The garden page layout is yours' });
+    const msg = page.locator('.sh-room .message').filter({ hasText: 'The garden page layout is yours' });
     await expect(msg).not.toContainText('T-07]');
     await expect(msg.getByRole('region', { name: 'Decision: Which layout for the garden page?' })).toBeVisible();
     // named by a message now, so it is not listed twice
     await expect(list.getByRole('region', { name: /garden page/ })).toHaveCount(0);
   });
 
-  test('the existing Areas rendering stays in step: a card\'s pick leaves Needs you; a pick in the decision\'s sheet turns its card to Decided', async ({ page }) => {
+  test('a card\'s pick turns it to Decided; a decision answered elsewhere turns its card to Decided on the next read', async ({ page }) => {
     await seed(page);
     await openAtlas(page);
     await arrive(page, ASK);
-    const card = page.locator('.sr-chat .message .decision-card').first();
+    const card = page.locator('.sh-room .message .decision-card').first();
     await expect(card.getByRole('button', { name: 'A', exact: true })).toBeVisible();
-    // the sheet (Needs you) answers the fixture's other decision; the garden one is answered from the card
-    // T-335: what needs you is in the room's details, inside the focus (every screen); its name steps back to the conversation
-    const needsText = async () => { await openDetails(page); const t = await focusSheet(page).locator('.all-focus-details .cp').first().innerText(); await focusSheet(page).getByRole('button', { name: /: back to the conversation$/ }).click(); return t; };
-    await expect.poll(needsText).toContain('Which layout for the garden page?');
     await card.getByRole('button', { name: 'A', exact: true }).click();
     await expect(card.locator('.decision-result')).toHaveText('Decided: A · by you');
-    await expect.poll(needsText).not.toContain('Which layout for the garden page?');
-    // the other way round: a room's message names the hosting decision by its marker; it is answered in its sheet (or by the room)
+    // the other way round: a room's message names the hosting decision by its marker; it is answered elsewhere (or by the room)
     await page.evaluate(() => (window as any).__setTask('dq2', { task: 'T-140' }));
     await page.clock.setFixedTime(Date.parse('2026-10-09T10:01:00.000Z'));
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await arrive(page, 'The hosting call is yours: self-host or managed. [decision T-140]');
-    const hosting = page.locator('.sr-chat .message').filter({ hasText: 'The hosting call is yours' }).locator('.decision-card');
+    const hosting = page.locator('.sh-room .message').filter({ hasText: 'The hosting call is yours' }).locator('.decision-card');
     await expect(hosting.getByRole('button', { name: 'Managed' })).toBeVisible();
     await page.evaluate(() => { const t = (window as any).__tasks.find((x: any) => x.id === 'dq2'); Object.assign(t.metadata, { state: 'decided', decided: 'Managed', decided_by: 'aaron' }); t.updatedAt = new Date(Date.now() + 9000).toISOString(); });
     await page.clock.setFixedTime(Date.parse('2026-10-09T10:05:00.000Z'));
@@ -219,13 +207,14 @@ test.describe('decision cards in the chat', () => {
     await seed(page);
     await openAtlas(page);
     await arrive(page, ASK);
-    const card = page.locator('.sr-chat .message .decision-card').first();
+    const card = page.locator('.sh-room .message .decision-card').first();
     await expect(card.getByRole('button', { name: 'A', exact: true })).toBeVisible();
     const before = (await posts(page)).length;
     await page.evaluate(() => { (window as any).__membersDelay = 2500; });
     await card.getByRole('button', { name: 'A', exact: true }).click();
     await expect(card.getByText('Telling the room…')).toBeVisible();
-    await railGo(page, 'Settings');
+    await leaveRoom(page);
+    await openSettings(page);
     await page.getByRole('button', { name: 'Forget this device key' }).click();
     await page.getByRole('button', { name: /^Tap again to forget/ }).click();
     await expect.poll(() => page.evaluate(() => (window as any).__calls.some((c: any) => c.cmd === 'identity_forget'))).toBe(true);
@@ -236,7 +225,7 @@ test.describe('decision cards in the chat', () => {
   test('a decision listed under the chat (no message names it) is answered there: its card stays, says Decided and tells the room', async ({ page }) => {
     await seed(page);
     await openAtlas(page);
-    const list = page.locator('.sr-chat .room-decisions');
+    const list = page.locator('.sh-room .room-decisions');
     await list.locator('summary').click();
     const hosting = list.getByRole('region', { name: /Decide the ATLAS hosting/ });
     const before = (await posts(page)).length;
@@ -251,7 +240,7 @@ test.describe('decision cards in the chat', () => {
     await page.addInitScript(() => { (window as any).__seedTasks = [{ id: '01M5D0000000000000000000B1', path: 'Projects/Atlas/Plain note', extension: 'md', tags: [], createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', content: '# Plain', metadata: {} }]; });
     await openAtlas(page);
     await arrive(page, 'See uni:01M5D0000000000000000000B1 for the notes.');
-    const msg = page.locator('.sr-chat .message').filter({ hasText: 'for the notes' });
+    const msg = page.locator('.sh-room .message').filter({ hasText: 'for the notes' });
     await expect(msg.locator('a.note-chip')).toBeVisible();
     await expect(msg.locator('.decision-card')).toHaveCount(0);
   });
@@ -266,7 +255,7 @@ test.describe('your words on a decision card', () => {
     await seed(page);
     await openAtlas(page);
     await arrive(page, ASK);
-    const card = page.locator('.sr-chat .message .decision-card').first();
+    const card = page.locator('.sh-room .message .decision-card').first();
     await expect(card.getByRole('button', { name: 'C', exact: true })).toBeVisible();
     // T-335: the words field is behind the card's details
     await card.getByRole('button', { name: 'details', exact: true }).click();
@@ -350,7 +339,7 @@ test.describe('your words on a decision card', () => {
     await arrive(page, `Reminder: uni:${D1}`);
     await field(card).fill('C, so the path stays lit.');
     // the same decision's other card shows the same unsent words (they live with the decision, not the card), and a redraw keeps them
-    const other = page.locator('.sr-chat .message .decision-card').nth(1);
+    const other = page.locator('.sh-room .message .decision-card').nth(1);
     await expect(field(other)).toHaveValue('C, so the path stays lit.');
     await arrive(page, 'Something else entirely.');
     await expect(field(card)).toHaveValue('C, so the path stays lit.');
@@ -415,7 +404,7 @@ test.describe('your words on a decision card', () => {
     const body = (await posts(page)).at(-1).body;
     expect(body).toBe(`Note on decision (no pick yet): <b>bold</b> and \\[x\\](javascript:alert(1)) \\*\\*loud\\*\\*\n\\# not a heading uni:${D1}`);
     // in the chat: the words as typed, no link, no bold, no heading, no element from the text
-    const own = page.locator('.sr-chat .message').filter({ hasText: 'Note on decision (no pick yet)' });
+    const own = page.locator('.sh-room .message').filter({ hasText: 'Note on decision (no pick yet)' });
     const md = own.locator('.message-content > .md');
     await expect(md).toContainText('<b>bold</b> and [x](javascript:alert(1)) **loud**');
     await expect(md.locator('a[href^="javascript"], b, strong, em, .md-h')).toHaveCount(0);

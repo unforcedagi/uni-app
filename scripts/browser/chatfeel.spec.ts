@@ -1,10 +1,10 @@
 // T-335 chat feel: what makes a room's chat feel alive, built from the chat-feel spec's ranked gaps. The send moment (the composer clears
 // in the same frame, Send turns into Stop, a plain-words line says what Uni is doing), the answer anchored under its question (the view
-// doesn't follow the text down), message actions beyond Copy, reading rhythm, the New line, quick replies under a question, and the All
-// view's routed composer (a sure route is named on Send; with no good signal nothing is chosen for you). Phone, Daylight and desktop.
+// doesn't follow the text down), message actions beyond Copy, reading rhythm, the New line and quick replies under a question. Phone, Daylight and desktop.
 // Made-up world only (the fixture's `world: 'unread'` with `glow`). Run: CHATFEEL_TEST_PORT=1471 npx playwright test --config playwright.chatfeel.config.ts
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, openPlaces } from './areasFixture';
+import { bootAreas } from './areasFixture';
+import { openRoom as openRoomById } from './shapeNav';
 
 const SHOTS = process.env.CHATFEEL_SHOTS ?? 'test-results/chatfeel-shots';
 const shot = (page: Page, name: string) => page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` });
@@ -13,27 +13,24 @@ const touch = () => project() !== 'desktop';
 const daylight = () => project() === 'daylight';
 const UNI = 'c'.repeat(64);
 
-async function boot(page: Page, unread: Record<string, number> = {}, view: 'places' | 'all' = 'places') {
-  await page.addInitScript((v) => {
+async function boot(page: Page, unread: Record<string, number> = {}) {
+  await page.addInitScript(() => {
     if (sessionStorage.getItem('feel.booted')) return;
     sessionStorage.setItem('feel.booted', '1');
     if (navigator.userAgent.includes('SM-T') || (window.innerWidth === 828 && window.innerHeight === 1104)) localStorage.setItem('uni.motion', 'calm');
-  }, view);
+  });
   await bootAreas(page, 'seed', { world: 'unread', glow: true, uniMember: true, unread });
-  await page.locator('[data-place="front-door"]').waitFor();
-  // 0.2 one home: the rail's Uni opens All's stream (no All tab)
-  if (view === 'all') { await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click(); await page.locator('[data-place="front-door"][data-view="all"]').waitFor(); }
 }
+/** T-335 the shape: a room opens from its row on home, by channel id. */
+const ROOMS: Record<string, string> = { 'Kiln Studio': 'ch-kiln', 'Bee Garden': 'ch-bees' };
 async function openRoom(page: Page, name: string) {
-  // 0.2: the places are in the drawer under the home's head
-  await openPlaces(page);
-  await page.locator(`.fd-door[data-path="Areas/${name}"]`).click();
-  await page.locator('.all-focus').getByRole('textbox', { name: /^Message / }).waitFor();
+  await openRoomById(page, ROOMS[name]);
+  await page.locator('.sh-room').getByRole('textbox', { name: /^Message / }).waitFor();
   await page.waitForTimeout(300);
 }
-// T-335: the room is in focus over All, whose own composer ("Message for your rooms") stays behind it: the room's chat is the focus's
-const box = (page: Page) => page.locator('.all-focus').getByRole('textbox', { name: /^Message / });
-const list = (page: Page) => page.locator('.all-focus .message-list').first();
+// T-335: the room's chat
+const box = (page: Page) => page.locator('.sh-room').getByRole('textbox', { name: /^Message / });
+const list = (page: Page) => page.locator('.sh-room .message-list').first();
 const posts = (page: Page) => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => ({ channel: c.args.channel, body: c.args.body, recipients: c.args.recipients })));
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const status = (page: Page) => page.locator('[data-status-line]');
@@ -45,21 +42,21 @@ const LONG = ['## Firing plan for the week', ...Array.from({ length: 14 }, (_, i
 async function sendAndLook(page: Page, text: string) {
   await box(page).fill(text);
   return page.evaluate(async ({ text, touch }) => {
-    const ta = [...document.querySelectorAll<HTMLTextAreaElement>('.all-focus textarea')].find((t) => t.getAttribute('aria-label')?.startsWith('Message '))!;
-    const listEl = document.querySelector('.all-focus .message-list')!;
+    const ta = [...document.querySelectorAll<HTMLTextAreaElement>('.sh-room textarea')].find((t) => t.getAttribute('aria-label')?.startsWith('Message '))!;
+    const listEl = document.querySelector('.sh-room .message-list')!;
     const inList = () => (listEl.textContent ?? '').includes(text);
     // when the message enters the list, timed by the DOM change itself (a frame's length on a busy machine is not the app's delay)
     let seenAt: number | null = null;
     const mo = new MutationObserver(() => { if (seenAt === null && inList()) seenAt = performance.now() - t0; });
     mo.observe(listEl, { childList: true, subtree: true, characterData: true });
     const t0 = performance.now();
-    if (touch) document.querySelector<HTMLButtonElement>('.all-focus .composer button.send')!.click();
+    if (touch) document.querySelector<HTMLButtonElement>('.sh-room .composer button.send')!.click();
     else ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
     if (seenAt === null && inList()) seenAt = performance.now() - t0;
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     mo.disconnect();
     const value = ta.value;
-    const stop = !!document.querySelector('.all-focus .composer button[aria-label="Stop Uni"]');
+    const stop = !!document.querySelector('.sh-room .composer button[aria-label="Stop Uni"]');
     return { value, stop, seenAt };
   }, { text, touch: touch() });
 }
@@ -78,13 +75,13 @@ test('the send moment: the composer clears in the same frame, Send becomes Stop,
   // within half a second a line says, in words, what is happening; no machine words
   await expect(status(page)).toBeVisible({ timeout: 500 });
   // the receipt under the question: Sending, then Sent
-  const mine = page.locator('.all-focus .message-list article.message.mine').filter({ hasText: q }).last();
+  const mine = page.locator('.sh-room .message-list article.message.mine').filter({ hasText: q }).last();
   await expect(mine.locator('.msg-receipt')).toHaveText('Sending');
   await page.waitForTimeout(400);
   // the question sits just under the top of the chat
   const gap = await page.evaluate((q) => {
-    const l = document.querySelector('.all-focus .message-list')!.getBoundingClientRect();
-    const m = [...document.querySelectorAll('.all-focus .message-list article.message.mine')].filter((a) => a.textContent!.includes(q)).pop()!.getBoundingClientRect();
+    const l = document.querySelector('.sh-room .message-list')!.getBoundingClientRect();
+    const m = [...document.querySelectorAll('.sh-room .message-list article.message.mine')].filter((a) => a.textContent!.includes(q)).pop()!.getBoundingClientRect();
     return m.top - l.top;
   }, q);
   expect(gap).toBeGreaterThanOrEqual(0);
@@ -123,7 +120,7 @@ test('a long answer anchors under its question: the view does not follow it down
   await expect(reply).toBeVisible();
   await page.waitForTimeout(700);
   const where = await page.evaluate((q) => {
-    const l = document.querySelector('.all-focus .message-list') as HTMLElement;
+    const l = document.querySelector('.sh-room .message-list') as HTMLElement;
     const lr = l.getBoundingClientRect();
     const mine = [...l.querySelectorAll('article.message.mine')].filter((a) => a.textContent!.includes(q)).pop()!.getBoundingClientRect();
     const first = [...l.querySelectorAll('article.message:not(.mine)')].filter((a) => a.textContent!.includes('Firing plan for the week')).pop()!.querySelector('p')!.getBoundingClientRect();
@@ -214,7 +211,7 @@ test('message actions: the latest reply has a quiet row (Copy and Save as note t
   await expect.poll(async () => (await calls(page, 'vault_create')).length).toBe(1);
   const made = (await calls(page, 'vault_create'))[0];
   expect(made.content).toContain('Three glaze tiles came out glossy');
-  expect(made.content).toContain('Kiln Studio');
+  expect(made.content).toContain('in kiln-studio'); // T-335 the shape: the place is the room's name (areas have no chat of their own now)
   await expect(page.getByText(/Saved as a note/)).toBeVisible();
   // an older message: its row on hover (desktop), its sheet on a long press (touch), which Back closes first
   const older = list(page).locator('article.message[data-ref="k1"]');
@@ -290,7 +287,7 @@ test('reading: a long answer has a book page\'s rhythm; tables keep their words 
     // field box is 240 px at 390, its text 202 px (measured on 0.1.90: 194 and 190)
     await box(page).click();
     expect((await box(page).boundingBox())!.width).toBeGreaterThanOrEqual(236);
-    for (const b of await page.locator('.all-focus .composer .compose-row button:visible').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    for (const b of await page.locator('.sh-room .composer .compose-row button:visible').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   }
 });
 
@@ -302,9 +299,9 @@ test('the New line: a room opened on unread lands on the first unread message, u
   const line = list(page).locator('.new-line');
   await expect(line).toHaveText(/^New · since \d{1,2}:\d{2}/);
   const pos = await page.evaluate(() => {
-    const l = document.querySelector('.all-focus .message-list')!.getBoundingClientRect();
-    const n = document.querySelector('.all-focus .message-list .new-line')!.getBoundingClientRect();
-    const next = document.querySelector('.all-focus .message-list .new-line + article.message')?.textContent ?? '';
+    const l = document.querySelector('.sh-room .message-list')!.getBoundingClientRect();
+    const n = document.querySelector('.sh-room .message-list .new-line')!.getBoundingClientRect();
+    const next = document.querySelector('.sh-room .message-list .new-line + article.message')?.textContent ?? '';
     return { top: n.top - l.top, next };
   });
   expect(pos.top).toBeGreaterThanOrEqual(0);
@@ -341,39 +338,6 @@ test('Daylight: the send moment has no motion: nothing animates longer than 120 
   expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
 });
 
-test('All: a sure route is named on Send; with no good signal nothing is chosen and Send waits; the feed reads in runs, long replies clamped, no pings', async ({ page }) => {
-  await boot(page, {}, 'all');
-  const field = page.getByRole('textbox', { name: 'Message for your rooms' });
-  const feed = page.getByRole('log', { name: 'All rooms, by time' });
-  await expect(feed.locator('article.all-msg')).toHaveCount(13);
-  // runs: a room's label only where the room changes (choir, north, kiln, bees, table, north, bees, kiln, choir)
-  await expect(feed.locator('.all-place')).toHaveCount(9);
-  // a ping never shows; a long reply shows its start and opens where it is
-  await page.evaluate(() => (window as any).__arrive('ch-north', 'Uni', '⏳ Working — 3 min — iteration 4/90, terminal'));
-  await page.evaluate((b) => (window as any).__arrive('ch-kiln', 'Uni', b), LONG);
-  await expect(feed.getByRole('button', { name: 'Read the rest' })).toBeVisible();
-  await expect(feed).not.toContainText('⏳');
-  // a sure route: chosen, and Send says where
-  await field.fill('Is the honey ready to jar?');
-  await expect(page.locator('.all-chip.chosen .all-chip-name')).toHaveText(['Bee Garden']);
-  await expect(page.locator('.all-send')).toHaveText('Send to Bee Garden');
-  // no good signal: a suggestion to tap, nothing chosen, Send waits
-  await field.fill('Something quick before the weekend');
-  await expect(page.locator('.all-chip.chosen')).toHaveCount(0);
-  await expect(page.locator('.all-chip.suggested').first()).toBeVisible();
-  await expect(page.locator('.all-send')).toBeDisabled();
-  await expect(page.locator('.all-send')).toHaveText('Choose a room');
-  const before = (await posts(page)).length;
-  if (!touch()) await field.press('Enter');
-  expect((await posts(page)).length).toBe(before);
-  await expect(page.locator('.all-note')).toContainText('Pick a room, or keep typing');
-  await shot(page, '09-all-choose');
-  await page.locator('.all-chip.suggested').first().click();
-  await expect(page.locator('.all-chip.chosen')).toHaveCount(1);
-  await expect(page.locator('.all-send')).toBeEnabled();
-  await expect(page.locator('.all-send')).toHaveText(/^Send to /);
-});
-
 // T-335 review (fresh reviewer, NO-SHIP → fixed): a failed send never freezes the room, the buttons' words post once, Stop waits for the
 // question to be posted, your own message can be deleted from the sheet
 test('review: a failed send puts the text back and the room follows new messages again', async ({ page }) => {
@@ -383,7 +347,7 @@ test('review: a failed send puts the text back and the room follows new messages
   const q = 'This one will not go';
   const look = await sendAndLook(page, q);
   expect(look.value).toBe('');
-  await expect(page.locator('.all-focus .composer .error')).toContainText('relay unreachable');
+  await expect(page.locator('.sh-room .composer .error')).toContainText('relay unreachable');
   await expect(box(page)).toHaveValue(q);
   await expect(status(page)).toHaveCount(0);
   // a message from Uni now: the room follows it to the end, as before the send
@@ -402,7 +366,7 @@ test('review: Stop waits for the question to be posted, and two taps post one st
   await expect(stop).toBeEnabled({ timeout: 5000 });
   await page.evaluate(() => (window as any).__react('ch-kiln', '👀'));
   const before = (await posts(page)).length;
-  await page.evaluate(() => { const b = document.querySelector<HTMLButtonElement>('.all-focus .composer button[aria-label="Stop Uni"]')!; b.click(); b.click(); });
+  await page.evaluate(() => { const b = document.querySelector<HTMLButtonElement>('.sh-room .composer button[aria-label="Stop Uni"]')!; b.click(); b.click(); });
   await expect(list(page).locator('.uni-stopped')).toBeVisible();
   await page.waitForTimeout(1200);
   expect((await posts(page)).slice(before).filter((p) => p.body === '/stop')).toHaveLength(1);
@@ -439,7 +403,7 @@ test('review: a send the relay accepted is sent; a ping in someone else\'s turn 
   await sendAndLook(page, 'Already on the relay');
   await page.waitForTimeout(600);
   await expect(box(page)).toHaveValue('');
-  await expect(page.locator('.all-focus .composer .error')).toHaveCount(0);
+  await expect(page.locator('.sh-room .composer .error')).toHaveCount(0);
   // someone else's turn: Rowan asked, Uni pings
   await page.evaluate(() => { (window as any).__arrive('ch-kiln', 'Rowan', 'Uni, can you weigh the clay?'); (window as any).__arrive('ch-kiln', 'Uni', '⏳ Working — 2 min — iteration 3/90, terminal'); });
   await expect(status(page)).toContainText('Running a command');

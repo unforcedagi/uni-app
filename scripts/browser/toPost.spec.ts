@@ -1,9 +1,10 @@
 // T-335: the To post queue, with Rust faked (`vault_query` for tag `post`, `post_approve`, `post_drop`, `post_edit`; the
-// real ones are proven end to end by toPostLive.spec.ts). The front door shows one quiet count; the queue shows each
+// real ones are proven end to end by toPostLive.spec.ts). The To Post tile in the applets drawer shows one quiet count; the queue shows each
 // post as it will look with whose voice it is; Approve, Schedule, Edit and Not this each make exactly one call naming
 // the post and the revision shown; a post in Uni's words for Aaron's account can't be approved. Synthetic text only.
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, openPlaces } from './areasFixture';
+import { bootAreas } from './areasFixture';
+import { bar } from './shapeNav';
 
 const meta = (m: Record<string, unknown>) => ({ state: 'proposed', platform: 'bluesky', piece: '', media: [], ...m });
 const POSTS = [
@@ -37,23 +38,27 @@ async function boot(page: Page) {
     };
   }, POSTS);
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true });
-  await page.locator('[data-place="front-door"]').waitFor();
 }
-/** 0.2 one home: the To post line is in the drawer under the home's head (pulled down once All's stream is in). */
-async function toPostLine(page: Page) {
-  await expect(page.locator('[data-place="front-door"] .fd-pull')).toBeEnabled();
-  await openPlaces(page);
-  return page.locator('#fd-drawer').getByRole('button', { name: 'To post · 3' });
+/** The To Post tile in the Applets drawer, with its count of what waits. */
+async function toPostTile(page: Page) {
+  await bar(page).getByRole('button', { name: /^Applets/ }).click();
+  return page.getByRole('dialog', { name: 'Applets' }).getByRole('button', { name: 'To Post (3)' });
+}
+/** Opens the queue from the drawer's tile. */
+async function openQueue(page: Page) {
+  await (await toPostTile(page)).click();
+  await expect(page.locator('.sh-ap-top h1')).toHaveText('To Post');
 }
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const card = (page: Page, text: string) => page.locator('.tp-card').filter({ hasText: text });
 
-test('the front door counts what waits; the queue shows each post as it will look, whose voice it is, and what it may do', async ({ page }) => {
+test('the To Post tile in the drawer counts what waits; the queue shows each post as it will look, whose voice it is, and what it may do', async ({ page }) => {
   await boot(page);
-  const line = await toPostLine(page);
-  await expect(line).toBeVisible();
+  const tile = await toPostTile(page);
+  await expect(tile).toBeVisible();
   if (process.env.T335_SHOTS) await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-front-door.png` });
-  await line.click();
+  await tile.click();
+  await expect(page.locator('.sh-ap-top h1')).toHaveText('To Post');
   const q = page.getByRole('region', { name: 'To post' });
   await expect(q.getByRole('heading', { name: 'To review · 3' })).toBeVisible();
   const uni = card(page, 'Uni build log');
@@ -79,7 +84,7 @@ test('the front door counts what waits; the queue shows each post as it will loo
 
 test('Approve, Schedule, Edit and Not this each make one call naming the post and the revision shown', async ({ page }) => {
   await boot(page);
-  await (await toPostLine(page)).click();
+  await openQueue(page);
   await card(page, 'Uni build log').getByRole('button', { name: 'Approve' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Approved. It goes out within a minute.' })).toBeVisible();
   expect(await calls(page, 'post_approve')).toEqual([{ vault: 'uni', id: 'post-uni', ifUpdatedAt: '2026-10-29T10:00:01.000Z' }]);
@@ -108,7 +113,7 @@ test('Approve, Schedule, Edit and Not this each make one call naming the post an
 
 test('Edit on Aaron\'s post takes his words; on Uni\'s post it is a note to Uni, never words under Uni\'s name', async ({ page }) => {
   await boot(page);
-  await (await toPostLine(page)).click();
+  await openQueue(page);
   const uni = card(page, 'Uni build log');
   await uni.getByRole('button', { name: 'Edit' }).click();
   await expect(uni.locator('.tp-form label')).toContainText('A note to Uni');
@@ -130,7 +135,7 @@ test('Edit on Aaron\'s post takes his words; on Uni\'s post it is a note to Uni,
 test('a post never says "Unlocked": it always asks for the device unlock, even just after one', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => { (window as any).__grace = 240; });
-  await (await toPostLine(page)).click();
+  await openQueue(page);
   const mine = card(page, 'The garden doesn’t hurry');
   await expect(mine.getByRole('button', { name: 'Approve' })).toBeVisible();
   await card(page, 'Uni build log').getByRole('button', { name: 'Approve' }).click();

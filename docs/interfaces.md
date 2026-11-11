@@ -1,12 +1,17 @@
 # Interfaces: the contract, manifests, kits and sealing
 
-An **interface** is a small app that the Uni app runs inside a sealed frame: today the HTML note
-`Areas/<Name>/app`, later other notes. It reaches the vault and chat only through the **interface
-contract** (version 1). The contract lives in `src/interface/` with no imports from `App.tsx`, so it can
-be lifted into a package. Area apps are its first consumer (`src/areas/`).
+An **interface** is a small app that the Uni app runs inside a sealed frame: an HTML note in the vault. It
+reaches the vault and chat only through the **interface contract** (version 1). The contract lives in
+`src/interface/` with no imports from `App.tsx`, so it can be lifted into a package.
 
-Example apps: [`areas-seed/techne.html`](../areas-seed/techne.html), [`areas-seed/unforced.html`](../areas-seed/unforced.html).
-Publish an app by creating or updating the note `Areas/<Name>/app` with `extension: html`.
+Since 0.4.0 its consumer is the **applets drawer**: a note tagged `applet`, with `extension: html` and both an
+`applet:` manifest (`src/interface/applets.ts`) and an `interface:` manifest in its metadata, joins the drawer as a
+sealed applet (`src/interface/sealedApplet.ts`, `src/shape/SealedApplet.tsx`). A note whose `applet:` manifest isn't valid is
+skipped and counted. One whose `interface:` needs are missing or can't be granted still gets its tile, and opening it
+shows "This applet can't open" with the reason. Until 0.4.0 the consumer was an area's app (`Areas/<Name>/app`, shown in the
+area view); the areas view is gone, and the example apps written for it
+([`areas-seed/techne.html`](../areas-seed/techne.html), [`areas-seed/unforced.html`](../areas-seed/unforced.html))
+declare `area` scopes, which a drawer applet refuses.
 
 ## How it fits together
 
@@ -37,63 +42,54 @@ Publish an app by creating or updating the note `Areas/<Name>/app` with `extensi
 
 ## The manifest
 
-In the app note's metadata:
+In the applet note's metadata:
 
 ```yaml
+applet:
+  contract: 1
+  id: seeds                         # unique; not a built-in's id, except a placeholder's (recipes)
+  name: Seeds
+  kind: vault
+  where: ...                        # where its data lives, in the words applets.ts checks
+  searches: [...]
 interface:
   contract: 1
   needs:
-    - vault.read: Areas/Techne/     # a folder prefix ending in "/", or "area"
-    - chat.read: area               # "area" = the area's linked room(s), or a room id
-    - chat.draft: area
-  layout:
-    chat: side                      # "side" | "sheet" | "hidden"; anything else is the default
+    - vault.read: Seeds/            # a folder prefix ending in "/"
+    - chat.read: <room id>          # a room this device has
+    - chat.draft: <room id>
 ```
 
-- No `interface` key → the default: `vault.read: area`, `chat.read: area`, `chat.draft: area`.
-- `area` resolves against the host: `vault.read` → `Areas/<Name>/`; `chat.*` → the area's `channel` rooms.
+- A drawer applet has no area and no room of its own, so every scope is explicit. No `interface` key (whose
+  default needs are all `area`), or the symbolic `area` scope anywhere, is refused with a screen that says why;
+  so is a `chat.*` need whose room this device doesn't have. The parser (`manifest.ts`) still knows `area` and
+  `interface.layout`, from the area host; the drawer uses neither.
 - Invalid manifests (unknown capability, `..`, `%`, backslash, no trailing `/`, > 12 needs, wrong contract
-  version) never run; the area shows its default view with the reason.
-- The grant is keyed by the note id, the SHA-256 of what the needs **resolve to** (folder prefixes, room
-  ids and the area path) and the SHA-256 of the app HTML. A different resolution asks again: a granted
-  app note moved into another area, or an area whose `channel` is edited, is a new question, even though
-  the symbolic `area` need reads the same. An **HTML-only** change runs, and the host shows an "updated
-  since you allowed it" line with an **Accept** button in the area bar (the frame cannot draw it). The line
-  stays, across restarts, until the user taps Accept; only then is the new HTML hash stored.
+  version) never run; the applet shows "This applet can't open" with the reason.
+- The grant is keyed by the note id, the SHA-256 of what the needs **resolve to** (folder prefixes and room
+  ids) plus the note's path, and the SHA-256 of the app HTML. A different resolution or a moved note asks
+  again. An **HTML-only** change runs, and the host shows an "updated since you allowed it" line with an
+  **Accept** button in the applet's bar (the frame cannot draw it). The line stays, across restarts, until the
+  user taps Accept; only then is the new HTML hash stored.
 - Scopes and `note.open` refs may not contain any invisible character (the same classifier as drafts,
-  below, including tag characters). A `vault.read` prefix outside the area's own folder, or a `chat.read` /
-  `chat.draft` room that is not one of the area's channels, is allowed but the prompt says so in bold
-  ("Read notes outside this area, in Journal/", "Read recent messages in a room outside this area, #x").
+  below, including tag characters).
 
-## The area includes its room
+## Chat from an applet
 
-The area view is the interface plus the area's room chat, which is the app's own room view (message list and
-composer: the same send path, drafts and signing), not a copy. The interface never draws chat; the host does.
-
-- `interface.layout.chat` is a hint, never an error: `side` (default on a desktop, >= 900 px: beside the
-  interface with a draggable divider, width kept in `uni.area.chatWidth.v1`, at most 60% of the view),
-  `sheet` (default on a phone: a pull-up sheet over the bottom; the peek bar shows the last message and an
-  unread count, tap or drag to expand) or `hidden` (no chat; suggestions stay above the interface and *Add to
-  draft* brings the room into focus over the home). `side` on a phone is a sheet. The hint does not change the grant key.
-- The suggestion bar sits directly above the chat composer; *Add to draft* fills that composer. A suggestion
-  arriving while the sheet is down opens it.
-- The bar has **Open #room**, which brings the room into focus over the home (the draft carries over). An area with no
-  room says "This area has no room yet".
-- The place remembers its room (`channel` on its saved target), so the room in focus follows it.
-- **Live messages:** with `chat.read`, the host pushes `{uni:1, event:"chat.message", data:{id, author, content,
-  created_at, room}}` for each message that arrives in a granted room (not the history already there when the
-  area opened). Text is cleaned with `stripHidden` and capped like `chat.recent`; each event costs one token
-  of the request bucket and is dropped when it is empty. No `chat.read`, no event. Kit: `uni.chat.onMessage(cb)`
-  returns an unsubscribe.
+An applet never draws chat and has no room beside it. With `chat.read` it can read a named room's recent
+messages (`chat.recent`); with `chat.draft`, *Add to draft* on its suggestion puts the text in that room's
+composer. With chat off in the active profile, no room is the applet's to read. The drawer host pushes no
+live `chat.message` events (the area view did); `uni.chat.onMessage(cb)` still exists in the kit for a host
+that does.
 
 ## Consent
 
 1. **First open: grant prompt** (`grantPrompt.tsx`, outside the frame). Lists the needs in plain words:
-   *Read notes in Areas/Techne/ · Read recent messages in #Techne · Suggest drafts for #Techne*.
-   Every sentence is the host's; the only text from the note is the area name, quoted and marked as
+   *Read notes in Seeds/ · Read recent messages in #garden · Suggest drafts for #garden*.
+   Every sentence is the host's; the only text from the note is the applet's name, quoted and marked as
    unverified. **Allow** stores the grant; **Not now** shows the default view and is not remembered.
 2. **While running: suggestion bar** (`consent.tsx`, outside the frame). `chat.draft` and `note.open`
-   only create a *pending suggestion*: "Techne suggests a draft for #Techne: … [Add to draft] [Dismiss]".
+   only create a *pending suggestion*: "Seeds suggests a draft for #garden: … [Add to draft] [Dismiss]".
    Only a tap on that host UI adds the text to the room's composer (after any existing draft; it never
    sends) or opens the note. The bar shows the **whole** draft that will be inserted. The block is at most
    the smaller of 40% of the window height and 24rem, and scrolls past that. **Add to draft** stays disabled
@@ -110,10 +106,10 @@ composer: the same send path, drafts and signing), not a copy. The interface nev
    draft** and **Dismiss** stay on screen. `note.open` is judged on the note the ref resolves to, and the
    suggestion carries that path. At most 3 pending; duplicates collapse. There is no gesture inference
    (no `userActivation`, no blur or focus heuristics): a frame that steals focus gains nothing.
-3. **Stop, revoke, restore.** The area bar has **Stop app** (unmounts the frame) and **Revoke access**
-   (forgets the grant; the next open asks again). Both clear pending suggestions, and a call that finishes after the frame is gone adds none. A stopped app shows **Open <Name> app**. An app starts
-   only on a tap in the current process (the area card, **Allow**, or **Open app**): an area tab restored
-   from the last launch never starts its app by itself, so a faulty app cannot freeze Uni on every launch.
+3. **Stop, revoke, restore.** The applet's bar has **Stop** (unmounts the frame) and **Revoke access**
+   (forgets the grant; the next open asks again). Both clear pending suggestions, and a call that finishes after the frame is gone adds none. A stopped applet shows **Open <Name>**. An applet starts
+   only on a tap in the current process (its tile in the drawer, **Allow**, or **Open**): an applet tab restored
+   from the last launch never starts by itself, so a faulty applet cannot freeze Uni on every launch.
 
 ## Wire protocol
 
@@ -154,7 +150,7 @@ stringifying attacker data); depth ≤ 6; plain JSON only. Over the request limi
 - `GET /api/notes/:idOrPath` → the note, or 404.
 
 Scope is judged on the **note that comes back** (its `path` must be strictly inside a granted prefix),
-whatever key it was looked up by, so ids, search hits and tags cannot leak a note from another area.
+whatever key it was looked up by, so ids, search hits and tags cannot leak a note from outside the grant.
 Out-of-scope reads are 404, not 403, so the vault has no existence oracle.
 
 Errors (`error.code`): `bad_request`, `bad_version`, `bad_params`, `too_large`, `unknown_namespace`,
@@ -163,13 +159,13 @@ Errors (`error.code`): `bad_request`, `bad_version`, `bad_params`, `too_large`, 
 ## Kits (`window.uni`, frozen)
 
 ```js
-const ctx = await uni.ready();                 // {contract:1, area:{name,title,purpose,status,since}, theme}
-const notes = await uni.vault.queryNotes({ pathPrefix: `Areas/${ctx.area.name}/`, limit: 12 });
-const note = await uni.vault.getNote("Areas/Techne/Plan");      // null when out of scope
+const ctx = await uni.ready();                 // {contract:1, applet:{id, name}, theme} (an area's app got area:{...})
+const notes = await uni.vault.queryNotes({ pathPrefix: "Seeds/", limit: 12 });
+const note = await uni.vault.getNote("Seeds/Plan");             // null when out of scope
 const { messages } = await uni.chat.recent(12);
 const off = uni.chat.onMessage((m) => { /* {id, author, content, created_at, room}; needs chat.read */ });
 await uni.chat.draft("text");                  // → pending suggestion; the user taps in the host
-await uni.note.open("Areas/Techne/Plan");      // → pending suggestion
+await uni.note.open("Seeds/Plan");             // → pending suggestion
 uni.theme.on((t) => { /* host colours; --text, --accent… are also set on <html> */ });
 ```
 
@@ -216,7 +212,7 @@ What each part really guarantees:
   allocation loop or a DOM bomb freezes the whole app on Chromium and WebKit (reproduced in review). The
   message limiter cannot help; there is no in-process fix. Mitigations shipped: the grant prompt says so,
   **Stop app** and **Revoke access** exist, and a restored tab never auto-starts its app. A frozen host
-  cannot be tapped, so recovery is force-quit and, on relaunch, not opening the area. **Out-of-process
+  cannot be tapped, so recovery is force-quit and, on relaunch, not opening the applet. **Out-of-process
   hosting (a separate webview per app) is the follow-up** that actually fixes it.
 - **DNS**: `dns-prefetch` and `preconnect` hints are not governed by CSP on Chromium, so a hostname-based
   DNS channel may remain. Our harness could not make those hints fire even without a CSP, so the result is
@@ -240,11 +236,11 @@ WebRTC checks revokes the stored result. `gateMode()` returns `sealed`, `approve
 | WebRTC and any other check failed or went unreported, or no result, or a different version, platform or webview | closed | never |
 
 In approved-code mode an app whose HTML hash differs from the one stored at approval (status `updated`) does
-**not** run. The area shows the grant prompt again with a host-rendered line, "This app's code changed since you
-allowed it. On this device apps can reach the network through WebRTC, so only code you've approved runs.", and
+**not** run. The applet shows the grant prompt again with a host-rendered line, "This applet's code changed since you
+allowed it. On this device applets can reach the network through WebRTC, so only code you've approved runs.", and
 **Allow this version** / **Not now**. Nothing runs until **Allow this version** stores the new hash. A
 never-approved app gets the first-open prompt, which in this mode drops the "sealed frame" and "can't reach the
-internet" sentences for the host line "On this device apps can reach the network through WebRTC, so this app is only as
+internet" sentences for the host line "On this device applets can reach the network through WebRTC, so this applet is only as
 safe as its code. Allow it only if you trust it." A running app shows an **Approved code** chip in the host bar. The
 grant record stores `grantedUnder` (the mode it was made in; a record without it counts as `sealed`), and a grant made
 under a sealed pass asks once more in approved-code mode. `runDecision` treats only `sealed` and `approved-code` as

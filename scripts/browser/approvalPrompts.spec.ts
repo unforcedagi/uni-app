@@ -1,11 +1,13 @@
-// T-161: a Hermes approval prompt posted in a room is in Needs you at once (the room and the exact command), opens its room at the prompt
-// with the composer focused, and leaves when Hermes says it was approved, denied or timed out, or when its own window ends. A message
+// T-161: a Hermes approval prompt posted in a room is told once, shows in its room as a prompt with a banner over the composer, and goes when Hermes says
+// it was approved, denied or timed out, or when its own window ends. T-335 the shape: a prompt ending within 15 minutes is also a pin on home (`.sh-pin`);
+// the retired "Needs you" list is gone: its row assertions in tests 1-3 are dropped, and 2 and 2b now check the pin. A message
 // that only talks about approving is never one. The prompts are synthetic copies of the gateway's shapes (scripts/fixtures).
 // Run: PROMPTS_TEST_PORT=5741 npx playwright test --config playwright.prompts.config.ts
 import { readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, openPlaces } from './areasFixture';
+import { bootAreas } from './areasFixture';
+import { homeHead, openRoom } from './shapeNav';
 
 const fx = JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8'));
 const ROOM = 'ch-garden';
@@ -22,34 +24,30 @@ async function boot(page: Page) {
     w.Notification = class { static permission = 'granted'; static requestPermission = async () => 'granted'; constructor(title: string, o: { body?: string } = {}) { w.__notes.push({ title, body: o.body ?? '' }); } };
   });
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, strayRoom: true });
-  // T-302: Uni's home, the front door, holds every room's prompts ("Waiting on your OK"; 0.2: in its drawer)
-  await page.locator('[data-place="front-door"]').waitFor();
+  await expect(homeHead(page)).toBeVisible();
 }
-/** 0.2 one home: the prompts wait in the home's drawer, under what needs you (every screen): pull it down (openPlaces does nothing
- *  while the home still reads its rooms, so wait for its head) */
-async function unfold(page: Page) { await page.locator('[data-place="front-door"] .fd-pull').waitFor(); await openPlaces(page); }
-const rows = (page: Page) => page.locator('.cp-approval');
+/** the pins on home: a prompt or card that ends within 15 minutes */
+const pins = (page: Page) => page.locator('.sh-pin');
+/** the room, from home, then (when the prompt is in a thread) its thread */
+async function intoRoom(page: Page, thread: string | null = null) {
+  await openRoom(page, ROOM);
+  if (thread) { await page.locator(`article.message[data-ref="${thread}"]`).locator('.thread-summary').click(); await expect(page.locator('.sh-room h1')).toContainText('thread'); }
+}
 /** a message over the live socket, each one second (and `later` more) after the one before (the fixture's own clock is the boot time) */
 const arrive = (page: Page, body: string, who = 'Uni', room = ROOM, root: string | null = null, later = 0) => page.evaluate(([c, n, b, r, l]) => { const w = window as any; w.__k = (w.__k ?? 0) + 1 + l; return w.__arrive(c, n, b, -w.__k, false, r); }, [room, who, body, root, later] as const);
 /** the app has read the store since the last message arrived (the hook re-reads on each live message) */
 const reads = (page: Page) => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'approval_messages').length);
 async function settled(page: Page, before: number) { await expect.poll(() => reads(page)).toBeGreaterThan(before); await page.waitForTimeout(150); }
 const shot = async (page: Page, name: string) => { await mkdir(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${name}-${page.viewportSize()!.width}x${page.viewportSize()!.height}.png` }); };
-const composerFocused = (page: Page) => page.evaluate(() => document.activeElement?.tagName === 'TEXTAREA' && !!document.activeElement.closest('.composer'));
 
 test.describe('a Hermes approval prompt, loudly', () => {
   test.describe.configure({ timeout: 120_000 });
-  test('1. a prompt in a room is in Needs you at once with its room and command; it opens the room at the prompt', async ({ page }) => {
+  test('1. a prompt in a room is told once; its room shows it marked, with the banner over the composer', async ({ page }) => {
     await boot(page);
-    await expect(rows(page)).toHaveCount(0);
+    await expect(pins(page)).toHaveCount(0);
     const ref = await arrive(page, fx.prompts.two_answers_30min);
-    await unfold(page);
-    const row = rows(page);
-    await expect(row).toHaveCount(1);
-    await expect(row.locator('.cp-approval-lead')).toHaveText('Needs your OK in #garden-club');
-    await expect(row.locator('.cp-approval-cmd')).toHaveText('git branch -D feature/example-cleanup');
-    await expect(row.locator('.cp-approval-why')).toHaveText('git branch force delete');
-    await expect(row.locator('.cp-approval-how')).toHaveText(/^Reply \/approve, \/approve session or \/deny · ends \d{1,2}:\d{2}\s?[AP]M$/);
+    // 30 minutes out: not pinned yet; it waits in its room
+    await expect(pins(page)).toHaveCount(0);
     // one notification, on the desktop (Android has no notification path from the app yet)
     if (await android(page)) expect(await page.evaluate(() => (window as any).__notes.length)).toBe(0);
     else await expect.poll(() => page.evaluate(() => (window as any).__notes)).toEqual([{ title: 'Uni in #garden-club', body: 'Needs your OK to run: git branch -D feature/example-cleanup' }]);
@@ -57,15 +55,13 @@ test.describe('a Hermes approval prompt, loudly', () => {
     const n = await reads(page);
     await arrive(page, 'Unrelated chatter in another room.', ME, 'ch-unf');
     await settled(page, n);
-    await expect(row).toHaveCount(1);
     expect((await page.evaluate(() => (window as any).__notes.length))).toBeLessThanOrEqual(1);
-    await shot(page, '01-needs-you');
-    // the row opens the room at the prompt, marked, with the banner over a focused composer; nothing is sent for the user
-    await row.getByRole('button').click();
+    await shot(page, '01-home');
+    // the room shows the prompt, marked, with the banner over the composer; nothing is sent for the user
+    await intoRoom(page);
     const prompt = page.locator(`.message.approval-waiting[data-ref="${ref}"]`);
     await expect(prompt).toBeVisible();
     await expect(page.locator('.approval-banner')).toContainText('Uni needs your OK to run git branch -D feature/example-cleanup. Reply /approve, /approve session or /deny below');
-    await expect.poll(() => composerFocused(page)).toBe(true);
     expect(await page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').length)).toBe(0);
     await shot(page, '02-room');
     // T-335: in the room the prompt is one short row: the command, how to answer; the full command and why behind details
@@ -89,70 +85,74 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await shot(page, '03-room-answered');
   });
 
-  test('2. it leaves Needs you when Hermes says approved, denied or timed out', async ({ page }) => {
-    await boot(page); await unfold(page);
+  test('2. a prompt ending within 15 minutes is pinned on home with its room and command, and leaves when Hermes says approved, denied or timed out', async ({ page }) => {
+    await boot(page);
+    await arrive(page, fx.prompts.three_answers_5min);
+    await expect(pins(page)).toHaveCount(1);
+    await expect(pins(page).locator('.sh-pin-room')).toHaveText('garden-club');
+    await expect(pins(page).locator('h3')).toHaveText('OK to run rm -rf /tmp/example-build/cache?');
+    await shot(page, '01-pin');
     for (const outcome of ['approved', 'denied'] as const) {
-      await arrive(page, fx.prompts.three_answers_5min);
-      await expect(rows(page)).toHaveCount(1);
+      if (outcome === 'denied') await arrive(page, fx.prompts.three_answers_5min);
+      await expect(pins(page)).toHaveCount(1);
       // the user's own reply is not the outcome: it waits until Hermes answers
       const n = await reads(page);
       await arrive(page, outcome === 'denied' ? '/deny' : '/approve', ME);
       await settled(page, n);
-      await expect(rows(page)).toHaveCount(1);
+      await expect(pins(page)).toHaveCount(1);
       await arrive(page, fx.outcomes[outcome]);
-      await expect(rows(page), outcome).toHaveCount(0);
+      await expect(pins(page), outcome).toHaveCount(0);
     }
     // the timeout notice comes when the window it stated is up (five minutes on), and settles that prompt
     await arrive(page, fx.prompts.three_answers_5min);
-    await expect(rows(page)).toHaveCount(1);
+    await expect(pins(page)).toHaveCount(1);
     await arrive(page, fx.outcomes.timed_out_5, 'Uni', ROOM, null, 299);
-    await expect(rows(page), 'timed out').toHaveCount(0);
+    await expect(pins(page), 'timed out').toHaveCount(0);
     // two at once: one approval settles the older, a plural one both
     await arrive(page, fx.prompts.three_answers_5min);
-    await arrive(page, fx.prompts.once_or_deny_30min);
-    await expect(rows(page)).toHaveCount(2);
+    await arrive(page, fx.prompts.multiline_why);
+    await expect(pins(page)).toHaveCount(2);
     await arrive(page, fx.outcomes.approved);
-    await expect(rows(page)).toHaveCount(1);
-    await expect(rows(page).locator('.cp-approval-cmd')).toHaveText('chmod -R 777 /srv/example');
+    await expect(pins(page)).toHaveCount(1);
     await arrive(page, fx.outcomes.denied);
-    await expect(rows(page)).toHaveCount(0);
+    await expect(pins(page)).toHaveCount(0);
   });
 
-  test('2b. withdrawn with no message, it stays until the window it stated is up, then goes by itself', async ({ page }) => {
-    await boot(page); await unfold(page);
-    await arrive(page, fx.prompts.once_or_deny_30min);
-    await expect(rows(page)).toHaveCount(1);
-    await page.clock.fastForward('29:00');
-    await expect(rows(page)).toHaveCount(1);
+  test('2b. withdrawn with no message, a pinned prompt stays until the window it stated is up, then goes by itself', async ({ page }) => {
+    await boot(page);
+    await arrive(page, fx.prompts.three_answers_5min);
+    await expect(pins(page)).toHaveCount(1);
+    await page.clock.fastForward('04:00');
+    await expect(pins(page)).toHaveCount(1);
     await page.clock.fastForward('01:30');
-    await expect(rows(page)).toHaveCount(0);
+    await expect(pins(page)).toHaveCount(0);
   });
 
   test('3. a message that only mentions approving is not flagged; a real prompt still is', async ({ page }) => {
-    await boot(page); await unfold(page);
+    await boot(page);
     const n = await reads(page);
     for (const body of Object.values(fx.not_prompts) as string[]) await arrive(page, body);
     // the user pasting a prompt is not Hermes asking
     await arrive(page, fx.prompts.three_answers_5min, ME);
     await settled(page, n);
     await page.waitForTimeout(400);
-    await expect(rows(page)).toHaveCount(0);
+    await expect(pins(page)).toHaveCount(0);
+    await intoRoom(page);
+    await expect(page.locator('.approval-banner')).toHaveCount(0);
+    await expect(page.locator('.message.approval-waiting')).toHaveCount(0);
     if (!(await android(page))) expect(await page.evaluate(() => (window as any).__notes.length)).toBe(0);
     await arrive(page, fx.prompts.smart_deny);
-    await expect(rows(page)).toHaveCount(1);
-    await expect(rows(page).locator('.cp-approval-lead')).toHaveText('Override needs your OK in #garden-club');
+    await expect(page.locator('.message.approval-waiting')).toHaveCount(1);
+    await expect(page.locator('.approval-banner')).toContainText('Uni needs your OK');
   });
 
-  test('4. a prompt posted as a reply opens in its thread, where it is, with the composer focused', async ({ page }) => {
+  test('4. a prompt posted as a reply is shown in its thread', async ({ page }) => {
     await boot(page);
     const top = await arrive(page, 'Cleaning up the old example branches now.');
     const ref = await arrive(page, fx.prompts.two_answers_30min, 'Uni', ROOM, top);
-    await unfold(page);
-    await expect(rows(page)).toHaveCount(1);
-    await rows(page).getByRole('button').click();
+    await intoRoom(page, top);
     await expect(page.locator(`.message.approval-waiting[data-ref="${ref}"]`)).toBeVisible();
     await expect(page.locator('.message.thread-root')).toContainText('Cleaning up the old example branches now.');
-    await expect.poll(() => composerFocused(page)).toBe(true);
     await expect(page.getByRole('status').filter({ hasText: "isn't in the loaded history" })).toHaveCount(0);
     // answered in the thread: it goes
     await arrive(page, '/approve', ME, ROOM, top);
@@ -165,8 +165,7 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await boot(page);
     const top = await arrive(page, 'Tidying the example branches next.');
     const ref = await arrive(page, fx.prompts.two_answers_30min, 'Uni', ROOM, top);
-    await unfold(page);
-    await rows(page).getByRole('button').click();
+    await intoRoom(page, top);
     const card = page.locator(`.message[data-ref="${ref}"] .cc`);
     await expect(card).toHaveClass(/cc-pending/);
     // Hermes answers at the top of the room (nothing else waits there): the thread's own messages don't hold that answer
@@ -180,9 +179,7 @@ test.describe('a Hermes approval prompt, loudly', () => {
     const fresh = await arrive(page, fx.prompts.two_answers_30min);
     // two days ago, its window long over; the store's read (a day) never sees it
     const old = await page.evaluate(([c, b]) => (window as any).__arrive(c, 'Uni', b, 2 * 86400), [ROOM, fx.prompts.once_or_deny_30min] as const);
-    await unfold(page);
-    await expect(rows(page)).toHaveCount(1);
-    await rows(page).getByRole('button').click();
+    await intoRoom(page);
     const oldCard = page.locator(`.message[data-ref="${old}"] .cc`);
     await expect(oldCard.getByRole('status')).toHaveText('No longer waiting');
     await expect(oldCard.locator('summary')).toHaveText('–No longer waiting · chmod -R 777 /srv/example');
@@ -204,8 +201,7 @@ test.describe('a Hermes approval prompt, loudly', () => {
   test('7. T-335: an older read that lands after a newer one failed leaves the state unknown', async ({ page }) => {
     await boot(page);
     const ref = await arrive(page, fx.prompts.two_answers_30min);
-    await unfold(page);
-    await rows(page).getByRole('button').click();
+    await intoRoom(page);
     const card = page.locator(`.message[data-ref="${ref}"] .cc`);
     await expect(card).toHaveClass(/cc-pending/);
     // the next read is slow and succeeds; the one after it fails at once

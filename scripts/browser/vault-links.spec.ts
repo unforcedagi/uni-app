@@ -72,7 +72,8 @@ test('search all vaults opens visible prefilled search', async ({ page }) => {
   await page.getByRole('button', { name: 'Search all vaults' }).click();
   await expect(page.getByRole('searchbox')).toBeVisible();
   await expect(page.getByRole('searchbox')).toHaveValue('Missing title');
-  await expect(page.locator('.search-filters select')).toHaveValue('');
+  // T-335 the shape: search starts where you are, so from this note it is scoped to its vault (no vault filter row; "Not what you meant?" widens it)
+  await expect(page.getByRole('region', { name: 'Search' })).toContainText('Searching the parachute vault');
   await page.locator('.search-hit').filter({ hasText: 'Work plan' }).click();
   await expect(page.locator('.note-body')).toContainText('Plan body');
 });

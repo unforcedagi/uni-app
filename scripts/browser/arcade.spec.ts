@@ -1,10 +1,11 @@
 // T-335 Taste Arcade in the app, with Rust faked (`arcade_*`, `journal_save_voice`, `journal_save_text`; the door itself
-// is proven end to end in the taste-arcade repo). Reachable from the rail at desktop size and from More on a phone; a burst
+// is proven end to end in the taste-arcade repo). Reachable from the Applets drawer; a burst
 // of This or That saves each pick once; Gallery, Fix It and Who Said It save what was played; a Ripple voice answer files a journal voice entry and the reaction names the
 // note it landed in, never its words; the Garden's "Not me" saves a verdict and the plant moves to the Not me patch.
 // Synthetic cards and words only.
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
+import { bar } from './shapeNav';
 
 const pal = (id: string, title: string, colors: string[], features: string[]) => ({ id, kind: 'palette', domain: 'visual', title, features, source: 'generated', palette: colors });
 const ASK = { dimension: 'colour', prompt: 'Which colours feel more like you?', detail: 'Same little landscape on both. Only the colours change.' };
@@ -87,26 +88,17 @@ async function boot(page: Page) {
       return d.stream; };
   }, { cards: CARDS, tonal: TONAL, ask: ASK, askGrey: ASK_GREY, askQ: ASK_Q, question: QUESTION, claims: CLAIMS, noteId: NOTE_ID, gallery: GALLERY, askGal: ASK_GAL, fix: FIX, askFix: ASK_FIX, voices: VOICES, askWho: ASK_WHO });
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true });
-  await page.locator('[data-place="front-door"]').waitFor();
 }
 const reactions = (page: Page) => page.evaluate(() => (window as any).__arcade as any[]);
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const tap = async (page: Page, loc: ReturnType<Page['locator']>, timeout?: number) => { if (test.info().project.name === 'phone') await loc.tap({ timeout }); else await loc.click({ timeout }); };
 
 async function openArcade(page: Page) {
-  const rail = page.getByRole('navigation', { name: 'Main navigation' });
-  const arcade = rail.getByRole('button', { name: 'Arcade' });
-  // the phone's bar is four places and More; the Arcade is in the sheet above it
-  if (test.info().project.name === 'phone') {
-    await expect(arcade).toBeHidden();
-    await tap(page, rail.getByRole('button', { name: 'More' }));
-  }
-  await tap(page, arcade);
-  await expect(page.locator('.arcade-place .ta-home')).toBeVisible();
-  if (test.info().project.name === 'phone') {
-    await expect(arcade).toBeHidden(); // the sheet folds away
-    await expect(rail.getByRole('button', { name: 'More' })).toHaveAttribute('aria-current', 'page'); // and More says where you are
-  }
+  // every applet opens from the Applets drawer, in the applet frame, on a phone as on a desktop
+  await bar(page).getByRole('button', { name: /^Applets/ }).click();
+  await tap(page, page.getByRole('dialog', { name: 'Applets' }).getByRole('button', { name: /^Arcade$/ }));
+  await expect(page.locator('.sh-ap-top h1')).toHaveText('Arcade');
+  await expect(page.locator('.sh-ap-frame .ta-home')).toBeVisible();
 }
 
 test('the Arcade opens from the app, a burst saves each pick once, and the way back returns to where you were', async ({ page }) => {
@@ -130,12 +122,12 @@ test('the Arcade opens from the app, a burst saves each pick once, and the way b
   // each reaction went to Rust once
   expect((await calls(page, 'arcade_react')).flatMap((a: any) => a.reactions).length).toBe(rs.length);
   await tap(page, page.locator('.ta-arcade').getByRole('button', { name: 'Arcade' }).first());
-  // 0.2: the Arcade has no Back of its own; the rail is the way out, to Uni's home
+  // the Arcade has no Back of its own; the applet frame's "Back to applets" is the way out
   await expect(page.locator('.ta-home')).toBeVisible();
   await expect(page.locator('.ta-home').getByRole('button', { name: /leave|back|close/i })).toHaveCount(0);
-  await tap(page, page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }));
-  await expect(page.locator('.arcade-place')).toHaveCount(0);
-  await expect(page.locator('[data-place="front-door"]')).toBeVisible();
+  await tap(page, page.locator('.sh-ap-frame').getByRole('button', { name: 'Back to applets' }));
+  await expect(page.locator('.sh-ap-frame')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Applets' })).toBeVisible();
 });
 
 test('in the app: a pair says what it asks; the greyscale switch reaches the door, and a pick is marked', async ({ page }) => {
@@ -370,10 +362,10 @@ test('Ripple: a second answer while the first is still saving is its own recordi
   for (const r of await reactions(page)) expect(r.voice.seconds).toBeLessThan(3); // the time spoken, not the time saving
 });
 
-// T-335 look here: a room pins a card for the owner (uni-tasks `tasks.py look --board arcade`); the ask in For you carries the pin's
+// T-335 look here: a room pins a card for the owner (uni-tasks `tasks.py look --board arcade`); the ask carries the pin's
 // link, and the app opens it itself: the Arcade, on that card, dealt first by the door. Made-up host, room and words.
 const PIN_URL = 'https://box.example.ts.net:8543/#look/t-img-b';
-test('a look-here link in For you opens the Arcade on the pinned card, in the app', async ({ page }) => {
+test('a look ask Open button opens the Arcade on the pinned card, in the app', async ({ page }) => {
   await page.addInitScript((url) => {
     const w = window as any;
     w.__look = [{ card: 't-img-b', game: 'gallery', title: 'Made-up sign', room: 'kiln-studio', why: 'Made-up: does the sign read from the road?', drops: '2026-12-01' }];
@@ -381,12 +373,11 @@ test('a look-here link in For you opens the Arcade on the pinned card, in the ap
       metadata: { state: 'open', owner: 'aaron', needs_aaron: true, kind: 'look', no_default: true, node: 'Areas/Kiln Studio', look_url: url, why_now: 'Made-up: does the sign read from the road?', asked_at: new Date().toISOString() } }];
   }, PIN_URL);
   await boot(page);
-  await tap(page, page.getByRole('button', { name: /1 to look at\. Open For you/ }));
-  const open = page.locator('.fy-item[data-id="fy-pin"] .fy-open');
-  await expect(open).toHaveAttribute('href', PIN_URL);
+  // the ask is on a home row with an Open button; it opens the card in the app (the Applets drawer is not the way in here)
+  const open = page.locator('.sh-ask').getByRole('button', { name: /^Open the link for .*Look at this card/ });
   await tap(page, open);
   // the Arcade, on the pinned card: its round came first because the app asked the door for it by id
-  await expect(page.locator('.arcade-place .ta-game')).toBeVisible();
+  await expect(page.locator('.sh-ap-frame .ta-game')).toBeVisible();
   await expect(page.locator('.ta-gal-where')).toHaveText(/^1 of/);
   await expect(page.getByRole('figure', { name: 'Made-up sign' })).toBeVisible();
   expect((await calls(page, 'arcade_rounds')).find((a: any) => a.game === 'gallery')).toMatchObject({ look: 't-img-b' });

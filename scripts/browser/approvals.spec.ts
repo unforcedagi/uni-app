@@ -1,5 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
-import { railGo } from './railGo';
+import { leaveRoom, openSettings as homeSettings } from './shapeNav';
+
+/** Settings sits behind home's gear: step out of the room the spec booted in, if it is in one. */
+async function gearSettings(page: Page) {
+  if (await page.locator('.sh-room').isVisible().catch(() => false)) await leaveRoom(page);
+  await homeSettings(page);
+}
 import { startInRoom } from './startInRoom';
 
 // T-234: Settings → Approvals on the real built frontend, with the Tauri backend faked. The fake stands in for Rust
@@ -70,7 +76,7 @@ const calls = (page: Page) => page.evaluate(() => (window as any).calls as { cmd
 const release = (page: Page) => page.evaluate(() => (window as any).held.splice(0).forEach((r: () => void) => r()));
 const enrolls = async (page: Page) => (await calls(page)).filter((c) => c.cmd === 'sealed_enroll');
 const settings = async (page: Page) => {
-  await railGo(page, 'Settings');
+  await gearSettings(page);
   const s = page.getByRole('region', { name: 'Approvals' });
   await s.scrollIntoViewIfNeeded();
   return s;
@@ -118,7 +124,7 @@ test('a double press posts once; once on, Settings offers no Enable again', asyn
   await expect(s.getByText('Approvals for Uni are on')).toBeVisible();
   expect(await enrolls(page)).toHaveLength(1);
   // Settings closed and opened again: the record comes from Rust, still no button
-  await page.getByRole('button', { name: 'Close panel' }).click();
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click();
   s = await settings(page);
   await expect(s.getByText('Approvals for Uni are on')).toBeVisible();
   await expect(s.getByRole('button', { name: /Enable approvals/ })).toHaveCount(0);

@@ -5,11 +5,14 @@
 // Run: npx playwright test --config playwright.mail.config.ts mail-approve (desktop, phone, and the Daylight both ways)
 import { expect, test, type Page } from '@playwright/test';
 import { boot, mail, shot } from './mailMock';
+import { expectMailCount, leaveMail, returnToMail } from './mailNav';
 
 const calls = (page: Page, cmd: string): Promise<any[]> => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const submissions = (page: Page): Promise<any[]> => page.evaluate(() => (window as any).__submissions);
 const parkedFp = (page: Page, n: number): Promise<string> => page.evaluate((i) => (window as any).__parked[i].fp, n);
-const badge = (page: Page) => page.locator('.rail .rail-count');
+// Mail's count (on its drawer tile and the bar's Applets button) is the held sends plus your Inbox's unread; the made-up Inbox has two unread
+const UNREAD = 2;
+const expectHeld = (page: Page, held: number) => expectMailCount(page, held + UNREAD);
 const heldRows = (page: Page) => page.locator('.mail-held-row');
 const held = (page: Page, subject: string) => page.getByRole('region', { name: `Held send: ${subject}` });
 const BARN = 'Booking the barn for the harvest supper', QUOTE = 'A quote for your newsletter';
@@ -28,7 +31,7 @@ async function openHeld(page: Page, subject: string) {
 
 test("a held send shows what it sends and why; Send it takes a confirm, never Enter, and a double tap sends it once", async ({ page }) => {
   await boot(page, 'ok', { writes: true, held: true });
-  await expect(badge(page)).toHaveText('2');
+  await expectHeld(page, 2);
   await expect(page.getByRole('button', { name: '2 sends from Uni\'s address wait for you · Review' })).toBeVisible();
   await page.getByRole('button', { name: /wait for you · Review$/ }).click();
   await expect(heldRows(page)).toHaveCount(2);
@@ -69,14 +72,12 @@ test("a held send shows what it sends and why; Send it takes a confirm, never En
   expect(await submissions(page)).toEqual([{ account: 'U', draft: 'h1', to: ['orchard@example.org'] }]);
   await expect(h.getByRole('button', { name: /^Send it/ })).toHaveCount(0);
   await expect(h.getByRole('button', { name: /^Don't send/ })).toHaveCount(0);
-  await expect(badge(page)).toHaveText('1');
+  await expectHeld(page, 1);
   await shot(page, 'a4-sent');
 
   // the outcome stays when Mail is left and opened again
-  const rail = page.getByRole('navigation', { name: 'Main navigation' });
-  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
-  await expect(page.locator('.mail')).toHaveCount(0);
-  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  await leaveMail(page);
+  await returnToMail(page);
   await expect(heldRows(page).filter({ hasText: BARN })).toContainText('Sent');
   await expect(heldRows(page).filter({ hasText: QUOTE })).toContainText('Waiting');
   expect(await submissions(page)).toHaveLength(1);
@@ -88,14 +89,12 @@ test('a decision still on its way when you leave Mail shows its outcome in the M
   await page.evaluate(() => { (window as any).__decideDelay = 2500; });
   await h.getByRole('button', { name: /^Send it/ }).click();
   await h.getByRole('button', { name: "Yes, send from Uni's address" }).click();
-  const rail = page.getByRole('navigation', { name: 'Main navigation' });
-  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
-  await expect(page.locator('.mail')).toHaveCount(0);
-  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  await leaveMail(page);
+  await returnToMail(page);
   const back = page.getByRole('button', { name: '← Waiting' }).filter({ visible: true });
   if (await back.count()) await back.first().click();
   await expect(heldRows(page).filter({ hasText: BARN })).toContainText('Sent', { timeout: 8000 });
-  await expect(badge(page)).toHaveText('1');
+  await expectHeld(page, 1);
   expect(await calls(page, 'mail_send_approve')).toHaveLength(1);
   expect(await submissions(page)).toHaveLength(1);
   // a failure leaves the count as it was, so nothing else redraws Mail: the store's own notice must
@@ -103,11 +102,11 @@ test('a decision still on its way when you leave Mail shows its outcome in the M
   await page.evaluate(() => { (window as any).__decideFails = 1; });
   await q.getByRole('button', { name: /^Send it/ }).click();
   await q.getByRole('button', { name: "Yes, send from Uni's address" }).click();
-  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
-  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  await leaveMail(page);
+  await returnToMail(page);
   if (await back.count()) await back.first().click();
   await expect(heldRows(page).filter({ hasText: QUOTE })).toContainText("Couldn't send: the mail server didn't answer. Ask #systems.", { timeout: 8000 });
-  await expect(badge(page)).toHaveText('1');
+  await expectHeld(page, 1);
 });
 
 test("Don't send takes a confirm, Cancel keeps it waiting, and declining sends nothing", async ({ page }) => {
@@ -126,7 +125,7 @@ test("Don't send takes a confirm, Cancel keeps it waiting, and declining sends n
   expect(await calls(page, 'mail_send_decline')).toEqual([{ accountId: 'U', opId: 'op-held-2-00000000000000' }]);
   expect(await calls(page, 'mail_send_approve')).toEqual([]);
   expect(await submissions(page)).toEqual([]);
-  await expect(badge(page)).toHaveText('1');
+  await expectHeld(page, 1);
   await expect(heldRows(page).filter({ hasText: QUOTE })).toContainText('Not sent');
   await shot(page, 'a5-declined');
 });
@@ -146,7 +145,7 @@ test('a held draft that changed after you saw it is refused and never sent; one 
   // the refused send has left the bridge's list; what happened stays on it
   await mail(page).getByRole('button', { name: 'Refresh' }).click();
   await expect(heldRows(page).filter({ hasText: BARN })).toContainText('Ask #systems');
-  await expect(badge(page)).toHaveText('1');
+  await expectHeld(page, 1);
   // another held draft changes before you open it: the bridge lists it as changed, with what it says now, and only
   // Don't send is offered
   await page.evaluate(() => { (window as any).__msgs.find((m: any) => m.id === 'h2').text += '\nP.S. And our bank details.'; });
@@ -166,7 +165,7 @@ test('a send that fails says to ask #systems and can be tried again, and is sent
   await h.getByRole('button', { name: /^Send it/ }).click();
   await h.getByRole('button', { name: "Yes, send from Uni's address" }).click();
   await expect(h.getByRole('status')).toHaveText("Couldn't send: the mail server didn't answer. Ask #systems.");
-  await expect(badge(page)).toHaveText('2');
+  await expectHeld(page, 2);
   await h.getByRole('button', { name: /^Send it/ }).click();
   await h.getByRole('button', { name: "Yes, send from Uni's address" }).click();
   await expect(h.getByRole('status')).toHaveText("Sent from Uni's address (uni@example.com).");
@@ -178,13 +177,13 @@ test('a send that fails says to ask #systems and can be tried again, and is sent
 
 test("nothing about held sends shows unless the bridge offers deciding them; each button only where it is offered", async ({ page }) => {
   const own = ['mark_seen', 'flag', 'archive', 'draft.save', 'draft.review', 'draft.discard', 'send', 'send.check'];
-  // listing offered, deciding not: no group, no banner, no badge, nothing asked
+  // listing offered, deciding not: no group, no banner, no held count, nothing asked
   await boot(page, 'ok', { writes: true, held: true, ops: { A: own, U: ['mark_seen', 'flag', 'send.parked', 'send.check'] } });
   await expect(mail(page).locator('.mail-account')).toHaveText('robin@example.com');
-  await page.waitForTimeout(4500); // past the rail's own first check
+  await page.waitForTimeout(4500); // past the first check of held sends
   await expect(page.getByText('Waiting for you')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /wait for you · Review$/ })).toHaveCount(0);
-  await expect(badge(page)).toHaveCount(0);
+  await expectHeld(page, 0); // only your Inbox's unread counts: no held sends
   expect(await calls(page, 'mail_parked')).toEqual([]);
 
   // both offered, Send it's confirm open; then the bridge stops offering approving: the confirm goes with it
@@ -239,7 +238,7 @@ const ROTA = 'The rota and the budget for the harvest supper';
 
 test('a held send with files lists each file, opens one with a tap, and Send it sends it with its files under the one fingerprint', async ({ page }) => {
   await boot(page, 'ok', { writes: true, held: true, heldFiles: true });
-  await expect(badge(page)).toHaveText('3');
+  await expectHeld(page, 3);
   await page.getByRole('button', { name: /wait for you · Review$/ }).click();
   await expect(heldRows(page).filter({ hasText: ROTA })).toHaveAccessibleName(`Waiting for you. From Uni's address to bookings@example.org: ${ROTA}, with 2 files`);
   await expect(heldRows(page).filter({ hasText: ROTA })).toContainText('📎 2 · ');
@@ -266,7 +265,7 @@ test('a held send with files lists each file, opens one with a tap, and Send it 
   await expect(h.getByRole('status').filter({ hasText: 'Sent' })).toHaveText("Sent from Uni's address (uni@example.com).");
   expect(await calls(page, 'mail_send_approve')).toEqual([{ accountId: 'U', opId: 'op-held-3-00000000000000', fingerprint: await parkedFp(page, 2) }]);
   expect(await submissions(page)).toEqual([{ account: 'U', draft: 'h3', to: ['bookings@example.org'] }]);
-  await expect(badge(page)).toHaveText('2');
+  await expectHeld(page, 2);
   await shot(page, 'f3-sent-with-files');
 });
 

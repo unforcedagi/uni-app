@@ -1,6 +1,7 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { PLAN, installNotePaneFixture } from './notePaneFixture';
+import { goJournal, leaveRoom, openRoom as openRoomRow } from './shapeNav';
 
 // T-200: a note linked in chat opens beside the chat (wide screens) or as a sheet over it (narrow screens, and on Android when upright:
 // the Daylight's portrait and landscape projects carry an Android user agent; T-273 put the note beside the chat on its side). Invented
@@ -55,17 +56,11 @@ async function back(page: Page) {
   else await page.locator('body').press('Alt+ArrowLeft');
 }
 
-/** T-335 one surface: another room, from Uni's home ("Other rooms"): it opens in focus over All. The keys go first, as a thumb on the bar does. */
+/** T-335 the shape: another room, from home's rows. The keys go first, as a thumb on Back does. */
 async function switchRoom(page: Page, name: string) {
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  await tap(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }));
-  // 0.2: the rooms no area holds are in the home's drawer, under its head
-  const pull = page.locator('[data-place="front-door"] .fd-pull');
-  await pull.waitFor();
-  if ((await pull.getAttribute('aria-expanded')) !== 'true' && await pull.isEnabled()) await tap(pull);
-  const others = page.locator('.fd-others');
-  if (!(await others.evaluate((d) => (d as HTMLDetailsElement).open))) await tap(others.locator('summary'));
-  await tap(others.getByRole('button', { name: '#' + name, exact: true }));
+  await tap(page.locator('.sh-room').getByRole('button', { name: 'Back to rooms' }));
+  await openRoomRow(page, name.toLowerCase());
 }
 
 test('tap a note link, read it, quote and reply, send, close: same room, same draft, same scroll', async ({ page }) => {
@@ -248,9 +243,10 @@ test('sheet: half or full height, ending at the composer, with the composer in s
 test('sheet: with the Journal open in its own tab too, the sheet lies over the room, not the hidden Journal', async ({ page }) => {
   test.skip(beside(), 'the sheet is for narrow screens and Android upright');
   await openRoom(page);
-  await tap(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Journal' }));
+  await leaveRoom(page); // the bar is hidden inside a room on a phone
+  await goJournal(page);
   await expect(page.locator('.journal-list')).toBeVisible();
-  await page.locator('body').press('Alt+ArrowLeft');
+  await openRoomRow(page, 'orchard');
   await expect(page.getByRole('textbox', { name: 'Message Orchard' })).toBeVisible();
   await expect(page.locator('.journal-list')).toHaveCount(1); // still mounted, hidden
   const chip = page.locator('.message-list .note-chip', { hasText: 'Spring planting plan' }).first();
@@ -258,7 +254,7 @@ test('sheet: with the Journal open in its own tab too, the sheet lies over the r
   await tap(chip);
   const pane = page.locator('.note-pane-sheet');
   await expect(pane.locator('.note-title')).toHaveText('Spring planting plan');
-  const list = (await page.locator('.sr-chat .message-list').boundingBox())!, sheet = (await pane.boundingBox())!;
+  const list = (await page.locator('.sh-room .message-list').boundingBox())!, sheet = (await pane.boundingBox())!;
   expect(Math.abs(sheet.width - list.width)).toBeLessThanOrEqual(2);
   expect(Math.abs(sheet.x - list.x)).toBeLessThanOrEqual(2);
 });

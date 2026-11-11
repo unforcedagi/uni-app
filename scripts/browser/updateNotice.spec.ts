@@ -4,8 +4,8 @@
 // Run: ELSEWHERE_TEST_PORT=5781 npx playwright test --config playwright.elsewhere.config.ts
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, openPlaces } from './areasFixture';
-import { railGo } from './railGo';
+import { bootAreas } from './areasFixture';
+import { leaveRoom, openRoom, openSettings } from './shapeNav';
 
 const SHOTS = process.env.ELSEWHERE_SHOTS ?? '';
 const shot = async (page: Page, name: string) => { if (!SHOTS) return; await mkdir(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` }); };
@@ -25,7 +25,6 @@ async function boot(page: Page) {
     };
   }, APK);
   await bootAreas(page, 'seed', { world: 'unread' });
-  await page.locator('[data-place="front-door"]').waitFor();
 }
 
 const overlap = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
@@ -41,13 +40,10 @@ test('the update line is at the top, in the flow, and never over the composer or
   // in the main pane's flow: it is not laid over anything
   expect(await notice.evaluate((el) => getComputedStyle(el).position)).toBe('static');
 
-  // 0.2: the places are in the drawer under the home's head
-  await openPlaces(page);
-  await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-  // T-335 one surface: the room is in focus over All
-  const focus = page.getByRole('region', { name: /in focus$/ });
-  await expect(focus.locator('.all-focus-title')).toHaveText('Kiln Studio');
-  const composer = focus.locator('.sr-chat .composer');
+  // T-335 the shape: the room opens from its row on home
+  await openRoom(page, 'ch-kiln');
+  const focus = page.locator('.sh-room');
+  const composer = focus.locator('.composer');
   const send = composer.getByRole('button', { name: 'Send message' });
   await composer.locator('textarea').fill('Unload it after lunch.');
   await expect(send).toBeEnabled();
@@ -57,7 +53,7 @@ test('the update line is at the top, in the flow, and never over the composer or
   expect(overlap(n, s)).toBe(false);
   // at the top of the window, above the room's head; the composer and Send wholly on screen
   expect(n.y).toBeLessThan(40);
-  expect(n.y + n.height).toBeLessThanOrEqual((await focus.locator('.all-focus-head').boundingBox())!.y + 1);
+  expect(n.y + n.height).toBeLessThanOrEqual((await focus.locator('.sh-room-top').boundingBox())!.y + 1);
   expect(s.y + s.height).toBeLessThanOrEqual(vp.height);
   expect(s.x + s.width).toBeLessThanOrEqual(vp.width);
   // what is at Send's centre is Send itself, not the notice
@@ -71,6 +67,7 @@ test('the update line is at the top, in the flow, and never over the composer or
   await notice.getByRole('button', { name: 'Later' }).click();
   await expect(notice).toHaveCount(0);
   // Settings still has it
-  await railGo(page, 'Settings');
+  await leaveRoom(page);
+  await openSettings(page);
   await expect(page.locator('.update-settings')).toContainText(onAndroid ? 'Update 0.1.99 available — Download APK' : 'Update 0.1.99 ready — Restart');
 });

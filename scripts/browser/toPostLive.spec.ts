@@ -5,6 +5,7 @@
 // Run by uni-ops post/e2e.py, which starts every server and sets T335_BRIDGE and T335_TEXT. Synthetic text only.
 import { test, expect } from '@playwright/test';
 import { bootAreas } from './areasFixture';
+import { openApplet } from './shapeNav';
 
 const BRIDGE = process.env.T335_BRIDGE ?? '';
 const TEXT = process.env.T335_TEXT ?? '';
@@ -32,8 +33,7 @@ test('Approve in the queue posts it on the Bluesky server; the takedown removes 
     };
   });
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true });
-  await page.locator('[data-place="front-door"]').waitFor();
-  await page.getByRole('button', { name: /^To post · \d+$/ }).click();
+  await openApplet(page, 'To Post');
   const card = page.locator('.tp-card').filter({ hasText: TEXT });
   await expect(card.locator('.tp-badge')).toHaveText('◆ Uni\'s voice');
   const shots = process.env.T335_SHOTS;

@@ -6,7 +6,8 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { bootAreas, openDetails, openPlaces } from './areasFixture';
+import { bootAreas } from './areasFixture';
+import { leaveRoom, openRoom, openSettings } from './shapeNav';
 
 /** The fixture's made-up Garden project's room (areasFixture `garden`). */
 const GARDEN = '5b0c4e8a-2f3d-4c1e-9a7b-6d8e0f1a2b3c';
@@ -22,7 +23,6 @@ const GONE_VIDEO = at('gone-walk-5f607182.webm');
 const GONE_IMAGE = at('gone-map-60718293.png');
 const ulid = (tail: string) => '01M5P' + '0'.repeat(21 - tail.length) + tail;
 const PUB = ulid('V1'), DEC = ulid('D1'), ASSETS = ulid('A1'), GONE = ulid('G1');
-const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900 && (page.viewportSize()?.height ?? 0) >= 400;
 
 // ── synthetic media, made once per worker ─────────────────────────────────────────────────────────────────
 type File = { path: string; mime: string };
@@ -79,21 +79,17 @@ async function open(page: Page, publish = true) {
   await bootAreas(page, 'seed', { tree: true, tasks: true, garden: true, pinned: true });
   await toGarden(page);
 }
-/** The made-up Garden project's room: its door in the home's drawer (0.2), in focus over All (T-335 one surface). */
+/** The made-up Garden project's room, opened from its row on home. */
 async function toGarden(page: Page) {
-  await page.locator('[data-place="front-door"]').first().waitFor();
-  await expect(page.locator('[data-place="front-door"] .fd-pull')).toBeEnabled(); // the drawer folds once All's stream is in; pull it after
-  await openPlaces(page);
-  await page.locator('.fd-door[data-path="Projects/Garden"]').click();
-  await expect(focus(page).locator('.all-focus-title')).toHaveText('Garden');
-  await expect(focus(page).locator('.sr-chat')).toBeVisible();
+  await openRoom(page, GARDEN);
+  await expect(page.locator('.sh-room .message-list')).toBeVisible();
 }
-const focus = (page: Page) => page.getByRole('region', { name: /in focus$/ });
+const focus = (page: Page) => page.locator('.sh-room');
 const arrive = (page: Page, body: string) => page.evaluate(([b, t]) => (window as any).__arrive(b, 'Uni', t), [GARDEN, body] as const);
 /** Opens a note from a room message's chip: beside the chat (wide) or over it (phone). */
 async function openNote(page: Page, id: string, words: string): Promise<Locator> {
   await arrive(page, `${words} uni:${id}`);
-  await focus(page).locator('.sr-chat .message').filter({ hasText: words }).locator('a.note-chip').first().click();
+  await focus(page).locator('.message').filter({ hasText: words }).locator('a.note-chip').first().click();
   const view = page.locator('.note-view').last();
   await expect(view.locator('.note-body')).toBeVisible();
   return view;
@@ -125,7 +121,7 @@ async function plays(media: Locator) {
 async function fits(page: Page, scope: Locator) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const vw = page.viewportSize()!.width;
-  for (const s of await page.locator('.note-scroll, .sr-chat').all()) expect(await s.evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
+  for (const s of await page.locator('.note-scroll, .sh-room').all()) expect(await s.evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
   for (const f of await scope.locator('figure.pub-media').all()) {
     const b = (await f.boundingBox())!;
     expect(b.x).toBeGreaterThanOrEqual(-1);
@@ -190,7 +186,7 @@ test.describe('published media in notes and decisions', () => {
   test('a decision card shows the clip its note links, playable in the card; the page stays a link; its Context plays the same clip', async ({ page }) => {
     await open(page);
     await arrive(page, `Your call on the garden walk cut. uni:${DEC}`);
-    const card = focus(page).locator('.sr-chat .message').filter({ hasText: 'Your call on the garden walk cut' }).getByRole('region', { name: 'Decision: Which cut of the garden walk?' });
+    const card = focus(page).locator('.message').filter({ hasText: 'Your call on the garden walk cut' }).getByRole('region', { name: 'Decision: Which cut of the garden walk?' });
     await expect(card).toBeVisible();
     await expect(card.locator('video')).toHaveCount(1);
     await expect(card.locator('figure.pub-video')).toHaveAttribute('data-url', VIDEO);
@@ -214,32 +210,6 @@ test.describe('published media in notes and decisions', () => {
     await plays(view.locator('.note-body video'));
     await fits(page, view);
     expect(await nativeFetches(page)).toBe(0);
-  });
-
-  test('the decision\'s sheet (Needs you) plays the clip too', async ({ page }) => {
-    await open(page);
-    // T-335: what needs you is in the room's details, inside the focus (the companion beside the chat is gone)
-    await openDetails(page);
-    const row = focus(page).locator('.all-focus-details').getByText('Which cut of the garden walk?').first();
-    await row.click();
-    const sheet = page.locator('.task-sheet[role="dialog"]');
-    await expect(sheet.getByRole('heading', { name: 'Which cut of the garden walk?' })).toBeVisible();
-    const media = sheet.locator('.task-media video');
-    await expect(media).toHaveCount(1);
-    await plays(media);
-    await fits(page, sheet);
-    // full screen over the sheet: Escape closes only the player's layer, the sheet stays (Codex r1)
-    await sheet.getByRole('button', { name: 'Full screen: garden-walk-0a1b2c3d.webm' }).click();
-    const layer = page.getByRole('dialog', { name: 'garden-walk-0a1b2c3d.webm, full screen' });
-    await expect(layer.locator('video')).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(layer).toHaveCount(0);
-    await expect(sheet).toBeVisible();
-    // the image the step links, opened full size over the sheet: a dialog of its own; the sheet stays and takes focus back
-    await viewerContract(page, sheet.getByRole('button', { name: 'Open image garden-map-2c3d4e5f.png' }));
-    await expect(sheet).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(sheet).toHaveCount(0);
   });
 
   test('a note\'s image shows (and opens large), its audio plays; a PDF, other hosts, lookalikes and script links stay links', async ({ page }) => {
@@ -281,7 +251,6 @@ test.describe('published media in notes and decisions', () => {
   });
 
   test('a new hub in Settings is read again: a note that showed only a link plays once the hub serves published files', async ({ page }) => {
-    test.skip(!wide(page), 'Settings is reached from the rail');
     await open(page, false);
     const view = await openNote(page, PUB, 'The garden walk clip is up:');
     await expect(view.locator('.note-body a[href="' + VIDEO + '"]')).toHaveCount(1);
@@ -289,14 +258,13 @@ test.describe('published media in notes and decisions', () => {
     // the hub is changed to one that serves published files (the fixture answers with its origin from now on)
     await page.evaluate((o) => { (window as any).__publishOrigins = [o]; }, ORIGIN);
     // 0.2: the Journal's hub and vault are in Settings → Developer ("Journal is kept in")
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
+    await leaveRoom(page);
+    await openSettings(page);
     await page.locator('.settings-dev > summary', { hasText: 'Developer' }).click();
     const kept = page.getByRole('region', { name: "Journal's vault" });
     await expect(kept).toContainText('Journal is kept in');
     await kept.getByRole('button', { name: 'Save' }).click();
-    await page.getByRole('button', { name: 'Close panel', exact: true }).click();
-    await expect(page.locator('.settings')).toHaveCount(0);
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click();
     await toGarden(page);
     const again = await openNote(page, PUB, 'Again, the garden walk clip:');
     await expect(again.locator('video')).toHaveCount(1);

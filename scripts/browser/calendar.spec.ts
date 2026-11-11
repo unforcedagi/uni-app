@@ -3,7 +3,7 @@
 // the times read are Denver's. Run: pnpm test:calendar (CAL_SHOTS=<dir> keeps a screenshot of each step).
 import { expect, test } from '@playwright/test';
 import { beside, boot, cal, detail, ev, isPhone, noSidewaysScroll, ops, pickView, shot } from './calMock';
-import { railGo } from './railGo';
+import { openApplet } from './shapeNav';
 
 test.describe('T-229 Calendar', () => {
   test('every view shows the door\'s events in the calendar\'s zone', async ({ page }) => {
@@ -310,19 +310,26 @@ test.describe('T-229 Calendar', () => {
     await noSidewaysScroll(page);
   });
 
-  test('the rail shows Calendar only once the door has answered this key', async ({ page }) => {
+  test('the drawer shows the Calendar tile only once the door has answered this key', async ({ page }) => {
     const d = await boot(page, { open: false });
-    const rail = page.getByRole('navigation', { name: 'Main navigation' });
-    await expect(rail.getByRole('button', { name: 'Calendar', includeHidden: true })).toHaveCount(1, { timeout: 8000 });
-    await railGo(page, 'Calendar');
+    const drawer = page.getByRole('dialog', { name: 'Applets' });
+    const tile = drawer.getByRole('button', { name: /^Calendar( \(\d+\))?$/ });
+    await page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: /^Applets/ }).click();
+    await expect(tile).toHaveCount(1, { timeout: 8000 });
+    await page.keyboard.press('Escape');
+    await expect(drawer).toHaveCount(0);
+    await openApplet(page, 'Calendar');
     await expect(cal(page)).toBeVisible();
     await noSidewaysScroll(page);
-    // a door that stops taking this key: gone from the rail at the next start
+    // a door that stops taking this key: the tile is gone at the next start
     d.refuse = true;
     await page.evaluate(() => localStorage.removeItem('uni.tabs.v2'));
     await page.reload();
     await expect.poll(() => page.evaluate(() => localStorage.getItem('uni.cal.seen.v1')), { timeout: 8000 }).toBeNull();
-    await expect(rail.getByRole('button', { name: 'Calendar' })).toHaveCount(0);
+    await page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: /^Applets/ }).click();
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole('button', { name: /^Vault/ })).toHaveCount(1); // the drawer itself is up, with its other tiles
+    await expect(drawer.getByRole('button', { name: /^Calendar/ })).toHaveCount(0);
   });
 
   test('a door without the session route: reads, and offers only what every key may do', async ({ page }) => {

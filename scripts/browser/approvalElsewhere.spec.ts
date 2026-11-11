@@ -1,22 +1,17 @@
-// T-335: a card that lands in another room is never missed. The room you are in says it at the top ("Approval waiting in #allotment"), Uni's
-// home lists it (and a door carries what needs you in its room), and one tap opens that room at the card; both go when it is answered or
-// expires. A Hermes prompt in another room counts the same. (T-335 one surface: the room is in focus over All; the tree of rooms beside it,
-// whose row carried the key, is gone.) Rust is faked (`sealed_waiting`, `sealed_card`, `sealed_answer`); the areas fixture's made-up world gives the rooms.
+// T-335 the shape: a card that lands in another room is never missed. When it ends within 15 minutes it is pinned over the rooms on home (`.sh-pin`)
+// Uni's card is answered in place; a Hermes prompt's pin has "Open in room". The pin goes when it is answered or expires.
+// (The in-room "Approval waiting in #room" line and the door's count are retired with the old shell, and their tests deleted.) Rust is faked (`sealed_waiting`, `sealed_card`, `sealed_answer`); the areas fixture's made-up world gives the rooms.
 // Run: ELSEWHERE_TEST_PORT=5781 npx playwright test --config playwright.elsewhere.config.ts
 import { mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, openPlaces } from './areasFixture';
+import { bootAreas } from './areasFixture';
+import { homeHead, openRoom, leaveRoom, roomRow } from './shapeNav';
 
 const fx = JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8'));
+const pins = (page: Page) => page.locator('.sh-pin');
 const SHOTS = process.env.ELSEWHERE_SHOTS ?? '';
 const BODY = '🔑 **Uni asks to use dns-zone** (powerful)\nFor: dns.edit. Add an A record for demo.example.org\nOpen this in the Uni app to see exactly what it unlocks.\n\n```uni-sealed-approval\n{"v": 1}\n```';
-const focus = (page: Page) => page.getByRole('region', { name: /in focus$/ });
-const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
-const line = (page: Page) => focus(page).locator('.approval-elsewhere');
-const title = (page: Page) => focus(page).locator('.all-focus-title');
-/** 0.2 one home: the approvals are in the drawer under the home's head, with what needs you. */
-const homeApprovals = (page: Page) => page.locator('#fd-drawer .cp-approval');
 const shot = async (page: Page, name: string) => { if (!SHOTS) return; await mkdir(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` }); };
 
 async function boot(page: Page) {
@@ -42,90 +37,69 @@ async function boot(page: Page) {
     };
   });
   await bootAreas(page, 'seed', { world: 'unread' });
-  await page.locator('[data-place="front-door"]').waitFor();
+  await expect(homeHead(page)).toBeVisible();
 }
-async function openArea(page: Page, area: string) {
-  await openPlaces(page);
-  await page.locator(`.fd-door[data-path="Areas/${area}"]`).click();
-  await expect(title(page)).toHaveText(area);
-}
-/** Uni's home with its drawer down (a phone steps out of the focus first: the rail is hidden under it); `back` opens the room again from its door
- *  (0.2: there is no All tab to come back by; the rail's Uni is the home). */
-async function home(page: Page) {
-  if (!(await rail(page).getByRole('button', { name: 'Uni', exact: true }).isVisible())) await focus(page).getByRole('button', { name: 'Back to Uni' }).click();
-  await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
-  await page.locator('[data-place="front-door"][data-view="all"]').waitFor();
-  await openPlaces(page);
-}
-async function back(page: Page, area: string) {
-  if (!(await focus(page).isVisible())) await openArea(page, area);
-  await expect(title(page)).toHaveText(area);
-}
+
 const card = (page: Page, room: string, inS = 900) => page.evaluate(([r, b, s]) => (window as any).__card(r, b, Math.floor(Date.now() / 1000) + Number(s)), [room, BODY, inS] as const);
 
-test('a card in another room: a line at the top and a key on that room; the line opens the card; answering it clears both', async ({ page }) => {
+test('a card ending within 15 minutes in another room is pinned on home; its card is answered in place and the pin clears', async ({ page }) => {
   test.setTimeout(120_000);
   await boot(page);
-  await openArea(page, 'Kiln Studio');
-  await expect(line(page)).toHaveCount(0);
+  await expect(pins(page)).toHaveCount(0);
+  await openRoom(page, 'ch-kiln');
+  await expect(page.locator('.sh-room').getByRole('heading', { level: 1 })).toHaveText('kiln-studio');
 
-  const ref = await card(page, 'ch-allot');
-  await expect(line(page)).toBeVisible();
-  await expect(line(page).locator('.approval-elsewhere-text b')).toHaveText('Approval waiting in #allotment');
-  await expect(line(page)).toHaveAttribute('aria-label', /^Approval waiting in #allotment · first ends \d{1,2}:\d{2}\s?[AP]M\. Show it$/);
-  // it sits under the room's head, above the conversation
-  const head = await focus(page).locator('.all-focus-head').boundingBox(); const box = await line(page).boundingBox();
-  expect(box!.y).toBeGreaterThanOrEqual(head!.y + head!.height - 1);
-  expect(box!.y + box!.height).toBeLessThanOrEqual((await focus(page).locator('.sr-chat').boundingBox())!.y + 1);
-  await shot(page, '01-line-in-kiln');
+  const ref = await card(page, 'ch-allot', 600);
+  // the room you are in does not carry a line any more; home pins it
+  await expect(page.locator('.approval-elsewhere')).toHaveCount(0);
+  await leaveRoom(page);
+  const pin = page.locator(`.sh-pin[data-ref="${ref}"]`);
+  await expect(pin).toBeVisible();
+  await expect(pin).toContainText('allotment');
+  await expect(pin.getByRole('timer')).toHaveText(/^expires in (9:[0-5]\d|10:00)$/);
+  await shot(page, '01-pin-on-home');
 
-  // Uni's home lists it; back in the room, its line is as it was
-  await home(page);
-  await expect(homeApprovals(page)).toHaveCount(1);
-  await shot(page, '02-on-the-home');
-  await back(page, 'Kiln Studio');
-  await expect(line(page)).toBeVisible();
-
-  await line(page).click();
-  await expect(title(page)).toHaveText('#allotment');
-  await expect(page.getByRole('region', { name: 'Approve use of dns-zone', exact: true })).toBeVisible();
-  await expect(focus(page).locator(`.message[data-ref="${ref}"]`)).toBeInViewport();
-  // here, the card is this room's: the banner over the composer says it, and the line (for other rooms) goes
-  await expect(line(page)).toHaveCount(0);
-  await expect(focus(page).locator('.approval-banner')).toBeVisible();
-  await shot(page, '03-opened-at-card');
-
-  await page.getByRole('region', { name: 'Approve use of dns-zone', exact: true }).getByRole('button', { name: 'Deny' }).click();
-  await expect(focus(page).locator('.approval-banner')).toHaveCount(0);
-  await home(page);
-  await expect(homeApprovals(page)).toHaveCount(0);
-  await page.locator('.fd-door[data-path="Areas/Kiln Studio"]').click();
-  await expect(title(page)).toHaveText('Kiln Studio');
-  await expect(line(page)).toHaveCount(0);
+  // Uni's card is pinned as it is in its room, so it is answered in place; nothing is sent as a message
+  const cardEl = pin.getByRole('region', { name: 'Approve use of dns-zone', exact: true });
+  await expect(cardEl).toBeVisible();
+  await cardEl.getByRole('button', { name: 'Deny' }).click();
+  await expect(pins(page)).toHaveCount(0);
   expect(await page.evaluate(() => (window as any).__calls.filter((x: any) => x.cmd === 'post_message').length)).toBe(0);
+  // the room has it as answered, not waiting
+  await openRoom(page, 'ch-allot');
+  await expect(page.locator('.sh-room .approval-banner')).toHaveCount(0);
+  await shot(page, '02-answered-in-room');
 });
 
-test('a card that expires takes its line and key with it; a Hermes prompt elsewhere counts too; two rooms are both named', async ({ page }) => {
+test('a Hermes prompt ending within 15 minutes in another room is pinned on home; Open in room opens that room at the prompt', async ({ page }) => {
   test.setTimeout(120_000);
   await boot(page);
-  await openArea(page, 'North Field');
-  await card(page, 'ch-allot', 4);
-  await expect(line(page).locator('b')).toHaveText('Approval waiting in #allotment');
-  // the app reads the waiting cards again when the first one ends: past its end it is gone
-  await expect(line(page)).toHaveCount(0, { timeout: 15_000 });
-  await home(page);
-  await expect(homeApprovals(page)).toHaveCount(0);
-  await back(page, 'North Field');
+  const ref = await page.evaluate(([c, b]) => (window as any).__arrive(c, 'Uni', b), ['ch-kiln', fx.prompts.three_answers_5min]);
+  const pin = page.locator(`.sh-pin[data-ref="${ref}"]`);
+  await expect(pin).toBeVisible();
+  await expect(pin.locator('.sh-pin-room')).toHaveText('kiln-studio');
+  await pin.getByRole('button', { name: 'Open in room' }).click();
+  await expect(page.locator('.sh-room').getByRole('heading', { level: 1 })).toHaveText('kiln-studio');
+  await expect(page.locator(`.sh-room .message.approval-waiting[data-ref="${ref}"]`)).toBeInViewport();
+  await expect(page.locator('.sh-room .approval-banner')).toBeVisible();
+});
 
-  // a Hermes prompt in Kiln Studio's room, and then a card in #allotment
+test('a card ending later than 15 minutes is not pinned; one that expires takes its pin with it; a 30-minute Hermes prompt is not pinned yet', async ({ page }) => {
+  test.setTimeout(120_000);
+  await boot(page);
+  await card(page, 'ch-allot', 1800);
+  await page.waitForTimeout(500);
+  await expect(pins(page)).toHaveCount(0);
+
+  // a card about to end is pinned, and gone once it is past its end
+  await card(page, 'ch-allot', 4);
+  await expect(pins(page)).toHaveCount(1);
+  await expect(pins(page).first()).toContainText('allotment');
+  await expect(pins(page)).toHaveCount(0, { timeout: 15_000 });
+
+  // a Hermes prompt in Kiln Studio's room (30 minutes: not pinned until it is within 15)
   await page.evaluate(([c, b]) => (window as any).__arrive(c, 'Uni', b), ['ch-kiln', fx.prompts.two_answers_30min]);
-  await expect(line(page).locator('b')).toHaveText('Approval waiting in #kiln-studio');
-  await expect(line(page).locator('i')).toHaveText('!');
-  await card(page, 'ch-allot');
-  await expect(line(page).locator('b')).toHaveText(/^2 approvals waiting in #(kiln-studio and #allotment|allotment and #kiln-studio)$/);
-  await shot(page, '04-two-rooms');
-  // on Uni's home, Kiln Studio's own door carries the prompt as what needs you there, and both approvals are listed
-  await home(page);
-  await expect(page.locator('.fd-door[data-path="Areas/Kiln Studio"] .fd-need-n')).toHaveText('1 for you');
-  await expect(homeApprovals(page)).toHaveCount(2);
+  await page.waitForTimeout(500);
+  await expect(pins(page)).toHaveCount(0);
+  await expect(roomRow(page, 'ch-kiln')).toBeVisible();
 });

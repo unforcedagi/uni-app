@@ -5,7 +5,13 @@
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import { railGo } from './railGo';
+import { leaveRoom, openSettings as homeSettings } from './shapeNav';
+
+/** Settings sits behind home's gear: step out of the room the spec booted in, if it is in one. */
+async function gearSettings(page: Page) {
+  if (await page.locator('.sh-room').isVisible().catch(() => false)) await leaveRoom(page);
+  await homeSettings(page);
+}
 
 const FIXTURE = JSON.parse(readFileSync(new URL('../fixtures/usage-note.json', import.meta.url), 'utf8'));
 const NOW = new Date('2026-10-26T18:00:00Z'); // the fixture's Monday, noon in Denver
@@ -54,7 +60,7 @@ async function boot(page: Page, w: World) {
 }
 
 async function openSettings(page: Page) {
-  await railGo(page, 'Settings');
+  await gearSettings(page);
   return page.getByRole('region', { name: 'Claude accounts' }).or(page.locator('section.usage-card'));
 }
 
@@ -226,7 +232,7 @@ test.describe('fixture', () => {
 
   test('no usage note on this install: Settings has no card', async ({ page }) => {
     await boot(page, { note: null, conflictOnce: false, calls: [] });
-    await railGo(page, 'Settings');
+    await gearSettings(page);
     await expect(page.getByRole('button', { name: /Forget this device key/ })).toBeVisible();
     await expect(page.locator('section.usage-card')).toHaveCount(0);
   });

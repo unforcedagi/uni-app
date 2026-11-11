@@ -3,6 +3,7 @@
 // made-up mail matches that double: Robin Vale's account A (YOU) and Uni's account U (UNI), shared with each other.
 // Run: npx playwright test --config playwright.mail.config.ts (desktop, phone, and the Daylight upright and sideways)
 import { expect, test } from '@playwright/test';
+import { leaveMail, returnToMail } from './mailNav';
 import { backToThreads, boot, boxesHidden, KEY, mail, mailCmds, pickBox, rows, shot, stacked } from './mailMock';
 
 test('the full flow: switch accounts and the combined view, open a thread, search, attachments, Send disabled', async ({ page }) => {
@@ -313,9 +314,7 @@ test('leaving Mail and coming back returns to the same thread', async ({ page })
   await boot(page);
   await rows(page).nth(3).click();
   await expect(page.getByRole('region', { name: 'Thread: Workshop photos and slides' })).toBeVisible();
-  const rail = page.getByRole('navigation', { name: 'Main navigation' });
-  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
-  await expect(page.locator('.mail')).toHaveCount(0);
-  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  await leaveMail(page);
+  await returnToMail(page);
   await expect(page.getByRole('region', { name: 'Thread: Workshop photos and slides' })).toBeVisible();
 });

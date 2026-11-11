@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { railGo } from './railGo';
+import { leaveRoom, openSettings as homeSettings } from './shapeNav';
+
+/** Settings sits behind home's gear: step out of the room the spec booted in, if it is in one. */
+async function gearSettings(page: Page) {
+  if (await page.locator('.sh-room').isVisible().catch(() => false)) await leaveRoom(page);
+  await homeSettings(page);
+}
 
 // T-335 motion pass. What moves, where: the Mac and the Pixel keep the app's short motion; Settings → Calm screen (the Daylight, where
 // every frame is a slow redraw) or the system's reduced motion stills all of it, script-driven scrolls included. Calm is the device's
@@ -50,7 +56,7 @@ async function boot(page: Page, opts: { history?: number; calm?: boolean } = {})
 }
 
 const openSettings = async (page: Page) => {
-  await railGo(page, 'Settings');
+  await gearSettings(page);
   await expect(page.getByRole('checkbox', { name: /Calm screen/ })).toBeVisible();
 };
 const calmOnRoot = (page: Page) => page.evaluate(() => document.documentElement.dataset.motion ?? null);
@@ -79,7 +85,8 @@ test('the Mac and the Pixel keep their motion: buttons answer, the toast rises',
   test.skip(info.project.name === 'daylight', 'the Mac and the Pixel (an Android phone: its user agent says Android too)');
   await boot(page);
   expect(await calmOnRoot(page)).toBeNull();
-  const button = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true, includeHidden: true });
+  if (await page.locator('.sh-room').isVisible().catch(() => false)) await leaveRoom(page);
+  const button = page.locator('.sh-home').getByRole('button', { name: 'Settings', exact: true });
   expect(parseFloat(await button.evaluate((b) => getComputedStyle(b).transitionDuration))).toBeGreaterThan(0);
   await openSettings(page);
   await expect(page.getByRole('checkbox', { name: /Calm screen/ })).not.toBeChecked();
@@ -96,7 +103,7 @@ test('Calm screen in Settings stills everything, now and after a restart; off ag
   expect(await moving(page)).toEqual({ animations: 0, transitions: 0 });
   // a restart: still calm, before anything is touched
   await page.reload();
-  await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rooms', level: 1 })).toBeVisible();
   expect(await calmOnRoot(page)).toBe('calm');
   expect(await moving(page)).toEqual({ animations: 0, transitions: 0 });
   await openSettings(page);

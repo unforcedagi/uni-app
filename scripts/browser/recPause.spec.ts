@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { test, expect, type Page, type Locator } from '@playwright/test';
 import { startInRoom as openIn } from './startInRoom';
+import { goJournal, leaveRoom } from './shapeNav';
 
 const press = (page: Page, target: Locator) => test.info().project.name === 'mobile' ? target.tap() : target.click();
 const button = (page: Page, name: string) => page.getByRole('button', { name, exact: true });
@@ -267,8 +268,8 @@ test('A recorder that can only write MP4, in a room: each section on its own, ne
 
 test('A recorder that can only write MP4, in the Journal: one WAV', async ({ page }) => {
   await boot(page, { noWebm: true });
-  const nav = page.getByRole('navigation', { name: 'Main navigation' });
-  await press(page, nav.getByRole('button', { name: 'Journal', exact: true }));
+  await leaveRoom(page); // the bar is hidden inside a room on a phone
+  await goJournal(page);
   await press(page, button(page, 'Record a journal entry'));
   await expect(button(page, 'Pause recording')).toBeVisible();
   await wait(page, 1200);
@@ -287,9 +288,8 @@ test('A recorder that can only write MP4, in the Journal: one WAV', async ({ pag
 
 test('Journal: pause and resume there too, saved as one recording', async ({ page }) => {
   await boot(page);
-  const nav = page.getByRole('navigation', { name: 'Main navigation' });
-  if (test.info().project.name === 'mobile' && !await nav.isVisible()) await page.locator('.back').first().tap();
-  await press(page, nav.getByRole('button', { name: 'Journal', exact: true }));
+  await leaveRoom(page); // the bar is hidden inside a room on a phone
+  await goJournal(page);
   await press(page, button(page, 'Record a journal entry'));
   await expect(button(page, 'Pause recording')).toBeVisible();
   await wait(page, 1200);

@@ -3,6 +3,7 @@
 // that go from the thread's mailbox; a retry that is the same send; outcomes that block; the "not verified" badge.
 // Run: npx playwright test --config playwright.mail.config.ts (desktop, phone, and the Daylight upright and sideways)
 import { expect, test, type Page } from '@playwright/test';
+import { expectMailCount, leaveMail, returnToMail } from './mailNav';
 import { backToThreads, boot, boxesHidden, mail, pickBox, rows, shot, stacked } from './mailMock';
 
 const calls = (page: Page, cmd: string): Promise<any[]> => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
@@ -294,10 +295,8 @@ test('a message being written survives opening a thread, New and leaving Mail; C
     await expect(c.getByRole('textbox', { name: 'Message' })).toHaveValue('A long message I am still writing.');
   }
   // leave Mail and come back
-  const rail = page.getByRole('navigation', { name: 'Main navigation' });
-  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
-  await expect(page.locator('.mail')).toHaveCount(0);
-  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  await leaveMail(page);
+  await returnToMail(page);
   c = page.getByRole('region', { name: 'New message' });
   await expect(c.getByRole('textbox', { name: 'Message' })).toHaveValue('A long message I am still writing.');
   await expect(c.getByRole('group', { name: 'From' })).toContainText('robin@example.com');
@@ -458,10 +457,9 @@ test('leaving Mail while a send is under way comes back as an unknown outcome, n
   await c.getByRole('button', { name: /^Send as Uni/ }).click();
   await page.evaluate(() => { (window as any).__sendDelay = 1500; });
   await page.getByRole('region', { name: 'Review before sending' }).getByRole('button', { name: /^Send as Uni/ }).click();
-  const rail = page.getByRole('navigation', { name: 'Main navigation' });
-  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
+  await leaveMail(page);
   await page.waitForTimeout(2000);
-  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  await returnToMail(page);
   const review = page.getByRole('region', { name: 'Review before sending' });
   await expect(review.getByText("Outcome unknown, checking. It won't be sent twice.")).toBeVisible();
   await expect(review.getByRole('button', { name: '← Edit' })).toHaveCount(0);
@@ -539,9 +537,8 @@ test('a save-and-close under way when you leave Mail finishes when you come back
   await page.evaluate(() => { (window as any).__saveDelay = 1500; });
   await c.getByRole('button', { name: '✕ Close' }).click();
   await page.getByRole('alertdialog', { name: 'Close without saving?' }).getByRole('button', { name: 'Save draft and close' }).click();
-  const rail = page.getByRole('navigation', { name: 'Main navigation' });
-  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
-  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  await leaveMail(page);
+  await returnToMail(page);
   c = page.getByRole('region', { name: 'New message' });
   await expect(c.getByRole('textbox', { name: 'Message' })).not.toBeEditable();
   await expect(page.getByRole('region', { name: 'New message' })).toHaveCount(0, { timeout: 4000 });
@@ -552,25 +549,22 @@ test('a save-and-close under way when you leave Mail finishes when you come back
   c = page.getByRole('region', { name: 'New message' });
   await c.getByRole('radio', { name: /robin@example\.com/ }).check();
   await c.getByRole('textbox', { name: 'Message' }).fill('Still here after leaving.');
-  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
-  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  await leaveMail(page);
+  await returnToMail(page);
   await expect(page.getByRole('region', { name: 'New message' }).getByRole('textbox', { name: 'Message' })).toHaveValue('Still here after leaving.');
 });
 
-/** T-208 item 5: the rail's Mail button carries an unread badge for your Inbox (not Uni's, not Junk or Trash), kept
+/** T-208 item 5: Mail's count (its drawer tile, and the bar's Applets button) is your Inbox's unread (not Uni's, not Junk or Trash), kept
  *  current as you read. */
-test("the rail's Mail button shows your Inbox's unread, and follows reading", async ({ page }) => {
+test("Mail's count shows your Inbox's unread, and follows reading", async ({ page }) => {
   await boot(page, 'ok', { writes: true });
-  const button = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Mail', exact: true });
   // a3 and a4 in your Inbox; Uni's two unread and your Junk's one don't count
-  await expect(button).toHaveAccessibleDescription('2 unread in your Inbox');
-  await expect(button.locator('.rail-dot')).toHaveCount(1);
+  await expectMailCount(page, 2);
   await row(page, 'Planning the garden week').click();
   await expect(page.getByRole('region', { name: 'Thread: Planning the garden week' })).toBeVisible();
-  await expect(button).toHaveAccessibleDescription('1 unread in your Inbox');
+  await expectMailCount(page, 1);
   await backToThreads(page);
   await row(page, 'Workshop photos').click();
   await expect(page.getByRole('region', { name: 'Thread: Workshop photos and slides' })).toBeVisible();
-  await expect(button).toHaveAccessibleDescription('');
-  await expect(button.locator('.rail-dot')).toHaveCount(0);
+  await expectMailCount(page, 0);
 });
