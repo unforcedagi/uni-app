@@ -284,6 +284,35 @@ check("an ask whose retired room moved into a private room this device doesn't h
   assert.deepEqual(at({ room: "old-g" }, { reg: reg2, tree: moved }, [...TROOMS, room("c-seed", "seed-log")]), [["c-seed", true]]);
 });
 
+check("a private place is private however it is spelled, wherever its work moved, and whichever room field names it", () => {
+  const n = (id: string, path: string, tags: string[], metadata: Record<string, unknown>) => ({ id, path, tags, metadata, updatedAt: "2026-11-01T00:00:00Z" });
+  const base = [n("n-s", "Areas/Sanctum", ["area"], {}), n("n-k", "Areas/Kiln", ["area"], { channel: "c-kiln" }), n("n-pots", "Projects/Pots", ["project"], { parent: "[[Areas/Kiln]]" }),
+    n("n-log", "Projects/Garden Log", ["project"], { parent: "[[Areas/Sanctum]]", channel: "c-garden" })];
+  const tree = nodeTree(base as never);
+  const here = [room("c-kiln", "kiln-studio"), room("c-uni", "Uni"), room("c-field", "north-field")];
+  const at = (m: Record<string, unknown>, o: Partial<Parameters<typeof asksFrom>[2]> = {}, rooms = here) => asksFrom([task("a", "T-1 x", m)], rooms, { uniRoom: "c-uni", now: NOW, tree, ...o }).map((a) => [a.room, a.private === true]);
+  // the second room field: a public reply_room never hides a private room
+  assert.deepEqual(at({ reply_room: "kiln-studio", room: "garden-log" }, {}, [...here, room("c-garden", "garden-log")]), []);
+  assert.deepEqual(at({ reply_room: "kiln-studio", room: "sanctum" }), []);
+  // the registry's private room, absent, spelled loosely or by an old name
+  const was = parseRegistry({ rooms: { "secret-room": { id: "c-sec", private: true, was: ["old-secret"] } }, retired: { "hush-room": { none: true, private: true } } })!;
+  for (const name of ["Secret Room", "secret_room", "Old Secret", "#old-secret", "Hush Room", "c-sec"]) assert.deepEqual(at({ room: name }, { reg: was }), [], name);
+  // its work moved more than one step, or the step is written as a channel id
+  const chain = parseRegistry({ rooms: { secret: { id: "c-sec", private: true }, "kiln-studio": { id: "c-kiln" } }, retired: { "a-old": { into: "b-old" }, "b-old": { into: "secret" } } })!;
+  assert.deepEqual(at({ room: "a-old" }, { reg: chain }), []);
+  assert.deepEqual(at({ room: "a-old" }, { reg: parseRegistry({ rooms: { secret: { id: "c-sec", private: true } }, retired: { "a-old": { into: "c-sec" } } })! }), []);
+  assert.deepEqual(at({ room: "c-old" }, { reg: parseRegistry({ rooms: { secret: { id: "c-sec", private: true } }, folded_ids: { "c-old": "c-sec" } })! }), []);
+  // a private node's archived room, spelled loosely (its public room_fallback is no way out)
+  const beds = nodeTree([...base, n("n-pv", "Projects/Hidden Beds", ["project"], { parent: "[[Areas/Sanctum]]", room: "Old Beds", room_status: "archived", room_fallback: "kiln-studio" })] as never);
+  for (const name of ["Old Beds", "old-beds", "oldbeds"]) assert.deepEqual(at({ room: name }, { tree: beds }), [], name);
+  // a node or card written any way
+  for (const node of ["projects/garden log", "Garden Log", "[[Garden Log]]", "Projects/Garden Log#x", "n-log"]) assert.deepEqual(at({ node, room: "kiln-studio" }), [], node);
+  assert.deepEqual(at({ card: "[[projects/garden log|x]]", room: "kiln-studio" }), []);
+  // and a public ask is still placed
+  assert.deepEqual(at({ node: "[[Projects/Pots]]", room: "kiln-studio" }), [["c-kiln", false]]);
+  assert.deepEqual(at({ reply_room: "north-field", room: "kiln-studio" }), [["c-field", false]]);
+});
+
 check("two live rooms of one name: the non-DM one, else the one the registry lists, else Uni's room (never a guess)", () => {
   const dm = { ...room("c-dm", "kiln-studio"), dm: true };
   const two = (rooms: ShapeRoom[], extra: Partial<Parameters<typeof asksFrom>[2]> = {}) =>

@@ -5,6 +5,7 @@
 // Moved here from For you (src/foryou/forYouCore.ts, retired with the bands, the cards and the areas tree): the field derivations of an ask
 // (kind, what, why, options, default, action, link), the answer and Seen metadata, and the words its room is told. Whether an ask needs him
 // is the task's own `needs_aaron`, as uni-tasks wrote it (the one rule: open, owned by him, fresh, in a live place with a live room).
+import { privateWords } from "./privateWords.ts";
 import type { Ask, ShapeRoom } from "./types.ts";
 import { metaOf, type Note } from "../vault/reader.ts";
 import { isPrivateName, isPrivatePath, isPrivateRoom, roomCluePrivate, roomView, type RoomRef } from "./privacy.ts";
@@ -127,6 +128,8 @@ export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRo
   };
   /** The channel ids the registry gives a room name (its own name or one it was known by). */
   const regIds = (nm: string): string[] => (reg ? Object.entries(reg.rooms).filter(([k, v]) => !!v.id && (loose(k) === loose(nm) || (v.was ?? []).some((w) => loose(w) === loose(nm)))).map(([, v]) => v.id!) : []);
+  // the one conservative judge: any spelling, any number of moves, either room field (privateWords.ts)
+  const words = privateWords({ tree: tree ?? null, reg, rooms: allRefs, uni, known: opts.privateRooms });
   const out: VaultAsk[] = [];
   const seen = new Set<string>();
   for (const n of notes) {
@@ -176,8 +179,12 @@ export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRo
       // a room this device doesn't have, known only by the registry's channel id for its name: private when a private place owns that channel
       || (!!tree && regIds(nm).some((id) => isPrivateRoom(tree, id, allRefs, uni)));
     const namedPrivate = (!!named && clue(named)) || moved.some(clue);
+    // (the room it lands in is judged by what that room IS, never by a name it shares: a public twin of a private room stays public,
+    // and an ask the words taint is then dropped, not drawn in it)
     const targetPrivate = !!room && roomPrivate(room);
-    const hush = namedPrivate || targetPrivate || gone.some(roomPrivate) || twins.some(roomPrivate) || privatePath(m.node) || privatePath(m.card);
+    // every word on the ask that could point at a private place: both room fields, where the work moved, the node, the card
+    const tainted = [m.reply_room, m.room, ...moved].some(words.room) || words.ref(m.node) || words.ref(m.card);
+    const hush = tainted || namedPrivate || targetPrivate || gone.some(roomPrivate) || twins.some(roomPrivate) || privatePath(m.node) || privatePath(m.card);
     if (hush && !targetPrivate) continue;
     const kindRaw = s(m.kind)?.toLowerCase();
     const kind: Kind = kindRaw === "choose" || kindRaw === "look" || kindRaw === "tell" ? kindRaw : tagsOf(n).includes("decision") ? "choose" : "do";

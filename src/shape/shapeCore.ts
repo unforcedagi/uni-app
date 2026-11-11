@@ -3,6 +3,7 @@
 // - A retired or folded room (the rooms registry, vault note System/Rooms) is not a room any more: home leaves it out.
 // - A private room (private by the registry, or by its name: src/shape/privacy.ts) is still a room, but its asks are drawn only inside it
 //   (home shows a wordless mark), and its runs nowhere (src/projects/live.ts gives a private run no room).
+import { privateWords } from "./privateWords.ts";
 import type { KnownDecision } from "../decisionLinks.ts";
 import { metaOf, type Note } from "../vault/reader.ts";
 import { isPrivateName, isPrivatePath, isPrivateRoom, roomCluePrivate, roomView } from "./privacy.ts";
@@ -93,6 +94,8 @@ export function decisionsFrom(notes: readonly Note<"decision">[], rooms: readonl
   /** A room's name says private: the app's one rule for clues, the registry, or a private place owning the channel the registry gives that
    *  name (a room this device doesn't have). */
   const clue = (nm: string) => roomCluePrivate(tree, nm, refs, uni) || (!!o.reg && isPrivateRoomName(o.reg, nm)) || (!!tree && regIds(nm).some((c) => isPrivateRoom(tree, c, refs, uni)));
+  // the one conservative judge: any spelling, any number of moves (privateWords.ts)
+  const words = privateWords({ tree, reg: o.reg ?? null, rooms: rooms.map((r) => ({ id: r.id, name: r.name })), uni, known: priv });
   const out: KnownDecision[] = [];
   for (const n of notes) {
     const id = str(n.id), path = refPath(n.path);
@@ -106,12 +109,14 @@ export function decisionsFrom(notes: readonly Note<"decision">[], rooms: readonl
     if (tree && node && node !== ROOT && isPrivatePath(tree, node)) continue;
     const named = str(m.room)?.replace(/^#/, "") ?? null;
     // a room clue is private by the app's one rule for clues (a private name, a room a private place owns or names) or by the registry
-    if (named && clue(named)) continue;
+    if (named && (clue(named) || words.room(named))) continue;
+    if (words.ref(m.node)) continue;
     const found = named ? rooms.find((r) => r.id === named)?.id ?? byName.get(roomKey(named)) ?? null : null;
     // a retired room is no place for it: it goes to the room the registry says its work went to, else where its node's room is
-    const successor = found && o.hidden?.has(found) && o.reg ? successorOf(o.reg, found) ?? successorOf(o.reg, named) : null;
+    // (looked up whether or not this device ever had the retired room)
+    const successor = o.reg && named && !(found && !o.hidden?.has(found)) ? (found ? successorOf(o.reg, found) : null) ?? successorOf(o.reg, named) : null;
     // where it moved is private (whether or not this device has that room): it is listed nowhere, never in its node's room or Uni's
-    if (successor && clue(successor)) continue;
+    if (successor && (clue(successor) || words.room(successor))) continue;
     const own = found && !o.hidden?.has(found) ? found : successor ? byName.get(roomKey(successor)) ?? null : null;
     // (no node, or one the tree doesn't have: the chain ends at Uni's room, where an account still has one)
     const channel = own ?? (tree ? roomView(tree, node ?? ROOT, refs, uni).target?.id ?? null : null);
