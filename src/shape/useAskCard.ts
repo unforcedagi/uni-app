@@ -1,10 +1,10 @@
 // T-335 cards expand (11-11): where the card an ask points at stands (`sealed_card`). Aaron had two asks telling him to tap production cards
 // that had ended at the broker an hour before. The card is read from the ask's own room as this device holds it: a card the broker ended is
 // edited to one line with no fence (its words say how it ended); one still fenced is checked by Rust (`sealed_card`): waiting, answered here,
-// expired or refused. Read again after any answer (SEALED_CHANGED), when the window comes back, and when its answer-by time passes.
+// expired or refused; a card in Needs you's waiting list (any room, any thread) is waiting. Read again after any answer (SEALED_CHANGED), when the window comes back, and when its answer-by time passes.
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
-import { cardIs, cardState, sealedFence, SEALED_CHANGED, type CardState, type SealedCardView } from "../sealedCardCore";
+import { cardIs, cardState, sealedFence, SEALED_CHANGED, type CardState, type SealedCardView, type SealedWaiting } from "../sealedCardCore";
 import type { Ask } from "./types";
 
 type Msg = { ref: string; channel: string; body: string };
@@ -24,6 +24,10 @@ export function useAskCard(ask: Pick<Ask, "room" | "sealedCard">): CardState | n
     let live = true;
     setSt((s) => s ?? { state: "checking" });
     (async () => {
+      // a card waiting anywhere on this device (another room, a thread) is waiting, wherever the ask lives
+      const waiting = await invoke<SealedWaiting[]>("sealed_waiting").catch(() => [] as SealedWaiting[]);
+      const w = Array.isArray(waiting) ? waiting.find((x) => cardIs(sealedCard, x.ref)) : undefined;
+      if (w && w.expires > Date.now() / 1000) { if (live) setSt({ state: "waiting", channel: w.channel, ref: w.ref, expires: w.expires }); return; }
       const rows = await invoke<Msg[]>("get_messages", { channel: room, root: null, limit: 300 }).catch(() => null);
       if (!live || rows === null) return;
       const msg = rows.find((m) => cardIs(sealedCard, m.ref)) ?? null;

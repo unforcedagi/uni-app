@@ -130,6 +130,13 @@ console.log("sealedCardCore ok");
   assert.deepEqual(cardState(msg, view([worded]), now + 600), { state: "expired", channel: "c", ref, at: now + 600 });
   assert.equal(cardState(msg, view([{ ...worded, answer: { decision: "deny", at: now, until: null, sent: true } }]), now).state, "answered");
 
+  const unsent = cardState(msg, view([{ ...worded, answer: { decision: "approve", at: now, until: null, sent: false } }]), now);
+  assert.deepEqual(unsent, { state: "answered", channel: "c", ref, decision: "approve", at: now, sent: false });
+  const { repostable } = await import("../src/sealedCardCore.ts");
+  assert.ok(!repostable(unsent), "an answer not sent yet is the card's own Try again, never a repost");
+  assert.ok(!repostable({ state: "missing" }), "not found here may only be not synced yet");
+  assert.ok(repostable({ state: "expired", channel: "c", ref, at: null }));
+  assert.ok(repostable({ state: "answered", channel: "c", ref, decision: "approve", at: now, sent: true }));
   const clock = () => "14:05";
   assert.equal(staleLine({ state: "waiting", channel: "c", ref, expires: now }, clock), null);
   assert.equal(staleLine({ state: "expired", channel: "c", ref, at: now }, clock), "Its card expired at 14:05: nothing was sent");

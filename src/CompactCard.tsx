@@ -20,7 +20,12 @@ export function PendingCard({ className, label, icon, what, meta, actions, below
       <span className="cc-icon" aria-hidden="true">{icon}</span>
       <span className="cc-text">
         {/* (a tap on the line opens it too; the button is the one control a keyboard and a screen reader use) */}
-        <span className="cc-what" onClick={() => setOpen((o) => !o)}>{what}</span>
+        <span className="cc-what" onClick={(e) => {
+          // (selecting its words, or a link or button inside it, is not a tap on the line)
+          const sel = window.getSelection();
+          if ((sel && !sel.isCollapsed && e.currentTarget.contains(sel.anchorNode)) || (e.target as HTMLElement).closest?.("a, button, input, select, textarea")) return;
+          setOpen((o) => !o);
+        }}>{what}</span>
         <span className="cc-meta">{meta}<button type="button" className="cc-toggle" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)}>{open ? "Show less" : "Show all"}</button></span>
       </span>
       {actions && <div className="cc-actions">{actions}</div>}

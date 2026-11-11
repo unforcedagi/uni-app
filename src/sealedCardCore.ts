@@ -191,7 +191,7 @@ export type CardState =
   | { state: "checking" }
   | { state: "waiting"; channel: string; ref: string; expires: number }
   | { state: "expired"; channel: string; ref: string; at: number | null }
-  | { state: "answered"; channel: string; ref: string; decision: "approve" | "deny"; at: number }
+  | { state: "answered"; channel: string; ref: string; decision: "approve" | "deny"; at: number; sent: boolean }
   | { state: "ended"; channel: string; ref: string; line: string }
   | { state: "refused"; channel: string; ref: string; why: string }
   | { state: "missing" };
@@ -208,23 +208,30 @@ export function cardState(msg: { channel: string; ref: string; body: string } | 
   if (!view) return { state: "checking" };
   if (view.refused) return view.refused === EXPIRED ? { state: "expired", channel, ref, at: null } : { state: "refused", channel, ref, why: view.refused };
   const answered = view.rows.find((x) => x.answer);
-  if (answered?.answer) return { state: "answered", channel, ref, decision: answered.answer.decision, at: answered.answer.at };
+  // (a card is answered as one: a morning card's rows left out are part of that one answer)
+  if (answered?.answer) return { state: "answered", channel, ref, decision: answered.answer.decision, at: answered.answer.at, sent: answered.answer.sent };
   const expires = Math.min(...view.rows.map((x) => x.expires));
   if (!view.rows.length || now >= expires) return { state: "expired", channel, ref, at: view.rows.length ? expires : null };
   return { state: "waiting", channel, ref, expires };
 }
 
-/** A card that no longer waits, in a few words; null while it waits or is being checked. */
+/** A card that no longer waits (or can't be found here), in a few words; null while it waits or is being checked. */
 export function staleLine(s: CardState, clock: (ts: number) => string): string | null {
   switch (s.state) {
     case "expired": return s.at ? `Its card expired at ${clock(s.at)}: nothing was sent` : "Its card expired: nothing was sent";
-    case "answered": return `Its card was already ${s.decision === "deny" ? "denied" : "approved"} here at ${clock(s.at)}`;
+    case "answered": return s.sent ? `Its card was already ${s.decision === "deny" ? "denied" : "approved"} here at ${clock(s.at)}`
+      : `Its card was ${s.decision === "deny" ? "denied" : "approved"} here at ${clock(s.at)}, but that hasn't reached Uni yet: Try again is on the card`;
     case "ended": return `Its card has ended: ${s.line.replace(/^🔑\s*/u, "")}`;
     case "refused": return `Its card can't be approved: ${s.why}`;
-    case "missing": return "Its card isn't in this room on this device: it may have ended, or never arrived";
+    case "missing": return "Its card isn't among this room's recent messages on this device";
     default: return null;
   }
 }
+
+/** It no longer waits for a tap, for sure: the room may be asked for a fresh one. (Missing may only be not here yet; an answer not sent yet
+ *  is still the card's own Try again.) */
+export const repostable = (s: CardState): boolean =>
+  s.state === "expired" || s.state === "ended" || s.state === "refused" || (s.state === "answered" && s.sent);
 
 /** What the room is told when he asks for a fresh card (addressed to its Uni, so it wakes). `fp`: the card's fingerprint, when known. */
 export function repostBody(o: { tid: string | null; what: string | null; fp: string | null; why: string }): string {

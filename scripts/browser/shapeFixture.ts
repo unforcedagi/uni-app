@@ -122,7 +122,13 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
         next: 'Tap the PRODUCTION card in Riverbend that deploys the import tool', sealed_card: CARD.prod.slice(0, 12) }),
       // the ask whose card the broker already ended: it must say so, not send him looking for it
       task('ask-load', 'T-611 Load the history into the archive', 14 * min, { kind: 'do', no_default: true, reply_room: 'Riverbend Commons', why_now: 'The import tool is live.',
-        next: 'Tap the second card in Riverbend that loads the history', sealed_card: CARD.ended }));
+        next: 'Tap the second card in Riverbend that loads the history', sealed_card: CARD.ended }),
+      // an ask in another room pointing at the same production card: its words never reach Riverbend's card; it finds the card waiting there
+      task('ask-elsewhere', 'T-612 Check the studio copy of the import', 13 * min, { kind: 'do', no_default: true, reply_room: 'Studio', why_now: 'A studio line that stays in Studio.',
+        next: 'Tap the PRODUCTION card that deploys the import tool', sealed_card: CARD.prod }),
+      // an ask whose card this device doesn't hold: said plainly, nothing to repost
+      task('ask-unknown', 'T-613 Approve the glaze kiln key', 12 * min, { kind: 'do', no_default: true, reply_room: 'Studio', why_now: 'The kiln is booked.',
+        next: 'Tap the kiln card', sealed_card: 'ee'.repeat(32) }));
     const run = (id: string, title: string, channel: string, room: string, sAgo: number, md: Record<string, unknown>, body: string) => ({ id, path: `Runs/2026-11-10 ${title}`, tags: ['run'], createdAt: iso(sAgo), updatedAt: iso(60),
       content: `# ${title}\n\n${body}\n\n---\n\nRun on [[Uni]], worker \`mts-${id}\`.\n`, metadata: { state: 'running', channel, room, attempt: id, worker: `mts-${id}`, started_at: iso(sAgo), doing_at: iso(60), ...md } });
     const notes: any[] = [
@@ -170,7 +176,8 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
         ttl_s: 600, uses: 3, payload: null, request_digest: '5d6e7f80' + 'b'.repeat(56), expires: nowS + 50 * min, answer: null, asked: nowS - 30 * min }] },
       [CARD.old]: { kind: 'single', event_id: CARD.old, refused: 'This card has expired.', rows: [] },
     };
-    const waiting = () => (w.__cardAnswered ? [] : [{ ref: 'rb-card', channel: ROOM.river, root: null, ts: nowS - 66 * min, kind: 'single', credential: 'billing', action: 'invoice.send', class: 'routine', rows: 1, expires, fingerprint: '9b13b2ae' }]);
+    const waiting = () => [...(o.cards ? [{ ref: CARD.prod, channel: ROOM.river, root: null, ts: nowS - 20 * min, kind: 'single', credential: 'cf-site', action: 'job.cloudflare', class: 'powerful', rows: 1,
+      expires: cards[CARD.prod].rows[0].expires, fingerprint: '7c4e19d2', reach }] : []), ...(w.__cardAnswered ? [] : [{ ref: 'rb-card', channel: ROOM.river, root: null, ts: nowS - 66 * min, kind: 'single', credential: 'billing', action: 'invoice.send', class: 'routine', rows: 1, expires, fingerprint: '9b13b2ae' }])];
 
     const matches = (m: any, f: any) => Object.entries(f ?? {}).every(([k, c]: [string, any]) => {
       const v = m?.[k];

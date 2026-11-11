@@ -20,6 +20,8 @@ type Asked = { at: number; room: string | null };
 const KEY = "uni.cards.repost.v1";
 const read = (): Record<string, Asked> => { try { const v = JSON.parse(localStorage.getItem(KEY) ?? "{}"); return v && typeof v === "object" ? v : {}; } catch { return {}; } };
 const subs = new Set<() => void>();
+/** Cards whose repost is being sent: a second button for the same card (its card and its ask) waits for the first. */
+const sending = new Set<string>();
 function keep(ref: string, a: Asked) {
   const all = read();
   all[ref] = a;
@@ -43,11 +45,12 @@ export function RepostButton({ channel, cardRef, body }: { channel: string; card
   const room = links?.roomName(channel) ?? null;
   if (asked) return <p className="cc-repost cc-repost-done" role="status">Asked {asked.room ? `#${asked.room}` : "the room"} for a fresh card · {clockTime(asked.at)}</p>;
   const send = async () => {
-    if (busy) return;
+    if (busy || sending.has(cardRef) || read()[cardRef]) return;
+    sending.add(cardRef);
     setBusy(true); setError(null);
     try { await postIn(channel, body, null); keep(cardRef, { at: Math.floor(Date.now() / 1000), room }); }
     catch (e) { setError((typeof e === "string" ? e : (e as Error)?.message ?? "it didn't go").slice(0, 140)); }
-    finally { setBusy(false); }
+    finally { sending.delete(cardRef); setBusy(false); }
   };
   return <div className="cc-repost">
     <button type="button" className="pairing-secondary cc-repost-btn" disabled={busy} onClick={() => void send()}>{busy ? "Asking…" : `Ask ${room ? `#${room}` : "the room"} to repost`}</button>

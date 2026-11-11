@@ -111,3 +111,27 @@ test("3. a card that no longer waits says so and offers to ask the room for a fr
   await openRiverbend(page);
   await expect(page.locator('.sh-ask[data-id="ask-load"] [data-card-state="ended"]').getByRole('status')).toHaveText(/^Asked #Riverbend Commons for a fresh card/);
 });
+
+test("review r1: an ask's words stay in its room; its card found waiting in another room says where; a card not on this device offers no repost", async ({ page }) => {
+  await bootShape(page, { cards: true });
+  await openRiverbend(page);
+  // Riverbend's card names Riverbend's own ask, never the Studio ask that points at the same card
+  const card = msg(page, CARD.prod).locator('.cc');
+  await card.scrollIntoViewIfNeeded();
+  await card.getByRole('button', { name: 'Show all' }).click();
+  await expect(card.locator('dl.cc-asking')).toContainText('for T-610');
+  await expect(card).not.toContainText('T-612');
+  await expect(card).not.toContainText('studio line');
+  await page.getByRole('button', { name: 'Back to rooms' }).click();
+  await page.locator(`.sh-row[data-room="${ROOM.studio}"] .sh-row-open`).click();
+  await expect(page.locator('.sh-room')).toBeVisible();
+  // the Studio ask: its card waits in Riverbend (Needs you's list), and it says so
+  const elsewhere = page.locator('.sh-room-ask .sh-ask[data-id="ask-elsewhere"] [data-card-state="waiting"]');
+  await elsewhere.scrollIntoViewIfNeeded();
+  await expect(elsewhere).toContainText(/Its card waits in #Riverbend Commons · answer by \d/);
+  // an ask whose card this device doesn't hold: said plainly, nothing to tap or repost
+  const unknown = page.locator('.sh-room-ask .sh-ask[data-id="ask-unknown"] [data-card-state="missing"]');
+  await unknown.scrollIntoViewIfNeeded();
+  await expect(unknown).toHaveText("🔑 Its card isn't among this room's recent messages on this device.");
+  await expect(unknown.getByRole('button')).toHaveCount(0);
+});

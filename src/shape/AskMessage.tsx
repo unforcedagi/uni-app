@@ -6,8 +6,8 @@ import type { ReactNode } from "react";
 import { askButtons, seenHint, type AskButton } from "./asksCore.ts";
 import type { Ask } from "./types.ts";
 import { clockTime } from "../CompactCard";
-import { RepostButton } from "../cardLinks";
-import { repostBody, staleLine, type CardState } from "../sealedCardCore";
+import { RepostButton, useCardLinks } from "../cardLinks";
+import { repostable, repostBody, staleLine, type CardState } from "../sealedCardCore";
 import { useAskCard } from "./useAskCard";
 import "./asks.css";
 
@@ -40,12 +40,18 @@ export function AskButtons({ ask, busy, onAct, archive = false }: { ask: Ask; bu
  * drawn under a waiting card's line (the sheet puts the card itself there, so it can be answered in place).
  */
 export function CardLine({ ask, state, children }: { ask: Ask; state: CardState | null; children?: (s: Extract<CardState, { state: "waiting" }>) => ReactNode }) {
+  const links = useCardLinks();
   if (!state || state.state === "checking") return null;
+  const where = state.state === "waiting" && state.channel !== ask.room ? `#${links?.roomName(state.channel) ?? "another room"}` : "this room";
   if (state.state === "waiting") return <div className="sh-ask-card" data-card-state="waiting">
-    <p className="sh-ask-card-line"><span aria-hidden="true">🔑</span> Its card waits in this room · answer by {clockTime(state.expires)}</p>
+    <p className="sh-ask-card-line"><span aria-hidden="true">🔑</span> Its card waits in {where} · answer by {clockTime(state.expires)}</p>
     {children?.(state)}
   </div>;
   const line = staleLine(state, clockTime) ?? "";
+  // (not found here may only mean not synced yet, or posted elsewhere: said plainly, with no repost)
+  if (!repostable(state)) return <div className="sh-ask-card" data-card-state={state.state} role="note">
+    <p className="sh-ask-card-line"><span aria-hidden="true">🔑</span> {line}.</p>
+  </div>;
   const channel = "channel" in state ? state.channel : ask.room;
   return <div className="sh-ask-card sh-ask-card-stale" data-card-state={state.state} role="note">
     <p className="sh-ask-card-line"><span aria-hidden="true">⌛</span> {line}. Nothing to tap.</p>
