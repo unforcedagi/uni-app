@@ -30,6 +30,7 @@ import { createThemeModule, readHostTheme } from "../interface/modules/theme";
 import { appletHostNeeds, needsGrant, ownFolder, type SealedEntry } from "../interface/sealedApplet";
 import { fingerprint, grantExpiry, grantLines } from "../interface/grant2";
 import { bridgePaths } from "../interface/bridgePaths";
+import { invalidatePaths } from "../vaultPaths";
 import { activeProfile } from "../areas/profile";
 import "./sealedApplet.css";
 
@@ -148,8 +149,9 @@ export function SealedApplet({ id, entry, listed, vault, rooms, onOpenNote, onCo
       getNote: (ref) => invoke<{ note: { id: string } }>("vault_note", { vault, noteRef: ref }).then((d) => d.note),
       search: (query, limit, pathPrefix) => invoke<{ id: string; path: string; snippet: string }[]>("vault_search", { query, limit, mode: "keyword", vault, pathPrefix }),
       // the two writes, asked only for a grant that names them (modules/vault.ts holds every call to its folders)
-      create: (path, content) => invoke<{ id: string; path?: string | null; updatedAt?: string | null }>("vault_create", { vault, path, content }),
-      save: (noteId, content, ifUpdatedAt) => invoke<{ id: string; path?: string | null; updatedAt?: string | null }>("vault_save", { vault, id: noteId, content, ifUpdatedAt, force: false }),
+      // (a write drops the path listings, the frame's and the app's, so the next list shows it)
+      create: (path, content) => invoke<{ id: string; path?: string | null; updatedAt?: string | null }>("vault_create", { vault, path, content }).finally(() => invalidatePaths(vault)),
+      save: (noteId, content, ifUpdatedAt) => invoke<{ id: string; path?: string | null; updatedAt?: string | null }>("vault_save", { vault, id: noteId, content, ifUpdatedAt, force: false }).finally(() => invalidatePaths(vault)),
     }),
     createChatModule({ getMessages: chatOn ? getMessages : async () => [], suggest: (s) => suggestions.add(s), roomName: (rid) => roomNameRef.current(rid) }),
     createNoteModule({ suggest: (s) => suggestions.add(s), resolve: (ref) => invoke<{ note: { id: string; path?: string | null } }>("vault_note", { vault, noteRef: ref }).then((d) => d.note) }),

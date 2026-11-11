@@ -11,14 +11,18 @@ Both are described by a manifest on the **interface contract**, which lives in `
 
 - **Contract 2** (new): one manifest says what the applet reads and writes (which vault, which types or folders, which
   door), what else it reaches, what it offers to search and its screens. The shell resolves it to a **grant**, shows
-  exactly that on **one card** the owner allows, and refuses anything outside it at runtime. Arcade is on it. A sealed
-  note may use it too.
+  exactly that on **one card** the owner allows, and refuses anything outside it at runtime. Arcade is on it, and so is
+  the first sealed applet a room made, Recipes (its note lives in its own `recipes` vault; it reads, adds and changes
+  notes in `Recipes/`).
 - **Contract 1**: a sealed note carries two manifests, `applet:` (how the drawer lists it) and `interface:` (its
   needs). Still accepted, and it asks on the same card. Built-ins other than Arcade are listed on contract 1 and ask for
   nothing yet.
 
 A sealed applet joins the drawer when its note is tagged `applet`, has `extension: html` and a valid manifest
-(`src/interface/sealedApplet.ts`, `src/shape/SealedApplet.tsx`). A note whose manifest isn't valid is skipped and
+(`src/interface/sealedApplet.ts`, `src/shape/SealedApplet.tsx`). Applet notes are read from **every vault this device
+has**, the primary vault first (`src/shape/useSealedApplets.ts`): an id the primary vault holds can't be taken from
+another vault, and a repeated id is skipped and counted. The vault the note is in is the applet's `here`, the only vault
+it reaches; the card names it, and it is part of the grant's key (the same note path in another vault asks again). A note whose manifest isn't valid is skipped and
 counted. One whose needs can't be granted still gets its tile, and opening it shows "This applet can't open" with the
 reason. Until 0.4.0 the consumer was an area's app (`Areas/<Name>/app`, shown in the area view); the areas view is
 gone, and the example apps written for it ([`areas-seed/techne.html`](../areas-seed/techne.html),
@@ -114,9 +118,20 @@ Arcade shares the page's `localStorage` (where grants are kept) and globals with
 opened by the shell's recorder, which the Arcade calls after `port.need("voice")` (asked, not enforced by the
 recorder). It does not stop hostile code that someone compiles in on purpose; the frame is the boundary for code the
 release doesn't vouch for. A sealed applet on contract 2 is compiled to the frame's needs and held by the same
-`session.ts` and `router.ts` as contract 1, so its boundary is the frame. Today the frame can only read, so a sealed
-manifest may hold only `vault: here`, rules of `{path, verbs: [read]}` and rooms; a door, a write, `voice`, another
-vault or a type-only rule is refused with the reason, and the note is not listed.
+`session.ts` and `router.ts` as contract 1, so its boundary is the frame. A sealed manifest may hold only `vault: here`,
+rules of `{path, verbs}` with verbs from `read`, `create` and `update`, and rooms; a door, `delete`, `own`, a type rule,
+`voice` or another vault is refused with the reason, and the note is not listed. Each verb becomes a need on that folder
+(`vault.read`, `vault.create`, `vault.update`); contract 1 can't ask for the two writes. **The frame's writes**
+(`modules/vault.ts`): `POST /api/notes {path, content}` adds a note whose path is plain and inside a create folder, and
+`PATCH /api/notes/:idOrPath {content, if_updated_at}` replaces the content of a note inside an update folder, at the
+revision the applet read (a stale one is `409 conflict`). Both are judged on the note as it is read at that moment, never
+on the ref asked for. A write sets content only: tags, metadata, links, a move or `force` are `400`; a note that is HTML
+or tagged `applet` (any applet's code) is never changed; a path ending in `.html` is refused; a note the applet can't
+read is `404` (no existence oracle) and one it reads but may not change is `403`. Nothing is written once the session
+has ended. The shell's writers are the app core's `vault_create` and `vault_save` on the applet's own vault; a write drops
+the path listings so the next list shows it. A vault fetch needs a read rule, so an applet that writes also reads.
+The card's row for a folder says every verb ("Read, add and change notes in Recipes/") and is marked, and its closing line
+says it can't delete or change notes anywhere else.
 
 **Not signed yet.** The grant is a record on this device (`localStorage`, `uni.interface.grants.v2`), as contract 1's
 was. `grantEvents(grant, expires)` builds the same grant in the shape Parachute 1.0 proposes for an owner-signed event
@@ -151,7 +166,7 @@ offline snapshot behind the port. Mail and Messages (doors with their own sessio
 | `router.ts` | `createRouter(modules)`: namespace/method → handler, enforcing grant, params and scope |
 | `session.ts` | one frame's message pump: two rate buckets of 60 per 10 s (requests: a message costs 1; reads: each underlying note read or searched prefix costs 1), 8 pending, replies |
 | `suggestions.ts` | pending suggestions (max 3). Adding never acts; only `accept()` does |
-| `modules/vault.ts` | read-only REST subset of surface-client's `VaultClient` over the frame |
+| `modules/vault.ts` | a REST subset of surface-client's `VaultClient` over the frame: reads, and a contract 2 grant's two writes |
 | `modules/chat.ts`, `note.ts`, `theme.ts` | `chat.recent` / `chat.draft`, `note.open`, `theme.get` |
 | `modules/frameFetch.ts` | the one adapter that knows the `pfr` wire shape (swap for the published `createFrameFetch`/`serveFrameFetch`) |
 | `kits/` | `frameKit.ts` (the code injected into the frame) and the bundled `VaultClient` |
@@ -256,7 +271,7 @@ stringifying attacker data); depth ≤ 6; plain JSON only. Over the request limi
 | `note.open` | `vault.read` | `{ref}` inside the granted prefix | `{pending:true}`; a pending suggestion |
 | `theme.get` | none | none | `{text, muted, accent, surface, line, sans, serif, mono}` |
 
-**Vault REST subset** (compatible with surface-client's `VaultClient`; GET only, everything else is 405):
+**Vault REST subset** (compatible with surface-client's `VaultClient`; GET, plus the two writes below for a grant that names them):
 
 - `GET /api/vault` → `{name, scope}`.
 - `GET /api/notes?path_prefix&tag&search&limit&id&path&include_content` → notes, newest first, `limit` ≤ 50.
@@ -269,6 +284,9 @@ stringifying attacker data); depth ≤ 6; plain JSON only. Over the request limi
   `400 bad_params` rather than silently ignored; `GET /api/vault` accepts `include_stats`. This is a
   **subset** of `VaultClient`, not the whole client.
 - `GET /api/notes/:idOrPath` → the note, or 404.
+- With a contract 2 write grant only: `POST /api/notes {path, content}` → 201, and `PATCH /api/notes/:idOrPath
+  {content, if_updated_at}` → 200 (rules above). A frame-fetch body is at most 7 KB (of the 8 KB request). Anything else
+  (PUT, DELETE, another route) is 405.
 
 Scope is judged on the **note that comes back** (its `path` must be strictly inside a granted prefix),
 whatever key it was looked up by, so ids, search hits and tags cannot leak a note from outside the grant.
@@ -292,7 +310,8 @@ uni.theme.on((t) => { /* host colours; --text, --accent… are also set on <html
 
 `uni.VaultClient` is surface-client's real `VaultClient` (about 20 KB minified, bundled into every
 srcdoc by the `virtual:uni-vault-client` Vite plugin); `uni.vault` is one pointed at `uni.frameFetch`.
-Mutating methods exist on the client but the host answers 405. `uni.frameFetch(url, init)` is the
+`uni.vault.createNote({path, content})` and `uni.vault.updateNote(id, {content, if_updated_at})` work for a contract 2
+write grant; every other mutating method is answered 405. `uni.frameFetch(url, init)` is the
 transport. Bare `#anchor` links scroll in place (a srcdoc frame would otherwise resolve them against
 the host's URL and navigate away).
 

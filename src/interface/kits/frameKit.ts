@@ -2,7 +2,7 @@
 // It runs inside the frame, so it is a string. Kept free of backticks and `${`.
 //   uni.ready()                      → Promise of the host's context ({applet: {id, name}}, contract, theme)
 //   uni.frameFetch(url, init)        → fetch over the frame (pfr envelope), what VaultClient uses
-//   uni.VaultClient / uni.vault      → surface-client's VaultClient on frameFetch (read-only subset)
+//   uni.VaultClient / uni.vault      → surface-client's VaultClient on frameFetch (reads; createNote and updateNote for a contract 2 write grant)
 //   uni.chat.recent(limit) / .draft(text, room?)
 //   uni.chat.onMessage(cb)           → live messages pushed by the host (needs chat.read; a drawer applet gets none today); returns an unsubscribe
 //   uni.note.open(path)

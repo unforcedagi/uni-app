@@ -83,7 +83,8 @@ test.describe('the drawer hosts a sealed applet', () => {
   test('contract 2: a note that asks for more than the frame can do is not listed; one with a second manifest beside it is refused when it opens', async ({ page }) => {
     const access = [{ vault: 'here', allow: [{ path: 'Seeds/', verbs: ['read'] }] }];
     await bootSealed(page, { granted: false, applets: [
-      quiet('writer', 'Seed writer', { v2: { access: [{ vault: 'here', allow: [{ path: 'Seeds/', verbs: ['read', 'update'] }] }] } }),
+      // (a sealed applet may read, add and change by folder; deleting is beyond the frame)
+      quiet('writer', 'Seed writer', { v2: { access: [{ vault: 'here', allow: [{ path: 'Seeds/', verbs: ['read', 'delete'] }] }] } }),
       quiet('doorway', 'Doorway', { v2: { access: [{ door: 'arcade', ops: ['home'] }] } }),
       quiet('two-faced', 'Two faced', { v2: { access }, interface: { contract: 1, needs: [{ 'vault.read': 'Journal/' }] } }),
     ] });
@@ -339,7 +340,7 @@ test.describe('the frame\'s reach', () => {
       expect(R['c:v3']).toBe('http200');
       expect(R['c:v4']).toBe('http200');
       expect(R['c:v5']).toBe('http403');
-      expect(R['c:v6']).toBe('http405');
+      expect(R['c:v6']).toBe('http403'); // a write under a read-only grant: not granted
       expect(R['c:v7']).toBe('http404');
       expect(R.vaultBodies).not.toMatch(/PRIVATE-DIARY|Private\//);
       expect(R['c:longid']).toBe('none');

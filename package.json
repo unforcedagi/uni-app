@@ -35,7 +35,8 @@
     "test:motion": "playwright test --config playwright.motion.config.ts",
     "test:route-door": "uv run --no-project --python 3.13 --with coincurve python services/route/test_server.py",
     "test:arcade": "playwright test --config playwright.arcade.config.ts",
-    "test:shape": "playwright test --config playwright.shape.config.ts"
+    "test:shape": "playwright test --config playwright.shape.config.ts",
+    "test:recipes": "playwright test --config playwright.recipes.config.ts"
   },
   "dependencies": {
     "@openparachute/surface-client": "0.3.7",

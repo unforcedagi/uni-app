@@ -25,7 +25,11 @@ export type FixtureApplet = {
   path?: string;
   /** Contract 2: the whole `applet` manifest (access, reach, search); the note then carries no `interface` beside it. */
   v2?: Record<string, unknown>;
+  /** The vault its note is in (default `uni`, the primary vault). */
+  vault?: string;
 };
+/** A data note in any vault (default `uni`). */
+export type FixtureNote = { id: string; path: string; content: string; vault?: string; tags?: string[]; extension?: string };
 export type SealedOpts = ShapeOpts & {
   applets?: FixtureApplet[];
   /** Seed a grant for every applet (true, the default) or none (false); computed as the app computes it. */
@@ -49,6 +53,9 @@ export type SealedOpts = ShapeOpts & {
   passUa?: string;
   /** getVersion() fails. */
   versionFails?: boolean;
+  /** More vaults this device lists (beyond the world's own), and data notes in any vault. */
+  vaults?: string[];
+  data?: FixtureNote[];
 };
 
 export const SEEDS_DATA = [
@@ -100,13 +107,14 @@ export async function bootSealed(page: Page, o: SealedOpts = {}) {
       const h = appletHostNeeds(appletMeta(a), Object.values(ROOM));
       if (!h.ok) continue;
       const html = await htmlHash(a.html);
-      grants[noteIdOf(a)] = { scope: await grantKey(h.resolved, pathOf(a)), html: (o.staleHtml ?? []).includes(a.id) ? `stale-${html}` : html,
+      grants[noteIdOf(a)] = { scope: await grantKey(h.resolved, `${a.vault ?? 'uni'}:${pathOf(a)}`), html: (o.staleHtml ?? []).includes(a.id) ? `stale-${html}` : html,
         grantedAt: '2026-11-01T00:00:00Z', ...(grantedUnder === 'legacy' ? {} : { grantedUnder }) };
     }
   }
   const notes = [
-    ...applets.map((a) => ({ id: noteIdOf(a), path: pathOf(a), extension: 'html', tags: ['applet'], content: a.html, metadata: appletMeta(a), updatedAt: '2026-11-09T10:00:00Z', createdAt: '2026-11-01T10:00:00Z' })),
-    ...SEEDS_DATA.map((n) => ({ ...n, extension: 'md', tags: [], metadata: {}, updatedAt: '2026-11-08T10:00:00Z', createdAt: '2026-11-01T10:00:00Z' })),
+    ...applets.map((a) => ({ id: noteIdOf(a), vault: a.vault ?? 'uni', path: pathOf(a), extension: 'html', tags: ['applet'], content: a.html, metadata: appletMeta(a), updatedAt: '2026-11-09T10:00:00Z', createdAt: '2026-11-01T10:00:00Z' })),
+    ...SEEDS_DATA.map((n) => ({ ...n, vault: 'uni', extension: 'md', tags: [], metadata: {}, updatedAt: '2026-11-08T10:00:00Z', createdAt: '2026-11-01T10:00:00Z' })),
+    ...(o.data ?? []).map((n) => ({ extension: 'md', tags: [], metadata: {}, updatedAt: '2026-11-08T10:00:00Z', createdAt: '2026-11-01T10:00:00Z', ...n, vault: n.vault ?? 'uni' })),
   ];
   if (o.noHostCsp) {
     await page.route((u) => new URL(u).pathname === '/', async (route) => {
@@ -138,32 +146,51 @@ export async function bootSealed(page: Page, o: SealedOpts = {}) {
     // a test changes a note in place (its manifest, path or html) to stand for an edit in the vault
     w.__sealedNotes = notes;
     const copy = (x: unknown) => JSON.parse(JSON.stringify(x));
-    const find = (ref: string) => notes.find((n) => n.id === ref || n.path === ref);
+    // every command names its vault; none given is the primary vault
+    const inVault = (args: any) => (n: any) => n.vault === (args?.vault ?? 'uni');
+    const find = (ref: string, args?: any) => notes.find((n) => (n.id === ref || n.path === ref) && inVault(args)(n));
+    let made = 0;
     T.invoke = async (cmd: string, args: any) => {
       const mine = (v: unknown) => { w.__calls.push({ cmd, args }); return v; };
       switch (cmd) {
         case 'plugin:app|version': if (d.versionFails) { w.__calls.push({ cmd, args }); throw 'version unavailable'; } break;
-        case 'vault_query': if (args.tag === 'applet' && (!args.vault || args.vault === 'uni')) return mine(copy(notes.filter((n) => n.tags.includes('applet')).map(({ content, ...n }) => n)));
+        case 'vault_list': if (d.vaults.length) return mine([...new Set([...(await inner(cmd, args)), ...d.vaults])]); break;
+        case 'vault_query': if (args.tag === 'applet' && (!args.vault || args.vault === 'uni' || d.vaults.includes(args.vault))) return mine(copy(notes.filter((n) => n.tags.includes('applet') && inVault(args)(n)).map(({ content, ...n }) => n)));
           break;
+        case 'vault_create': {
+          w.__calls.push({ cmd, args });
+          if (notes.some((n) => n.path === args.path && inVault(args)(n))) throw 'vault error: path_conflict: a note is already at that path';
+          const n = { id: `made-${++made}`, vault: args.vault, path: args.path, extension: 'md', tags: [], metadata: {}, content: args.content, createdAt: '2026-11-11T12:00:00Z', updatedAt: `2026-11-11T12:00:0${made}Z` };
+          notes.push(n);
+          return copy(n);
+        }
+        case 'vault_save': {
+          w.__calls.push({ cmd, args });
+          const n = find(args.id, args);
+          if (!n) throw 'vault error: not found';
+          if (!args.force && args.ifUpdatedAt !== n.updatedAt) throw 'conflict: note has been modified';
+          n.content = args.content; n.updatedAt = `2026-11-11T13:00:${String(++made).padStart(2, '0')}Z`;
+          return copy(n);
+        }
         case 'vault_note': {
-          const n = find(args.noteRef);
+          const n = find(args.noteRef, args);
           if (!n) break;
           w.__calls.push({ cmd, args });
           if ((w.__noteFails ?? {})[args.noteRef]) throw 'hub unreachable: connection refused';
           return { hub: 'https://example.invalid', vault: args.vault ?? 'uni', note: copy(n) };
         }
-        case 'vault_paths': return mine(notes.map((n) => ({ id: n.id, path: n.path, extension: n.extension, updatedAt: n.updatedAt })));
+        case 'vault_paths': return mine(notes.filter(inVault(args)).map((n) => ({ id: n.id, path: n.path, extension: n.extension, updatedAt: n.updatedAt })));
         case 'vault_search': {
           const q = String(args.query).toLowerCase();
-          const own = notes.filter((n) => n.extension !== 'html' && n.content.toLowerCase().includes(q) && (!args.pathPrefix || n.path.startsWith(args.pathPrefix)))
-            .map((n) => ({ vault: 'uni', id: n.id, path: n.path, snippet: n.content, score: null, mode: 'keyword' }));
+          const own = notes.filter((n) => inVault(args)(n) && n.extension !== 'html' && n.content.toLowerCase().includes(q) && (!args.pathPrefix || n.path.startsWith(args.pathPrefix)))
+            .map((n) => ({ vault: n.vault, id: n.id, path: n.path, snippet: n.content, score: null, mode: 'keyword' }));
           const rest = await inner(cmd, args);
           return [...own, ...rest].slice(0, args.limit ?? 20);
         }
       }
       return inner(cmd, args);
     };
-  }, { notes, grants, mode, passUa: o.passUa ?? null, selftest: o.selftest ?? true, webrtcOff: (o.webrtc ?? 'off') === 'off', ipcLeak: !!o.ipcLeak, stripCsp: !!o.stripCsp, versionFails: !!o.versionFails });
+  }, { notes, grants, vaults: o.vaults ?? [], mode, passUa: o.passUa ?? null, selftest: o.selftest ?? true, webrtcOff: (o.webrtc ?? 'off') === 'off', ipcLeak: !!o.ipcLeak, stripCsp: !!o.stripCsp, versionFails: !!o.versionFails });
   await page.reload();
 }
 
