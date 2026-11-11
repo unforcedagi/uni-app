@@ -157,7 +157,14 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
   const answer = useCallback(async (ask: Ask, text: string) => { const said = text.trim(); if (said) await act(ask, false, said); }, [act]);
   const seen = useCallback(async (ask: Ask) => { await act(ask, true, ""); }, [act]);
   /** Send an owed post again. */
-  const retry = useCallback(async (id: string) => { const p = owed.find((x) => x.id === id); if (p) await post(p); }, [owed, post]);
+  // one send at a time per owed post: a second tap while the relay is slow must not post it twice
+  const resending = useRef(new Set<string>());
+  const retry = useCallback(async (id: string) => {
+    const p = owed.find((x) => x.id === id);
+    if (!p || resending.current.has(id)) return;
+    resending.current.add(id);
+    try { await post(p); } finally { resending.current.delete(id); }
+  }, [owed, post]);
 
   return { asks, byRoom, busy, errors, answer, seen, ready, owed, retry };
 }

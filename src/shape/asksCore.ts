@@ -125,6 +125,8 @@ export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRo
     const reged = pool.filter((r) => listed.has(r.id.toLowerCase()));
     return { room: reged.length === 1 ? reged[0] : null, twins: all };
   };
+  /** The channel ids the registry gives a room name (its own name or one it was known by). */
+  const regIds = (nm: string): string[] => (reg ? Object.entries(reg.rooms).filter(([k, v]) => !!v.id && (loose(k) === loose(nm) || (v.was ?? []).some((w) => loose(w) === loose(nm)))).map(([, v]) => v.id!) : []);
   const out: VaultAsk[] = [];
   const seen = new Set<string>();
   for (const n of notes) {
@@ -143,6 +145,9 @@ export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRo
     if (!tree && (named || s(m.node) || s(m.card))) continue;
     const node = resolve?.(m.node) ?? null;
     let room: ShapeRoom | null = null, direct = false, twins: ShapeRoom[] = [];
+    // every name its work is said to have moved to (the registry's successor, a node's room_fallback): a private one hushes the ask
+    // even when this device has no such room, so it never falls through to Uni's room
+    const moved: string[] = [];
     // the rooms it names that are gone from home (a retired or folded channel): their privacy counts too
     const gone = named ? rooms.filter((r) => hidden.has(r.id) && (r.id === named || loose(r.name) === loose(named))) : [];
     if (named) {
@@ -151,12 +156,14 @@ export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRo
       if (!room && !twins.length) {
         // where its work went: the registry's successor (an old name, a retired or folded room)
         const next = reg ? gone.map((g) => successorOf(reg, g.id)).find(Boolean) ?? successorOf(reg, named) : null;
-        if (next) room = pick(next).room;
+        if (next) { moved.push(next); room = pick(next).room; }
         // a node that marks the room archived names the room it moved to
         if (!room && tree) for (const a of [...tree.nodes.values(), ...tree.archived]) {
           const md = a.metadata;
           if (typeof md.room !== "string" || roomKey(md.room) !== roomKey(named) || !/^(archived|missing)$/i.test(String(md.room_status ?? "")) || typeof md.room_fallback !== "string") continue;
-          room = pick(md.room_fallback.replace(/^#/, "").trim()).room;
+          const to = md.room_fallback.replace(/^#/, "").trim();
+          moved.push(to);
+          room = pick(to).room;
           if (room) break;
         }
         // its own node's room (its own, else an ancestor's)
@@ -164,7 +171,11 @@ export function asksFrom(notes: readonly Note<"task">[], rooms: readonly ShapeRo
       }
     }
     const privatePath = (v: unknown) => namePrivate(refPath(v)) || (!!tree && !!resolve && (() => { const at = resolve(v); return !!at && isPrivatePath(tree, at); })());
-    const namedPrivate = !!named && (namePrivate(named) || priv.has(roomKey(named)) || privLoose.has(loose(named)) || privNodeNames.has(loose(named)) || (!!reg && isPrivateRoomName(reg, named)) || (!!tree && roomCluePrivate(tree, named, allRefs, uni)));
+    /** A room's name says private: by its own words, the rooms known private, a private node's name, the registry, or the tree. */
+    const clue = (nm: string) => namePrivate(nm) || priv.has(roomKey(nm)) || privLoose.has(loose(nm)) || privNodeNames.has(loose(nm)) || (!!reg && isPrivateRoomName(reg, nm)) || (!!tree && roomCluePrivate(tree, nm, allRefs, uni))
+      // a room this device doesn't have, known only by the registry's channel id for its name: private when a private place owns that channel
+      || (!!tree && regIds(nm).some((id) => isPrivateRoom(tree, id, allRefs, uni)));
+    const namedPrivate = (!!named && clue(named)) || moved.some(clue);
     const targetPrivate = !!room && roomPrivate(room);
     const hush = namedPrivate || targetPrivate || gone.some(roomPrivate) || twins.some(roomPrivate) || privatePath(m.node) || privatePath(m.card);
     if (hush && !targetPrivate) continue;

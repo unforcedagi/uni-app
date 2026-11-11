@@ -92,6 +92,21 @@ assert.deepEqual(folded.map((d) => [d.id, d.channel]), [["G1", "c-kiln"], ["G2",
 assert.deepEqual([...hiddenRooms([room("c-b", "barn"), room("c-k", "kiln-studio")], parseRegistry({ rooms: { "kiln-studio": {} }, retired: { "old-barn": { none: true, was: ["barn"] } } }))], ["c-b"]);
 
 // Forget sweeps what the old home kept on the device, and only that
+// a decision whose retired room moved into a private room this device doesn't have: nowhere (never its node's room, never Uni's)
+{
+  const regP = parseRegistry({ rooms: { uni: { id: "c-uni" }, "kiln-studio": { id: "c-kiln" }, secret: { id: "c-sec", private: true }, "seed-log": { id: "c-seed" } }, retired: { "old-barn": { into: "secret" }, "potting-shed": { into: "seed-log" } } })!;
+  const treeP = nodeTree([node("n-s", "Areas/Sanctum", ["area"], {}), node("n-c", "Projects/Compost", ["project"], { parent: "[[Areas/Sanctum]]", channel: "c-seed" }), node("n-k", "Areas/Kiln", ["area"], { channel: "c-kiln" })] as never);
+  const liveRooms = [room("c-uni", "Uni"), room("c-kiln", "kiln-studio"), room("c-old", "old-barn"), room("c-fold", "potting-shed")];
+  const hid = new Set(["c-old", "c-fold"]);
+  const at = (m: Record<string, unknown>) => decisionsFrom([note("d", "Decisions/T-9 pick", m)] as never, liveRooms, privateRooms(liveRooms, regP, treeP, "c-uni"), treeP, "c-uni", { reg: regP, hidden: hid }).map((d) => d.channel);
+  // private by the registry, absent
+  assert.deepEqual(at({ room: "old-barn", node: "[[Areas/Kiln]]" }), []);
+  // private only because a private place owns the successor's channel, absent
+  assert.deepEqual(at({ room: "potting-shed", node: "[[Areas/Kiln]]" }), []);
+  // named directly, absent, private by the registry's channel id
+  assert.deepEqual(at({ room: "seed-log", node: "[[Areas/Kiln]]" }), []);
+}
+
 const kept = new Map(Object.entries({ "uni.areas.cache.v2": "x", "uni.areas.cache.v2:uni": "x", "uni.areas.cache.v1": "x", "uni.tasks.saved.v1": "x", "uni.asks.v3:me": "x",
   "uni.noteTitles.uni": "x", "uni.home.layout.v1": "x", "uni.rooms.registry.v1:uni": "x", "uni.tabs.v2": "keep", "uni.asks.owed.v1:me|uni": "keep", "uni.areas.cachedthing": "keep" }));
 const store = { get length() { return kept.size; }, key: (i: number) => [...kept.keys()][i] ?? null, removeItem: (k: string) => { kept.delete(k); } };

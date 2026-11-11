@@ -257,6 +257,33 @@ check("an ask naming a retired or renamed room goes where its work went: the reg
   assert.deepEqual(noReg.map((a) => a.room), ["c-field"]);
 });
 
+check("an ask whose retired room moved into a private room this device doesn't have is dropped, never put in Uni's room", () => {
+  // the registry says where it went, and that the place is private; the device has no such room
+  const reg = parseRegistry({ rooms: { "kiln-studio": { id: "c-kiln" }, secret: { id: "c-sec", private: true }, uni: { id: "c-uni" } }, retired: { "old-a": { into: "secret" } } })!;
+  const at = (m: Record<string, unknown>, o: Partial<Parameters<typeof asksFrom>[2]> = {}, rooms = TROOMS) => asksFrom([task("a", "T-1 x", m)], rooms, { uniRoom: "c-uni", now: NOW, tree: TREE, ...o }).map((a) => [a.room, a.private === true]);
+  assert.deepEqual(at({ room: "old-a" }, { reg }), []);
+  // the successor is private only by the tree (a project inside the private area owns it), and absent
+  const moved = nodeTree([
+    { id: "n-s", path: "Areas/Sanctum", tags: ["area"], metadata: {}, updatedAt: "2026-11-01T00:00:00Z" },
+    { id: "n-k", path: "Areas/Kiln", tags: ["area"], metadata: { channel: "c-kiln" }, updatedAt: "2026-11-01T00:00:00Z" },
+    { id: "n-log", path: "Projects/Seed Log", tags: ["project"], metadata: { parent: "[[Areas/Sanctum]]", channel: "c-seed" }, updatedAt: "2026-11-01T00:00:00Z" },
+    { id: "n-pub", path: "Projects/Pots", tags: ["project"], metadata: { parent: "[[Areas/Kiln]]", room: "pots-old", room_status: "archived", room_fallback: "seed-log" }, updatedAt: "2026-11-01T00:00:00Z" },
+  ] as never);
+  const reg2 = parseRegistry({ rooms: { "kiln-studio": { id: "c-kiln" }, "seed-log": { id: "c-seed" }, uni: { id: "c-uni" } }, retired: { "old-g": { into: "seed-log" } } })!;
+  assert.deepEqual(at({ room: "old-g" }, { reg: reg2, tree: moved }), []);
+  // a public node's archived room whose room_fallback is that private, absent room
+  assert.deepEqual(at({ room: "pots-old" }, { tree: moved }), []);
+  // the private place owns the room under another name: only the registry's channel id ties the name to it
+  const other = nodeTree([
+    { id: "n-s", path: "Areas/Sanctum", tags: ["area"], metadata: {}, updatedAt: "2026-11-01T00:00:00Z" },
+    { id: "n-c", path: "Projects/Compost", tags: ["project"], metadata: { parent: "[[Areas/Sanctum]]", channel: "c-seed" }, updatedAt: "2026-11-01T00:00:00Z" },
+  ] as never);
+  assert.deepEqual(at({ room: "old-g" }, { reg: reg2, tree: other }), []);
+  assert.deepEqual(at({ room: "seed-log" }, { reg: reg2, tree: other }), []);
+  // and when the private room it moved to IS here: inside it, private
+  assert.deepEqual(at({ room: "old-g" }, { reg: reg2, tree: moved }, [...TROOMS, room("c-seed", "seed-log")]), [["c-seed", true]]);
+});
+
 check("two live rooms of one name: the non-DM one, else the one the registry lists, else Uni's room (never a guess)", () => {
   const dm = { ...room("c-dm", "kiln-studio"), dm: true };
   const two = (rooms: ShapeRoom[], extra: Partial<Parameters<typeof asksFrom>[2]> = {}) =>
