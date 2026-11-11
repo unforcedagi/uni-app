@@ -158,6 +158,12 @@
 .ta-home-seeds b { font: 600 24px/1 var(--ta-display); font-variant-numeric: tabular-nums; }
 .ta-home-error { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 20px; padding: 12px 16px; border-radius: 14px; background: var(--ta-sunk); color: var(--ta-ink-2); }
 
+/* look here (T-335): a room's deliberate pin, quiet; no pin is the usual case and then nothing shows */
+.ta-look { display: grid; gap: 10px; margin: 0 0 22px; }
+.ta-look-pin { display: grid; gap: 2px; text-align: left; padding: 12px 16px; border: 1.5px solid currentColor; border-radius: 14px;
+  background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.ta-look-label { font-size: 13px; opacity: .75; }
+.ta-look-why { font-size: 17px; line-height: 1.35; }
 .ta-toys { display: grid; gap: 18px; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: minmax(236px, auto); }
 .ta-toys > .ta-toy { grid-column: span 4; }
 .ta-toys > [data-toy="garden"] { grid-column: 1 / -1; }

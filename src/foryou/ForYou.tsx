@@ -15,6 +15,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { quietLine } from "../projects/FrontDoor";
 import { headWords } from "./scope";
 import { dialogOpen, openDialog } from "../areas/focusTrap";
+import { lookCard } from "../arcade/arcadeCore.ts";
+import { openLink } from "../openLink.ts";
 import "./foryou.css";
 
 export type ForYouProps = {
@@ -159,7 +161,8 @@ function ItemView({ item, p, onCard, inCard = false }: { item: Item; p: ItemActi
         {item.default.label}</button>}
       {item.options.map((o) => <button key={o} type="button" className="fy-opt" disabled={busy} onClick={() => go(o)}>{o}</button>)}
       {item.action && <button type="button" className="fy-opt fy-act" disabled={busy} onClick={() => go(item.action!)}>{item.action}</button>}
-      {item.link && <a className="fy-opt fy-open" href={item.link} onClick={(e) => openOut(e, item.link!)}>Open ↗</a>}
+      {item.link && <a className="fy-opt fy-open" href={item.link}
+        onClick={(e) => { if (lookCard(item.link!)) { e.preventDefault(); void openLink(item.link!); } else openOut(e, item.link!); }}>Open ↗</a>}
       {/* T-335 Seen: on every item. A tell or look ask closes; a do or choose ask stays open with its room (it says so) */}
       {!item.legacy && <button type="button" className="fy-opt fy-seen" disabled={busy} onClick={() => void p.seen(item)}
         title={seenCloses(item.kind) ? "Seen: ends it; its room is told" : "Seen: out of For you; it stays with its room until it needs you"}

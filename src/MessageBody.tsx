@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { openLink as routeLink } from "./openLink.ts";
 import { parseMarkdown, type Block, type Inline } from "./markdown";
 import { mentionSegments, type Member } from "./mentions";
 import { useNoteOpener } from "./noteLinks";
@@ -45,7 +45,7 @@ const bareId = (n: { ref: { ref: string; vault: string }; c: Inline[] }): string
 function openLink(e: React.MouseEvent, href: string) {
   // Never navigate the app's own WebView; hand the link to the system browser.
   e.preventDefault();
-  void invoke("open_link", { url: href }).catch(() => {});
+  void routeLink(href).catch(() => {});
 }
 
 // Memoized: typing in the composer re-renders the room, and re-parsing

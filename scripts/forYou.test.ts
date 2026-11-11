@@ -129,6 +129,12 @@ check("look asks are Ready to look at, not Yours; their one tap is Seen (no seco
   assert.equal(v.count, 1, "the count is what is yours");
 });
 
+check("a look-here pin's deep link (look_url) is its Open link, so the Arcade's opens in the app", () => {
+  const url = "https://box.example.ts.net:8543/#look/web%3A12";
+  const v = view([task("p", "T-22 Look at this card", { node: "Areas/Kiln Studio", kind: "look", no_default: true, link: "https://example.com/ref", look_url: url })]);
+  assert.equal(v.look[0].link, url);
+});
+
 check("T-335 one home: an old Decisions/ note is the record, not an ask: never in For you, whatever it says", () => {
   const dec: Note = { ...task("dq", "Choose the hive paint", { node: "Areas/North Field", options: ["White", { label: "Pale yellow" }], owner: "room:x" }, ["decision"]), path: "Decisions/Choose the hive paint" };
   const v = view([dec, dec, task("decided", "Old one", { node: "Areas/North Field", state: "decided" }, ["decision"])]);

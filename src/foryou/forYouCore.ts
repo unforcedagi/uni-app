@@ -331,7 +331,8 @@ export function forYou(input: ForYouInput): ForYouView {
       default: defValue ? { value: defValue, at: defAt, label } : null,
       options: choices,
       action: choices.length || kind === "tell" || kind === "look" || kind === "decision" ? null : "Done",
-      link: s(m.link) ?? s(m.url),
+      // a look-here pin: its deep link (look_url, uni-tasks look.py) is the point, before any other link; the Arcade's opens in the app (src/openLink.ts)
+      link: s(m.look_url) ?? s(m.link) ?? s(m.url),
       replyRoom, replyRoot, footer, node, state, updatedAt: s(n.updatedAt), defaultAt: defAt,
       asked: s(m.asked_at) ?? s(m.asked) ?? s(m.created) ?? s(n.createdAt),
       contextNote: s(m.context_note),

@@ -45,3 +45,21 @@ export function typedAnswer(r: Reaction, refs: Map<string, string>): Reaction | 
   void _drop;
   return { ...rest, kind: "voice", voice: { ref } };
 }
+
+/** The arcade door's port: a room's "look here" link for the Arcade is `https://<the hub's host>:8543/#look/<card id>`. */
+const DOOR_PORT = "8543";
+/** The event a look-here link raises so the app opens the Arcade on that card (src/openLink.ts sends it, App listens). */
+export const LOOK_EVENT = "uni-arcade-look";
+
+/** The card a look-here link pins for the Arcade, or null: not the Arcade's link (the media and video boards' #look/ links
+ *  are on other ports and open outside), or not a card id the door makes (the same rule as uni-core's check_card). */
+export function lookCard(href: string): string | null {
+  let u: URL;
+  try { u = new URL(href.trim()); } catch { return null; }
+  if (u.protocol !== "https:" || u.port !== DOOR_PORT || !u.hostname.endsWith(".ts.net") || u.pathname !== "/" || u.search) return null;
+  const m = /^#look\/([^/?#]+)$/.exec(u.hash);
+  if (!m) return null;
+  let id: string;
+  try { id = decodeURIComponent(m[1]); } catch { return null; }
+  return /^[A-Za-z0-9:_.-]{1,120}$/.test(id) ? id : null;
+}

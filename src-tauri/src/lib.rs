@@ -1990,7 +1990,7 @@ where
     .map_err(arcade_invalid)?
 }
 
-/// Seeds, the profile's headline and how many fresh rounds each game has.
+/// Seeds, the profile's headline, how many fresh rounds each game has, and the cards a room pinned (`look`).
 #[tauri::command]
 async fn arcade_home(app: tauri::AppHandle, grey: Option<bool>, still: Option<bool>) -> Result<serde_json::Value, ArcadeError> {
     let screen = uni_core::arcade::Screen { grey: grey.unwrap_or(false), still: still.unwrap_or(false) };
@@ -1999,9 +1999,10 @@ async fn arcade_home(app: tauri::AppHandle, grey: Option<bool>, still: Option<bo
 
 /// Rounds to play for one game.
 #[tauri::command]
-async fn arcade_rounds(app: tauri::AppHandle, game: String, n: u32, grey: Option<bool>, still: Option<bool>) -> Result<serde_json::Value, ArcadeError> {
+async fn arcade_rounds(app: tauri::AppHandle, game: String, n: u32, grey: Option<bool>, still: Option<bool>, look: Option<String>) -> Result<serde_json::Value, ArcadeError> {
     let screen = uni_core::arcade::Screen { grey: grey.unwrap_or(false), still: still.unwrap_or(false) };
-    arcade_io(&app, move |door| tauri::async_runtime::block_on(door.rounds(&game, n, screen))).await
+    // look: a card a room pinned ("look here"), dealt first; checked as a card id before it goes into the signed URL
+    arcade_io(&app, move |door| tauri::async_runtime::block_on(door.rounds(&game, n, screen, look.as_deref()))).await
 }
 
 /// Store reactions (the door skips ids it has seen, so a retry never doubles).

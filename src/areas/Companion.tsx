@@ -2,7 +2,7 @@
 // is), and one dated sentence on where it stands. T-335 one surface: it is the room's details, inside its focus over All (AllFocus.tsx); each item
 // opens its task sheet, and "All of X's work" goes one step deeper, still inside the focus.
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { openLink as routeLink } from "../openLink.ts";
 import { cleanText } from "../interface/contract";
 import { RefName, RefText } from "./noteRefs";
 import { splitRefs, type NoteRef } from "./noteRefsCore";
@@ -61,7 +61,7 @@ const RUNS_SHOWN = 2;
 /** The ask itself: the "Decision (default yes):" style label a decision's title carries is left to the opened item. */
 export const askOf = (rest: string): string => { const t = plainDetail(rest) || rest; return t.replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").trim() || t; };
 
-const openLink = (e: React.MouseEvent, url: string) => { e.preventDefault(); void invoke("open_link", { url }).catch(() => {}); };
+const openLink = (e: React.MouseEvent, url: string) => { e.preventDefault(); void routeLink(url).catch(() => {}); };
 
 /** A task's next step, in full: wraps up to 6 lines, then "More" opens the rest in place. Links read as their domain and stay clickable; note ids read as the note's title. */
 export function NextText({ text, vault, onNote, lines, open: openProp, onOpen, onClamp }: { text: string; /** where the text lives: an id written without a vault is this vault's note */ vault: string; onNote?: (ref: NoteRef) => void; lines?: number; open?: boolean; onOpen?: (v: boolean) => void; onClamp?: (v: boolean) => void }) {

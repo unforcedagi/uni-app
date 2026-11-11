@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Arcade } from "./kit/ui/src/index.ts";
 import type { ArcadeHost, PlayGame, VoiceCapture } from "./kit/ui/src/index.ts";
+import type { LookPin } from "./kit/ui/src/host.ts"; // (the library's index does not export it yet)
 import type { Card, DealOptions, GameId, Profile, Reaction, Round, Stats } from "./kit/engine/src/types.ts";
 import { RecorderSession } from "../recorderSession.ts";
 import { newDraft, type FlushReport } from "../journalCore.ts";
@@ -13,7 +14,7 @@ import "./arcade-place.css";
 
 const GAMES: GameId[] = ["this-or-that", "gallery", "fix-it", "who-said-it", "ripple", "garden"];
 
-type Home = { stats: Stats; fresh?: Partial<Record<PlayGame, number>> };
+type Home = { stats: Stats; fresh?: Partial<Record<PlayGame, number>>; look?: LookPin[] };
 
 /** Voice for Ripple: the app's own recorder session, saved as a journal voice entry. One recording at a time: a second
  *  start is refused, a second stop waits for the first, and cancel during a stop resolves it with nothing kept. */
@@ -71,7 +72,8 @@ async function saveVoiceEntry(blob: Blob, mime: string): Promise<string> {
   return journalRef(r, draft.path);
 }
 
-export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: string | null; onBack?: () => void; onOpenNote: (vault: string, path: string) => void }) {
+/** `look`: a room's look-here link to open (App, from src/openLink.ts); `n` counts the taps, so a second tap opens it again. */
+export function ArcadeView({ ownerName, onBack, onOpenNote, look }: { ownerName: string | null; onBack?: () => void; onOpenNote: (vault: string, path: string) => void; look?: { card: string; n: number } | null }) {
   const urls = useRef(new Map<string, Promise<string | null>>());
   useEffect(() => () => {
     for (const p of urls.current.values()) void p.then((u) => { if (u) URL.revokeObjectURL(u); });
@@ -103,7 +105,8 @@ export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: strin
     return {
       owner: { name: ownerName ?? "you", you: false },
       games: GAMES,
-      rounds: async (game, n, o) => (await call<{ rounds: Round[] }>("arcade_rounds", { game, n, ...screen(o) })).rounds,
+      // look: a pinned card's round first (the Arcade asks this once, for the pin it opens)
+      rounds: async (game, n, o) => (await call<{ rounds: Round[] }>("arcade_rounds", { game, n, ...screen(o), ...(o?.look ? { look: o.look } : {}) })).rounds,
       react: async (reactions: Reaction[]) => {
         const out = reactions.map((r) => typedAnswer(r, typedRef.current)).filter((r): r is Reaction => r !== null);
         if (out.length) await call("arcade_react", { reactions: out });
@@ -112,6 +115,8 @@ export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: strin
       profile: async () => (await call<{ profile: Profile }>("arcade_profile")).profile,
       stats: async () => (await fetchHome(lastDeal.current)).stats,
       fresh: async (o) => { lastDeal.current = o; return (await fetchHome(o)).fresh ?? {}; },
+      // look here: the cards a room pinned, from the same /home answer
+      look: async (o) => (await fetchHome(o)).look ?? [],
       mediaUrl: (card: Card, which: "src" | "poster") => {
         const name = which === "src" ? card.media?.src : card.media?.poster;
         if (!name) return Promise.resolve(null);
@@ -144,5 +149,5 @@ export function ArcadeView({ ownerName, onBack, onOpenNote }: { ownerName: strin
   // the browser tests' build may shorten This or That's minute (VITE_AREAS_TESTHOOKS); a shipped build never reads it
   const burst = import.meta.env.VITE_AREAS_TESTHOOKS === "1" ? Number((window as { __arcadeBurst?: number }).__arcadeBurst) || undefined : undefined;
   // 0.2: the Arcade is a place on the rail: no Back of its own (a host without a rail can still pass one)
-  return <div className="arcade-place"><Arcade host={host} onExit={onBack} burstSeconds={burst} /></div>;
+  return <div className="arcade-place"><Arcade key={look?.n ?? 0} host={host} onExit={onBack} burstSeconds={burst} look={look?.card} /></div>;
 }

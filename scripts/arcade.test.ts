@@ -1,6 +1,6 @@
 // T-335 Taste Arcade: the app host's pure pieces. Run: node --experimental-strip-types scripts/arcade.test.ts
 import assert from "node:assert/strict";
-import { arcadeError, journalRef, mediaType, typedAnswer } from "../src/arcade/arcadeCore.ts";
+import { arcadeError, journalRef, lookCard, mediaType, typedAnswer } from "../src/arcade/arcadeCore.ts";
 import type { Card, Reaction } from "../src/arcade/kit/engine/src/types.ts";
 
 const ID = "01M6QAF6FYXD39R6BP1TW2TEST";
@@ -36,4 +36,25 @@ assert.deepEqual(typedAnswer(typed, refs), { id: "r1", at: "2026-11-05T10:00:00Z
 assert.equal(typedAnswer(typed, new Map()), null, "no known entry: not sent, so the words never reach the door");
 const pick: Reaction = { id: "r2", at: "2026-11-05T10:00:00Z", game: "gallery", kind: "pin", card: "c", words: "kept" };
 assert.equal(typedAnswer(pick, refs), pick);
+
+// look here: a room's pin link opens the Arcade on that card; other links (other boards' #look/, other ports, odd ids) don't
+const DOOR = "https://box.example.ts.net:8543/";
+assert.equal(lookCard(`${DOOR}#look/media%3Abellows-film`), "media:bellows-film", "look.py quotes the id; the card is the door's own");
+assert.equal(lookCard(`${DOOR}#look/web:12`), "web:12");
+assert.equal(lookCard(" https://box.example.ts.net:8543/#look/pv-wsi-012 "), "pv-wsi-012");
+for (const out of [
+  "https://box.example.ts.net:8560/#look/up-to-here", // the media board: its own page, outside
+  "https://box.example.ts.net:8506/#look/01-baseline", // the video board
+  "http://box.example.ts.net:8543/#look/web:12",
+  "https://example.com:8543/#look/web:12",
+  "https://box.example.ts.net:8543/#home",
+  "https://box.example.ts.net:8543/x#look/web:12",
+  "https://box.example.ts.net:8543/?a=1#look/web:12",
+  `${DOOR}#look/`,
+  `${DOOR}#look/a%26game%3Dripple`, // would smuggle a parameter into the signed rounds URL
+  `${DOOR}#look/a/b`,
+  `${DOOR}#look/%E0%A4%A`,
+  "not a url",
+]) assert.equal(lookCard(out), null, out);
+
 console.log("arcade: ok");

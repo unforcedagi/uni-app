@@ -4,6 +4,7 @@ import { editableExtension, beginEdit, isDirty } from "./noteEdit";
 import { backlinks } from "./backlinks";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openLink as routeLink } from "./openLink.ts";
 import { CodeRenderer, NoteRenderer, type CodeOverrideProps, type LinkComponentProps, type NoteRendererProps } from "@openparachute/surface-render";
 import type { NoteHit } from "./Search";
 import type { Note } from "@openparachute/surface-client";
@@ -22,7 +23,7 @@ type VaultNote = { hub: string; vault: string; note: Note & { extension?: string
 const MEDIA_COMPONENTS = { [PLAYER_TAG]: PublishedInNote } as NoteRendererProps["components"];
 
 function openExternal(url: string) {
-  void invoke("open_link", { url }).catch(() => {});
+  void routeLink(url).catch(() => {});
 }
 
 export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onSearch, backIcon = "←", actions, compact = false }: {
