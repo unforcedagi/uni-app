@@ -36,10 +36,13 @@ const getMessages = (channel: string, limit: number) => invoke<RoomMessage[]>("g
 type AppNote = { id: string; path: string; html: string; metadata: unknown };
 
 /**
- * The tile's tap is the user's own press: it starts the applet's note (App calls this before opening it). Only a real gesture counts:
- * the drawer hands App no event to check `isTrusted` on, so a script's click (no user activation) starts nothing.
+ * The tile's tap is the user's own press: it starts the applet's note (App calls this before opening it). Only a real gesture counts: the
+ * tile's own click event, trusted (a script's `click()` or dispatched event is not, even while the page still holds the user's activation
+ * from an earlier tap), and, where the webview reports it, live user activation. No event, or an untrusted one: the applet opens stopped,
+ * with its "Open" button, as a restored tab does.
  */
-export function startSealedApplet(noteId: string): void {
+export function startSealedApplet(noteId: string, tap: { isTrusted: boolean } | null): void {
+  if (!tap?.isTrusted) return;
   const ua = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
   if (ua && !ua.isActive) return;
   markStarted(noteId);

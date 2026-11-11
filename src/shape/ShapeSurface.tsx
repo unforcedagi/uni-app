@@ -27,7 +27,7 @@ export function jumpToAsk(id: string) {
   window.setTimeout(() => el.classList.remove("sh-flash"), 1800);
 }
 
-/** Uni's approval card pinned over the rooms as it is in its room, so Approve works in place (the card reads its own checked view). It
+/** Uni's approval card pinned over the rooms as it is in its room (never a private room's: home draws that one without words), so Approve works in place (the card reads its own checked view). It
  *  leaves when it is answered (the waiting list is read again) or when its clock runs out. */
 function SealedPin({ pin, onLapse }: { pin: Pin; onLapse: () => void }) {
   return <section className="sh-pin sh-pin-sealed" aria-label={`Approval in ${pin.roomName}`} data-ref={pin.ref}>
@@ -75,7 +75,7 @@ export function ShapeSurface(p: {
     <div className="sh-scroll">
       <Home rows={shape.rows} pins={shape.pins} now={shape.now} loading={p.loading} onOpenRoom={p.onOpenRoom} onSearch={p.onSearch} onSettings={p.onSettings}
         renderAsk={(a) => ask(a, true)} renderRun={(run, r) => <RunLine run={run} where="row" onOpen={(x) => openStory(x, r.id)} />}
-        renderPin={(pin) => (pin.sealed ? <SealedPin pin={pin} onLapse={shape.onPinLapsed} /> : null)} onPinLapsed={shape.onPinLapsed} emptyHint={p.emptyHint} />
+        renderPin={(pin) => (pin.sealed && !pin.private ? <SealedPin pin={pin} onLapse={shape.onPinLapsed} /> : null)} onPinLapsed={shape.onPinLapsed} emptyHint={p.emptyHint} />
     </div>
     {sheet}
   </>;

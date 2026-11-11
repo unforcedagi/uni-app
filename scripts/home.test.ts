@@ -64,6 +64,20 @@ check("pins: Uni's sealed card says its reach and class, not the prompt fields",
   assert.equal(m.what, "Morning card · 2 routine credentials");
 });
 
+check("pins: one from a private room (or while privacy can't be told) is wordless: no command, no reach, no why, no room name; still counted", () => {
+  const sealed = { ref: "s", channel: "den", root: null, ts: NOW, kind: "single" as const, credential: "billing", action: "invoice.send", class: "powerful" as const, rows: 1, expires: NOW + 120, fingerprint: "9b13b2ae00", reach: "Sends one invoice for $2,400" };
+  const list = [approval("x", NOW + 60, { channel: "den" }), approval("s", NOW + 120, { kind: "sealed", channel: "den", sealed }), approval("o", NOW + 90)];
+  const pins = pinsFrom(list, (id) => (id === "den" ? "den" : names(id)), NOW, (ch) => ch === "den");
+  const hushed = pins.filter((p) => p.private);
+  assert.deepEqual(hushed.map((p) => p.ref), ["x", "s"]);
+  for (const p of hushed) {
+    assert.deepEqual({ what: p.what, detail: p.detail, roomName: p.roomName, room: p.room }, { what: "An approval waits in a private room", detail: null, roomName: "a private room", room: "den" });
+    assert.doesNotMatch(JSON.stringify(p), /invoice|Sends|billing|Powerful/i);
+  }
+  assert.equal(pins.find((p) => p.ref === "o")!.private, undefined);
+  assert.equal(wantsCount([], pins), 3);
+});
+
 check("countdown: m:ss, zero-padded seconds, expired at and after zero", () => {
   assert.equal(countdown(NOW + 539, NOW), "expires in 8:59");
   assert.equal(countdown(NOW + 5, NOW), "expires in 0:05");

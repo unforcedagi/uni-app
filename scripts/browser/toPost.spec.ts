@@ -95,6 +95,15 @@ test('the To Post tile in the drawer counts what waits; the queue shows each pos
   await expect(wrong.getByRole('button', { name: 'Approve' })).toBeDisabled();
   await expect(wrong.getByRole('button', { name: 'Schedule' })).toBeDisabled();
   await expect(page.locator('.tp-posted')).toContainText('Posted · open');
+  // its link looks like a link in chat (the app's link colour, underlined), never the browser's default blue
+  const look = await page.locator('.tp-posted .tp-status a').evaluate((a) => {
+    const probe = document.createElement('div'); probe.className = 'md'; probe.innerHTML = '<a href="#">x</a>'; document.body.appendChild(probe);
+    const chat = getComputedStyle(probe.firstElementChild!).color; probe.remove();
+    const cs = getComputedStyle(a); return { color: cs.color, chat, line: cs.textDecorationLine };
+  });
+  expect(look.color).toBe(look.chat);
+  expect(look.color).not.toBe('rgb(0, 0, 238)');
+  expect(look.line).toBe('underline');
   // the X copy failed: said on its own line; the Bluesky post stands (the poster never posts it again)
   await expect(page.locator('.tp-posted .tp-failed')).toHaveText('The X copy didn\'t post: X 503: Service Unavailable');
   if (process.env.T335_SHOTS) await page.locator('.tp-posted').screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-x-copy-failed.png` });

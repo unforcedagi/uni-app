@@ -17,6 +17,7 @@ export type Ask = {
   /** A single action word ("Done"), when the ask is a thing to do. */ action: string | null;
   /** A link to look at. */ link: string | null;
   /** Seconds. */ updatedAt: number;
+  /** (added, T-335) The message an answer threads under (`reply_root`), only in the room it names: its quick replies give way to the ask's buttons. */ replyRoot?: string | null;
   /** (added, T-335) Its room is private: drawn in full only inside that room (its chat and strip); home shows a wordless mark. */ private?: boolean;
 };
 
@@ -31,7 +32,8 @@ export type RoomRun = {
 export type RoomRuns = { moving: RoomRun | null; waiting: RoomRun | null };
 
 /** An approval card about to expire, pinned over the rooms. */
-export type Pin = { ref: string; room: string; roomName: string; what: string; detail: string | null; /** Unix seconds. */ expires: number; sealed: boolean };
+export type Pin = { ref: string; room: string; roomName: string; what: string; detail: string | null; /** Unix seconds. */ expires: number; sealed: boolean;
+  /** (added, T-335) From a private room: drawn on home without its words (no card, no command, no room name), opened in its room. */ private?: boolean };
 
 /** One row of home. */
 export type HomeRow = {

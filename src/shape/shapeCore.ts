@@ -5,7 +5,7 @@
 //   (home shows a wordless mark), and its runs nowhere (src/projects/live.ts gives a private run no room).
 import type { KnownDecision } from "../decisionLinks.ts";
 import { metaOf, type Note } from "../vault/reader.ts";
-import { isPrivateName, isPrivatePath, roomCluePrivate, roomView } from "./privacy.ts";
+import { isPrivateName, isPrivatePath, isPrivateRoom, roomCluePrivate, roomView } from "./privacy.ts";
 import { buildTree, ROOT, type Tree } from "../areas/treeCore.ts";
 import { parseArea, parseProject, type Area } from "../areas/areasCore.ts";
 import { pathResolver } from "../areas/refs.ts";
@@ -33,12 +33,18 @@ export function hiddenRooms(rooms: readonly ShapeRoom[], reg: RoomsRegistry | nu
   return out;
 }
 
-/** The rooms whose runs and asks stay inside them: private by the registry, or by a private name (any segment of `a/b`). */
-export function privateRooms(rooms: readonly ShapeRoom[], reg: RoomsRegistry | null): Set<string> {
+/**
+ * The rooms whose runs, asks and approvals stay inside them: private by the registry, by a private name (any segment of `a/b`), or (with the
+ * node tree) a room a private place owns or names, under any name (privacy.ts isPrivateRoom). `uniRoom`: Uni's room's id (borrowing it
+ * never makes it private).
+ */
+export function privateRooms(rooms: readonly ShapeRoom[], reg: RoomsRegistry | null, tree: Tree | null = null, uniRoom: string | null = null): Set<string> {
   const out = new Set<string>();
+  const refs = rooms.map((r) => ({ id: r.id, name: r.name }));
+  const uni = refs.find((r) => r.id === uniRoom) ?? null;
   for (const r of rooms) {
     const name = r.name.trim().replace(/^#/, "");
-    if (name.split("/").some((w) => isPrivateName(w.trim())) || (!!reg && isPrivateRoomName(reg, name))) out.add(r.id);
+    if (name.split("/").some((w) => isPrivateName(w.trim())) || (!!reg && isPrivateRoomName(reg, name)) || (!!tree && isPrivateRoom(tree, r.id, refs, uni))) out.add(r.id);
   }
   return out;
 }

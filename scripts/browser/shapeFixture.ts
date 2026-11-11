@@ -75,7 +75,7 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
       metadata: { state: 'open', owner: 'aaron', needs_aaron: true, ...m } });
     w.__tasks = [
       task('ask-summary', 'T-601 The weekly summary is ready to read', 3 * min, { kind: 'tell', no_default: true, reply_room: 'Uni', why_now: 'Read it now, or save it for Sunday.' }),
-      task('ask-walk', 'T-602 Offer Mira Thursday at 2 for the walkthrough?', 11 * min, { kind: 'choose', options: ['Yes, Thursday 2pm', 'Friday instead'], no_default: true, reply_room: 'Riverbend Commons', why_now: 'Your Thursday is free from 1 to 4.' }),
+      task('ask-walk', 'T-602 Offer Mira Thursday at 2 for the walkthrough?', 11 * min, { kind: 'choose', options: ['Yes, Thursday 2pm', 'Friday instead'], no_default: true, reply_room: 'Riverbend Commons', reply_root: 'r3', why_now: 'Your Thursday is free from 1 to 4.' }),
       task('ask-cut', 'T-603 Cut 3 is ready to watch', 52 * min, { kind: 'look', no_default: true, link: 'https://example.com/studio/cut-3', reply_room: 'Studio' }),
       task('ask-sign', 'T-604 Sign What the garden taught us and post it?', 3 * H, { kind: 'choose', options: ['Sign and post', 'Not yet'], no_default: true, reply_room: 'To Post' }),
       task('ask-quiet', 'T-605 A quiet line that stays in its room', 4 * H, { kind: 'tell', no_default: true, reply_room: 'sanctum' }),

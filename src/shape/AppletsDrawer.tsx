@@ -1,14 +1,15 @@
 // T-335 the applets drawer: every applet in one sheet, from one registry (src/interface/applets.ts). Vault applets
 // first, then doors (dashed tiles), and a legend for the two marks. A bottom sheet on a phone, a centred panel on a
 // wide screen. Scrim and Escape close it; focus starts on the first tile and goes back to the opener on close.
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent, type MouseEvent } from "react";
 import { countOf, type AppletCounts, type AppletManifest } from "../interface/applets.ts";
 import "./applets.css";
 
 export function AppletsDrawer({ applets, counts, onOpen, onClose }: {
   applets: readonly AppletManifest[];
   counts: AppletCounts;
-  onOpen: (id: string) => void;
+  /** `tap`: the tile's click (a sealed applet starts only on a trusted one). */
+  onOpen: (id: string, tap: MouseEvent) => void;
   onClose: () => void;
 }) {
   const sheet = useRef<HTMLDivElement>(null);
@@ -31,7 +32,7 @@ export function AppletsDrawer({ applets, counts, onOpen, onClose }: {
 
   const tile = (a: AppletManifest) => {
     const n = countOf(counts, a.id);
-    return <button key={a.id} type="button" className={`sh-ap-tile ${a.kind}`} aria-label={n ? `${a.name} (${n})` : a.name} onClick={() => onOpen(a.id)}>
+    return <button key={a.id} type="button" className={`sh-ap-tile ${a.kind}`} aria-label={n ? `${a.name} (${n})` : a.name} onClick={(e) => onOpen(a.id, e)}>
       <i aria-hidden="true">{a.glyph}</i><span className="sh-ap-name">{a.name}</span>
       {n > 0 && <span className="sh-ap-count" aria-hidden="true">{n > 99 ? "99+" : n}</span>}
     </button>;

@@ -844,7 +844,9 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .approval-banner-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .approval-banner-text code { font: 500 12px/1.3 var(--g-font-code); }
 .approval-banner-show { flex: none; padding: 3px 12px; border: var(--g-hair) solid var(--g-line-strong); border-radius: 999px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.message.approval-waiting { box-shadow: inset 3px 0 0 var(--g-needs); }
+/* the waiting prompt's rule runs down its content, with room between it and the words (on the message itself, which has no left padding in
+   the room column, it sat over the first letters) */
+.message.approval-waiting .message-content { box-shadow: inset 3px 0 0 var(--g-needs); padding-left: 14px; }
 /* T-258: a video over the whole window, with the platform's full screen on top where it is allowed. */
 .video-full { background: #000; }
 .video-full-player { width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh; object-fit: contain; background: #000; }

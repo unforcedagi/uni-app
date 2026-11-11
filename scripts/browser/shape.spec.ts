@@ -18,6 +18,32 @@ async function openRoomFromHome(page: Page, room: string) {
   await expect(page.locator('.composer textarea')).toBeVisible();
 }
 
+/** A waiting approval's message carries a rule down its left side: its text (the name, the first letter of its body) starts right of the
+ *  rule, never under it. The rule is an inset box-shadow on the message or its content; its right edge is that box's left plus its width. */
+async function ruleClearsText(page: Page, ref: string) {
+  const m = page.locator(`.sh-room .message.approval-waiting[data-ref="${ref}"]`);
+  await m.scrollIntoViewIfNeeded();
+  const r = await m.evaluate((el) => {
+    const boxes = [el, el.querySelector('.message-content')].filter(Boolean) as HTMLElement[];
+    const ruled = boxes.find((b) => /inset/.test(getComputedStyle(b).boxShadow) || parseFloat(getComputedStyle(b).borderLeftWidth) > 0);
+    if (!ruled) return null;
+    const cs = getComputedStyle(ruled);
+    const w = /inset/.test(cs.boxShadow) ? parseFloat(/(-?[\d.]+)px 0px 0px/.exec(cs.boxShadow)?.[1] ?? '0') : parseFloat(cs.borderLeftWidth);
+    const firstGlyph = (root: Element | null) => {
+      if (!root) return null;
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.textContent!.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) });
+      const t = walk.nextNode() as Text | null;
+      if (!t) return null;
+      const range = document.createRange(); const i = t.textContent!.search(/\S/); range.setStart(t, i); range.setEnd(t, i + 1);
+      return range.getBoundingClientRect().left;
+    };
+    return { ruleRight: ruled.getBoundingClientRect().left + w, name: firstGlyph(el.querySelector('.message-meta')), body: firstGlyph(el.querySelector('.md, .message-content p')) };
+  });
+  expect(r, 'the waiting message has its rule').not.toBeNull();
+  expect(r!.name!, 'its name starts right of the rule').toBeGreaterThanOrEqual(r!.ruleRight);
+  expect(r!.body!, 'its first line starts right of the rule').toBeGreaterThanOrEqual(r!.ruleRight);
+}
+
 test.beforeEach(async ({ page }) => {
   page.on('pageerror', (e) => { throw e; });
 });
@@ -46,13 +72,15 @@ test('home: rooms newest first, the moving line, the asks with their buttons, a 
   await expect(row(page, ROOM.family)).toBeVisible();
   await expect(row(page, ROOM.family).locator('.sh-run, .sh-ask')).toHaveCount(0);
   await expect(row(page, ROOM.family).locator('.sh-row-hush')).toHaveText(/^◆\uFE0E? Something waits in here$/);
+  // two wait there: T-606, and T-607, which names the room by its old name (the registry's `was`) and so is the same room's
+  await expect(row(page, ROOM.family).locator('.sh-row-hush')).toHaveAttribute('data-hushed', '2');
   // (the same private room by an old name no room on this device has: hidden, never in Uni's room)
   await expect(row(page, ROOM.uni).locator('.sh-ask')).toHaveCount(1);
   const dom = await page.evaluate(() => document.documentElement.outerHTML);
   for (const words of ['Private words about the practice', 'A quiet line that stays in its room', 'T-605', 'A family line that stays at the table', 'T-606',
     'Family words about the seating', 'A kitchen line that stays private', 'T-607']) expect(dom, words).not.toContain(words);
-  // the bar counts what wants you: four asks, the two waiting in private rooms, and the pinned card
-  await expect(bar(page).getByRole('button', { name: /^Rooms, 7 things want you$/ })).toBeVisible();
+  // the bar counts what wants you: four asks, the three waiting in private rooms, and the pinned card
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 8 things want you$/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await shot(page, '01-home');
 });
@@ -75,7 +103,7 @@ test('answering from home: Seen and a choice each write the vault once, tell tha
   expect(answered[0].args.metadata).toMatchObject({ answer: 'Yes, Thursday 2pm', decided: 'Yes, Thursday 2pm' });
   // nothing was posted anywhere else
   expect((await calls(page, 'post_message')).map((c) => c.args.channel).sort()).toEqual([ROOM.river, ROOM.uni]);
-  await expect(bar(page).getByRole('button', { name: /^Rooms, 5 things want you$/ })).toBeVisible();
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 6 things want you$/ })).toBeVisible();
 });
 
 test('inside a private room its ask is drawn in full, in the chat and the strip, and is answered there; home still has none of its words', async ({ page }) => {
@@ -100,7 +128,7 @@ test('inside a private room its ask is drawn in full, in the chat and the strip,
   await expect(row(page, ROOM.quiet).locator('.sh-row-hush')).toHaveCount(0);
   await expect(row(page, ROOM.family).locator('.sh-row-hush')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain('A family line that stays at the table');
-  await expect(bar(page).getByRole('button', { name: /^Rooms, 6 things want you$/ })).toBeVisible();
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 7 things want you$/ })).toBeVisible();
 });
 
 test('the expiring card is pinned with its clock, is approved in place, and leaves', async ({ page }) => {
@@ -112,7 +140,7 @@ test('the expiring card is pinned with its clock, is approved in place, and leav
   await pin.getByRole('button', { name: 'Approve' }).click();
   await expect.poll(async () => (await calls(page, 'sealed_answer')).map((c) => c.args.decision)).toEqual(['approve']);
   await expect(page.locator('.sh-pin')).toHaveCount(0);
-  await expect(bar(page).getByRole('button', { name: /^Rooms, 6 things want you$/ })).toBeVisible();
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 7 things want you$/ })).toBeVisible();
 });
 
 test("a room: its strip, its ask as a message, the run's story from the moving line, the jump to the ask, and Back to home", async ({ page }) => {
@@ -244,7 +272,7 @@ test('the ink screen: every mark reads by shape and word, not by colour', async 
   await expect(row(page, ROOM.quiet).locator('.sh-row-hush .sh-mark-needs')).toHaveText(/^◆\uFE0E?$/);
   await expect(row(page, ROOM.quiet).locator('.sh-row-hush')).toContainText('Something waits in here');
   const count = bar(page).locator('.sh-place-rooms .sh-count');
-  await expect(count).toHaveText('7');
+  await expect(count).toHaveText('8');
   expect(await count.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(0, 0, 0)');
   expect(await page.locator('.sh-pin').first().evaluate((e) => getComputedStyle(e).borderTopColor)).toBe('rgb(0, 0, 0)');
   await shot(page, '11-home-ink');
@@ -252,6 +280,52 @@ test('the ink screen: every mark reads by shape and word, not by colour', async 
   await expect(page.locator('.sh-strip .sh-run[data-run="waiting"] .sh-run-word')).toHaveText('Waits on you');
   await expect(page.locator('.sh-strip .sh-run[data-run="moving"] .sh-run-word')).toHaveText('Moving');
   await shot(page, '12-room-ink');
+});
+
+test("a waiting approval's rule sits clear of its message's first letters, in colour and on the ink screen", async ({ page }) => {
+  await bootShape(page);
+  await openRoomFromHome(page, ROOM.river);
+  await ruleClearsText(page, 'rb-card');
+  await page.evaluate(() => { document.documentElement.dataset.screen = 'ink'; });
+  await ruleClearsText(page, 'rb-card');
+});
+
+test("after midnight the room's list starts below its strip: nothing is drawn under it", async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-11-11T00:20:00') });
+  await bootShape(page);
+  await openRoomFromHome(page, ROOM.uni);
+  await expect(page.locator('.day-divider').first()).toHaveText('Yesterday');
+  const [strip, list] = await Promise.all([page.locator('.sh-strip').boundingBox(), page.locator('.sh-room-chat .message-list').boundingBox()]);
+  expect(list!.y).toBeGreaterThanOrEqual(strip!.y + strip!.height - 0.5);
+  // scrolled to its top, the first divider is whole, under the strip
+  await page.locator('.sh-room-chat .message-list').hover();
+  await page.mouse.wheel(0, -2000);
+  await expect.poll(() => page.locator('.sh-room-chat .message-list').evaluate((el) => el.scrollTop)).toBe(0);
+  const d = await page.locator('.day-divider').first().boundingBox();
+  expect(d!.y).toBeGreaterThanOrEqual(strip!.y + strip!.height);
+});
+
+test("one question, one set of buttons: an ask threaded under the room's newest message takes the place of its quick replies", async ({ page }) => {
+  await bootShape(page);
+  await openRoomFromHome(page, ROOM.river);
+  // Mira's yes-or-no question is the newest message, and Uni's ask T-602 is threaded under it (reply_root)
+  await expect(page.locator('.sh-ask-msg[data-id="ask-walk"]').getByRole('button', { name: 'Friday instead' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Quick replies' })).toHaveCount(0);
+  // answered, the ask leaves: Mira's question offers its quick replies again
+  await page.locator('.sh-ask-msg[data-id="ask-walk"]').getByRole('button', { name: 'Friday instead' }).click();
+  await expect(page.locator('.sh-ask-msg[data-id="ask-walk"]')).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Quick replies' }).getByRole('button', { name: 'Yes' })).toBeVisible();
+});
+
+test("the composer's placeholder is never cut off: a room name that doesn't fit on a phone leaves just \"Message\"", async ({ page }) => {
+  await bootShape(page);
+  await openRoomFromHome(page, ROOM.river);
+  const field = page.locator('.composer textarea');
+  await expect(field).toHaveAttribute('placeholder', 'Message');
+  await expect(field).toHaveAttribute('aria-label', /Riverbend Commons/);
+  await page.locator('.sh-room').getByRole('button', { name: 'Back to rooms' }).click();
+  await openRoomFromHome(page, ROOM.uni);
+  await expect(field).toHaveAttribute('placeholder', 'Message Uni');
 });
 
 test.describe('wide', () => {
@@ -271,6 +345,11 @@ test('wide: the bar is the left rail, beside home and beside a room, never over 
   const chat = await page.locator('.sh-room').boundingBox();
   expect(chat!.x).toBeGreaterThanOrEqual(rail!.width);
   await shot(page, '03-room-wide');
+  // room for the whole name
+  await expect(page.locator('.composer textarea')).toHaveAttribute('placeholder', 'Message Riverbend Commons');
+  await ruleClearsText(page, 'rb-card');
+  await page.evaluate(() => { document.documentElement.dataset.screen = 'ink'; });
+  await ruleClearsText(page, 'rb-card');
 });
 });
 

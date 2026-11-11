@@ -199,6 +199,19 @@ test.describe('the grant follows the needs, the note and the code', () => {
     expect(Object.keys(await grants(page))).not.toContain(noteIdOf(seedListApplet()));
   });
 
+  test('a script\'s click on the tile (not the user\'s) opens the applet but does not start it: one real tap does', async ({ page }) => {
+    await bootSealed(page);
+    // the drawer opened by a real tap (the page has the user's activation for a few seconds), then the tile clicked by a script
+    await page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: /^Applets/ }).click();
+    const tile = page.getByRole('dialog', { name: 'Applets' }).getByRole('region', { name: 'From your vault' }).getByRole('button', { name: 'Seed list', exact: true });
+    await tile.evaluate((el) => (el as HTMLElement).click());
+    await expect(page.getByRole('heading', { name: 'Seed list', level: 1 })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Seed list' })).toBeVisible();
+    await expect(page.locator('iframe')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Open Seed list' }).click();
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+  });
+
   test('a folder outside the applet\'s own is stressed in the prompt', async ({ page }) => {
     await bootSealed(page, { granted: false, applets: [seedListApplet({ interface: { contract: 1, needs: [{ 'vault.read': 'Seeds/' }, { 'vault.read': 'Garden/' }] } })] });
     await openFromDrawer(page, 'Seed list');

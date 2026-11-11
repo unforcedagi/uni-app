@@ -50,10 +50,11 @@ export function Home(p: HomeProps) {
 function PinSlot({ pin, renderPin, onOpenRoom, onPinLapsed }: { pin: Pin } & Pick<HomeProps, "renderPin" | "onOpenRoom" | "onPinLapsed">) {
   const own = renderPin(pin);
   if (own !== null && own !== undefined) return <>{own}</>;
-  return <section className="sh-pin" aria-label={`Approval in ${pin.roomName}`} data-ref={pin.ref}>
+  // a private room's pin: that one waits and when it ends, never what it is or which room
+  return <section className={`sh-pin${pin.private ? " sh-pin-private" : ""}`} aria-label={`Approval in ${pin.roomName}`} data-ref={pin.ref}>
     <div className="sh-pin-head">
       <span className="sh-mark-needs" aria-hidden="true">◆{"︎"}</span>
-      <span className="sh-pin-room">{pin.roomName}</span>
+      {!pin.private && <span className="sh-pin-room">{pin.roomName}</span>}
       <Clock expires={pin.expires} onLapse={onPinLapsed} />
     </div>
     <h3>{pin.what}</h3>

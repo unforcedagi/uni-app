@@ -1,9 +1,9 @@
 // T-335 the shape: everything home, a room's strip and the bar read, in one hook the App holds for as long as it runs (so the Rooms count on
 // the bar is right in the Journal and in an applet too). It feeds the shared stores the old home used to feed (the work store's rooms, the
 // decisions the chat links to) and reads the rooms registry (System/Rooms: retired and private rooms).
-// A private room's asks are drawn only inside it (home: a wordless mark). Privacy waits for what it needs: until the registry's first read has
-// settled, no ask or run line is drawn (a room private only by the
-// registry can't be told yet); until the node tree is read, no decision is published.
+// A private room's asks are drawn only inside it (home: a wordless mark), and its approvals pinned without their words. Privacy waits for what
+// it needs: until the registry's first read has settled, no ask or run line is drawn (a room private only by the registry can't be told yet);
+// until the node tree is read, no decision is published, an ask whose place can't be judged is not drawn, and every pin is wordless.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Approval } from "../approvals";
@@ -54,37 +54,55 @@ function useRegistry(vault: string, on: boolean): { reg: RoomsRegistry | null; s
   return st.key === key ? { reg: st.reg, settled: st.settled } : { reg: kept(key), settled: false };
 }
 
+/** The areas and projects (the vault's `node` notes) as a tree, read through the one reader on its tick; null until read for this vault (a
+ *  failed read keeps what was read; none read: null). Built again only when the reader hands new rows. */
+function useNodeTree(vault: string, on: boolean): Tree | null {
+  const [got, setGot] = useState<{ vault: string; tree: Tree } | null>(null);
+  const current = useRef(on ? vault : null); current.current = on ? vault : null;
+  const built = useRef<{ rows: unknown; tree: Tree } | null>(null);
+  useEffect(() => {
+    setGot(null); built.current = null;
+    if (!on) return;
+    const read = () => reader.nodes(vault).then((n) => {
+      if (current.current !== vault) return;
+      if (built.current?.rows === n.rows) return;
+      built.current = { rows: n.rows, tree: nodeTree(n.rows as RawNote[]) };
+      setGot({ vault, tree: built.current.tree });
+    }).catch(() => { /* the next tick tries again */ });
+    void read();
+    return reader.onPoll(() => void read());
+  }, [on, vault]);
+  return on && got?.vault === vault ? got.tree : null;
+}
+
 /**
  * The open decisions the chat links to (a `[decision T-NN]` marker or a decision's id in a message gets its card, and a room lists its own
  * open ones under its chat), read through the one reader with the node tree (a decision's place, its privacy and its room come from its
  * node). `openNote`: what a decision's link opens now (its note: the old task sheet is gone).
  */
-function useDecisionsFeed(o: { vault: string; on: boolean; rooms: readonly ShapeRoom[]; priv: ReadonlySet<string>; hidden: ReadonlySet<string>; reg: RoomsRegistry | null; uniRoom: string | null; openNote: (id: string) => void }) {
-  type Read = { vault: string; notes: Awaited<ReturnType<typeof reader.openDecisions>>["rows"]; tree: Tree };
+function useDecisionsFeed(o: { vault: string; on: boolean; tree: Tree | null; rooms: readonly ShapeRoom[]; priv: ReadonlySet<string>; hidden: ReadonlySet<string>; reg: RoomsRegistry | null; uniRoom: string | null; openNote: (id: string) => void }) {
+  type Read = { vault: string; notes: Awaited<ReturnType<typeof reader.openDecisions>>["rows"] };
   const [got, setGot] = useState<Read | null>(null);
   const open = useRef(o.openNote); open.current = o.openNote;
   // the vault the hook reads now: an answer for another (a switch while a read was out) is dropped
   const current = useRef(o.on ? o.vault : null); current.current = o.on ? o.vault : null;
-  // the tree is built again only when the node rows are new (the reader shares one read per tick)
-  const built = useRef<{ rows: unknown; tree: Tree } | null>(null);
   const read = useCallback(() => {
     if (!o.on) return;
     const vault = o.vault;
-    Promise.all([reader.openDecisions(vault), reader.nodes(vault)]).then(([d, n]) => {
+    reader.openDecisions(vault).then((d) => {
       if (current.current !== vault) return;
-      if (built.current?.rows !== n.rows) built.current = { rows: n.rows, tree: nodeTree(n.rows as RawNote[]) };
-      setGot({ vault, notes: d.rows, tree: built.current.tree });
+      setGot({ vault, notes: d.rows });
     }).catch(() => { /* the next tick tries again; what was read stands (none read: nothing is published) */ });
   }, [o.on, o.vault]);
   useEffect(() => {
-    setGot(null); built.current = null;
+    setGot(null);
     if (!o.on) return;
     read();
     return reader.onPoll(read);
   }, [o.on, read]);
   useEffect(() => {
-    publishDecisions(o.on && got?.vault === o.vault ? decisionsFrom(got.notes, o.rooms, o.priv, got.tree, o.uniRoom, { reg: o.reg, hidden: o.hidden }) : []);
-  }, [got, o.rooms, o.priv, o.hidden, o.reg, o.on, o.vault, o.uniRoom]);
+    publishDecisions(o.on && o.tree && got?.vault === o.vault ? decisionsFrom(got.notes, o.rooms, o.priv, o.tree, o.uniRoom, { reg: o.reg, hidden: o.hidden }) : []);
+  }, [got, o.tree, o.rooms, o.priv, o.hidden, o.reg, o.on, o.vault, o.uniRoom]);
   useEffect(() => {
     if (!o.on) return;
     setDecisionOpener((id) => open.current(id));
@@ -105,17 +123,23 @@ export function useShape(o: {
   openNote: (id: string) => void;
 }) {
   const { reg, settled } = useRegistry(o.vault, o.on && !!o.identity);
+  const tree = useNodeTree(o.vault, o.on && !!o.identity);
   const rooms = o.rooms as ShapeRoom[];
-  const hidden = useMemo(() => hiddenRooms(rooms, reg), [rooms, reg]);
-  const priv = useMemo(() => privateRooms(rooms, reg), [rooms, reg]);
+  // what is worked out from the rooms is worked out again only when a room's id, name or kind changes, not on every new message
+  const roomsKey = rooms.map((r) => `${r.id}\u0001${r.name}\u0001${r.dm ?? ""}`).join("\u0000");
+  // the rooms as the asks are placed by them (id, name, DM or not): the same list while those stay the same
+  const askRooms = useMemo(() => rooms, [roomsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hidden = useMemo(() => hiddenRooms(askRooms, reg), [askRooms, reg]);
+  // Uni's room is one home shows (a room the registry folded into none is no place to send anything)
+  const uniRoom = useMemo(() => findUniRoom(rooms.filter((r) => !hidden.has(r.id)))?.id ?? null, [rooms, hidden]);
+  // private by name, by the registry, and (once read) by the tree: a room a private place owns under any name
+  const priv = useMemo(() => privateRooms(rooms, reg, tree, uniRoom), [roomsKey, reg, tree, uniRoom]); // eslint-disable-line react-hooks/exhaustive-deps
   // a stable set while its members are the same (the asks re-derive on a new one)
   const privKey = [...priv].sort().join(" ");
   const privStable = useMemo(() => priv, [privKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // the asks know a private room by its channel id and by its name (an ask naming a retired private room finds no room by name)
   const privNames = rooms.filter((r) => privStable.has(r.id)).map((r) => r.name).sort().join("\u0000");
   const privAsks = useMemo(() => new Set([...privStable, ...(privNames ? privNames.split("\u0000") : [])]), [privStable, privNames]);
-  // Uni's room is one home shows (a room the registry folded into none is no place to send anything)
-  const uniRoom = useMemo(() => findUniRoom(rooms.filter((r) => !hidden.has(r.id)))?.id ?? null, [rooms, hidden]);
   useFeedWorkRooms(o.roomsReady ? rooms : null);
   const allRuns = useRoomRuns(rooms);
   // a private room's runs stay inside it: home and its strip draw none (and none at all until privacy can be told)
@@ -125,13 +149,13 @@ export function useShape(o: {
     for (const id of privStable) out.delete(id);
     return out;
   }, [allRuns, privStable, o.on, settled]);
-  // a retired room is no place for an ask: one that names it goes to Uni's room, as one naming a room this device doesn't have does
-  const askRooms = useMemo(() => (hidden.size ? rooms.filter((r) => !hidden.has(r.id)) : rooms), [rooms, hidden]);
-  const asks = useAsks({ vault: o.vault, identity: o.identity, rooms: askRooms, uniRoom, on: o.on, privateRooms: privAsks });
+  // a retired room is no place for an ask: one that names it goes where its work went (asksFrom: the registry's successor, its node's room,
+  // else Uni's room); its privacy is judged with the tree on where it lands
+  const asks = useAsks({ vault: o.vault, identity: o.identity, rooms: askRooms, hidden, reg, tree, uniRoom, on: o.on, privateRooms: privAsks });
   // an ask naming a private room by a name the device has no room for (an old name, a retired private room) stays out too; a private
   // room's own asks stay in it (drawn in full inside, without words on home)
   const byRoom: ReadonlyMap<string, Ask[]> = useMemo(() => (settled ? keepAsks(asks.byRoom, reg) : NO_ASKS), [asks.byRoom, reg, settled]);
-  useDecisionsFeed({ vault: o.vault, on: o.on && !!o.identity && settled, rooms, priv: privStable, hidden, reg, uniRoom, openNote: o.openNote });
+  useDecisionsFeed({ vault: o.vault, on: o.on && !!o.identity && settled, tree, rooms, priv: privStable, hidden, reg, uniRoom, openNote: o.openNote });
   // pins leave the moment they lapse: the clock that reads them is bumped when one reaches zero (and once a minute besides)
   const [tick, setTick] = useState(0);
   const lapsed = useCallback(() => setTick((n) => n + 1), []);
@@ -139,7 +163,10 @@ export function useShape(o: {
   const now = useMemo(() => Date.now() / 1000, [tick, o.approvals, rooms]); // eslint-disable-line react-hooks/exhaustive-deps
   const roomName = useCallback((id: string | null) => (id ? rooms.find((r) => r.id === id)?.name ?? null : null), [rooms]);
   // (an approval still waiting in a retired room is pinned all the same: it still needs you, and "Open in room" opens it)
-  const pins = useMemo(() => pinsFrom(o.approvals, roomName, now), [o.approvals, roomName, now]);
+  // a private room's approval is pinned without its words; with the Uni glue on, every pin is, until the registry and the tree are read
+  const privacyKnown = !o.on || (settled && tree !== null);
+  const pinPrivate = useCallback((ch: string) => !privacyKnown || privStable.has(ch), [privacyKnown, privStable]);
+  const pins = useMemo(() => pinsFrom(o.approvals, roomName, now, pinPrivate), [o.approvals, roomName, now, pinPrivate]);
   const rows = useMemo(() => homeRows(rooms, runs, byRoom, { hidden }), [rooms, runs, byRoom, hidden]);
   const wants = wantsCount(rows, pins);
   // (the Studio board is outside every room: a private room's look pins stay in the room)

@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { answerBody, answerMeta, askButtons, asksByRoom, asksFrom, seenBody, seenCloses, seenMeta, splitTitle, visibleAsks, whenLabel, type VaultAsk } from "../src/shape/asksCore.ts";
 import type { ShapeRoom } from "../src/shape/types.ts";
+import { nodeTree } from "../src/shape/shapeCore.ts";
+import { parseRegistry } from "../src/areas/roomsRegistry.ts";
 import type { Note } from "../src/vault/reader.ts";
 
 let failed = 0;
@@ -20,7 +22,9 @@ const task = (id: string, title: string, m: Record<string, unknown>, at = NOW - 
   ({ id, path: `Tasks/${title}`, tags, updatedAt: iso(at), createdAt: iso(at), metadata: { state: "open", owner: "aaron", asked_at: iso(at), needs_aaron: true, ...m } });
 const room = (id: string, name: string): ShapeRoom => ({ id, name, last_message: null, last_ts: null });
 const ROOMS = [room("c-kiln", "Kiln-Studio"), room("c-field", "#north-field"), room("c-uni", "Uni"), room("c-sanctum", "sanctum"), room("c-held", "held-room")];
-const from = (notes: Note<"task">[], extra: Partial<Parameters<typeof asksFrom>[2]> = {}) => asksFrom(notes, ROOMS, { uniRoom: "c-uni", now: NOW, ...extra });
+// (the node tree as read, with nothing in it: these asks are judged by their names and rooms)
+const NO_NODES = nodeTree([]);
+const from = (notes: Note<"task">[], extra: Partial<Parameters<typeof asksFrom>[2]> = {}) => asksFrom(notes, ROOMS, { uniRoom: "c-uni", now: NOW, tree: NO_NODES, ...extra });
 const one = (m: Record<string, unknown>, title = "T-501 Pick the glaze") => { const a = from([task("a", title, m)]); assert.equal(a.length, 1); return a[0]; };
 
 check("only open tasks with needs_aaron true are asks (false, missing, closed and plain decisions are not)", () => {
@@ -189,6 +193,82 @@ check("the default's date in a few words, in the device's time; a task's id read
   assert.equal(whenLabel(null, NOW), null);
   assert.equal(whenLabel("soon", NOW), null);
   assert.deepEqual(splitTitle("Tasks/T-77b Fix it"), { tid: "T-77B", rest: "Fix it" });
+});
+
+// ------------------------------------------------------------------ the node tree, retired rooms, two rooms of one name (review 11-11)
+const nnote = (id: string, path: string, tags: string[], metadata: Record<string, unknown>) => ({ id, path, tags, metadata, updatedAt: "2026-11-01T00:00:00Z" });
+// "Sanctum" (the fixtures' private area) holds a project with an ordinary name, and that project owns a room with an ordinary name
+const TREE = nodeTree([
+  nnote("n-quiet", "Areas/Sanctum", ["area"], {}), nnote("n-kiln", "Areas/Kiln", ["area"], { channel: "c-kiln" }),
+  nnote("n-pots", "Projects/Pots", ["project"], { parent: "[[Areas/Kiln]]" }),
+  nnote("n-log", "Projects/Garden Log", ["project"], { parent: "[[Areas/Sanctum]]", channel: "c-garden" }),
+  nnote("n-barn", "Areas/Barn", ["area"], { room: "old-barn", room_status: "archived", room_fallback: "north-field" }),
+] as never);
+const TROOMS = [...ROOMS, room("c-garden", "garden-log"), room("c-old", "old-barn")];
+const tfrom = (notes: Note<"task">[], extra: Partial<Parameters<typeof asksFrom>[2]> = {}) =>
+  asksFrom(notes, TROOMS, { uniRoom: "c-uni", now: NOW, tree: TREE, ...extra }).map((a) => [a.room, a.private === true]);
+
+check("an ask on a project inside a private area (by the tree, under an ordinary name) never lands in Uni's room or a public one", () => {
+  assert.deepEqual(tfrom([task("a", "T-1 x", { node: "[[Projects/Garden Log]]" })]), []);
+  assert.deepEqual(tfrom([task("a", "T-1 x", { node: "Projects/Garden Log", room: "kiln-studio" })]), []);
+  assert.deepEqual(tfrom([task("a", "T-1 x", { card: "[[Projects/Garden Log]]" })]), []);
+  // a public project's ask is ordinary
+  assert.deepEqual(tfrom([task("a", "T-1 x", { node: "[[Projects/Pots]]", room: "kiln-studio" })]), [["c-kiln", false]]);
+});
+
+check("a room a private area owns under an ordinary name is private: its asks are drawn only inside it", () => {
+  assert.deepEqual(tfrom([task("a", "T-1 x", { room: "garden-log" })]), [["c-garden", true]]);
+  assert.deepEqual(tfrom([task("a", "T-1 x", { node: "[[Projects/Garden Log]]", reply_room: "#garden-log" })]), [["c-garden", true]]);
+});
+
+check("a room named loosely (spaces, case, '#', no dash) is the same room, so a private place's room keeps its ask however it is written", () => {
+  assert.deepEqual(tfrom([task("a", "T-1 x", { room: "Garden Log" })]), [["c-garden", true]]);
+  assert.deepEqual(tfrom([task("a", "T-1 x", { reply_room: "#gardenlog" })]), [["c-garden", true]]);
+  // a private project's name as the room, with no room of that name here: never Uni's room
+  assert.deepEqual(asksFrom([task("a", "T-1 x", { room: "Garden Log" })], ROOMS, { uniRoom: "c-uni", now: NOW, tree: TREE }), []);
+  assert.deepEqual(tfrom([task("a", "T-1 x", { room: "Kiln Studio" })]), [["c-kiln", false]]);
+});
+
+check("until the tree is read, an ask whose place can't be judged is not drawn (only a placeless ask in Uni's room is)", () => {
+  const pre = (m: Record<string, unknown>) => tfrom([task("a", "T-1 x", m)], { tree: null });
+  assert.deepEqual(pre({ node: "[[Projects/Pots]]" }), []);
+  assert.deepEqual(pre({ room: "kiln-studio" }), []);
+  assert.deepEqual(pre({ room: "garden-log" }), []);
+  assert.deepEqual(pre({ card: "Cards/Anything" }), []);
+  assert.deepEqual(pre({}), [["c-uni", false]]);
+});
+
+check("an ask naming a retired or renamed room goes where its work went: the registry's successor, else its node's room, else Uni's", () => {
+  const reg = parseRegistry({ rooms: { "kiln-studio": { id: "c-kiln", was: ["kiln"] }, "held-room": { id: "c-held", private: true, was: ["old-held"] }, uni: { id: "c-uni" } },
+    retired: { "old-barn": { into: "kiln-studio" }, "gone-room": { none: true } } })!;
+  const hidden = new Set(["c-old"]);
+  const at = (m: Record<string, unknown>, tree: typeof TREE | null = TREE) => asksFrom([task("a", "T-1 x", { reply_root: "ev1", ...m })], TROOMS, { uniRoom: "c-uni", now: NOW, tree, reg, hidden });
+  // retired into a live room: there, and not threaded under a post of the old room
+  assert.deepEqual(at({ room: "old-barn" }).map((a) => [a.room, a.replyRoot]), [["c-kiln", null]]);
+  // an old name of a live room: that room
+  assert.deepEqual(at({ room: "kiln" }).map((a) => a.room), ["c-kiln"]);
+  // a private room's old name: inside that room, private (never dropped for its old name, never in Uni's room)
+  assert.deepEqual(at({ room: "old-held" }).map((a) => [a.room, a.private === true]), [["c-held", true]]);
+  // a retired room with no successor: its node's room, else Uni's
+  assert.deepEqual(at({ room: "gone-room", node: "[[Projects/Pots]]" }).map((a) => a.room), ["c-kiln"]);
+  assert.deepEqual(at({ room: "gone-room" }).map((a) => a.room), ["c-uni"]);
+  // no registry word: a node that marks the room archived names its room_fallback
+  const noReg = asksFrom([task("a", "T-1 x", { room: "old-barn" })], TROOMS, { uniRoom: "c-uni", now: NOW, tree: TREE, hidden });
+  assert.deepEqual(noReg.map((a) => a.room), ["c-field"]);
+});
+
+check("two live rooms of one name: the non-DM one, else the one the registry lists, else Uni's room (never a guess)", () => {
+  const dm = { ...room("c-dm", "kiln-studio"), dm: true };
+  const two = (rooms: ShapeRoom[], extra: Partial<Parameters<typeof asksFrom>[2]> = {}) =>
+    asksFrom([task("a", "T-1 x", { room: "kiln-studio", reply_root: "ev1" })], rooms, { uniRoom: "c-uni", now: NOW, tree: TREE, ...extra }).map((a) => [a.room, a.replyRoot]);
+  assert.deepEqual(two([dm, ...ROOMS]), [["c-kiln", "ev1"]]);
+  const twin = room("c-kiln2", "Kiln-Studio");
+  assert.deepEqual(two([twin, ...ROOMS]), [["c-uni", null]]);
+  assert.deepEqual(two([twin, ...ROOMS], { reg: parseRegistry({ rooms: { "kiln-studio": { id: "c-kiln2" } } }) }), [["c-kiln2", "ev1"]]);
+  // one of the two private: its words never go to Uni's room
+  assert.deepEqual(two([twin, ...ROOMS], { privateRooms: new Set(["c-kiln2"]) }), []);
+  // the registry picks one, but its twin is private (known by id only): the ask is not drawn in the public one
+  assert.deepEqual(two([twin, ...ROOMS], { reg: parseRegistry({ rooms: { "kiln-studio": { id: "c-kiln" } } }), privateRooms: new Set(["c-kiln2"]) }), []);
 });
 
 console.log(failed ? `\n${failed} failed` : "\nall asks checks passed");

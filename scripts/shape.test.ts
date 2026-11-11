@@ -54,6 +54,14 @@ const tree = nodeTree([
   node("n-quiet", "Areas/Sanctum", ["area"], {}), node("n-kiln", "Areas/Kiln", ["area"], { channel: "c-kiln" }),
   node("n-pots", "Projects/Pots", ["project"], { parent: "[[Areas/Kiln]]" }), node("n-hush", "Projects/Hush", ["project"], { parent: "[[Areas/Sanctum]]" }),
 ] as never);
+// with the tree: a room a project inside the private area owns is private under its ordinary name; a public area's and Uni's are not
+{
+  const owned = nodeTree([node("n-quiet", "Areas/Sanctum", ["area"], {}), node("n-kiln", "Areas/Kiln", ["area"], { channel: "c-kiln" }),
+    node("n-hush", "Projects/Hush", ["project"], { parent: "[[Areas/Sanctum]]", channel: "c-hush" })] as never);
+  const all = [...rooms, room("c-hush", "hush-room")];
+  assert.deepEqual([...privateRooms(all, null, owned, "c-uni")].sort(), ["c-hush", "c-quiet", "c-sub"]);
+  assert.deepEqual([...privateRooms(all, null)].sort(), ["c-quiet", "c-sub"], "before the tree is read, names only");
+}
 const placed = decisionsFrom([
   note("E1", "Decisions/T-21 Glaze order", { state: "open", node: "[[Projects/Pots]]" }),
   note("E2", "Decisions/T-22 Hush", { state: "open", node: "Projects/Hush" }),

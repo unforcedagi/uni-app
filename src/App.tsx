@@ -284,8 +284,31 @@ function ComposerField({ box, inputRef, ...props }: { box: DraftBox; inputRef: (
     return () => { own.current = null; if (cleanup) cleanup(); else inputRef(null); };
   }, [inputRef]);
   useLayoutEffect(() => { if (own.current) resizeComposer(own.current); }, [value]);
-  return <textarea ref={ref} value={value} {...props} />;
+  // T-335: a placeholder wider than the field ("Message <a long room name>") would be cut off mid-word: it says just its first word then
+  const placeholder = props.placeholder;
+  const [fits, setFits] = useState(true);
+  useLayoutEffect(() => {
+    const el = own.current;
+    if (!el || !placeholder) return;
+    let gone = false;
+    const measure = () => {
+      if (gone) return;
+      const cs = getComputedStyle(el);
+      const ctx = (phGauge ??= document.createElement("canvas").getContext("2d"));
+      if (!ctx) return;
+      ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      const room = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      setFits(room <= 0 || ctx.measureText(placeholder).width <= room);
+    };
+    measure();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    ro?.observe(el);
+    void document.fonts?.ready.then(measure);
+    return () => { gone = true; ro?.disconnect(); };
+  }, [placeholder]);
+  return <textarea ref={ref} value={value} {...props} placeholder={fits || !placeholder ? placeholder : placeholder.split(" ")[0]} />;
 }
+let phGauge: CanvasRenderingContext2D | null | undefined;
 
 function Conversations({ onForget }: { onForget: () => void }) {
   // The last rooms list on this device (per identity): a restored place resolves at once, before the first fetch.
@@ -2196,7 +2219,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const uniInRoom = !!findUniMember(members);
   // T-335 chat feel: the newest message, when it is someone else's question with plain answers, offers them as chips (not while you're sending)
   const newest = messages[messages.length - 1];
-  const chips = viewShown && !isThread && newest && newest.author !== identity && !outgoing && !turn ? quickReplies(newest.body) : null;
+  // one question, one set of buttons: an open ask in this room threaded under that message (its reply_root) is the answer drawn for it
+  const askedUnder = !!newest && !!channel && (shape.asks.byRoom.get(channel) ?? []).some((a) => a.replyRoot === newest.ref);
+  const chips = viewShown && !isThread && newest && newest.author !== identity && !outgoing && !turn && !askedUnder ? quickReplies(newest.body) : null;
   const sheetMsg = sheetFor ? messages.find((m) => m.ref === sheetFor) ?? null : null;
   /** `tail`: drawn after the last message, inside the scroller (T-335 the shape: the room's asks, as messages); the view keeps to the newest as it grows. */
   const roomPane = (currentRoom: Room, above: ReactNode, placeholder?: string, place?: string, tail?: ReactNode) => {
@@ -2679,10 +2704,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const id = Object.entries(APPLET_TAB).find(([, k]) => k === t.kind)?.[0];
     return id ? BUILT_IN.find((a) => a.id === id) ?? null : null;
   };
-  function openApplet(id: string) {
+  /** `tap`: the tile's click; a sealed applet starts only on the user's own (trusted) one, else it opens stopped with its Open button. */
+  function openApplet(id: string, tap: { isTrusted: boolean } | null = null) {
     setDrawerOpen(false);
     const se = sealedOf(id);
-    if (se) { startSealedApplet(se.noteId); openTarget({ kind: "applet", applet: id, title: se.manifest.name }); return; }
+    if (se) { startSealedApplet(se.noteId, tap); openTarget({ kind: "applet", applet: id, title: se.manifest.name }); return; }
     const kind = APPLET_TAB[id];
     if (!kind) return;
     const name = BUILT_IN.find((a) => a.id === id)?.name ?? id;

@@ -44,12 +44,19 @@ function pinWords(a: Approval): { what: string; detail: string | null } {
     : { what: `OK to run ${cmd}?`, detail: why };
 }
 
-/** The approvals that end within the window from `now` (and haven't ended), soonest first. `roomName` null: "a room". */
-export function pinsFrom(approvals: readonly Approval[], roomName: (id: string) => string | null, now: number): Pin[] {
+/** What a pin from a private room says on home: that one waits, never what it is or which room (its row shows that). */
+export const PRIVATE_PIN = "An approval waits in a private room";
+/**
+ * The approvals that end within the window from `now` (and haven't ended), soonest first. `roomName` null: "a room". `isPrivate`: its room
+ * keeps its words inside (the caller answers true while privacy can't be told yet): the pin is wordless, `private`, and still counted.
+ */
+export function pinsFrom(approvals: readonly Approval[], roomName: (id: string) => string | null, now: number, isPrivate: (channel: string) => boolean = () => false): Pin[] {
   return approvals
     .filter((a) => a.deadline !== null && a.deadline > now && a.deadline - now <= PIN_WINDOW_S)
     .sort((a, b) => a.deadline! - b.deadline!)
-    .map((a) => ({ ref: a.ref, room: a.channel, roomName: roomName(a.channel)?.replace(/^#/, "") || "a room", ...pinWords(a), expires: a.deadline!, sealed: a.kind === "sealed" }));
+    .map((a): Pin => isPrivate(a.channel)
+      ? { ref: a.ref, room: a.channel, roomName: "a private room", what: PRIVATE_PIN, detail: null, expires: a.deadline!, sealed: a.kind === "sealed", private: true }
+      : { ref: a.ref, room: a.channel, roomName: roomName(a.channel)?.replace(/^#/, "") || "a room", ...pinWords(a), expires: a.deadline!, sealed: a.kind === "sealed" });
 }
 
 /** "expires in 8:59", "expires in 0:05", or "expired" (seconds). */

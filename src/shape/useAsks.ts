@@ -14,6 +14,8 @@ import { findUniMember } from "../uniActions.ts";
 import { relayAccepted } from "../voiceOutbox.ts";
 import { answerBody, answerMeta, asksByRoom, asksFrom, seenBody, seenCloses, seenMeta, visibleAsks, type Gone, type VaultAsk } from "./asksCore.ts";
 import type { Ask, ShapeRoom } from "./types.ts";
+import type { Tree } from "../areas/treeCore.ts";
+import type { RoomsRegistry } from "../areas/roomsRegistry.ts";
 
 type Member = { pubkey: string; name: string };
 /** A post its room hasn't had yet (the write landed): kept on this device with its reason until it goes. */
@@ -67,7 +69,9 @@ export function forgetAsks(): void {
 }
 
 /** `privateRooms`: rooms (by channel id or name) whose asks stay inside them: drawn in full only in their own chat and strip, never on home. */
-export function useAsks(o: { vault: string; identity: string | null; rooms: ShapeRoom[]; uniRoom: string | null; on: boolean; privateRooms?: ReadonlySet<string> }) {
+export function useAsks(o: { vault: string; identity: string | null; rooms: ShapeRoom[]; uniRoom: string | null; on: boolean; privateRooms?: ReadonlySet<string>;
+  /** The node tree (null: not read yet), the registry, the rooms home leaves out: where an ask lands and whether it is private (asksFrom). */
+  tree: Tree | null; reg: RoomsRegistry | null; hidden: ReadonlySet<string> }) {
   const on = o.on && !!o.identity;
   const owner = `${o.identity ?? ""}|${o.vault}`;
   const [rows, setRows] = useState<Note<"task">[]>([]);
@@ -103,7 +107,8 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
     return reader.onPoll(() => void read());
   }, [on, read]);
 
-  const all = useMemo(() => asksFrom(rows, o.rooms, { uniRoom: o.uniRoom, privateRooms: o.privateRooms }), [rows, o.rooms, o.uniRoom, o.privateRooms]);
+  const all = useMemo(() => asksFrom(rows, o.rooms, { uniRoom: o.uniRoom, privateRooms: o.privateRooms, tree: o.tree, reg: o.reg, hidden: o.hidden }),
+    [rows, o.rooms, o.uniRoom, o.privateRooms, o.tree, o.reg, o.hidden]);
   // what the vault no longer lists is settled: stop hiding it by hand
   useEffect(() => {
     setGone((g) => { const live = new Set(all.map((a) => a.id)); const next = new Map([...g].filter(([id]) => live.has(id))); return next.size === g.size ? g : next; });
