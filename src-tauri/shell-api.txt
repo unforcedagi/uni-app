@@ -141,7 +141,6 @@ command async voice_transcribe(app: tauri::AppHandle, request: tauri::ipc::Reque
 command journal_config(app: tauri::AppHandle) -> HubSetting
 command journal_set_config(app: tauri::AppHandle, hub: String, vault: String) -> Result<(), String>
 command live_stop() -> Result<(), String>
-command log_line(line: String)
 command media_pin(sha: String) -> Result<(), String>
 command media_release(sha: String) -> Result<(), String>
 command open_link(app: tauri::AppHandle, url: String) -> Result<(), String>
