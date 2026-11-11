@@ -23,6 +23,8 @@ export type FixtureApplet = {
   applet?: Record<string, unknown>;
   /** Where its note lives (default `Seeds/<name>`: an applet's note sits in the folder it reads). */
   path?: string;
+  /** Contract 2: the whole `applet` manifest (access, reach, search); the note then carries no `interface` beside it. */
+  v2?: Record<string, unknown>;
 };
 export type SealedOpts = ShapeOpts & {
   applets?: FixtureApplet[];
@@ -80,7 +82,7 @@ const settle = (k, p) => p.then((v) => { R[k] = v; }, (e) => { R[k] = { error: e
 
 export const seedListApplet = (over: Partial<FixtureApplet> = {}): FixtureApplet => ({ id: 'seed-list', name: 'Seed list', html: SEED_LIST, ...over });
 
-const appletMeta = (a: FixtureApplet) => ({
+const appletMeta = (a: FixtureApplet) => a.v2 ? { applet: { contract: 2, id: a.id, name: a.name, ...a.v2 }, ...(a.interface ? { interface: a.interface } : {}) } : ({
   applet: { contract: 1, id: a.id, name: a.name, kind: 'vault', where: 'Seeds folder, in your vault', searches: ['seeds'], ...(a.applet ?? {}) },
   ...(a.interface === null ? {} : { interface: a.interface ?? { contract: 1, needs: [{ 'vault.read': 'Seeds/' }] } }),
 });

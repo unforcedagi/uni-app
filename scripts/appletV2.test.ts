@@ -71,9 +71,10 @@ await check("Calendar and To Post have valid manifests, and nothing runs on them
   for (const raw of PLANNED) parsed(raw);
   for (const id of ["calendar", "topost"]) assert.equal(BUILT_IN.find((a) => a.id === id)!.contract, 1, `${id} is still on contract 1`);
   const cal = grantLines(grantOf(CALENDAR_MANIFEST), (id) => id);
-  assert.deepEqual(cal.map((l) => [l.where, l.stress]), [["Calendar door, on the box", true], ["plot vault", false]]);
-  assert.match(cal[0].text, /^See what this device may do · list events · read one event · list conflicts · ask the door to change an event/);
-  assert.equal(cal[1].text, "Read event notes");
+  assert.deepEqual(cal.map((l) => [l.where, l.stress]), [["Calendar door, on the box", false], ["Calendar door, on the box", true], ["plot vault", false]]);
+  assert.equal(cal[0].text, "See what this device may do · list events · read one event · list conflicts");
+  assert.equal(cal[1].text, "Ask the door to change an event (it checks each change)");
+  assert.equal(cal[2].text, "Read event notes");
   const post = grantLines(grantOf(TOPOST_MANIFEST), (id) => id);
   assert.deepEqual(post, [{ where: "plot vault", text: "Read and change post notes", stress: true }]);
 });
@@ -143,7 +144,8 @@ await check("a sealed applet's manifest is held to what the frame can do", () =>
 await check("the card names exactly what Arcade is granted, in the shell's words", () => {
   const lines = grantLines(grantOf(ARCADE_MANIFEST), (id) => id);
   assert.deepEqual(lines, [
-    { where: "Arcade door, on the box", text: "See what's new and your counts · deal rounds · read your taste profile · show a card's picture, sound or clip · save your reactions · ask for a fresh taste profile", stress: true },
+    { where: "Arcade door, on the box", text: "See what's new and your counts · deal rounds · read your taste profile · show a card's picture, sound or clip", stress: false },
+    { where: "Arcade door, on the box", text: "Save your reactions · ask for a fresh taste profile", stress: true },
     { where: "plot vault", text: "Add notes in Journal/ (only the ones it made)", stress: true },
     { where: "plot vault", text: "Read notes in Taste/", stress: false },
     { where: "This device", text: "Record your voice when you ask it to", stress: false },

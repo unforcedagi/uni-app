@@ -4,7 +4,7 @@
 // here, so a manifest that asks for anything else (a new release, another home vault) shows the card again; it ends
 // after a year or on Revoke access. `reviewing` (the frame's Access button) shows the same card over the running
 // applet, with what was allowed and the way to take it back.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import GrantCard from "../interface/GrantCard";
 import { BUILTIN_CODE, builtinSubject, deviceGrants } from "../interface/grants";
@@ -35,7 +35,7 @@ function backends(home: string | null, onOpenNote: (vault: string, path: string)
   };
 }
 
-export function AppletGate({ applet, home, rooms, reviewing, onReviewDone, onOpenNote, children }: {
+export function AppletGate({ applet, home, rooms, reviewing, onReviewDone, onAllowed, onOpenNote, children }: {
   /** A built-in on contract 2 (`applet.v2`). */
   applet: AppletManifest;
   /** The owner's own vault on this device. */
@@ -43,6 +43,8 @@ export function AppletGate({ applet, home, rooms, reviewing, onReviewDone, onOpe
   rooms: readonly { id: string; name: string }[];
   reviewing: boolean;
   onReviewDone: () => void;
+  /** Whether it holds a grant now (the frame shows Access only then: before that there is nothing to review or revoke). */
+  onAllowed: (allowed: boolean) => void;
   onOpenNote: (vault: string, path: string) => void;
   children: (port: AppletPort) => ReactNode;
 }) {
@@ -63,19 +65,25 @@ export function AppletGate({ applet, home, rooms, reviewing, onReviewDone, onOpe
 
   const subject = builtinSubject(m.id);
   const allowed = !!key && grants.status(subject, key, BUILTIN_CODE) === "ok";
-  // the port asks this before every call: a revoke, an expiry or leaving the screen ends it at once, in-flight work included
-  const live = useRef<string | null>(null);
+  const onAllowedRef = useRef(onAllowed); onAllowedRef.current = onAllowed;
+  useEffect(() => { onAllowedRef.current(allowed); return () => onAllowedRef.current(false); }, [allowed]);
+  // The port asks `live` before every call, so a revoke, an expiry or leaving the screen ends it at once, in-flight work included.
+  // `current` is set while rendering (the applet's own effects run before this component's, and their first calls must pass);
+  // `mounted` goes false when the gate leaves the screen.
+  const current = useRef<string | null>(null);
+  current.current = allowed ? key : null;
+  const mounted = useRef(true);
+  useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const openNoteRef = useRef(onOpenNote); openNoteRef.current = onOpenNote;
   const port = useMemo(() => {
     if (!allowed || !resolved.ok || !key) return null;
     const mine = key;
     return createAppletPort(resolved.grant, backends(home, (v, p) => openNoteRef.current(v, p)), {
       home,
-      live: () => live.current === mine && grants.status(subject, mine, BUILTIN_CODE) === "ok",
+      live: () => mounted.current && current.current === mine && grants.status(subject, mine, BUILTIN_CODE) === "ok",
       onRefused: (r) => console.warn(`[applet ${m.id}] refused (${r.code}): ${r.what}`),
     });
   }, [allowed, resolved, key, home, subject, m.id]);
-  useEffect(() => { live.current = port ? key : null; return () => { live.current = null; }; }, [port, key]);
 
   const roomName = (id: string) => cleanText(rooms.find((r) => r.id === id)?.name.replace(/^#/, "") ?? id);
   if (!resolved.ok) return <div className="sh-ap-calm sh-ap-gate" role="alert"><p className="sh-ap-calm-head">{m.name} can't open</p><p>It was not run: {resolved.error}.</p></div>;

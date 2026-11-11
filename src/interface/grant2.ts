@@ -112,8 +112,11 @@ export function grantLines(g: Grant, roomName: (id: string) => string, opts: { o
   for (const d of g.doors) {
     const door = doorOf(d.door);
     if (!door) continue;
-    const ops = Object.keys(door.ops).filter((op) => d.ops.includes(op));
-    out.push({ where: door.name, text: cap(ops.map((op) => door.ops[op].words).join(" · ")), stress: ops.some((op) => door.ops[op].write) });
+    // what it only reads on one row, what it changes on the next: only the second is stressed
+    for (const write of [false, true]) {
+      const ops = Object.keys(door.ops).filter((op) => d.ops.includes(op) && door.ops[op].write === write);
+      if (ops.length) out.push({ where: door.name, text: cap(ops.map((op) => door.ops[op].words).join(" · ")), stress: write });
+    }
   }
   for (const v of g.vaults) for (const r of v.allow) {
     out.push(outside(r) && r.verbs.length === 1 && r.verbs[0] === "read"

@@ -2640,6 +2640,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useEffect(() => { if (active?.kind !== "arcade") setArcadeLook(null); }, [active?.kind]);
   /** A contract 2 applet's grant card, opened from its frame's Access button; leaving the applet closes it. */
   const [accessOpen, setAccessOpen] = useState(false);
+  const [accessHeld, setAccessHeld] = useState(false);
   useEffect(() => { setAccessOpen(false); }, [active?.kind]);
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const homeOpen = active?.kind === "all";
@@ -2759,7 +2760,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       case "calendar": return <Calendar />;
       case "messages": return <Messages />;
       // contract 2: the Arcade runs only behind its grant card, and reaches things only through the port the gate hands it
-      case "arcade": return applet?.v2 ? <AppletGate applet={applet} home={lifeVault || null} rooms={rooms} reviewing={accessOpen} onReviewDone={() => setAccessOpen(false)} onOpenNote={openArcadeNote}>
+      case "arcade": return applet?.v2 ? <AppletGate applet={applet} home={lifeVault || null} rooms={rooms} reviewing={accessOpen} onReviewDone={() => setAccessOpen(false)} onAllowed={setAccessHeld} onOpenNote={openArcadeNote}>
         {(port) => <ArcadeView port={port} ownerName={myName ?? null} look={arcadeLook} onBack={backToDrawer} />}</AppletGate> : null;
       case "posts": return <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} />;
       case "studio": return <Studio looks={shape.looks} onOpenLink={(url) => void openLink(url).catch(() => {})} />;
@@ -2790,7 +2791,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onRecordingChange={(on, controls) => { journalRecordingRef.current = on; setJournalRecording(on && controls ? { controls } : null); }} /></div>}
       {journalOpen ? null
       : applet ? <AppletFrame applet={active?.kind === "vault" && active.vault && active.vault !== VAULT_CHOOSER ? { ...applet, name: active.vault } : applet} onBack={backToDrawer} onSearch={() => openFind()}
-          onAccess={applet.v2 && applet.host === "native" ? () => setAccessOpen((o) => !o) : undefined}>{appletBody()}</AppletFrame>
+          onAccess={applet.v2 && applet.host === "native" && accessHeld ? () => setAccessOpen((o) => !o) : undefined}>{appletBody()}</AppletFrame>
       : homeOpen ? <ShapeSurface shape={shape} rooms={rooms} loading={rooms.length === 0 && synced === 0} focus={focus} vault={lifeVault} chat={roomChat}
           story={story} onStory={setStory} onOpenRoom={(id) => openRoom(id)} onBack={stepBackInFocus} onSearch={() => openFind()} onSettings={openSettings}
           onOpenNote={(id) => openNote({ hub: null, vault: lifeVault, ref: id }, null)} onOpenLink={(url) => void openLink(url).catch((e) => setError(`Couldn't open the link: ${e}`))} />

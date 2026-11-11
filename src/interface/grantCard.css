@@ -5,7 +5,7 @@
   background: var(--g-paper); color: var(--g-ink); border: var(--g-hair) solid var(--g-line-strong); border-radius: 16px; box-shadow: var(--g-shadow-1);
   font: 14px/1.45 var(--g-font-ui); }
 .grant-head { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; }
-.grant-glyph { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; font-size: 17px;
+.grant-glyph { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; font-size: 17px; line-height: 1;
   background: var(--g-ground); border: var(--g-hair) solid var(--g-line); font-variant-emoji: text;
   font-family: "Noto Sans Symbols 2", "Noto Sans Symbols", "DejaVu Sans", var(--g-font-ui); }
 .grant-card h2 { margin: 0; min-width: 0; font: 600 20px/1.2 var(--g-font-display); overflow-wrap: anywhere; }
