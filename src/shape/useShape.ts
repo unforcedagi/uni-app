@@ -174,5 +174,6 @@ export function useShape(o: {
   const looks = useMemo(() => studioLooks(shown, roomName), [shown, roomName]);
   // (only by room: the flat list holds asks the registry hasn't vetted yet, and private ones; nothing outside a room should read them)
   const { asks: _unvetted, ...answering } = asks;
-  return { rows, pins, wants, now, onPinLapsed: lapsed, runs, asks: { ...answering, byRoom }, /* (only once the rooms, the registry and the tree are read: an ask about to be drawn in its room is not "out of sight") */ unseen: privacyKnown && o.on && rooms.length > 0 ? asks.unseen : 0, hidden, priv: privStable, uniRoom, looks, roomName };
+  return { rows, pins, wants, now, onPinLapsed: lapsed, runs, asks: { ...answering, byRoom }, /* (only once the rooms, the registry and the tree are read: an ask about to be drawn in its room is not "out of sight") */ unseen: privacyKnown && o.on && rooms.length > 0 ? asks.unseen : 0, hidden, priv: privStable, uniRoom, looks, roomName,
+    /* (T-335 cards expand) a room whose words stay inside it: private, or not yet known not to be */ isPrivate: pinPrivate };
 }

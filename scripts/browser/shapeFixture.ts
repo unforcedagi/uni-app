@@ -35,7 +35,7 @@ export type ShapeOpts = {
 };
 
 /** T-335 cards expand: the extra cards' message ids (card event ids are hex; an ask names one by its first 12 or more). */
-export const CARD = { prod: 'ab12cd34ef56' + '1'.repeat(52), long: 'bc23de45fa67' + '2'.repeat(52), old: 'cd34ef56ab78' + '3'.repeat(52), ended: 'de45fa67bc89' + '4'.repeat(52) };
+export const CARD = { secret: 'ef56ab78cd90' + '5'.repeat(52), prod: 'ab12cd34ef56' + '1'.repeat(52), long: 'bc23de45fa67' + '2'.repeat(52), old: 'cd34ef56ab78' + '3'.repeat(52), ended: 'de45fa67bc89' + '4'.repeat(52) };
 
 export async function bootShape(page: Page, o: ShapeOpts = {}) {
   // the calendar door double, served to the page as calMock serves it
@@ -128,7 +128,10 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
         next: 'Tap the PRODUCTION card that deploys the import tool', sealed_card: CARD.prod }),
       // an ask whose card this device doesn't hold: said plainly, nothing to repost
       task('ask-unknown', 'T-613 Approve the glaze kiln key', 12 * min, { kind: 'do', no_default: true, reply_room: 'Studio', why_now: 'The kiln is booked.',
-        next: 'Tap the kiln card', sealed_card: 'ee'.repeat(32) }));
+        next: 'Tap the kiln card', sealed_card: 'ee'.repeat(32) }),
+      // an ask in a public room pointing at a card waiting in the private room: that card is never named or drawn outside it
+      task('ask-hushed', 'T-614 Approve the quiet key', 11 * min, { kind: 'do', no_default: true, reply_room: 'Studio', why_now: 'It was asked for.',
+        next: 'Tap the quiet card', sealed_card: CARD.secret }));
     const run = (id: string, title: string, channel: string, room: string, sAgo: number, md: Record<string, unknown>, body: string) => ({ id, path: `Runs/2026-11-10 ${title}`, tags: ['run'], createdAt: iso(sAgo), updatedAt: iso(60),
       content: `# ${title}\n\n${body}\n\n---\n\nRun on [[Uni]], worker \`mts-${id}\`.\n`, metadata: { state: 'running', channel, room, attempt: id, worker: `mts-${id}`, started_at: iso(sAgo), doing_at: iso(60), ...md } });
     const notes: any[] = [
@@ -175,8 +178,11 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
         scope: "Send the October invoice and the two overdue reminders to billing@riverbend.example, with the phasing summary attached as a PDF for the board's Thursday meeting",
         ttl_s: 600, uses: 3, payload: null, request_digest: '5d6e7f80' + 'b'.repeat(56), expires: nowS + 50 * min, answer: null, asked: nowS - 30 * min }] },
       [CARD.old]: { kind: 'single', event_id: CARD.old, refused: 'This card has expired.', rows: [] },
+      [CARD.secret]: { kind: 'single', event_id: CARD.secret, refused: null, rows: [{ rid: 'r4'.padEnd(32, '0'), action: 'quiet.open', credential: 'quiet-key', class: 'routine',
+        scope: 'Private words about the practice', ttl_s: 600, uses: 1, payload: null, request_digest: '11223344' + 'c'.repeat(56), expires: nowS + 40 * min, answer: null, asked: nowS - 5 * min }] },
     };
-    const waiting = () => [...(o.cards ? [{ ref: CARD.prod, channel: ROOM.river, root: null, ts: nowS - 20 * min, kind: 'single', credential: 'cf-site', action: 'job.cloudflare', class: 'powerful', rows: 1,
+    const waiting = () => [...(o.cards ? [{ ref: CARD.secret, channel: ROOM.quiet, root: null, ts: nowS - 5 * min, kind: 'single', credential: 'quiet-key', action: 'quiet.open', class: 'routine', rows: 1,
+      expires: nowS + 40 * min, fingerprint: '11223344', reach: null }, { ref: CARD.prod, channel: ROOM.river, root: null, ts: nowS - 20 * min, kind: 'single', credential: 'cf-site', action: 'job.cloudflare', class: 'powerful', rows: 1,
       expires: cards[CARD.prod].rows[0].expires, fingerprint: '7c4e19d2', reach }] : []), ...(w.__cardAnswered ? [] : [{ ref: 'rb-card', channel: ROOM.river, root: null, ts: nowS - 66 * min, kind: 'single', credential: 'billing', action: 'invoice.send', class: 'routine', rows: 1, expires, fingerprint: '9b13b2ae' }])];
 
     const matches = (m: any, f: any) => Object.entries(f ?? {}).every(([k, c]: [string, any]) => {

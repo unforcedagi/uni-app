@@ -201,10 +201,11 @@ const EXPIRED = "This card has expired.";
  * The state of an ask's card from the room's message (`body` as the room shows it: a card the broker ended is edited to one line with no
  * fence) and, while it still carries its fence, its checked view.
  */
-export function cardState(msg: { channel: string; ref: string; body: string } | null, view: SealedCardView | null, now: number): CardState {
+export function cardState(msg: { channel: string; ref: string; body: string; edited?: boolean } | null, view: SealedCardView | null, now: number): CardState {
   if (!msg) return { state: "missing" };
   const { channel, ref } = msg;
-  if (!sealedFence(msg.body)) return { state: "ended", channel, ref, line: msg.body.split("\n")[0].trim() };
+  // (a message that never carried a fence isn't a card the broker ended: the ask names the wrong message)
+  if (!sealedFence(msg.body)) return msg.edited ? { state: "ended", channel, ref, line: msg.body.split("\n")[0].trim() } : { state: "missing" };
   if (!view) return { state: "checking" };
   if (view.refused) return view.refused === EXPIRED ? { state: "expired", channel, ref, at: null } : { state: "refused", channel, ref, why: view.refused };
   const answered = view.rows.find((x) => x.answer);

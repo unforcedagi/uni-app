@@ -24,8 +24,9 @@ type Read = { body: string | null; error: string | null; loading: boolean };
 function yesLine(ask: Ask, room: string): { label: string; does: string } {
   const b = askButtons(ask)[0];
   const to = room ? `#${room}` : "its room";
+  // a choose ask's yes is any of its options, not only the first
+  if (b.act === "answer") return { label: "an option", does: `Your pick goes to ${to} and closes the ask` };
   const does = b.act === "done" ? `Tells ${to} you did it; the ask goes back to the room for any follow-up`
-    : b.act === "answer" ? `Your pick goes to ${to} and closes the ask`
     : b.act === "open" ? "Opens the link; Seen then ends it"
     : b.act === "seen" ? `Seen: ${seenHint(ask.kind)}`
     : b.label;

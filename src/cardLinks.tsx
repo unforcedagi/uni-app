@@ -10,6 +10,7 @@ import { postIn } from "./shape/useAsks";
 
 export type CardLinks = {
   /** A room's name, no `#`; null when this device doesn't know it. */ roomName: (channel: string) => string | null;
+  /** A room whose words stay inside it (private, or privacy not read yet): its cards are never named or drawn from another room. */ privateRoom: (channel: string) => boolean;
   /** The ask in this card's own room that points at it (asks are vetted per room: never one from elsewhere). */ askFor: (channel: string, ref: string) => CardAsk | null;
 };
 export const CardLinksContext = createContext<CardLinks | null>(null);

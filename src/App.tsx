@@ -2396,7 +2396,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       fallback={<Body body={m.body} mentions={m.mentions} me={identity} edited={m.edited} />} />;
     // T-234: Uni's approval card; Rust checks who signed it and everything in it, and the card draws only from that
     if (sealedFence(m.body)) return <><Body body={sealedProse(m.body)} mentions={m.mentions} me={identity} edited={m.edited} />
-      <SealedCard channel={m.channel} reference={m.ref} /></>;
+      <SealedCard channel={m.channel} reference={m.ref} ts={m.ts} /></>;
     if (!secretCards) return null;
     if (parseSecretRequest(m.body)) return <><Body body={withoutSecretBlock(m.body).split("\n")[0]} mentions={m.mentions} me={identity} edited={m.edited} />
       <SecretRequestCard channel={m.channel} requestRef={m.ref} authorName={m.author_name} receipts={(author, rid) => receiptFor(secretReceipts, author, rid)}
@@ -2785,8 +2785,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // T-335 cards expand: a card reads its room's name and the ask in that same room that points at it (its expanded head says who asked, why)
   const cardLinks = useMemo<CardLinks>(() => ({
     roomName: (ch) => rooms.find((r) => r.id === ch)?.name.replace(/^#/, "") ?? null,
+    privateRoom: (ch) => shape.isPrivate(ch) || !rooms.some((r) => r.id === ch),
     askFor: (ch, ref) => { const a = (shape.asks.byRoom.get(ch) ?? []).find((x) => cardIs(x.sealedCard, ref)); return a ? { tid: a.tid, what: a.what, why: a.why } : null; },
-  }), [rooms, shape.asks.byRoom]);
+  }), [rooms, shape.asks.byRoom, shape.isPrivate]);
   const roomChat = focus && homeOpen && channel === focus.room && (root ?? null) === focus.root && currentRoom
     ? (tail: ReactNode) => roomPane(currentRoom, null, `Message ${currentRoom.name.replace(/^#/, "")}`, currentRoom.name, tail) : null;
   return <VaultProfileProvider profile={profile}><NoteOpener.Provider value={openNote}><CardLinksContext.Provider value={cardLinks}><main className={`shell sh-shell in-room${barAside ? " sh-bar-aside" : ""}${roomShown ? " sh-in-room" : ""} ${topNote ? "note-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>

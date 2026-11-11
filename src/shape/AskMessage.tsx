@@ -42,7 +42,8 @@ export function AskButtons({ ask, busy, onAct, archive = false }: { ask: Ask; bu
 export function CardLine({ ask, state, children }: { ask: Ask; state: CardState | null; children?: (s: Extract<CardState, { state: "waiting" }>) => ReactNode }) {
   const links = useCardLinks();
   if (!state || state.state === "checking") return null;
-  const where = state.state === "waiting" && state.channel !== ask.room ? `#${links?.roomName(state.channel) ?? "another room"}` : "this room";
+  const other = state.state === "waiting" && state.channel !== ask.room ? links?.roomName(state.channel) ?? null : null;
+  const where = state.state === "waiting" && state.channel !== ask.room ? (other ? `#${other}` : "another room") : "its room";
   if (state.state === "waiting") return <div className="sh-ask-card" data-card-state="waiting">
     <p className="sh-ask-card-line"><span aria-hidden="true">🔑</span> Its card waits in {where} · answer by {clockTime(state.expires)}</p>
     {children?.(state)}

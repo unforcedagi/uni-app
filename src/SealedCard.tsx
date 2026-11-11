@@ -90,7 +90,8 @@ function Badge({ cls }: { cls: SealedRow["class"] }) {
   return <span className={`sealed-badge ${cls}`}>{cls === "powerful" ? "Powerful" : "Routine"}</span>;
 }
 
-export function SealedCard({ channel, reference }: { channel: string; reference: string }) {
+/** `ts`: when the card was posted (unix seconds), when the room knows it: a card older than two days is history, and offers no repost. */
+export function SealedCard({ channel, reference, ts }: { channel: string; reference: string; ts?: number }) {
   const [view, setView] = useState<SealedCardView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -101,7 +102,9 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
   const links = useCardLinks();
   const room = links?.roomName(channel) ?? null;
   const linked = links?.askFor(channel, reference) ?? null;
-  const repost = (why: string, fp: string | null) => <RepostButton channel={channel} cardRef={reference}
+  // (a card from days ago is history: likely replaced already, so it offers no fresh one)
+  const recent = ts === undefined || Date.now() / 1000 - ts < 2 * 86_400;
+  const repost = (why: string, fp: string | null) => recent && <RepostButton channel={channel} cardRef={reference}
     body={repostBody({ tid: linked?.tid ?? null, what: linked?.what ?? null, fp, why })} />;
   // an answer on any card can change this one (the same request on another card is then a replay): read it again
   const [again, setAgain] = useState(0);

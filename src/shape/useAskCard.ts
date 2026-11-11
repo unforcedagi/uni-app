@@ -3,15 +3,22 @@
 // edited to one line with no fence (its words say how it ended); one still fenced is checked by Rust (`sealed_card`): waiting, answered here,
 // expired or refused; a card in Needs you's waiting list (any room, any thread) is waiting. Read again after any answer (SEALED_CHANGED), when the window comes back, and when its answer-by time passes.
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cardIs, cardState, sealedFence, SEALED_CHANGED, type CardState, type SealedCardView, type SealedWaiting } from "../sealedCardCore";
 import type { Ask } from "./types";
+import { useCardLinks } from "../cardLinks";
 
-type Msg = { ref: string; channel: string; body: string };
+type Msg = { ref: string; channel: string; body: string; edited?: boolean };
 
 export function useAskCard(ask: Pick<Ask, "room" | "sealedCard">): CardState | null {
   const { room, sealedCard } = ask;
   const [st, setSt] = useState<CardState | null>(null);
+  const links = useCardLinks();
+  // (another room's card is only joined when that room's words may show here: never a private room's, never an unknown one's)
+  const shareable = links ? (ch: string) => ch === room || !links.privateRoom(ch) : (ch: string) => ch === room;
+  const shareRef = useRef(shareable); shareRef.current = shareable;
+  const key = `${room}\u0000${sealedCard}`;
+  const shown = useRef(key);
   const [again, setAgain] = useState(0);
   useEffect(() => {
     const bump = () => setAgain((n) => n + 1);
@@ -22,11 +29,12 @@ export function useAskCard(ask: Pick<Ask, "room" | "sealedCard">): CardState | n
   useEffect(() => {
     if (!room || !sealedCard) { setSt(null); return; }
     let live = true;
-    setSt((s) => s ?? { state: "checking" });
+    // a new card (a re-ask) or room: never the old card's state while the new one is read
+    if (shown.current !== key) { shown.current = key; setSt({ state: "checking" }); } else setSt((s) => s ?? { state: "checking" });
     (async () => {
       // a card waiting anywhere on this device (another room, a thread) is waiting, wherever the ask lives
       const waiting = await invoke<SealedWaiting[]>("sealed_waiting").catch(() => [] as SealedWaiting[]);
-      const w = Array.isArray(waiting) ? waiting.find((x) => cardIs(sealedCard, x.ref)) : undefined;
+      const w = Array.isArray(waiting) ? waiting.find((x) => cardIs(sealedCard, x.ref) && shareRef.current(x.channel)) : undefined;
       if (w && w.expires > Date.now() / 1000) { if (live) setSt({ state: "waiting", channel: w.channel, ref: w.ref, expires: w.expires }); return; }
       const rows = await invoke<Msg[]>("get_messages", { channel: room, root: null, limit: 300 }).catch(() => null);
       if (!live || rows === null) return;
@@ -35,7 +43,7 @@ export function useAskCard(ask: Pick<Ask, "room" | "sealedCard">): CardState | n
       if (live) setSt(cardState(msg, view && Array.isArray(view.rows) ? view : null, Date.now() / 1000));
     })();
     return () => { live = false; };
-  }, [room, sealedCard, again]);
+  }, [room, sealedCard, again, key]);
   // a waiting card's answer-by time: read again once it passes
   const until = st?.state === "waiting" ? st.expires : null;
   useEffect(() => {

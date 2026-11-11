@@ -72,7 +72,7 @@ test('2. opened, a card says what it asks: what a yes does, what it touches, who
   // the ask that points at it: its sheet says what its button does, who asked, and shows the card itself, waiting, to answer in place
   const ask = page.locator('.sh-room-ask .sh-ask[data-id="ask-deploy"]');
   await ask.scrollIntoViewIfNeeded();
-  await expect(ask.locator('[data-card-state="waiting"]')).toContainText(/Its card waits in this room · answer by \d/);
+  await expect(ask.locator('[data-card-state="waiting"]')).toContainText(/Its card waits in its room · answer by \d/);
   await ask.locator('.sh-ask-open').click();
   const sheet = page.locator('.sh-ask-sheet');
   await expect(sheet).toBeVisible();
@@ -134,4 +134,16 @@ test("review r1: an ask's words stay in its room; its card found waiting in anot
   await unknown.scrollIntoViewIfNeeded();
   await expect(unknown).toHaveText("🔑 Its card isn't among this room's recent messages on this device.");
   await expect(unknown.getByRole('button')).toHaveCount(0);
+  // review r2: a card waiting in the private room is never named or drawn here, nor in the ask's sheet
+  const hushed = page.locator('.sh-room-ask .sh-ask[data-id="ask-hushed"]');
+  await hushed.scrollIntoViewIfNeeded();
+  await expect(hushed.locator('[data-card-state="missing"]')).toBeVisible();
+  await expect(hushed).not.toContainText('sanctum');
+  await hushed.locator('.sh-ask-open').click();
+  const sheet = page.locator('.sh-ask-sheet');
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator('[data-card-state="missing"]')).toBeVisible();
+  await expect(sheet.locator('.sealed-card')).toHaveCount(0);
+  await expect(sheet).not.toContainText('Private words');
+  await expect(sheet).not.toContainText('sanctum');
 });
