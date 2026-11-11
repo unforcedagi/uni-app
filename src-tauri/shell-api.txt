@@ -19,7 +19,7 @@ command async arcade_home(app: tauri::AppHandle, grey: Option<bool>, still: Opti
 command async arcade_media(app: tauri::AppHandle, card: String, which: String) -> Result<tauri::ipc::Response, ArcadeError>
 command async arcade_profile(app: tauri::AppHandle) -> Result<serde_json::Value, ArcadeError>
 command async arcade_react(app: tauri::AppHandle, reactions: serde_json::Value) -> Result<serde_json::Value, ArcadeError>
-command async arcade_rounds(app: tauri::AppHandle, game: String, n: u32, grey: Option<bool>, still: Option<bool>) -> Result<serde_json::Value, ArcadeError>
+command async arcade_rounds(app: tauri::AppHandle, game: String, n: u32, grey: Option<bool>, still: Option<bool>, look: Option<String>) -> Result<serde_json::Value, ArcadeError>
 command async cal_conflicts(app: tauri::AppHandle) -> Result<serde_json::Value, CalError>
 command async cal_event(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, CalError>
 command async cal_events(app: tauri::AppHandle, from: String, to: String) -> Result<serde_json::Value, CalError>
