@@ -17,7 +17,7 @@ Anyone can clone it, with its full history, and every push to `main` ships a rel
 - **Screenshots and videos are test outputs: ignored, never committed** (`__shots__/`, `walkthrough/` media). A visual
   baseline (`toHaveScreenshot`) may only use synthetic fixtures. Why: a screenshot of the real app shows real data, and
   no test reads the old ones.
-- **The owner's private areas are never named.** The app recognises them by a hash (`src/areas/treeRooms.ts`); the
+- **The owner's private areas are never named.** The app recognises them by a hash (`src/shape/privacy.ts`); the
   fixtures' private area is "Sanctum".
 
 ## The guard: `scripts/check-public.py`

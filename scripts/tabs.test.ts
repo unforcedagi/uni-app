@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/tabs.test.ts
 import assert from "node:assert/strict";
-import { isUniSide, persistable, readUniPlace, serializeUniPlace, viewOf, activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, sameTarget, serializeTabs, updateTab, type TabTarget, type Tabs } from "../src/tabs.ts";
+import { isUniSide, persistable, readUniPlace, serializeUniPlace, viewOf, activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, sameTarget, serializeTabs, updateTab, VAULT_CHOOSER, type TabTarget, type Tabs } from "../src/tabs.ts";
 import { claimRecording, recordingHolder, releaseRecording, RecordingBusy } from "../src/recLock.ts";
 
 let n = 0;
@@ -257,6 +257,21 @@ assert.equal(activeTab(restoreTabs(serializeTabs(resolvedTab), []))?.note?.ref, 
   for (const bad of [{ ...spot, ref: "" }, { ...spot, offset: "4" }, { ...spot, offset: null }, { ...spot, limit: 0 }, { ...spot, limit: 2.5 }, { ...spot, ref: "x".repeat(201) }])
     assert.equal(readUniPlace(JSON.stringify({ v: 1, target: area, spot: bad }), ["ch-lantern"])?.spot, null);
   assert.deepEqual(["areas", "area", "all", "journal", "messages", "mail", "calendar", "note", "vault"].filter((kind) => isUniSide({ kind: kind as TabTarget["kind"] })), ["areas", "area", "all"]);
+}
+
+// T-335 the shape: the applets drawer's Studio and Recipes are places a saved set can reopen on, each one tab
+{
+  for (const kind of ["studio", "recipes"] as const) {
+    const saved = restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "x", kind, title: "?" }], active: "x", recent: ["x"] }), []);
+    assert.deepEqual(activeTab(saved), { id: "x", kind, title: kind === "studio" ? "Studio" : "Recipes" });
+    const once = openTab(openTab(EMPTY_TABS, { kind, title: "t" }, "new", () => "a"), { kind, title: "t" }, "new", () => "b");
+    assert.equal(once.tabs.length, 1);
+  }
+}
+// the Vault applet's chooser (a vault tab naming no vault) survives a re-sync of the rooms, which restores every tab
+{
+  const chooser = openTab(EMPTY_TABS, { kind: "vault", vault: VAULT_CHOOSER, title: "Vault" }, "new", () => "v");
+  assert.deepEqual(activeTab(restoreTabs(serializeTabs(chooser), ["c1"])), { id: "v", kind: "vault", vault: VAULT_CHOOSER, title: "Vault" });
 }
 
 console.log("tabs tests passed");

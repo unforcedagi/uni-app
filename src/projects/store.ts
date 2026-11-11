@@ -13,7 +13,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useSyncExternalStore } from "react";
 import { activeProfile, onVaultChange } from "../areas/profile";
-import type { RawNote } from "../areas/taskCore";
+import type { RawNote } from "../vault/rawNote";
 import { POLL_MS, reader } from "../vault/reader";
 import { freshen, workFrom, type LiveWork, type Sources } from "./live";
 import { isHome } from "./model";

@@ -1,7 +1,7 @@
 // T-161: Hermes approval prompts in Needs you: the room, the exact command and why it was flagged, the answers it takes and when it ends.
 // A row opens the room at the prompt with the composer focused (r30's one answer mechanism: the user answers in the chat, nothing is sent
 // for them); it leaves the list when Hermes answers it (approved, denied, timed out) or its own window ends.
-import { answersLine, commandLine, endsLine, type Approval } from "../approvals";
+import { answersLine, endsLine, type Approval } from "../approvals";
 import { elsewhereText, waitingElsewhere } from "../approvalsElsewhere";
 import { useApprovalList } from "../approvalsLive";
 import { jobFingerprint } from "../sealedCardCore";
@@ -46,20 +46,7 @@ export function ApprovalRows({ approvals, className = "cp-list cp-approvals" }: 
   })}</ul>;
 }
 
-/** Over a room's composer while a prompt there waits: what it asks, and a way back to the prompt in the chat. */
-export function ApprovalBanner({ approvals, onShow }: { approvals: readonly Approval[]; onShow: (a: Approval) => void }) {
-  if (!approvals.length) return null;
-  const a = approvals[0];
-  const more = approvals.length > 1 ? ` · ${approvals.length - 1} more waiting` : "";
-  if (a.kind === "sealed") return <div className="approval-banner" role="status" data-ref={a.ref}>
-    <span className="approval-banner-text"><b>Uni asks for your tap</b>: <code>{commandLine(a)}</code>. Answer on its card · {endsLine(a, clock)}{more}</span>
-    <button type="button" className="approval-banner-show" onClick={() => onShow(a)}>Show</button>
-  </div>;
-  return <div className="approval-banner" role="status" data-ref={a.ref}>
-    <span className="approval-banner-text"><b>Uni needs your OK</b> to run <code>{commandLine(a)}</code>. Reply {answersLine(a)} below · {endsLine(a, clock)}{approvals.length > 1 ? ` · ${approvals.length - 1} more waiting` : ""}</span>
-    <button type="button" className="approval-banner-show" onClick={() => onShow(a)}>Show</button>
-  </div>;
-}
+export { ApprovalBanner } from "../shape/ApprovalBanner";
 
 /**
  * T-335: at the top of the room you are in, one line for every approval waiting in another room ("Approval waiting in #kiln"). A tap

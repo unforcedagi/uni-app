@@ -12,7 +12,7 @@
 // when it reaches the note's first line, so lines don't vanish when a part closes. A note from before T-319 is read as before.
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useSyncExternalStore } from "react";
-import type { RawNote } from "../areas/taskCore";
+import type { RawNote } from "../vault/rawNote";
 import { feedPages, parseFeed, partBefore, withHead, withPart, type FeedItem, type FeedPages, type Held } from "./sessionWords";
 
 export type FeedState = { items: FeedItem[]; ready: boolean; error: string | null;

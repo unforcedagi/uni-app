@@ -7,7 +7,7 @@
 // is the task's own `needs_aaron`, as uni-tasks wrote it (the one rule: open, owned by him, fresh, in a live place with a live room).
 import type { Ask, ShapeRoom } from "./types.ts";
 import { metaOf, type Note } from "../vault/reader.ts";
-import { isPrivateName } from "../areas/treeRooms.ts";
+import { isPrivateName } from "./privacy.ts";
 
 export type Kind = Ask["kind"];
 /** An ask as the hook needs it to answer: the shared `Ask` plus what the write and the post need. */

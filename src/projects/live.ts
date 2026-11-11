@@ -10,11 +10,11 @@
 //   id or its room's name says. One that says no area is in the Unfiled home.
 // - A run touching a private place by any clue (node, task's node, folder, room id or name) is the private place's, whatever public clue it
 //   also carries: it goes to the private area, or (with none) to Unfiled with none of its words. The app's own private-place rules decide.
-import type { RawNote } from "../areas/taskCore.ts";
+import type { RawNote } from "../vault/rawNote.ts";
 import { metaOf } from "../vault/reader.ts";
 import { parseArea, parseProject, type Area as TreeNode } from "../areas/areasCore.ts";
 import { buildTree } from "../areas/treeCore.ts";
-import { isPrivateName, isPrivatePath, runIsPrivate } from "../areas/treeRooms.ts";
+import { isPrivateName, isPrivatePath, runIsPrivate } from "../shape/privacy.ts";
 import { redactRaw, safeStep } from "./sessionWords.ts";
 import { END_WHYS, isFolder, makeProject, ModelError, UNFILED, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type SessionWait, type Work } from "./model.ts";
 

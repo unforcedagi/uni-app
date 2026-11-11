@@ -1,0 +1,25 @@
+/* T-335 the shape: rules the surviving pieces still use (the self-test, a note reference in a line, Retry, the vault choice, the key
+   error), moved here as they were from the old home's sheets (src/areas/areas.css, tree.css, lifeos.css), which nothing imports now. */
+.area-frame { flex: 1; min-height: 0; width: 100%; border: 0; background: transparent; color-scheme: normal; }
+.area-selftest { display: flex; flex-direction: column; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.selftest-status { margin: 0; font-size: 13px; color: var(--text-soft); overflow-wrap: anywhere; }
+.selftest-status.pass { color: var(--accent); } .selftest-status.fail { color: var(--danger); } .selftest-status.approved { color: var(--text); font-weight: 600; }
+.selftest-frame { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.selftest-frame iframe { width: 320px; height: 200px; }
+.selftest-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12px; color: var(--text-soft); }
+.selftest-list .pass span:first-child { color: var(--accent); } .selftest-list .fail { color: var(--danger); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.area-stopped { margin: 28px auto; max-width: 46ch; padding: 14px 18px; border: 1px solid var(--danger); border-radius: var(--radius); color: var(--danger); font-size: 14px; line-height: 1.5; text-align: center; }
+.task-do { all: unset; box-sizing: border-box; min-height: 48px; padding: 0 16px; display: flex; align-items: center; border: var(--g-hair) solid var(--g-line-strong); border-radius: 999px; font-weight: 600; cursor: pointer; background: var(--th-paper); color: var(--th-ink); }
+.task-do.primary { background: var(--th-ink); color: var(--th-paper); }
+.task-do.quiet { border-color: var(--th-hair2); font-weight: 500; }
+.task-do:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 3px; }
+.lifeos-vault { display: flex; gap: 8px; align-items: center; padding: 6px 12px; font-size: 13px; color: var(--muted, #666); }
+.lifeos-vault select { font: inherit; }
+.cp-ref { all: unset; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.cp-ref:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+.cp-ref-wait { color: var(--th-mute); }
+.cp-retry { all: unset; cursor: pointer; min-height: 28px; display: inline-flex; align-items: center; font: 600 12.5px var(--th-sans); color: var(--th-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--g-line-strong); text-underline-offset: 3px; }
+.cp-retry:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+.key-error { display: flex; align-items: center; gap: 8px; justify-content: center; }
+.cp-ref-off { text-decoration-style: dotted; opacity: .75; }

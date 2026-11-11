@@ -13,10 +13,9 @@ export type TaskState = "open" | "doing" | "waiting" | "done" | "archived";
 export type AnyState = TaskState | "decided";
 export const LIVE_STATES: readonly TaskState[] = ["open", "doing", "waiting"];
 
-export type RawNote = {
-  id?: unknown; path?: unknown; tags?: unknown; metadata?: unknown; updatedAt?: unknown; createdAt?: unknown;
-  lastUpdatedBy?: unknown; lastUpdatedVia?: unknown; content?: unknown;
-};
+import type { RawNote } from "../vault/rawNote.ts";
+export type { RawNote, FailureKind } from "../vault/rawNote.ts";
+export { failureKind } from "../vault/rawNote.ts";
 
 /** `priority` on a task note: how soon it needs doing. Absent means unsorted, which reads as `soon`. */
 export type Priority = "now" | "soon" | "someday";
@@ -299,10 +298,3 @@ export function tasksUnder(tree: TaskTree, path: string, list: readonly Task[]):
   return list.filter((t) => set.has(t.node));
 }
 
-export type FailureKind = "conflict" | "invalid" | "error";
-/** How a failed write reads: 409 `transition_conflict`, 422 `schema_validation`, anything else. */
-export function failureKind(message: string): FailureKind {
-  if (/transition_conflict|\b409\b|conflict:/i.test(message)) return "conflict";
-  if (/schema_validation|\b422\b|invalid value|not one of/i.test(message)) return "invalid";
-  return "error";
-}

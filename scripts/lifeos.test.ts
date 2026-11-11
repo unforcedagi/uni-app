@@ -160,12 +160,7 @@ check("the Tauri side registers vault_query", () => {
 });
 
 
-check("forget clears the areas memory and persistent cache", () => {
-  assert.match(src("../src/App.tsx").split('async function forget()')[1].split('const currentRoom')[0], /forgetAreas\(\)/);
-  const u = src("../src/areas/useAreas.ts");
-  assert.match(u, /export function forgetAreas/);
-  assert.match(u, /deviceCache.clear\(\)/);
-});
+// (T-335 the shape: what Forget sweeps of the old home is tested for real in scripts/shape.test.ts)
 
 // -------------------------------------------------------------------- the tree (T-80b)
 const areaNote = (name: string, metadata: Record<string, unknown> = {}) => ({ id: `a-${name}`, path: `Areas/${name}`, tags: ["area"], content: `# ${name}\n\nAbout ${name}.`, metadata, updatedAt: "2026-10-09T10:00:00Z" });

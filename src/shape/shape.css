@@ -7,15 +7,15 @@
 .sh-glyph, .sh-mark-needs, .sh-back { font-variant-emoji: text; font-family: "Noto Sans Symbols 2", "Noto Sans Symbols", "DejaVu Sans", var(--g-font-ui); }
 
 /* ── Home ── */
-.sh-home { max-width: var(--sh-col); margin: 0 auto; padding-bottom: calc(var(--sh-bar-h) + 16px + env(safe-area-inset-bottom)); color: var(--g-ink); font: 15px/1.45 var(--g-font-ui); }
+.sh-home { max-width: var(--sh-col); margin: 0 auto; padding-bottom: 16px; color: var(--g-ink); font: 15px/1.45 var(--g-font-ui); }
 .sh-top { display: flex; align-items: center; gap: 10px; padding: calc(14px + env(safe-area-inset-top)) 16px 8px; }
 .sh-top h1 { margin: 0; flex: 1; min-width: 0; font: 600 26px/1.15 var(--g-font-display); letter-spacing: -.01em; color: var(--g-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sh-iconbtn { flex: none; width: 40px; height: 40px; border: 0; border-radius: 12px; background: transparent; display: grid; place-items: center; padding: 0; font-size: 22px; color: var(--g-ink-2); cursor: pointer; }
 .sh-iconbtn .mono-icon { width: 21px; height: 21px; }
 .sh-iconbtn:hover, .sh-iconbtn:active { background: var(--g-sunk); }
-.sh-find { display: flex; align-items: center; gap: 10px; margin: 2px 16px 10px; width: calc(100% - 32px); height: 42px; padding: 0 14px; border: var(--g-hair) solid var(--g-line); border-radius: 14px; background: var(--g-sunk); color: var(--g-ink-3); font: 15px/1 var(--g-font-ui); text-align: left; cursor: pointer; }
-.sh-find .mono-icon { width: 18px; height: 18px; color: var(--g-ink-2); }
-.sh-find span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-home > .sh-find { display: flex; align-items: center; gap: 10px; margin: 2px 16px 10px; width: calc(100% - 32px); height: 42px; padding: 0 14px; border: var(--g-hair) solid var(--g-line); border-radius: 14px; background: var(--g-sunk); color: var(--g-ink-3); font: 15px/1 var(--g-font-ui); text-align: left; cursor: pointer; }
+.sh-home > .sh-find .mono-icon { width: 18px; height: 18px; color: var(--g-ink-2); }
+.sh-home > .sh-find span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sh-home-note { margin: 18px 16px; color: var(--g-ink-3); font: 400 15px/1.5 var(--g-font-uni); }
 .sh-home-error { color: var(--g-ink-2); }
 .sh-home-empty { margin: 30px 16px; text-align: center; color: var(--g-ink-3); font: 400 15px/1.5 var(--g-font-uni); }
@@ -41,6 +41,12 @@
 .sh-pin h3 { margin: 2px 0 1px; font: 600 15px/1.3 var(--g-font-ui); color: var(--g-ink); overflow-wrap: anywhere; }
 .sh-pin p { margin: 0; color: var(--g-ink-2); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sh-pin .sh-acts { margin-top: 8px; }
+.sh-pins { grid-template-columns: minmax(0, 1fr); }
+.sh-pin { min-width: 0; }
+/* Uni's own card inside a pin: the pin is its frame (one border, one ground); its buttons wrap under its words on a phone */
+.sh-pin-sealed .sealed-card { margin: 4px 0 0; padding: 0; max-width: none; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.sh-pin-sealed .cc-what { white-space: normal; overflow-wrap: anywhere; }
+.sh-pin-sealed .cc-actions { margin-left: 0; }
 
 /* Rows: glyph, name and time, last line, then the run and the asks the host draws */
 .sh-rows { margin: 0; padding: 0; list-style: none; }
@@ -86,7 +92,54 @@
   .sh-bar { top: 0; right: auto; width: calc(var(--sh-rail-w) + env(safe-area-inset-left)); height: auto; flex-direction: column; justify-content: flex-start; gap: 6px; padding: calc(16px + env(safe-area-inset-top)) 0 16px env(safe-area-inset-left); border-top: 0; border-right: var(--g-hair) solid var(--g-line); }
   .sh-place { flex: none; height: 64px; }
   .sh-count { top: 4px; }
-  .sh-home { padding-bottom: 24px; }
+}
+
+/* ── The shell around the places (App.tsx `.shell.sh-shell`): the bar is fixed, so the places make room for it; the old rail's rules
+   (App.css `.shell`, `.rail`, `.rooms`) assumed a 56px bottom rail or a 64px left one and are overridden here ── */
+.shell.sh-shell { padding-bottom: 0; }
+.sh-shell .conversation { min-height: 0; }
+.sh-shell:not(.sh-bar-aside) .conversation { padding-bottom: calc(var(--sh-bar-h) + env(safe-area-inset-bottom)); }
+.sh-shell.sh-bar-aside .sh-bar { display: none; }
+.sh-shell .note-sheet { left: 0; bottom: 0; }
+.sh-shell .toast { bottom: calc(var(--sh-bar-h) + 12px + env(safe-area-inset-bottom)); }
+.sh-shell.sh-bar-aside .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+.sh-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.sh-room-chat .message-list { flex: 1; min-height: 0; }
+.sh-room-sub { font: 400 15px/1 var(--g-font-ui); color: var(--g-ink-3); }
+
+/* the room's asks at the end of its chat, and an answer its room didn't get */
+.sh-room-tail { display: grid; gap: 10px; margin: 6px 0 4px; }
+.sh-owed { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin: 0; padding: 8px 12px; border: var(--g-hair) dashed var(--g-line-strong); border-radius: 12px; color: var(--g-ink-2); font: 400 13.5px/1.4 var(--g-font-ui); }
+.sh-owed span { flex: 1 1 14em; min-width: 0; }
+/* "Waits on you" jumps to the ask: it is marked for a moment (an outline, so it reads on the ink screen too) */
+.sh-ask-msg.sh-flash { outline: 2px solid var(--g-needs); outline-offset: 4px; border-radius: 12px; transition: outline-color 1.6s var(--g-ease); }
+
+/* Search and Settings: full screen on a phone, a panel beside the rail on a wide screen */
+.sh-overlay { position: fixed; inset: 0; z-index: 55; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; background: var(--g-ground); color: var(--g-ink); padding-top: env(safe-area-inset-top); }
+.sh-overlay[hidden] { display: none; }
+.sh-overlay > .search-view { flex: 1; min-height: 0; margin: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.sh-overlay-head { position: sticky; top: 0; z-index: 1; background: var(--g-ground); }
+.sh-overlay .settings { padding: 0 16px 24px; }
+.sh-overlay-scrim { display: none; }
+
+/* An applet's own head inside its frame: the frame names it and goes back, so the inner title steps aside and its tools stay */
+/* (Mail, Calendar, Messages and To Post name themselves in a `*-title` strong; the frame's head already does, so only their small line
+   (the account, offline, "as Uni") and their tools stay, in one quiet row) */
+.sh-ap-body .note-bar > [class$="-title"] > strong { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sh-ap-body .note-bar > [class$="-title"] > small { margin: 0; font-size: 12.5px; }
+.sh-ap-body .note-bar:has(> [class$="-title"]) { min-height: 44px; padding-top: 0; padding-bottom: 0; overflow: visible; border-bottom: 0; }
+/* the Arcade's home names itself and has its own Back: in the frame, the frame's head is both */
+.sh-ap-body .ta-home-head > .ta-back { display: none; }
+.sh-ap-body .ta-home-head > .ta-home-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sh-vaults { padding: 4px 12px 24px; }
+
+@media (min-width: 900px) {
+  .sh-shell .conversation, .sh-shell:not(.sh-bar-aside) .conversation { margin-left: calc(var(--sh-rail-w) + env(safe-area-inset-left)); padding-bottom: 0; }
+  .sh-shell.sh-bar-aside .sh-bar { display: flex; }
+  .sh-shell .note-sheet { left: calc(var(--sh-rail-w) + env(safe-area-inset-left)); }
+  .sh-shell .toast, .sh-shell.sh-bar-aside .toast { bottom: calc(24px + env(safe-area-inset-bottom)); }
+  .sh-overlay { inset: 0 auto 0 calc(var(--sh-rail-w) + env(safe-area-inset-left)); width: min(560px, calc(100vw - var(--sh-rail-w))); border-right: var(--g-hair) solid var(--g-line); box-shadow: var(--g-shadow-2); }
+  .sh-overlay-scrim { display: block; position: fixed; inset: 0; z-index: 54; border: 0; padding: 0; background: var(--g-scrim); }
 }
 
 /* ── Ink: shape and word, heavier lines, no fills that only tint ── */
@@ -94,7 +147,9 @@
 :root[data-screen="ink"] .sh-unread-pill, :root[data-screen="ink"] .sh-count { background: #000; color: #fff; }
 :root[data-screen="ink"] .sh-place[aria-current="page"] i { background: none; outline: 1.5px solid #000; }
 :root[data-screen="ink"] .sh-strip { border-top: 0; }
+:root[data-screen="ink"] .sh-ask-msg.sh-flash { outline: 3px solid #000; transition: none; }
+:root[data-screen="ink"] .sh-owed { border: 1.5px dashed #000; }
 :root[data-screen="ink"] .sh-home *, :root[data-screen="ink"] .sh-room-top *, :root[data-screen="ink"] .sh-strip *, :root[data-screen="ink"] .sh-bar * { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
-  .sh-btn, .sh-place i { transition: none; }
+  .sh-btn, .sh-place i, .sh-ask-msg.sh-flash { transition: none; }
 }

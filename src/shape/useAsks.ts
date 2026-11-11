@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { reader } from "../vault/reader.ts";
 import type { Note } from "../vault/reader.ts";
-import { failureKind } from "../areas/taskCore.ts";
+import { failureKind } from "../vault/rawNote.ts";
 import { activeProfile } from "../areas/profile.ts";
 import { findUniMember } from "../uniActions.ts";
 import { relayAccepted } from "../voiceOutbox.ts";
@@ -61,7 +61,13 @@ async function write(vault: string, ask: VaultAsk, metadata: Record<string, unkn
   } catch (e) { const message = String(e); return { ok: false, kind: failureKind(message), message }; }
 }
 
-export function useAsks(o: { vault: string; identity: string | null; rooms: ShapeRoom[]; uniRoom: string | null; on: boolean }) {
+/** Forget this device (Settings, "Forget this device key"): every owed post kept here, for every identity and vault. */
+export function forgetAsks(): void {
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith("uni.asks.owed.v1:")) localStorage.removeItem(k); } catch { /* unavailable storage */ }
+}
+
+/** `privateRooms`: rooms (by channel id) whose asks stay inside them; never drawn on home or in a strip. */
+export function useAsks(o: { vault: string; identity: string | null; rooms: ShapeRoom[]; uniRoom: string | null; on: boolean; privateRooms?: ReadonlySet<string> }) {
   const on = o.on && !!o.identity;
   const owner = `${o.identity ?? ""}|${o.vault}`;
   const [rows, setRows] = useState<Note<"task">[]>([]);
@@ -97,7 +103,7 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
     return reader.onPoll(() => void read());
   }, [on, read]);
 
-  const all = useMemo(() => asksFrom(rows, o.rooms, { uniRoom: o.uniRoom }), [rows, o.rooms, o.uniRoom]);
+  const all = useMemo(() => asksFrom(rows, o.rooms, { uniRoom: o.uniRoom, privateRooms: o.privateRooms }), [rows, o.rooms, o.uniRoom, o.privateRooms]);
   // what the vault no longer lists is settled: stop hiding it by hand
   useEffect(() => {
     setGone((g) => { const live = new Set(all.map((a) => a.id)); const next = new Map([...g].filter(([id]) => live.has(id))); return next.size === g.size ? g : next; });
