@@ -21,7 +21,7 @@ type Home = { stats: Stats; fresh?: Partial<Record<PlayGame, number>>; look?: Lo
 
 /** Voice for Ripple: the app's own recorder session, saved as a journal voice entry. One recording at a time: a second
  *  start is refused, a second stop waits for the first, and cancel during a stop resolves it with nothing kept. */
-export function journalVoice(save: (blob: Blob, mime: string) => Promise<string>, allowed: () => void = () => {}): VoiceCapture {
+export function journalVoice(save: (blob: Blob, mime: string) => Promise<string>, allowed: () => void | Promise<void> = () => {}): VoiceCapture {
   let session: RecorderSession<null> | null = null;
   let done: ((v: { blob: Blob; mime: string } | null) => void) | null = null;
   let stopping: Promise<{ ref: string; seconds: number } | null> | null = null;
@@ -29,11 +29,17 @@ export function journalVoice(save: (blob: Blob, mime: string) => Promise<string>
   // a recording that ended on its own (the mic went away) before stop was asked for
   let early: { blob: Blob; mime: string } | null = null;
   let t0 = 0;
+  let asking = false, asks = 0;
   const end = () => { session?.dispose(); session = null; };
   return {
     async start() {
-      if (session) throw new Error("already recording");
-      allowed(); // throws unless the grant lets the Arcade record
+      if (session || asking) throw new Error("already recording");
+      // before the microphone opens: throws unless the grant lets the Arcade record AND the answer could be saved (nothing is
+      // recorded that would then be refused)
+      const mine = ++asks;
+      asking = true;
+      try { await allowed(); } finally { asking = false; }
+      if (mine !== asks) return; // left while it was asked: no recording starts
       early = null;
       const s = new RecorderSession<null>((blob, mime) => { const d = done; done = null; if (d) d({ blob, mime }); else early = { blob, mime }; });
       session = s;
@@ -61,6 +67,7 @@ export function journalVoice(save: (blob: Blob, mime: string) => Promise<string>
       return stopping;
     },
     cancel() {
+      asks++;
       const d = done; done = null; d?.(null);
       session?.stop();
       end();
@@ -83,7 +90,7 @@ export function ArcadeView({ port, ownerName, onBack, look }: { /** The Arcade's
     for (const p of urls.current.values()) void p.then((u) => { if (u) URL.revokeObjectURL(u); });
     urls.current.clear();
   }, []);
-  const voice = useMemo(() => journalVoice(saveVoiceEntry(port), () => port.need("voice")), [port]);
+  const voice = useMemo(() => journalVoice(saveVoiceEntry(port), async () => { port.need("voice"); await port.vault.writable("home", newDraft("", "voice").path); }), [port]);
   // a typed Ripple answer is filed as a journal entry; the door hears where it landed, never the words (as for voice)
   const typedRef = useRef(new Map<string, string>());
   // the home asks for stats and fresh together: stats share the answer fresh asked for

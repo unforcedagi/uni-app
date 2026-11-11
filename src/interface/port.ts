@@ -4,9 +4,10 @@
 // op, note or folder). A read is judged on the note that comes back, never on what was asked for, and a note outside
 // the grant reads as absent, so the port is no oracle for what exists.
 //
-// The boundary: the applet's own code must hold no other way out. scripts/appletV2.test.ts fails the build if a v2
-// applet's folder imports Tauri, so the port is its only path to a command. (A sealed applet's boundary is the frame
-// and session.ts; this port is for code compiled into the app.)
+// The boundary is one of construction: the applet's folder is written with no other way to a shell command, and
+// scripts/appletV2.test.ts keeps it so (no Tauri, no command names, no network, no microphone, a short list of shell
+// imports). docs/interfaces.md says what that does and doesn't cover. (A sealed applet's boundary is the frame and
+// session.ts; this port is for code compiled into the app.)
 // Pure: no React, no Tauri. The shell supplies the backends.
 
 import { ContractError, ERROR_CODES } from "./contract.ts";
@@ -24,8 +25,13 @@ export type PortBackends = {
   command(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
   query(vault: string, q: { type?: string; pathPrefix?: string; limit: number; offset: number }): Promise<PortNote[]>;
   note(vault: string, ref: string): Promise<PortNote | null>;
-  /** Add a note through the shell's writer (it queues offline and never doubles a retry). */
-  create(vault: string, note: NewNote, audio?: { bytes: Uint8Array; mime: string }, opts?: { saveAnother?: boolean }): Promise<unknown>;
+  /** Can the shell's writer add notes to this vault right now? Rejects with the reason when it can't. */
+  writable(vault: string): Promise<void>;
+  /**
+   * Add a note through the shell's writer (it queues offline and never doubles a retry). `made`: the ids or paths of the
+   * notes the writer says this call created, empty when it can't say (queued, landed on another name, held as a duplicate).
+   */
+  create(vault: string, note: NewNote, audio?: { bytes: Uint8Array; mime: string }, opts?: { saveAnother?: boolean }): Promise<{ result: unknown; made: string[] }>;
   /** Show a note to the owner. */
   open(vault: string, path: string): void;
 };
@@ -41,7 +47,7 @@ export type PortOptions = {
 
 export function createAppletPort(grant: Grant, be: PortBackends, opts: PortOptions) {
   let closed = false;
-  // the notes this port added: `own` rules cover them, and nothing else
+  // the notes the shell's writer says this port added (ids or paths): `own` rules cover them, and nothing else
   const made = new Set<string>();
   const refuse = (code: Refusal["code"], what: string): never => {
     opts.onRefused?.({ code, what });
@@ -54,7 +60,10 @@ export function createAppletPort(grant: Grant, be: PortBackends, opts: PortOptio
     if (!name || !grant.vaults.some((v) => v.vault === name)) refuse("not_granted", `${what} in the ${vault} vault`);
     return name!;
   };
-  const facts = (n: PortNote) => ({ path: typeof n.path === "string" ? n.path : null, tags: Array.isArray(n.tags) ? n.tags : null, own: typeof n.path === "string" && made.has(n.path) });
+  const facts = (n: PortNote) => ({ path: typeof n.path === "string" ? n.path : null, tags: Array.isArray(n.tags) ? n.tags : null,
+    own: (typeof n.id === "string" && made.has(n.id)) || (typeof n.path === "string" && made.has(n.path)) });
+  /** Asked again when the shell answers: a grant that ended while a call was in flight gets nothing back from it. */
+  const after = <T,>(value: T): T => { check(); return value; };
 
   return {
     grant,
@@ -71,7 +80,7 @@ export function createAppletPort(grant: Grant, be: PortBackends, opts: PortOptio
       if (!grant.doors.some((d) => d.door === door)) refuse("not_granted", `use the ${door} door`);
       const def = doorOp(door, op);
       if (!def || !allowsDoor(grant, door, op)) refuse("out_of_scope", `ask the ${door} door to ${op}`);
-      return (await be.command(def!.cmd, args)) as T;
+      return after(await be.command(def!.cmd, args)) as T;
     },
     vault: {
       /** Notes of a type and/or under a folder the grant lets it read; anything else that came back is dropped. */
@@ -81,13 +90,13 @@ export function createAppletPort(grant: Grant, be: PortBackends, opts: PortOptio
         if (!allowsQuery(grant, name, q)) refuse("out_of_scope", `list ${q.type ?? "notes"}${q.pathPrefix ? ` in ${q.pathPrefix}` : ""} in the ${name} vault`);
         const limit = Math.min(200, Math.max(1, Math.floor(q.limit ?? 50))), offset = Math.max(0, Math.floor(q.offset ?? 0));
         const rows = await be.query(name, { ...(q.type ? { type: q.type } : {}), ...(q.pathPrefix ? { pathPrefix: q.pathPrefix } : {}), limit, offset });
-        return rows.filter((n) => allowsNote(grant, name, "read", facts(n)));
+        return after(rows).filter((n) => allowsNote(grant, name, "read", facts(n)));
       },
       /** One note, or null when it is absent or outside the grant (the two look the same). */
       async note(vault: string, ref: string): Promise<PortNote | null> {
         check();
         const name = vaultOf(vault, "read notes");
-        const n = await be.note(name, ref).catch(() => null);
+        const n = after(await be.note(name, ref).catch(() => null));
         return n && allowsNote(grant, name, "read", facts(n)) ? n : null;
       },
       /** Add a note. Every path it could land on must be inside a create rule. */
@@ -101,11 +110,19 @@ export function createAppletPort(grant: Grant, be: PortBackends, opts: PortOptio
         const paths = [copy.path, ...alternates];
         const tags = Array.isArray(copy.tags) ? copy.tags : null;
         if (!paths.every((p) => typeof p === "string" && allowsNote(grant, name, "create" satisfies Verb, { path: p, tags }))) refuse("out_of_scope", `add a note at ${String(copy.path).slice(0, 80)} in the ${name} vault`);
-        const out = (await be.create(name, copy, audio, o)) as T;
-        // `own` covers a note only when it is known where it landed: with alternates it could be any of them, so none is claimed
-        // (claiming them all would let it name someone else's note as an alternate and then read it as its own)
-        if (!alternates.length) made.add(copy.path);
-        return out;
+        const out = await be.create(name, copy, audio, o);
+        // `own` covers only what the writer says this call made. The path asked for is never taken on trust: the writer may
+        // have landed on another name, or added nothing, and the asked-for path may be someone else's note.
+        for (const ref of out.made) if (typeof ref === "string" && ref) made.add(ref);
+        return after(out.result) as T;
+      },
+      /** Would a note at this path be added right now? Throws as `create` would, without writing: ask before work that ends in a save. */
+      async writable(vault: string, path: string): Promise<void> {
+        check();
+        const name = vaultOf(vault, "add notes");
+        if (!allowsNote(grant, name, "create", { path, tags: null })) refuse("out_of_scope", `add a note at ${String(path).slice(0, 80)} in the ${name} vault`);
+        await be.writable(name);
+        check();
       },
     },
     /** Show the owner a note. Only one in a folder the grant lets it read (a folder rule: the shell judges the path alone). */

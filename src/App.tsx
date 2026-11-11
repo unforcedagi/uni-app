@@ -2760,7 +2760,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       case "calendar": return <Calendar />;
       case "messages": return <Messages />;
       // contract 2: the Arcade runs only behind its grant card, and reaches things only through the port the gate hands it
-      case "arcade": return applet?.v2 ? <AppletGate applet={applet} home={lifeVault || null} journalVault={journalVault} rooms={rooms} reviewing={accessOpen} onReviewDone={() => setAccessOpen(false)} onAllowed={setAccessHeld} onOpenNote={openArcadeNote}>
+      case "arcade": return applet?.v2 ? <AppletGate applet={applet} home={lifeVault || null} rooms={rooms} reviewing={accessOpen} onReviewDone={() => setAccessOpen(false)} onAllowed={setAccessHeld} onOpenNote={openArcadeNote}>
         {(port) => <ArcadeView port={port} ownerName={myName ?? null} look={arcadeLook} onBack={backToDrawer} />}</AppletGate> : null;
       case "posts": return <ToPost key={active.path ?? ""} vault={lifeVault} node={active.path ?? null} />;
       case "studio": return <Studio looks={shape.looks} onOpenLink={(url) => void openLink(url).catch(() => {})} />;

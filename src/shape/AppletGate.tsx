@@ -16,35 +16,43 @@ import "./applets.css";
 
 const grants = deviceGrants();
 
+type Flush = { sent?: unknown; error?: unknown; remaining?: unknown; duplicate?: unknown };
+
 /** The shell's side of the port: what runs once the port has said yes. */
-function backends(journalVault: string | null, onOpenNote: (vault: string, path: string) => void): PortBackends {
+function backends(onOpenNote: (vault: string, path: string) => void): PortBackends {
+  // The one writer the shell has that queues offline and never doubles a retry is the journal's, and it saves to the journal's own
+  // vault (Journal settings), whatever it is asked. So a note is added only when the vault the grant named IS that vault. It is
+  // asked from the app core at every write, never from a copy: the setting can change while the applet is open.
+  const writable = async (vault: string) => {
+    const journal = await invoke<{ vault?: string }>("journal_config").then((c) => c.vault || null, () => null);
+    if (journal !== vault) throw new Error(journal ? `Not saved: your journal is kept in the ${journal} vault, and this was allowed for the ${vault} vault.` : "Not saved: the app couldn't tell where your journal is kept.");
+  };
   return {
     command: (cmd, args) => invoke(cmd, args),
     // (the vault commands list by tag; a folder alone has no listing here yet)
     query: (vault, q) => (q.type ? invoke<Record<string, unknown>[]>("vault_query", { vault, tag: q.type, includeContent: false, limit: q.limit, offset: q.offset })
       : Promise.reject(new Error("listing a folder without a type isn't built"))),
     note: (vault, ref) => invoke<{ note: Record<string, unknown> }>("vault_note", { vault, noteRef: ref }).then((d) => d.note),
-    // The one writer the shell has that queues offline and never doubles a retry is the journal's, and it writes to the journal's
-    // own vault (Journal settings), whatever it is asked. So a note is added only when the vault the grant named IS that vault:
-    // the card never says one vault while the write lands in another.
-    create: (vault, note, audio, o) => {
-      if (!journalVault || vault !== journalVault) return Promise.reject(new Error(`Not saved: your journal is kept in the ${journalVault ?? "(unknown)"} vault, and this was allowed for the ${vault} vault.`));
-      if (!note.path.startsWith("Journal/")) return Promise.reject(new Error("Not saved: the shell can only add journal entries today."));
-      return audio
-        ? invoke("journal_save_voice", audio.bytes, { headers: { "x-entry": JSON.stringify(note), "x-audio-mime": audio.mime } })
-        : invoke("journal_save_text", { entry: note, saveAnother: !!o?.saveAnother });
+    writable,
+    create: async (vault, note, audio, o) => {
+      await writable(vault);
+      if (!note.path.startsWith("Journal/")) throw new Error("Not saved: the shell can only add journal entries today.");
+      const r = await (audio
+        ? invoke<Flush>("journal_save_voice", audio.bytes, { headers: { "x-entry": JSON.stringify(note), "x-audio-mime": audio.mime } })
+        : invoke<Flush>("journal_save_text", { entry: note, saveAnother: !!o?.saveAnother }));
+      // the writer names what it sent; only when that is this one entry and nothing waits is it known to be the note just made
+      const sent = Array.isArray(r?.sent) ? r.sent.filter((x): x is string => typeof x === "string") : [];
+      return { result: r, made: !r?.error && !r?.duplicate && sent.length === 1 && (r?.remaining ?? 0) === 0 ? sent : [] };
     },
     open: onOpenNote,
   };
 }
 
-export function AppletGate({ applet, home, journalVault, rooms, reviewing, onReviewDone, onAllowed, onOpenNote, children }: {
+export function AppletGate({ applet, home, rooms, reviewing, onReviewDone, onAllowed, onOpenNote, children }: {
   /** A built-in on contract 2 (`applet.v2`). */
   applet: AppletManifest;
   /** The owner's own vault on this device. */
   home: string | null;
-  /** The vault the journal's writer saves to (Journal settings); a note is added only when the grant named that vault. */
-  journalVault: string | null;
   rooms: readonly { id: string; name: string }[];
   reviewing: boolean;
   onReviewDone: () => void;
@@ -76,7 +84,8 @@ export function AppletGate({ applet, home, journalVault, rooms, reviewing, onRev
   const allowed = !!key && grants.status(subject, key, BUILTIN_CODE) === "ok";
   const onAllowedRef = useRef(onAllowed); onAllowedRef.current = onAllowed;
   useEffect(() => { onAllowedRef.current(allowed); return () => onAllowedRef.current(false); }, [allowed]);
-  // The port asks `live` before every call, so a revoke, an expiry or leaving the screen ends it at once, in-flight work included.
+  // The port asks `live` before every call and again when the shell answers, so after a revoke, an expiry or leaving the screen
+  // no new call passes and one in flight gets nothing back.
   // `current` is set while rendering (the applet's own effects run before this component's, and their first calls must pass);
   // `mounted` goes false when the gate leaves the screen.
   const current = useRef<string | null>(null);
@@ -84,16 +93,24 @@ export function AppletGate({ applet, home, journalVault, rooms, reviewing, onRev
   const mounted = useRef(true);
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const openNoteRef = useRef(onOpenNote); openNoteRef.current = onOpenNote;
-  const journalRef = useRef(journalVault); journalRef.current = journalVault;
   const port = useMemo(() => {
     if (!allowed || !resolved.ok || !key) return null;
     const mine = key;
-    return createAppletPort(resolved.grant, backends(journalRef.current, (v, p) => openNoteRef.current(v, p)), {
+    return createAppletPort(resolved.grant, backends((v, p) => openNoteRef.current(v, p)), {
       home,
       live: () => mounted.current && current.current === mine && grants.status(subject, mine, BUILTIN_CODE) === "ok",
       onRefused: (r) => console.warn(`[applet ${m.id}] refused (${r.code}): ${r.what}`),
     });
   }, [allowed, resolved, key, home, subject, m.id]);
+
+  // a grant that runs out while the applet is open: the card comes back then, not at the next tap
+  const endsAt = allowed ? grants.record(subject)?.expires ?? null : null;
+  useEffect(() => {
+    const ms = endsAt ? Date.parse(endsAt) - Date.now() : NaN;
+    if (!(ms > 0)) return;
+    const t = window.setTimeout(bump, Math.min(ms + 50, 2 ** 31 - 1));
+    return () => window.clearTimeout(t);
+  }, [endsAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const roomName = (id: string) => cleanText(rooms.find((r) => r.id === id)?.name.replace(/^#/, "") ?? id);
   if (!resolved.ok) return <div className="sh-ap-calm sh-ap-gate" role="alert"><p className="sh-ap-calm-head">{m.name} can't open</p><p>It was not run: {resolved.error}.</p></div>;

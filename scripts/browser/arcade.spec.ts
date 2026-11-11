@@ -73,7 +73,7 @@ async function boot(page: Page) {
       if (cmd === 'arcade_react') { w.__arcade.push(...args.reactions); return { ok: true, stored: args.reactions.length, stats: stats() }; }
       if (cmd === 'arcade_profile') return { profile: profile(), markdown: '# Taste profile', note: w.__profileNote ?? { vault: 'uni', path: 'Taste/Profile' } };
       if (cmd === 'arcade_distill') return { queued: true };
-      if (cmd === 'journal_config' && w.__journalVault) return { hub: 'https://example.invalid', vault: w.__journalVault };
+      if (cmd === 'journal_config') { if (w.__journalConfigDelay && !w.__journalConfigAsked) { w.__journalConfigAsked = true; await new Promise((r) => setTimeout(r, w.__journalConfigDelay)); } if (w.__journalVault) return { hub: 'https://example.invalid', vault: w.__journalVault }; }
       if (cmd === 'arcade_media') return new ArrayBuffer(8);
       if (cmd === 'journal_save_voice') { await new Promise((r) => setTimeout(r, w.__saveDelay ?? 0)); return { sent: [noteId], remaining: 0, error: null }; }
       if (cmd === 'journal_save_text') return { sent: [noteId], remaining: 0, error: null };
@@ -252,6 +252,44 @@ test('contract 2: a journal kept in another vault than the card named is not wri
   await expect(page.getByText(/journal is kept in the elsewhere vault/)).toBeVisible();
   expect(await calls(page, 'journal_save_text')).toHaveLength(0);
   expect(await reactions(page)).toHaveLength(0);
+});
+
+const typeAnswer = async (page: Page, words: string) => {
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: /Write it instead/ }));
+  await page.getByLabel('Your answer').fill(words);
+  await tap(page, page.getByRole('button', { name: 'Keep it' }));
+};
+
+test('contract 2: the journal moved to another vault while the Arcade is open: the next answer is not written there', async ({ page }) => {
+  await boot(page);
+  await openArcade(page);
+  // Journal settings, changed after the Arcade was allowed and opened (the shell's writer reads its vault at every save)
+  await page.evaluate(() => { (window as any).__journalVault = 'elsewhere'; });
+  await typeAnswer(page, 'Made-up: hold it all until Monday.');
+  await expect(page.getByText(/journal is kept in the elsewhere vault/)).toBeVisible();
+  expect(await calls(page, 'journal_save_text')).toHaveLength(0);
+});
+
+test('contract 2: an Arcade opened before the app knew its journal vault still saves once it does', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__journalConfigDelay = 2500; });
+  await boot(page);
+  await openArcade(page);
+  await page.waitForTimeout(2600);
+  await typeAnswer(page, 'Made-up: hold it all until Monday.');
+  await expect(page.getByText('In your journal. Uni will fold it into Systems.')).toBeVisible();
+  expect(await calls(page, 'journal_save_text')).toHaveLength(1);
+});
+
+test('contract 2: with the journal in another vault, a spoken answer is refused before anything is recorded', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__journalVault = 'elsewhere'; });
+  await boot(page);
+  await openArcade(page);
+  await tap(page, page.locator('[data-toy="ripple"]'));
+  await tap(page, page.getByRole('button', { name: 'Answer out loud' }));
+  await expect(page.getByText(/journal is kept in the elsewhere vault/)).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__tracks.length), 'the microphone was never opened').toBe(0);
+  expect(await calls(page, 'journal_save_voice')).toHaveLength(0);
 });
 
 test('the Arcade opens from the app, a burst saves each pick once, and the way back returns to where you were', async ({ page }) => {

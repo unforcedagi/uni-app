@@ -42,7 +42,8 @@ function shell() {
     command: async (...args) => { calls.push({ what: "command", args }); return { ok: true }; },
     query: async (...args) => { calls.push({ what: "query", args }); return notes; },
     note: async (...args) => { calls.push({ what: "note", args }); return notes.find((n) => n.id === args[1] || n.path === args[1]) ?? null; },
-    create: async (...args) => { calls.push({ what: "create", args }); return { sent: ["x"] }; },
+    writable: async (...args) => { calls.push({ what: "writable", args }); },
+    create: async (...args) => { calls.push({ what: "create", args }); return { result: { sent: ["x"] }, made: [] }; },
     open: (...args) => { calls.push({ what: "open", args }); },
   };
   return { calls, be };
@@ -265,7 +266,7 @@ await check("a type rule covers that type and those beneath it, wherever the not
 await check("writing outside the grant is refused: only a journal entry, and every path it could land on must be inside", async () => {
   const { port, calls } = arcadePort();
   const draft = { path: "Journal/2026/11-11/10-00 Answer", alternates: ["Journal/2026/11-11/10-00-05 Answer"], content: "made-up words" };
-  assert.deepEqual(await port.vault.create("home", draft, undefined, { saveAnother: true }), { sent: ["x"] });
+  assert.deepEqual(await port.vault.create("home", draft, undefined, { saveAnother: true }), { sent: ["x"] }, "the applet gets the writer's answer");
   assert.deepEqual(calls[0], { what: "create", args: ["plot", draft, undefined, { saveAnother: true }] });
   assert.equal(await code(port.vault.create("home", { path: "Taste/Profile", content: "rewritten" })), "out_of_scope", "it may read Taste/, not write there");
   assert.equal(await code(port.vault.create("home", { path: "Tasks/Do this", content: "x" })), "out_of_scope");
@@ -275,13 +276,24 @@ await check("writing outside the grant is refused: only a journal entry, and eve
   assert.equal(calls.length, 1, "none of the refused writes reached the shell");
 });
 
-await check("own is not fooled by alternates, and a note is judged and written from one copy", async () => {
+await check("own covers only what the writer says was made: never the path asked for, never an alternate", async () => {
   const { be, calls } = shell();
   const g = grantOf({ ...base, access: [{ vault: "home", allow: [{ path: "Journal/", verbs: ["create", "read"], own: true }] }] });
-  const port = createAppletPort(g, { ...be, note: async (_v, ref) => ({ id: ref, path: ref, tags: [] }) }, { home: "plot" });
-  await port.vault.create("home", { path: "Journal/new", alternates: ["Journal/2026/11-11/09-00 Private"], content: "x" });
-  assert.equal(await port.vault.note("home", "Journal/2026/11-11/09-00 Private"), null, "naming someone else's entry as an alternate doesn't make it its own");
-  assert.equal(await port.vault.note("home", "Journal/new"), null, "where it landed isn't known, so nothing is claimed");
+  const other = "Journal/2026/11-11/09-00 Private";
+  const reading = { ...be, note: async (_v: string, ref: string) => ({ id: `id-${ref}`, path: ref, tags: [] }) };
+  // the writer landed somewhere else, or added nothing (a duplicate, an error report): nothing is claimed
+  const port = createAppletPort(g, reading, { home: "plot" });
+  assert.equal(await port.vault.note("home", other), null, "someone else's entry");
+  await port.vault.create("home", { path: "Journal/new", alternates: [other], content: "x" });
+  assert.equal(await port.vault.note("home", other), null, "naming someone else's entry as an alternate doesn't make it its own");
+  await port.vault.create("home", { path: other, content: "x" });
+  assert.equal(await port.vault.note("home", other), null, "nor does asking to create at its very path");
+  // the writer reports the note it made, by id or by path: that one, and only that one, is its own
+  const told = createAppletPort(g, { ...reading, create: async () => ({ result: {}, made: ["id-Journal/2026/11-11/10-00 Mine"] }) }, { home: "plot" });
+  await told.vault.create("home", { path: "Journal/2026/11-11/10-00 Wanted", content: "x" });
+  assert.equal((await told.vault.note("home", "Journal/2026/11-11/10-00 Mine"))?.path, "Journal/2026/11-11/10-00 Mine");
+  assert.equal(await told.vault.note("home", "Journal/2026/11-11/10-00 Wanted"), null);
+  assert.equal(await told.vault.note("home", other), null);
   // a path that reads one way to the check and another to the writer
   let reads = 0;
   const shifty = { get path() { return reads++ ? "Tasks/stolen" : "Journal/ok"; }, content: "x" };
@@ -292,13 +304,16 @@ await check("own is not fooled by alternates, and a note is judged and written f
   assert.equal(await code(() => arcade.port.open("plot", "Taste/%2e%2e/Journal/x")), "out_of_scope");
 });
 
-await check("own: it can read back only the notes it made", async () => {
+await check("asking whether a note could be added: the grant first, then the shell's writer, and nothing is written", async () => {
+  const { port, calls } = arcadePort();
+  await port.vault.writable("home", "Journal/2026/11-11/10-00");
+  assert.deepEqual(calls, [{ what: "writable", args: ["plot"] }]);
+  assert.equal(await code(port.vault.writable("home", "Taste/Profile")), "out_of_scope");
+  assert.equal(await code(port.vault.writable("other", "Journal/x")), "not_granted");
   const { be } = shell();
-  const g = grantOf({ ...base, access: [{ vault: "home", allow: [{ path: "Journal/", verbs: ["create", "read"], own: true }] }] });
-  const port = createAppletPort(g, { ...be, note: async (_v, ref) => ({ id: ref, path: ref, tags: [] }) }, { home: "plot" });
-  assert.equal(await port.vault.note("home", "Journal/2026/11-11/09-00 Private"), null, "someone else's entry");
-  await port.vault.create("home", { path: "Journal/2026/11-11/10-00 Mine", content: "x" });
-  assert.equal((await port.vault.note("home", "Journal/2026/11-11/10-00 Mine"))?.path, "Journal/2026/11-11/10-00 Mine");
+  const shut = createAppletPort(grantOf(ARCADE_MANIFEST), { ...be, writable: async () => { throw new Error("kept elsewhere"); } }, { home: "plot" });
+  assert.match(await code(shut.vault.writable("home", "Journal/x")), /kept elsewhere/, "the writer's own reason comes through");
+  assert.equal(calls.length, 1);
 });
 
 await check("showing a note, and the microphone, need the grant too", async () => {
@@ -314,7 +329,25 @@ await check("showing a note, and the microphone, need the grant too", async () =
   assert.equal(calls.length, 1);
 });
 
-await check("a grant that has ended refuses everything, in-flight work included", async () => {
+await check("a grant that ends while a call is in flight gets nothing back from it", async () => {
+  let live = true;
+  let release: (v: unknown) => void = () => {};
+  const { be } = shell();
+  const held = () => new Promise<any>((r) => { release = r; });
+  const port = createAppletPort(grantOf(ARCADE_MANIFEST), { ...be, command: held, note: held, query: held }, { home: "plot", live: () => live });
+  const answers = [{ secret: "the answer" }, { id: "n1", path: "Taste/Profile", tags: [] }, [{ id: "n1", path: "Taste/Profile", tags: [] }]];
+  const callsToMake = [() => port.door("arcade", "profile"), () => port.vault.note("home", "n1"), () => port.vault.query("home", { pathPrefix: "Taste/" })];
+  for (let i = 0; i < callsToMake.length; i++) {
+    live = true;
+    const pending = code(callsToMake[i]());
+    await Promise.resolve();
+    live = false; // revoked while the shell was answering
+    release(answers[i]);
+    assert.equal(await pending, "not_granted");
+  }
+});
+
+await check("a grant that has ended refuses every new call", async () => {
   let live = true;
   const { port, calls } = arcadePort({ live: () => live });
   await port.door("arcade", "home");
@@ -332,7 +365,7 @@ await check("a grant that has ended refuses everything, in-flight work included"
 
 // ── the boundary: a contract 2 applet's own code holds no other way out ──
 
-await check("the Arcade's folder has no way out but the port: no Tauri, no shell command, no network, no microphone, no grant store", () => {
+await check("the Arcade's folder is written with no way out but the port: it holds no Tauri, shell command, network call, microphone call or grant store, and imports only listed shell modules", () => {
   const root = new URL("../src/arcade/", import.meta.url).pathname;
   const files: string[] = [];
   const walk = (dir: string) => { for (const f of readdirSync(dir)) { const p = join(dir, f); if (statSync(p).isDirectory()) walk(p); else if (/\.(ts|tsx)$/.test(f)) files.push(p); } };

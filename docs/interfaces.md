@@ -74,7 +74,8 @@ record whose expiry can't be read counts as expired. The name is not in the key:
 place: a door's reads on one row and what it changes on the next, each vault rule, each room, the microphone. Rows that
 change something, reach a room or read outside a sealed applet's own folder are marked. Every sentence is the shell's (a
 door's and an op's words come from `doors.ts`). What a note supplies is shown as data inside those sentences: a sealed
-applet's name, quoted and marked as unverified, and the folder paths it asks for, as written (a path is a plain folder
+applet's name, quoted and marked as unverified (its glyph is not shown on the card: a note could pick a tick or a
+padlock), and the folder paths it asks for, as written (a path is a plain folder
 ending in `/`, with no hidden characters, but it can hold words: read the row's path as the note's, not the shell's). Under the rows it says "Nothing else", when the grant ends, and a fingerprint (the key's first eight
 digits) that changes whenever the access does. Only a real tap allows (`isTrusted`). Once allowed, a built-in's frame
 has an **Access** button that shows the same card with **Revoke access**.
@@ -84,14 +85,21 @@ has an **Access** button that shows the same card with **Revoke access**.
 `not_granted` (the grant has no such door, vault or reach) or `out_of_scope` (it has, but not this op, note or folder)
 before anything reaches a shell command. A read is judged on the note that comes back (its real path and tags), a note
 outside the grant reads as absent, a list's rows from outside are dropped, and every path a new note could land on
-(alternates too) must be inside a create rule. A note is checked and written from one copy, a path holding `%` is
-never judged, and `own` covers a note only when the port knows where it landed (a note saved with alternates is not
-claimed). A revoke, an expiry or leaving the applet ends the port at once, in-flight work included. A rooms list that
-changes nothing the grant names leaves the running applet alone.
+(alternates too) must be inside a create rule. A note is checked and written from one copy, and a path holding `%` is
+never judged. `own` covers only the notes the shell's writer reports this port made (by id or path); the path that was
+asked for is never taken on trust, so a note that was queued, landed on another name or was held as a duplicate is not
+claimed. The grant is asked again when the shell answers: a revoke, an expiry or leaving the applet refuses every new
+call, and a call that was in flight gets nothing back (a write already handed to the shell's writer is not undone). A
+grant that runs out while the applet is open brings the card back then. A rooms list that changes nothing the grant
+names leaves the running applet alone.
 
-The shell's writer behind `create` is the journal's, which saves to the journal's own vault (Journal settings). A note
-is added only when the vault the grant named is that vault; otherwise the write is refused and says so. The card never
-names one vault while the write lands in another.
+The shell's writer behind `create` is the journal's, which saves to the journal's own vault (Journal settings). The
+port's backend asks the app core where the journal is kept at every write, never from a copy, and adds the note only
+when that is the vault the grant named; otherwise it refuses and says so. `port.vault.writable(vault, path)` asks the
+same without writing, and the Arcade asks it before the microphone opens, so nothing is recorded that would then be
+refused. Limits, stated plainly: the check and the save are two calls to the app core, not one (closing that needs the
+save command itself to take the expected vault); it compares the vault's name, not the hub; and an entry queued while
+offline is sent to wherever the journal is kept when it is sent, as every journal entry is.
 
 **What the boundary is, and isn't.** A built-in applet is code in the app's own bundle, covered by the release
 signature, in the same JavaScript realm as the shell. The port is a boundary of construction, not of isolation: it
