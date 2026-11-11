@@ -106,6 +106,7 @@ export function createAppletPort(grant: Grant, be: PortBackends, opts: PortOptio
         // judged and written from one copy, read once: what is checked is what the writer gets
         let copy: NewNote;
         try { copy = JSON.parse(JSON.stringify(note)) as NewNote; } catch { copy = { path: "" }; }
+        if (!copy || typeof copy !== "object" || Array.isArray(copy)) copy = { path: "" };
         const alternates = Array.isArray(copy.alternates) ? copy.alternates : [];
         copy.alternates = alternates;
         const paths = [copy.path, ...alternates];

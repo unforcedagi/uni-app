@@ -64,8 +64,11 @@ export type NoteFacts = { path: string | null | undefined; tags?: readonly unkno
 /** A note has a type when it carries that tag or one beneath it (`post/draft` is a `post`). */
 const hasType = (tags: readonly unknown[] | null | undefined, type: string) => Array.isArray(tags) && tags.some((t) => typeof t === "string" && (t === type || t.startsWith(`${type}/`)));
 
-/** A note's path as a rule may judge it: plain segments only, whatever the rule (no `..`, `.`, empty or encoded segment, no backslash, not absolute). */
-const plainPath = (path: unknown): path is string => typeof path === "string" && !/%/.test(path) && inScope([""], path);
+/**
+ * A note's path as a rule may judge it: plain segments only, whatever the rule (no `..`, `.` or empty segment, no backslash, not
+ * absolute, and no percent-encoded dot, slash, backslash or percent). A bare `%` is a character like any other: "50% sure" is a title.
+ */
+const plainPath = (path: unknown): path is string => typeof path === "string" && !/%(?:2e|2f|5c|25)/i.test(path) && inScope([""], path);
 
 function ruleCovers(rule: Rule, verb: Verb, note: NoteFacts): boolean {
   if (!rule.verbs.includes(verb)) return false;

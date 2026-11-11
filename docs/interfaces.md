@@ -85,8 +85,9 @@ has an **Access** button that shows the same card with **Revoke access**.
 `not_granted` (the grant has no such door, vault or reach) or `out_of_scope` (it has, but not this op, note or folder)
 before anything reaches a shell command. A read is judged on the note that comes back (its real path and tags), a note
 outside the grant reads as absent, a list's rows from outside are dropped, and every path a new note could land on
-(alternates too) must be inside a create rule. A note is checked and written from one copy. A path that isn't plain is refused whatever the rule, a type-only rule
-included. `own` covers only the notes the shell's writer reports this port made (by id or path); the path that was
+(alternates too) must be inside a create rule. A note is checked and written from one copy. A note's path that isn't plain (a `..`, empty or absolute segment, a backslash, a percent-encoded dot or slash) is
+refused whatever the rule, a type-only rule included; a list's `pathPrefix` is held to its folder rule and each row is
+judged as a note. `own` covers only the notes the shell's writer reports this port made (by id or path); the path that was
 asked for is never taken on trust. Today's writer (the journal's) can't name the note a save made, so it reports none:
 an `own` rule lets an applet add notes and read none of them back, until the save command returns the note's id.
 The grant is asked again when the shell answers: a revoke, an expiry or leaving the applet refuses every new

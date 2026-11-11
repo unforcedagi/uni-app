@@ -11,6 +11,7 @@ import { BUILTIN_CODE, builtinSubject, createGrantStore } from "../src/interface
 import { BUILT_IN } from "../src/interface/applets.ts";
 import { DOORS } from "../src/interface/doors.ts";
 import { ARCADE_MANIFEST } from "../src/arcade/manifest.ts";
+import { newDraft } from "../src/journalCore.ts";
 import { CALENDAR_MANIFEST, PLANNED, TOPOST_MANIFEST } from "../src/interface/planned2.ts";
 
 let failed = 0;
@@ -312,6 +313,16 @@ await check("a type-only rule judges the path too: nothing climbing, absolute or
   }
   await port.vault.create("home", { path: "Posts/New", tags: ["post"], content: "x" });
   assert.equal(calls.filter((c) => c.what === "create").length, 1);
+});
+
+await check("a journal entry whose first words hold a % is saved: only an encoded dot or slash is refused", async () => {
+  const { port, calls } = arcadePort();
+  const draft = newDraft("I'm 50% sure about this one", "text", new Date(2026, 10, 11, 10, 36, 5));
+  assert.match(draft.path, /50% sure/);
+  await port.vault.create("home", draft, undefined, { saveAnother: true });
+  assert.equal(calls.filter((c) => c.what === "create").length, 1);
+  for (const path of ["Journal/%2E%2E/x", "Journal/a%2fb", "Journal/a%5Cb", "Journal/%252e%252e/x"]) assert.equal(await code(port.vault.create("home", { path, content: "x" })), "out_of_scope", path);
+  for (const bad of ["str", 5, null, []]) assert.equal(await code(port.vault.create("home", bad as never)), "out_of_scope", "not a note at all");
 });
 
 await check("asking whether a note could be added: the grant first, then the shell's writer, and nothing is written", async () => {
