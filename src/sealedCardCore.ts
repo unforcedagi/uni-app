@@ -129,3 +129,106 @@ export function waitingTitle(w: Pick<SealedWaiting, "kind" | "credential" | "act
   if (w.reach) return w.reach;
   return w.kind === "morning" ? `Morning card · ${w.rows} routine credential${w.rows === 1 ? "" : "s"}` : `${w.credential} · ${w.action}`;
 }
+
+// ------------------------------------------------------------------ T-335 cards expand (11-11)
+// Aaron: "I can't see the full text, theres no option to expand; and the cards often contain not much context; so in the case of those two I
+// don't really know what they're even asking about". An expanded card says first, in plain words, what a yes does, what it touches
+// (production or not, which account), who asked and why now: all from the card's checked row (the broker's own words in `scope`), and, when
+// an ask in the same room points at this card (`sealed_card`), that ask's T-number and why-now.
+
+/** The ask that points at a card, as the card names it (only one in the card's own room: asks are vetted per room). */
+export type CardAsk = { tid: string | null; what: string; why: string | null };
+/** What a card asks, one plain line each. */
+export type Asking = { approve: string; touches: string; asked: string; why: string | null };
+
+/** A broker-worded scope's lines (card_text.render): the reach, "Can: …", maybe "Read key: …", maybe "Uni says: …". */
+const scopeLine = (scope: string, head: string): string | null => {
+  const l = scope.split("\n").find((x) => x.startsWith(head));
+  return l ? l.slice(head.length).trim() || null : null;
+};
+
+/** The account and whether it is production, from the reach line ("🔴 Open Site (site.example) — PRODUCTION account · …"); null when the
+ *  card has no such line (a card the broker didn't word: production or not isn't on it). */
+export function accountOf(reach: string | null | undefined): { account: string; production: boolean } | null {
+  if (!reach) return null;
+  const head = reach.replace(/^(🔴|🟡|🟢)\s*/u, "").split(" · ")[0].trim();
+  const prod = / — PRODUCTION account$/.exec(head);
+  if (prod) return { account: head.slice(0, prod.index).trim(), production: true };
+  const none = / \(no production\)$/.exec(head);
+  if (none) return { account: head.slice(0, none.index).trim(), production: false };
+  return null;
+}
+
+const lower1 = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+
+/** The expanded card's head: what a yes does, what it touches, who asked, why now. `room`: the card's room name, no `#`; `now` unix seconds. */
+export function askingOf(r: SealedRow, o: { room: string | null; now: number; ask?: CardAsk | null }): Asking {
+  const uses = `${r.uses} use${r.uses === 1 ? "" : "s"}`;
+  const can = scopeLine(r.scope, "Can:");
+  const child = childToken(r);
+  const key = child ? (child.permanent ? "a permanent token" : `a token that lasts ${span(child.ttl ?? 0)}`) : `a key for ${span(r.ttl_s)} (${uses})`;
+  const approve = can
+    ? `Uni gets ${key}. It ${/^can\b/i.test(can) ? lower1(can) : `can ${lower1(can)}`}`
+    : `Uni opens ${r.credential} for ${r.action}, ${span(r.ttl_s)} and ${uses}: ${r.scope.split("\n")[0]}`;
+  const acct = accountOf(r.reach);
+  const dest = payloadField(r, "destination");
+  const touches = (acct ? `${acct.production ? "PRODUCTION" : "Not production"} · ${acct.account}` : `${r.credential} · the card doesn't say whether it is production`)
+    + (dest ? ` · to ${dest}` : "");
+  const age = ageText(o.now, r.asked);
+  const asked = ["Uni", o.room ? `in #${o.room}` : null, r.asked !== undefined ? `${whenText(r.asked, o.now)}${age ? ` (${age})` : ""}` : null,
+    o.ask ? `for ${o.ask.tid ? `${o.ask.tid}: ` : ""}${o.ask.what}` : null].filter(Boolean).join(" · ");
+  const says = payloadField(r, "purpose") ?? scopeLine(r.scope, "Uni says:");
+  const why = o.ask?.why ?? says ?? null;
+  return { approve: approve.replace(/\.?$/, "."), touches, asked, why };
+}
+
+/** A card named by an ask (`sealed_card`: its event id, at least its first 12 hex) is this message. */
+export const cardIs = (named: string | null | undefined, ref: string): boolean =>
+  !!named && named.length >= 12 && ref.toLowerCase().startsWith(named.toLowerCase());
+
+/** Where the card an ask points at stands, as this device can tell. */
+export type CardState =
+  | { state: "checking" }
+  | { state: "waiting"; channel: string; ref: string; expires: number }
+  | { state: "expired"; channel: string; ref: string; at: number | null }
+  | { state: "answered"; channel: string; ref: string; decision: "approve" | "deny"; at: number }
+  | { state: "ended"; channel: string; ref: string; line: string }
+  | { state: "refused"; channel: string; ref: string; why: string }
+  | { state: "missing" };
+
+const EXPIRED = "This card has expired.";
+/**
+ * The state of an ask's card from the room's message (`body` as the room shows it: a card the broker ended is edited to one line with no
+ * fence) and, while it still carries its fence, its checked view.
+ */
+export function cardState(msg: { channel: string; ref: string; body: string } | null, view: SealedCardView | null, now: number): CardState {
+  if (!msg) return { state: "missing" };
+  const { channel, ref } = msg;
+  if (!sealedFence(msg.body)) return { state: "ended", channel, ref, line: msg.body.split("\n")[0].trim() };
+  if (!view) return { state: "checking" };
+  if (view.refused) return view.refused === EXPIRED ? { state: "expired", channel, ref, at: null } : { state: "refused", channel, ref, why: view.refused };
+  const answered = view.rows.find((x) => x.answer);
+  if (answered?.answer) return { state: "answered", channel, ref, decision: answered.answer.decision, at: answered.answer.at };
+  const expires = Math.min(...view.rows.map((x) => x.expires));
+  if (!view.rows.length || now >= expires) return { state: "expired", channel, ref, at: view.rows.length ? expires : null };
+  return { state: "waiting", channel, ref, expires };
+}
+
+/** A card that no longer waits, in a few words; null while it waits or is being checked. */
+export function staleLine(s: CardState, clock: (ts: number) => string): string | null {
+  switch (s.state) {
+    case "expired": return s.at ? `Its card expired at ${clock(s.at)}: nothing was sent` : "Its card expired: nothing was sent";
+    case "answered": return `Its card was already ${s.decision === "deny" ? "denied" : "approved"} here at ${clock(s.at)}`;
+    case "ended": return `Its card has ended: ${s.line.replace(/^🔑\s*/u, "")}`;
+    case "refused": return `Its card can't be approved: ${s.why}`;
+    case "missing": return "Its card isn't in this room on this device: it may have ended, or never arrived";
+    default: return null;
+  }
+}
+
+/** What the room is told when he asks for a fresh card (addressed to its Uni, so it wakes). `fp`: the card's fingerprint, when known. */
+export function repostBody(o: { tid: string | null; what: string | null; fp: string | null; why: string }): string {
+  const card = o.fp ? `the approval card ${o.fp}` : "the approval card";
+  const lead = o.tid ? `${o.tid}: ${card}` : o.what ? `${o.what}: ${card}` : card.charAt(0).toUpperCase() + card.slice(1);
+  return `${lead} no longer waits (${o.why}). If it's still needed, post a fresh card${o.tid ? ` and point ${o.tid} at it (--sealed-card)` : ""}; if not, close it.`;
+}

@@ -218,10 +218,16 @@ export function asksPlaced(notes: readonly Note<"task">[], rooms: readonly Shape
       updatedAt: updated === null ? 0 : Math.floor(updated / 1000),
       rev: s(n.updatedAt) ?? "", state, roomName: named, replyRoot: direct ? s(m.reply_root) : null, askedAt: asked.length ? Math.max(...asked) : null,
       ...(hush ? { private: true } : {}),
+      // T-335 cards expand: the card a "Tap the … card" ask means (uni-tasks --sealed-card), so the ask shows where that card stands
+      // (not in the vault's task schema yet: read as the note holds it)
+      ...(sealedRef((m as Record<string, unknown>).sealed_card) ? { sealedCard: sealedRef((m as Record<string, unknown>).sealed_card) } : {}),
     });
   }
   return { asks: out.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id)), unseen };
 }
+
+/** An ask's `sealed_card`: a card's event id, or at least its first 12 hex, lower-cased; null for anything else. */
+export const sealedRef = (v: unknown): string | null => { const r = s(v)?.toLowerCase() ?? null; return r && /^[0-9a-f]{12,64}$/.test(r) ? r : null; };
 
 /** The asks by their room's channel id (an ask with no room, when there is no Uni room either, is in no room). Each room's newest first. */
 export function asksByRoom<A extends Ask>(asks: readonly A[]): Map<string, A[]> {

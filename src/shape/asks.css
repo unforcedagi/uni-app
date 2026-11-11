@@ -55,6 +55,13 @@
 .sh-ask-sheet .sh-ask-acts { margin-top: 4px; }
 .sh-ask-sheet .sh-ask-btn[data-act="archive"] { margin-left: auto; }
 
+/* T-335 cards expand: the card an ask points at, where it stands (waiting, or no longer: with "Ask the room to repost") */
+.sh-ask-card { margin: 6px 0 8px; }
+.sh-ask-card-line { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--g-ink-2); overflow-wrap: anywhere; }
+.sh-ask-card-stale .sh-ask-card-line { color: var(--g-ink); font-weight: 600; }
+.sh-ask-card .cc { margin-top: 6px; }
+.sh-ask-sheet .sh-ask-yes { font-weight: 600; }
+
 /* Daylight ink screen: no tint to lean on, borders 1.5px, no motion */
 :root[data-screen="ink"] .sh-ask-wants { background: none; border: 1.5px solid #000; }
 :root[data-screen="ink"] .sh-ask-mark { color: #000; }

@@ -310,6 +310,19 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .cc-done .cc-sep, .cc-done .cc-when { flex: none; white-space: pre; }
 .cc-done > details > .cc-details { margin: 2px 0 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
 .cc-done .secret-status, .cc-done > .pairing-secondary { margin: 4px 0; }
+/* T-335 cards expand: an open card shows its whole line, never cut; its head says what it asks */
+.cc-what { cursor: pointer; }
+.cc-open .cc-what, .cc-done > details[open] .cc-what, .cc-done > details[open] .cc-status { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.cc-done > details[open] > summary { flex-wrap: wrap; }
+.cc-asking { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); font-size: 14px; line-height: 1.45; }
+.cc-asking dt { color: var(--muted); font-size: 12.5px; padding-top: 1px; }
+.cc-asking dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.cc-asking dd:first-of-type { font-weight: 600; }
+.cc-pending > .cc-asking { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.cc-repost { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 6px; }
+.cc-repost-done { margin: 4px 0 6px; color: var(--muted); font-size: 13px; }
+:root[data-screen="ink"] .cc-asking { border-bottom: 1.5px solid #000; }
+:root[data-screen="ink"] .cc-asking dt { color: #000; }
 .cc-quiet { padding: 0; border: 0; background: none; box-shadow: none; }
 .cc-quiet .cc-row { min-height: 32px; color: var(--muted); font-size: 13.5px; }
 .cc-quiet .cc-title { min-width: 0; font-weight: 600; color: var(--text-soft); overflow-wrap: anywhere; }

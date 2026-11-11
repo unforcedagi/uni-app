@@ -94,7 +94,7 @@ test('a request becomes a masked card; the value goes only to send_secret and le
   await card.getByRole('button', { name: 'Send sealed' }).click();
   await expect(card.getByText('Sealed and sent to Uni')).toBeVisible();
   await shot(page, '04-sent-waiting');
-  await card.getByRole('button', { name: 'details' }).click();
+  await card.getByRole('button', { name: 'Show all' }).click();
   await expect(card.locator('dt', { hasText: /^Sealed to$/ }).locator('+ dd')).toHaveText('Uni · cccc cccc cccc cccc');
 
   const c = await calls(page);

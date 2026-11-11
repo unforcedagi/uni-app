@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { clockTime as clock, DoneCard, PendingCard, QuietCard } from "./CompactCard";
 import { GraceHint } from "./UnlockGrace";
+import { AskingBlock, RepostButton, useCardLinks } from "./cardLinks";
 import {
-  SEALED_CHANGED, ageText, childToken, jobFingerprint, needsHold, payloadEntries, payloadField, plainError, reachLine, releasesLine, shortText, span, tapOnly, whenText, windowText,
+  SEALED_CHANGED, ageText, askingOf, repostBody, childToken, jobFingerprint, needsHold, payloadEntries, payloadField, plainError, reachLine, releasesLine, shortText, span, tapOnly, whenText, windowText,
   type SealedCardView, type SealedRow,
 } from "./sealedCardCore";
 
@@ -13,6 +14,8 @@ import {
 // the request's one-time key and sends it; the webview never sees a key. A powerful credential is approved by holding the
 // button for about a second (letting go early cancels and sends nothing); a routine one by a tap. Each request is
 // answered once (Rust refuses a second answer); a failed send keeps the decision and offers Try again.
+// T-335 cards expand: opened, a card first says what it asks (what a yes does, what it touches, who asked and why now: CardLinks gives its
+// room's name and the ask there that points at it); an expired one says so and offers to ask its room for a fresh card.
 
 export const HOLD_MS = 1000;
 
@@ -95,6 +98,11 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
   const [note, setNote] = useState<string | null>(null);
   const [off, setOff] = useState<Set<string>>(new Set());
   const sending = useRef(false);
+  const links = useCardLinks();
+  const room = links?.roomName(channel) ?? null;
+  const linked = links?.askFor(channel, reference) ?? null;
+  const repost = (why: string, fp: string | null) => <RepostButton channel={channel} cardRef={reference}
+    body={repostBody({ tid: linked?.tid ?? null, what: linked?.what ?? null, fp, why })} />;
   // an answer on any card can change this one (the same request on another card is then a replay): read it again
   const [again, setAgain] = useState(0);
   useEffect(() => {
@@ -139,6 +147,10 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
   const title = morning ? "Uni's morning card" : "Approve use of a credential";
   if (!view || view.refused || !view.rows.length) {
     const why = loadError ?? view?.refused ?? null;
+    // an expired card says so plainly, not as a fault, and offers a fresh one: it no longer waits, and nothing was sent
+    if (!loadError && view?.refused === "This card has expired.") return <QuietCard className="sealed-card sealed-greyed sealed-expired" label={`${title} (expired)`} icon="⌛"
+      title={linked ? `${title}${linked.tid ? ` for ${linked.tid}` : ""}` : title} status="Expired: it no longer waits, and nothing was sent." warn={false}
+      after={repost("it expired before it was answered", null)} />;
     return <QuietCard className="sealed-card sealed-greyed" label={`${title} (${why ? "can't be approved" : "checking"})`} icon="🔑" title={title}
       status={why ?? "Checking this card…"} warn={!!why} />;
   }
@@ -166,6 +178,7 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
     const age = ageText(minute, r.asked);
     const hold = needsHold(r);
     const warn = child?.permanent && <p className="sealed-warn" role="note"><span aria-hidden="true">⚠️</span> This makes a <strong>permanent token</strong>. It keeps working until someone revokes it.</p>;
+    const asking = <AskingBlock a={askingOf(r, { room, now: minute, ask: linked })} />;
     const facts = <>
       <dl className="secret-facts sealed-facts">
         <dt>Credential</dt><dd><code>{r.credential}</code></dd>
@@ -190,8 +203,8 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
       // an answer kept but never sent, then expired, says so: it never reached Uni
       const status = expired ? (a ? `Expired · ${a.decision === "deny" ? "denial" : "approval"} not sent` : "Expired") : `${a?.decision === "deny" ? "Denied" : "Approved"}${a?.sent ? "" : " · not sent yet"}`;
       return <DoneCard className={`${cls} ${expired ? "sealed-greyed" : ""}`} label={label} mark={expired ? "⌛" : a?.decision === "deny" ? "✕" : "✓"}
-        status={status} what={what} when={expired ? clock(r.expires) : a ? clock(a.at) : null} details={facts}
-        after={<>{failure}{retry}</>} />;
+        status={status} what={what} when={expired ? clock(r.expires) : a ? clock(a.at) : null} details={<>{asking}{facts}</>}
+        after={<>{failure}{retry}{expired && repost(a ? "it expired before the answer reached Uni" : "it expired before it was answered", jobFingerprint(r.request_digest))}</>} />;
     }
     return <PendingCard className={cls} label={label} icon="🔑" what={reach ? <span className="sealed-reach">{reach}</span> : what}
       meta={<>{!reach && <><span className="cc-where">{r.credential}</span> · <code className="cc-action">{r.action}</code> · {span(r.ttl_s)} · </>}{age && <><span className="cc-age">{age}</span> · </>}{hold && <><Badge cls="powerful" /> · </>}<GraceHint on={tapOnly([r])} sep /></>}
@@ -201,7 +214,7 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
           ? <HoldButton label="Hold to approve" disabled={busy} onDone={() => void answer("approve", [r.rid])} onCancel={() => setNote("Cancelled: nothing was sent. Hold for a second to approve.")} />
           : <button type="button" className="sealed-approve" disabled={busy} onClick={() => void answer("approve", [r.rid])}>Approve</button>}
       </div>}
-      below={<>{r.read_key && <p className="sealed-read-key">{r.read_key}</p>}{reach && what !== r.scope && <p className="sealed-says">Uni says: {what}</p>}{warn}{releases && <p className="sealed-releases">{releases}</p>}{note && <p className="secret-status" role="status">{note}</p>}{failure}</>}
+      below={(open) => <>{open && asking}{r.read_key && <p className="sealed-read-key">{r.read_key}</p>}{reach && what !== r.scope && <p className="sealed-says">Uni says: {what}</p>}{warn}{releases && <p className="sealed-releases">{releases}</p>}{note && <p className="secret-status" role="status">{note}</p>}{failure}</>}
       details={facts} />;
   }
 

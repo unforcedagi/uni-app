@@ -79,8 +79,8 @@ async function boot(page: Page, o: Opts) {
 const calls = (page: Page) => page.evaluate(() => (window as any).calls as { cmd: string; args: any }[]);
 const answers = async (page: Page) => (await calls(page)).filter((c) => c.cmd === 'sealed_answer');
 const card = (page: Page, name: string) => page.getByRole('region', { name, exact: true });
-/** T-335: a waiting card's facts are behind its "details" toggle, closed until asked for */
-const details = async (c: ReturnType<typeof card>) => { await c.getByRole('button', { name: 'details', exact: true }).click(); await expect(c.locator('.cc-details')).toBeVisible(); };
+/** T-335: a waiting card's facts are behind its "Show all" toggle, closed until asked for */
+const details = async (c: ReturnType<typeof card>) => { await c.getByRole('button', { name: 'Show all', exact: true }).click(); await expect(c.locator('.cc-details')).toBeVisible(); };
 /** T-335: an answered card is one line, closed */
 const line = (c: ReturnType<typeof card>) => c.locator('details > summary');
 const shot = async (page: Page, name: string) => { if (process.env.CARDS_SHOTS) await page.screenshot({ path: `${process.env.CARDS_SHOTS}/${test.info().project.name}-${name}.png` }); };
@@ -101,13 +101,14 @@ test('approve a powerful card: every field from the view, a click does nothing, 
   await expect(c.getByText('Powerful', { exact: true })).toBeVisible();
   // T-335: one row: what (the checked scope), where and how long, the buttons; the facts are closed
   await expect(c.locator('.cc-what')).toHaveText('Add an A record for demo.example.org');
-  await expect(c.locator('.cc-meta')).toHaveText(/^dns-zone · dns\.edit · 10 min · Powerful · details$/);
+  await expect(c.locator('.cc-meta')).toHaveText(/^dns-zone · dns\.edit · 10 min · Powerful · Show all$/);
   await expect(c.locator('dl')).toHaveCount(0);
-  await expect(c.getByRole('button', { name: 'details' })).toHaveAttribute('aria-expanded', 'false');
-  // tapping the row itself answers nothing
+  await expect(c.getByRole('button', { name: 'Show all' })).toHaveAttribute('aria-expanded', 'false');
+  // tapping the row itself answers nothing (T-335 cards expand: a tap on its line opens it, and Show less closes it again)
   await c.locator('.cc-what').click();
   await c.locator('.cc-meta').click({ position: { x: 2, y: 2 } });
   expect(await answers(page)).toHaveLength(0);
+  await c.getByRole('button', { name: 'Show less', exact: true }).click();
   await details(c);
   for (const [k, v] of [['Credential', 'dns-zone'], ['Action', 'dns.edit'], ['Scope', 'Add an A record for demo.example.org'], ['Window', '10 min, 1 use'], ['Exact job', '9b13 b2ae (fingerprint)']]) {
     await expect(c.locator('dt', { hasText: new RegExp(`^${k}$`) }).locator('+ dd')).toHaveText(v);
@@ -134,7 +135,7 @@ test('approve a powerful card: every field from the view, a click does nothing, 
   await expect(c.getByRole('status')).toHaveText('Approved');
   await expect(line(c)).toHaveText(/^✓Approved · Add an A record for demo\.example\.org · \d{1,2}:\d{2}(\s?[AP]M)?$/);
   await expect(c.locator('details')).not.toHaveAttribute('open');
-  await expect(c.locator('dl')).toBeHidden();
+  await expect(c.locator('dl').first()).toBeHidden();
   await expect(c.getByRole('button', { name: /Deny|approve/i })).toHaveCount(0);
   await line(c).click();
   await expect(c.locator('dt', { hasText: /^Open until$/ }).locator('+ dd')).toHaveText(/^\d{2}:\d{2}/);
@@ -178,7 +179,7 @@ test('a routine card is approved with a plain tap, with no powerful warning', as
   const r = row({ credential: 'pages-deploy', action: 'deploy.pages', class: 'routine', ttl_s: 3600, uses: 3, scope: 'Deploy the example site', payload: null });
   await boot(page, { messages: [msg('m1', single(), now() - 30)], cards: { m1: view([r]) } });
   const c = card(page, 'Approve use of pages-deploy');
-  await expect(c.locator('.cc-meta')).toHaveText('pages-deploy · deploy.pages · 60 min · details');
+  await expect(c.locator('.cc-meta')).toHaveText('pages-deploy · deploy.pages · 60 min · Show all');
   await expect(c.locator('.sealed-badge')).toHaveCount(0);
   await expect(c.locator('.sealed-releases')).toHaveCount(0);
   await details(c);
@@ -194,9 +195,10 @@ test('expired: greyed with the reason and no buttons; one that expires while ope
   await page.clock.install();
   await boot(page, { messages: [msg('m1', single(), now() - 3000), msg('m2', single(), now() - 30)],
     cards: { m1: refused('This card has expired.'), m2: view([row({ rid: 'r2'.padEnd(32, '0'), expires: now() + 120 })]) } });
-  const old = card(page, 'Approve use of a credential (can\'t be approved)');
-  await expect(old.getByRole('status')).toHaveText('This card has expired.');
-  await expect(old.getByRole('button')).toHaveCount(0);
+  // T-335 cards expand: an expired card says so plainly (not as a fault); its one button asks the room for a fresh card, never to approve
+  const old = card(page, 'Approve use of a credential (expired)');
+  await expect(old.getByRole('status')).toHaveText('Expired: it no longer waits, and nothing was sent.');
+  await expect(old.getByRole('button')).toHaveText(['Ask #Test room to repost']);
   const open = card(page, 'Approve use of dns-zone');
   await expect(open.getByRole('button', { name: 'Deny' })).toBeVisible();
   await page.clock.fastForward('03:00');
@@ -345,8 +347,8 @@ test('the unlock grace: a routine card says "Unlocked · 4 min"; a powerful card
   await boot(page, { grace: 4 * 60 - 5, messages: [msg('m1', single(), now() - 90), msg('m2', single(), now() - 70), msg('m3', single(), now() - 50),
     msg('m4', fence('uni-sealed-morning', "🔑 **Uni's morning card**"), now() - 30)], cards: { m1: view([routine]), m2: view([powerful]), m3: view([mint]), m4: view(rows, 'morning') } });
   const r = card(page, 'Approve use of pages-deploy');
-  await expect(r.locator('.cc-meta')).toHaveText('pages-deploy · deploy.pages · 60 min · Unlocked · 4 min · details');
-  await expect(card(page, 'Approve use of dns-zone').locator('.cc-meta')).toHaveText(/^dns-zone · dns\.edit · 10 min · Powerful · details$/);
+  await expect(r.locator('.cc-meta')).toHaveText('pages-deploy · deploy.pages · 60 min · Unlocked · 4 min · Show all');
+  await expect(card(page, 'Approve use of dns-zone').locator('.cc-meta')).toHaveText(/^dns-zone · dns\.edit · 10 min · Powerful · Show all$/);
   await expect(card(page, 'Approve use of cf-parent').locator('.cc-grace')).toHaveCount(0);
   await expect(card(page, 'Approve use of cf-parent').getByRole('note')).toContainText('permanent token');
   // the morning card: only what is chosen counts; switch the permanent mint off and the rest would go on the tap
@@ -443,7 +445,7 @@ test('a card open past midnight says which day, and an older card still draws', 
   const c = page.getByRole('region', { name: 'Approve use of dns-zone' });
   await expect(c.locator('.cc-what')).toContainText('demo.example.org');
   await expect(c.locator('.sealed-says')).toHaveCount(0);
-  await c.getByRole('button', { name: 'details' }).click();
+  await c.getByRole('button', { name: 'Show all' }).click();
   const tomorrow = new Date(Date.now() + 86000 * 1000).getDate() !== new Date().getDate();
   if (tomorrow) await expect(c.getByText(/^tomorrow /)).toBeVisible();
 });

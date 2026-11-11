@@ -20,6 +20,7 @@ export type Ask = {
   /** Seconds. */ updatedAt: number;
   /** (added, T-335) The message an answer threads under (`reply_root`), only in the room it names: its quick replies give way to the ask's buttons. */ replyRoot?: string | null;
   /** (added, T-335) Its room is private: drawn in full only inside that room (its chat and strip); home shows a wordless mark. */ private?: boolean;
+  /** (added, T-335 cards expand) The approval card it asks him to tap (`sealed_card`: the card's event id, 12+ lower-case hex), in its room. */ sealedCard?: string | null;
 };
 
 /** What a room's worker is doing, or waiting for: one line on home and in the room's strip. */

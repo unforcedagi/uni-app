@@ -9,13 +9,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { openDialog } from "../areas/focusTrap";
 import { Body } from "../MessageBody";
 import { NoteOpener, useNoteOpener } from "../noteLinks";
-import { askBody, askFault, KIND_WORD, type AskButton } from "./asksCore.ts";
-import { AskButtons } from "./AskMessage";
+import { askBody, askButtons, askFault, KIND_WORD, seenHint, type AskButton } from "./asksCore.ts";
+import { AskButtons, CardLine } from "./AskMessage";
+import { useAskCard } from "./useAskCard";
+import { SealedCard } from "../SealedCard";
+import { ago } from "./homeCore";
 import type { Ask } from "./types.ts";
 import "./runs.css";
 import "./asks.css";
 
 type Read = { body: string | null; error: string | null; loading: boolean };
+
+/** T-335 cards expand: what the first button does, in plain words (the sheet's head says it before anything else). */
+function yesLine(ask: Ask, room: string): { label: string; does: string } {
+  const b = askButtons(ask)[0];
+  const to = room ? `#${room}` : "its room";
+  const does = b.act === "done" ? `Tells ${to} you did it; the ask goes back to the room for any follow-up`
+    : b.act === "answer" ? `Your pick goes to ${to} and closes the ask`
+    : b.act === "open" ? "Opens the link; Seen then ends it"
+    : b.act === "seen" ? `Seen: ${seenHint(ask.kind)}`
+    : b.label;
+  return { label: b.label, does };
+}
 
 export function AskSheet({ vault, ask, roomName, busy, error, onAct, onClose }: {
   vault: string; ask: Ask; roomName: string; busy: boolean; error: string | null | undefined;
@@ -43,6 +58,8 @@ export function AskSheet({ vault, ask, roomName, busy, error, onAct, onClose }: 
   // a note linked from its context opens over the place, with the sheet out of its way
   const openNote = useCallback<NonNullable<typeof outer>>((ref, href) => { onClose(); outer?.(ref, href); }, [onClose, outer]);
   const fault = !read.loading && !read.error && askFault(ask, read.body);
+  const card = useAskCard(ask);
+  const yes = yesLine(ask, roomName);
   const fallback = ask.fallback ? `If you do nothing: ${ask.fallback.label}` : ask.kind === "choose" || ask.kind === "do" ? "No default: it waits for you" : null;
 
   return <div className="sh-story-layer sh-ask-layer" ref={layer}>
@@ -52,11 +69,14 @@ export function AskSheet({ vault, ask, roomName, busy, error, onAct, onClose }: 
       <p className="sh-ask-sheet-kind"><i className="sh-run-needs" aria-hidden="true">◆</i><b>Waits on you</b><span> · {KIND_WORD[ask.kind]}{ask.tid ? ` · ${ask.tid}` : ""}{roomName ? ` · in ${roomName}` : ""}</span></p>
       <h2 id="sh-ask-title">{ask.what}</h2>
       <dl className="sh-ask-facts">
+        <dt>If you tap {yes.label}</dt><dd className="sh-ask-yes">{yes.does}</dd>
+        <dt>Asked by</dt><dd>{roomName ? `#${roomName}` : "Uni"}{ask.updatedAt ? ` · ${((a) => (a === "now" ? "just now" : /^\d/.test(a) ? `${a} ago` : a))(ago(ask.updatedAt, Date.now() / 1000))}` : ""}</dd>
         {ask.next && <><dt>Next</dt><dd className="sh-ask-next">{ask.next}</dd></>}
         {ask.why && <><dt>Why now</dt><dd>{ask.why}</dd></>}
         {fallback && <><dt>Default</dt><dd>{fallback}</dd></>}
         {ask.link && <><dt>Link</dt><dd><a href={ask.link} onClick={(e) => { e.preventDefault(); onAct(ask, { act: "open", value: ask.link!, label: "Open", primary: false }); }}>{ask.link}</a></dd></>}
       </dl>
+      {ask.sealedCard && <CardLine ask={ask} state={card}>{(c) => <SealedCard channel={c.channel} reference={c.ref} />}</CardLine>}
       {read.loading && read.body === null && <p className="sh-story-quiet" role="status">Reading its context…</p>}
       {read.error && <p className="sh-story-error" role="alert">Couldn't read its context just now. <button type="button" className="sh-story-retry" onClick={load}>Retry</button></p>}
       {read.body && <div className="sh-ask-context"><NoteOpener.Provider value={openNote}><Body body={read.body} mentions={[]} me={null} /></NoteOpener.Provider></div>}

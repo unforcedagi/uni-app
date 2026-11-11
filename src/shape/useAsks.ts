@@ -30,7 +30,7 @@ const words = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? 
 /** The owner's message in a room, addressed to the room's Uni when it is there (as every message to it is). A reply whose root this device
  *  hasn't cached yet reads the rooms once and tries again. `quiet` (T-335 Seen): addressed to no one and threaded under nothing, so it wakes
  *  no room's Uni (rooms answer only when addressed or replied to); the line sits in the room for whoever reads it next. */
-async function postIn(channel: string, body: string, root: string | null, quiet = false): Promise<void> {
+export async function postIn(channel: string, body: string, root: string | null, quiet = false): Promise<void> {
   const send = async () => {
     const uni = quiet ? null : findUniMember(await invoke<Member[]>("get_members", { channel }).catch(() => [] as Member[]));
     try { await invoke("post_message", { channel, body, replyTo: root, recipients: uni ? [uni.pubkey] : [], media: [] }); }

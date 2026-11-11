@@ -2,8 +2,13 @@
 // otherwise in the room's chat, a message from Uni with the buttons under it. The buttons come from asksCore.askButtons, by the ask's kind
 // (T-335 fixes: do -> Done, Not now; choose -> its options, Not now; look -> Open, Seen; tell -> Seen). Its line opens the ask's sheet
 // (AskSheet: its whole context, the same buttons and Archive). It reads by shape and word, never colour alone: a filled ◆ and "wants you".
+import type { ReactNode } from "react";
 import { askButtons, seenHint, type AskButton } from "./asksCore.ts";
 import type { Ask } from "./types.ts";
+import { clockTime } from "../CompactCard";
+import { RepostButton } from "../cardLinks";
+import { repostBody, staleLine, type CardState } from "../sealedCardCore";
+import { useAskCard } from "./useAskCard";
 import "./asks.css";
 
 export type AskMessageProps = {
@@ -29,14 +34,36 @@ export function AskButtons({ ask, busy, onAct, archive = false }: { ask: Ask; bu
   </div>;
 }
 
+/**
+ * T-335 cards expand: an ask that tells him to tap a card (`sealed_card`) says where that card stands: waiting (and until when), or no longer
+ * waiting (expired, answered, ended at the broker, refused, or not on this device), with a way to ask the room for a fresh one. `children`:
+ * drawn under a waiting card's line (the sheet puts the card itself there, so it can be answered in place).
+ */
+export function CardLine({ ask, state, children }: { ask: Ask; state: CardState | null; children?: (s: Extract<CardState, { state: "waiting" }>) => ReactNode }) {
+  if (!state || state.state === "checking") return null;
+  if (state.state === "waiting") return <div className="sh-ask-card" data-card-state="waiting">
+    <p className="sh-ask-card-line"><span aria-hidden="true">🔑</span> Its card waits in this room · answer by {clockTime(state.expires)}</p>
+    {children?.(state)}
+  </div>;
+  const line = staleLine(state, clockTime) ?? "";
+  const channel = "channel" in state ? state.channel : ask.room;
+  return <div className="sh-ask-card sh-ask-card-stale" data-card-state={state.state} role="note">
+    <p className="sh-ask-card-line"><span aria-hidden="true">⌛</span> {line}. Nothing to tap.</p>
+    {channel && <RepostButton channel={channel} cardRef={"ref" in state ? state.ref : ask.sealedCard ?? ask.id}
+      body={repostBody({ tid: ask.tid, what: ask.what, fp: null, why: line.replace(/^Its card /, "it ") })} />}
+  </div>;
+}
+
 export function AskMessage({ ask, busy, error, onAct, onOpen, compact = false }: AskMessageProps) {
   const buttons = <AskButtons ask={ask} busy={busy} onAct={onAct} />;
   const err = error ? <p className="sh-ask-error" role="alert">{error}</p> : null;
+  const card = useAskCard(ask);
+  const cardLine = ask.sealedCard ? <CardLine ask={ask} state={card} /> : null;
   if (compact) return <div className="sh-ask sh-ask-wants" data-id={ask.id} data-kind={ask.kind} aria-busy={busy || undefined}>
     <button type="button" className="sh-ask-line sh-ask-open" onClick={(e) => { e.stopPropagation(); onOpen(ask); }} aria-label={`Wants you: ${ask.what}. Open it`}>
       <span className="sh-ask-mark" aria-hidden="true">◆</span><span className="sh-ask-what">{ask.what}</span><span className="sh-ask-chev" aria-hidden="true">›</span>
     </button>
-    {buttons}{err}
+    {cardLine}{buttons}{err}
   </div>;
   return <article className="sh-ask sh-ask-msg" data-id={ask.id} data-kind={ask.kind} aria-busy={busy || undefined} aria-label={`Uni asks: ${ask.what}`}>
     <div className="sh-ask-meta"><b>Uni</b><span className="sh-ask-mark" aria-hidden="true">◆</span> wants you{ask.tid ? <span className="sh-ask-tid"> · {ask.tid}</span> : null}</div>
@@ -44,6 +71,6 @@ export function AskMessage({ ask, busy, error, onAct, onOpen, compact = false }:
       <span className="sh-ask-what">{ask.what}<span className="sh-ask-chev" aria-hidden="true"> ›</span></span>
       {(ask.next || ask.why) && <span className="sh-ask-why">{ask.next ?? ask.why}</span>}
     </button>
-    {buttons}{err}
+    {cardLine}{buttons}{err}
   </article>;
 }

@@ -67,9 +67,9 @@ test.describe('a Hermes approval prompt, loudly', () => {
     // T-335: in the room the prompt is one short row: the command, how to answer; the full command and why behind details
     const pc = prompt.getByRole('region', { name: 'Uni needs your OK: git branch -D feature/example-cleanup' });
     await expect(pc.locator('.cc-what')).toHaveText('git branch -D feature/example-cleanup');
-    await expect(pc.locator('.cc-meta')).toHaveText(/^Uni needs your OK · reply \/approve, \/approve session or \/deny · ends \d{1,2}:\d{2}\s?[AP]M · details$/);
+    await expect(pc.locator('.cc-meta')).toHaveText(/^Uni needs your OK · reply \/approve, \/approve session or \/deny · ends \d{1,2}:\d{2}\s?[AP]M · Show all$/);
     await expect(pc.getByText(/Why it was flagged/)).toHaveCount(0);
-    await pc.getByRole('button', { name: 'details' }).click();
+    await pc.getByRole('button', { name: 'Show all' }).click();
     await expect(pc.getByText('Why it was flagged: git branch force delete')).toBeVisible();
     // still answered in words: no approve button in the chat
     await expect(pc.getByRole('button', { name: /approve|deny/i })).toHaveCount(0);

@@ -82,3 +82,59 @@ assert.equal(waitingTitle({ kind: "single", credential: "c", action: "a", rows: 
 assert.equal(waitingTitle({ kind: "single", credential: "c", action: "a", rows: 1, reach: null }), "c · a");
 
 console.log("sealedCardCore ok");
+
+// ── T-335 cards expand: what a card asks, and where an ask's card stands ──
+{
+  const { accountOf, askingOf, cardIs, cardState, staleLine, repostBody } = await import("../src/sealedCardCore.ts");
+  const reach = "🔴 Open Site (site.example) — PRODUCTION account · changes what the public reaches · 10 min";
+  assert.deepEqual(accountOf(reach), { account: "Open Site (site.example)", production: true });
+  assert.deepEqual(accountOf("🟡 Site Staging (no production) · one thing · 10 min"), { account: "Site Staging", production: false });
+  assert.equal(accountOf("dns-zone · dns.edit"), null);
+  assert.equal(accountOf(null), null);
+
+  const now = 1_900_000_000;
+  const worded = { rid: "r", action: "job.cloudflare", credential: "cf-prod", class: "powerful" as const, ttl_s: 600, uses: 1, payload: { purpose: "Deploy the import tool" },
+    request_digest: "ab".repeat(32), expires: now + 600, answer: null, asked: now - 3 * 3600, reach,
+    scope: `${reach}\nCan: deploy Workers scripts on site.example.\nUni says: Deploy the import tool` };
+  const a = askingOf(worded, { room: "dev", now });
+  assert.equal(a.approve, "Uni gets a key for 10 min (1 use). It can deploy Workers scripts on site.example.");
+  assert.equal(a.touches, "PRODUCTION · Open Site (site.example)");
+  assert.match(a.asked, /^Uni · in #dev · .* \(asked 3 h ago\)$/);
+  assert.equal(a.why, "Deploy the import tool");
+  // an ask that points at the card: its T-number, its line and its why-now
+  const b = askingOf(worded, { room: "dev", now, ask: { tid: "T-12", what: "Deploy the import tool", why: "Staging passed; the box closes Friday" } });
+  assert.match(b.asked, / · for T-12: Deploy the import tool$/);
+  assert.equal(b.why, "Staging passed; the box closes Friday");
+  // a card the broker didn't word: what it opens, and that production isn't stated
+  const plain = { ...worded, action: "dns.edit", credential: "dns-zone", reach: null, scope: "Add an A record for demo.example.org", payload: null, asked: undefined };
+  const c = askingOf(plain, { room: null, now });
+  assert.equal(c.approve, "Uni opens dns-zone for dns.edit, 10 min and 1 use: Add an A record for demo.example.org.");
+  assert.equal(c.touches, "dns-zone · the card doesn't say whether it is production");
+  assert.equal(c.asked, "Uni");
+  assert.equal(c.why, null);
+
+  const ref = "ab12cd34ef56" + "9".repeat(52);
+  assert.ok(cardIs("AB12CD34EF56", ref));
+  assert.ok(!cardIs("ab12cd", ref), "a short prefix never matches");
+  assert.ok(!cardIs(null, ref));
+
+  const fenced = "🔑 x\n\n```uni-sealed-approval\n{}\n```";
+  const msg = { channel: "c", ref, body: fenced };
+  const view = (rows: unknown[], refused: string | null = null) => ({ kind: "single" as const, event_id: ref, refused, rows: rows as never[] });
+  assert.deepEqual(cardState(null, null, now), { state: "missing" });
+  assert.deepEqual(cardState(msg, null, now), { state: "checking" });
+  assert.equal(cardState({ ...msg, body: "✓ Approved 14:05 · Open Site" }, null, now).state, "ended");
+  assert.equal(cardState(msg, view([], "This card has expired."), now).state, "expired");
+  assert.equal(cardState(msg, view([], "Not signed by Uni."), now).state, "refused");
+  assert.deepEqual(cardState(msg, view([worded]), now), { state: "waiting", channel: "c", ref, expires: now + 600 });
+  assert.deepEqual(cardState(msg, view([worded]), now + 600), { state: "expired", channel: "c", ref, at: now + 600 });
+  assert.equal(cardState(msg, view([{ ...worded, answer: { decision: "deny", at: now, until: null, sent: true } }]), now).state, "answered");
+
+  const clock = () => "14:05";
+  assert.equal(staleLine({ state: "waiting", channel: "c", ref, expires: now }, clock), null);
+  assert.equal(staleLine({ state: "expired", channel: "c", ref, at: now }, clock), "Its card expired at 14:05: nothing was sent");
+  assert.equal(staleLine({ state: "ended", channel: "c", ref, line: "🔑 ✓ Approved 14:05" }, clock), "Its card has ended: ✓ Approved 14:05");
+  assert.match(repostBody({ tid: "T-12", what: "x", fp: "ab12 cd34", why: "it expired" }), /^T-12: the approval card ab12 cd34 no longer waits \(it expired\)\. If it's still needed, post a fresh card and point T-12 at it/);
+  assert.match(repostBody({ tid: null, what: null, fp: null, why: "it expired" }), /^The approval card no longer waits/);
+}
+console.log("sealedCardCore T-335 cards expand: ok");

@@ -30,7 +30,12 @@ export type ShapeOpts = {
   /** Times the fake relay refuses a post before it takes one. */ postFails?: number;
   /** Times the fake vault refuses an ask's write (a close or a patch) before it takes one. */ writeFails?: number;
   /** A run in a public room (the garden's) that waits on you for the private room's ask T-605: its words must never leave that room. */ leakRun?: boolean;
+  /** T-335 cards expand: more cards in Riverbend (a production card an ask points at, a long plain one, an expired one, one the broker ended
+   *  with an ask still pointing at it). */ cards?: boolean;
 };
+
+/** T-335 cards expand: the extra cards' message ids (card event ids are hex; an ask names one by its first 12 or more). */
+export const CARD = { prod: 'ab12cd34ef56' + '1'.repeat(52), long: 'bc23de45fa67' + '2'.repeat(52), old: 'cd34ef56ab78' + '3'.repeat(52), ended: 'de45fa67bc89' + '4'.repeat(52) };
 
 export async function bootShape(page: Page, o: ShapeOpts = {}) {
   // the calendar door double, served to the page as calMock serves it
@@ -40,7 +45,7 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
     const r = door.handle(req.method(), url.pathname.replace(/^\/__door/, '') + url.search, req.method() === 'POST' ? req.postDataJSON() : undefined);
     await route.fulfill({ status: r.status, contentType: 'application/json', body: JSON.stringify(r.body) });
   });
-  await page.addInitScript(({ ME, UNI, ROOM, o, USAGE, PLOT_NOTE }) => {
+  await page.addInitScript(({ ME, UNI, ROOM, o, USAGE, PLOT_NOTE, CARD }) => {
     const w = window as any;
     const now = Date.now(), nowS = Math.floor(now / 1000), min = 60, H = 3600;
     const iso = (sAgo: number) => new Date((nowS - sAgo) * 1000).toISOString();
@@ -72,6 +77,15 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
       [ROOM.family]: [msg('f1', ROOM.family, 'me', 8 * H, 'Dinner at six on Sunday.')],
       [ROOM.barn]: [msg('b1', ROOM.barn, 'Uni', 90 * 24 * H, 'This room is closed.')],
     };
+    if (o.cards) {
+      const river = msgs[ROOM.river];
+      river.splice(river.length - 1, 0,
+        msg(CARD.ended, ROOM.river, 'Uni', 64 * min, '✓ Approved 13:10 · Open Site (site.example) — PRODUCTION account · loads the history into the archive'),
+        msg(CARD.old, ROOM.river, 'Uni', 50 * min, fence('Uni asks to rotate the mailing key.')),
+        msg(CARD.long, ROOM.river, 'Uni', 30 * min, fence('Uni asks to send the reminders.')),
+        msg(CARD.prod, ROOM.river, 'Uni', 20 * min, fence('Uni asks to deploy the import tool.')));
+      river[river.length - 5].edited = true;   // the broker's edit: one line in the card's place, no fence
+    }
     const NAMES: Record<string, string> = { [ROOM.uni]: 'Uni', [ROOM.river]: 'Riverbend Commons', [ROOM.garden]: 'Garden co-op site', [ROOM.studio]: 'Studio', [ROOM.teach]: 'Teaching: Design 2',
       [ROOM.post]: 'To Post', [ROOM.house]: 'House', [ROOM.arcade]: 'Arcade night', [ROOM.quiet]: 'sanctum', [ROOM.barn]: 'old-barn', [ROOM.family]: 'Family table' };
     const UNREAD: Record<string, number> = { [ROOM.river]: 2, [ROOM.teach]: 1 };
@@ -102,6 +116,13 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
         next: 'Paste the portal key into the boiler page' },
         context('Only you can sign in to the boiler portal.', ['Sign in at the portal', 'Copy the key', 'Paste it into the boiler page'], ['The portal: https://example.com/boiler'], 'Two minutes.')),
     ];
+    if (o.cards) w.__tasks.push(
+      // the ask whose card waits: "Tap the PRODUCTION card" names it (sealed_card: the card's first 12 hex)
+      task('ask-deploy', 'T-610 Deploy the import tool to the site', 15 * min, { kind: 'do', no_default: true, reply_room: 'Riverbend Commons', why_now: 'Staging passed; the archive window closes Friday.',
+        next: 'Tap the PRODUCTION card in Riverbend that deploys the import tool', sealed_card: CARD.prod.slice(0, 12) }),
+      // the ask whose card the broker already ended: it must say so, not send him looking for it
+      task('ask-load', 'T-611 Load the history into the archive', 14 * min, { kind: 'do', no_default: true, reply_room: 'Riverbend Commons', why_now: 'The import tool is live.',
+        next: 'Tap the second card in Riverbend that loads the history', sealed_card: CARD.ended }));
     const run = (id: string, title: string, channel: string, room: string, sAgo: number, md: Record<string, unknown>, body: string) => ({ id, path: `Runs/2026-11-10 ${title}`, tags: ['run'], createdAt: iso(sAgo), updatedAt: iso(60),
       content: `# ${title}\n\n${body}\n\n---\n\nRun on [[Uni]], worker \`mts-${id}\`.\n`, metadata: { state: 'running', channel, room, attempt: id, worker: `mts-${id}`, started_at: iso(sAgo), doing_at: iso(60), ...md } });
     const notes: any[] = [
@@ -138,6 +159,17 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
     const expires = nowS + 9 * min;
     const card = { kind: 'single', event_id: 'e'.repeat(64), refused: null, rows: [{ rid: 'r1'.padEnd(32, '0'), action: 'invoice.send', credential: 'billing', class: 'routine', scope: 'Send the October invoice to billing@riverbend.example',
       ttl_s: 600, uses: 1, payload: null, request_digest: '9b13b2ae' + 'f'.repeat(56), expires, answer: null }] };
+    // T-335 cards expand: the production card (broker-worded, powerful), a long plain one, an expired one
+    const reach = '🔴 Open Site (site.example) — PRODUCTION account · changes what the public reaches · 10 min';
+    const cards: Record<string, any> = {
+      [CARD.prod]: { kind: 'single', event_id: CARD.prod, refused: null, rows: [{ rid: 'r2'.padEnd(32, '0'), action: 'job.cloudflare', credential: 'cf-site', class: 'powerful',
+        scope: `${reach}\nCan: deploy Workers scripts on site.example.\nUni says: Deploy the history import tool`, ttl_s: 600, uses: 1, payload: { purpose: 'Deploy the history import tool', job: 'site-deploy' },
+        request_digest: '7c4e19d2' + 'a'.repeat(56), expires: nowS + 40 * min, answer: null, asked: nowS - 20 * min, reach, always_unlock: true }] },
+      [CARD.long]: { kind: 'single', event_id: CARD.long, refused: null, rows: [{ rid: 'r3'.padEnd(32, '0'), action: 'mail.send', credential: 'billing', class: 'routine',
+        scope: "Send the October invoice and the two overdue reminders to billing@riverbend.example, with the phasing summary attached as a PDF for the board's Thursday meeting",
+        ttl_s: 600, uses: 3, payload: null, request_digest: '5d6e7f80' + 'b'.repeat(56), expires: nowS + 50 * min, answer: null, asked: nowS - 30 * min }] },
+      [CARD.old]: { kind: 'single', event_id: CARD.old, refused: 'This card has expired.', rows: [] },
+    };
     const waiting = () => (w.__cardAnswered ? [] : [{ ref: 'rb-card', channel: ROOM.river, root: null, ts: nowS - 66 * min, kind: 'single', credential: 'billing', action: 'invoice.send', class: 'routine', rows: 1, expires, fingerprint: '9b13b2ae' }]);
 
     const matches = (m: any, f: any) => Object.entries(f ?? {}).every(([k, c]: [string, any]) => {
@@ -180,7 +212,7 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
           case 'secret_requesters': return [];
           case 'unlock_grace': return null;
           case 'sealed_waiting': return waiting();
-          case 'sealed_card': return args.reference === 'rb-card' ? JSON.parse(JSON.stringify(card)) : null;
+          case 'sealed_card': return args.reference === 'rb-card' ? JSON.parse(JSON.stringify(card)) : o.cards && cards[args.reference] ? JSON.parse(JSON.stringify(cards[args.reference])) : null;
           case 'sealed_answer': {
             const t = Math.floor(Date.now() / 1000);
             card.rows = card.rows.map((r: any) => (args.rids.includes(r.rid) ? { ...r, answer: { decision: args.decision, at: t, until: args.decision === 'approve' ? t + r.ttl_s : null, sent: true } } : r));
@@ -257,7 +289,7 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
     // the mail double (when booted) installs its own; this world keeps the page's Tauri and hands it only the mail commands
     Object.defineProperty(w, '__TAURI_INTERNALS__', { configurable: true, get: () => mine, set: (v: any) => { mailInvoke = v?.invoke ?? null; } });
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
-  }, { ME, UNI, ROOM, o, USAGE, PLOT_NOTE });
+  }, { ME, UNI, ROOM, o, USAGE, PLOT_NOTE, CARD });
   if (o.mail) await bootMail(page, 'ok', { held: true });
   else await page.goto('/');
 }

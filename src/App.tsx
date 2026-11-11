@@ -78,7 +78,8 @@ import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings,
 import { SecretRequestCard } from "./SecretRequestCard";
 import { EnrollmentLine, SealedApprovals } from "./SealedApprovals";
 import { SealedCard } from "./SealedCard";
-import { sealedFence, sealedProse } from "./sealedCardCore";
+import { cardIs, sealedFence, sealedProse } from "./sealedCardCore";
+import { CardLinksContext, type CardLinks } from "./cardLinks";
 import { useSealedWaiting } from "./sealedLive";
 import { parseEnrollment } from "./sealedCore";
 import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, secretCardsOn, withoutSecretBlock } from "./secretRequest";
@@ -2781,9 +2782,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
       default: return null;
     }
   };
+  // T-335 cards expand: a card reads its room's name and the ask in that same room that points at it (its expanded head says who asked, why)
+  const cardLinks = useMemo<CardLinks>(() => ({
+    roomName: (ch) => rooms.find((r) => r.id === ch)?.name.replace(/^#/, "") ?? null,
+    askFor: (ch, ref) => { const a = (shape.asks.byRoom.get(ch) ?? []).find((x) => cardIs(x.sealedCard, ref)); return a ? { tid: a.tid, what: a.what, why: a.why } : null; },
+  }), [rooms, shape.asks.byRoom]);
   const roomChat = focus && homeOpen && channel === focus.room && (root ?? null) === focus.root && currentRoom
     ? (tail: ReactNode) => roomPane(currentRoom, null, `Message ${currentRoom.name.replace(/^#/, "")}`, currentRoom.name, tail) : null;
-  return <VaultProfileProvider profile={profile}><NoteOpener.Provider value={openNote}><main className={`shell sh-shell in-room${barAside ? " sh-bar-aside" : ""}${roomShown ? " sh-in-room" : ""} ${topNote ? "note-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
+  return <VaultProfileProvider profile={profile}><NoteOpener.Provider value={openNote}><CardLinksContext.Provider value={cardLinks}><main className={`shell sh-shell in-room${barAside ? " sh-bar-aside" : ""}${roomShown ? " sh-in-room" : ""} ${topNote ? "note-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
     <Bar place={place} wants={shape.wants} applets={appletsTotal} drawerOpen={drawerOpen} settingsOpen={panel === "settings"}
       onSettings={() => { if (panel === "settings") setPanel(null); else { setStory(null); openSettings(); } }}
       onRooms={() => { setPanel(null); goHome(); }} onJournal={() => { setDrawerOpen(false); setStory(null); setPanel(null); openTarget({ kind: "journal", title: "Journal" }); }} onApplets={() => { setSearchOpen(false); setPanel(null); setStory(null); setDrawerOpen((o) => !o); }} />
@@ -2852,7 +2858,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {creating && <SurfaceModal onCancel={() => { if (!createBusy) setCreating(null); }}><form role="dialog" aria-modal="true" aria-label="New note" onSubmit={(e) => { e.preventDefault(); void createNote(); }}><h2>New note in {creating.vault}</h2><label>Name, with any folders before it<input autoFocus placeholder="Projects/Glaze Tests/Firing notes" value={creating.path} disabled={createBusy} onChange={(e) => setCreating({ ...creating, path: e.target.value })} /></label>{createError && <p className="error" role="alert">{createError}</p>}<button disabled={createBusy} type="submit">{createBusy ? "Creating…" : "Create note"}</button><button disabled={createBusy} type="button" onClick={() => setCreating(null)}>Cancel</button></form></SurfaceModal>}
     {confirmation && <SurfaceModal onCancel={() => setConfirmation(null)}><div role="alertdialog" aria-modal="true" aria-label="Unsaved changes">{confirmation.notice && <p role="status">{confirmation.notice}</p>}<p>{confirmation.text}</p><button autoFocus onClick={() => setConfirmation(null)}>Keep editing</button><button onClick={() => { const run = confirmation.run; setConfirmation(null); run(); }}>{confirmation.go}</button></div></SurfaceModal>}
     {toast && <div className="toast" role="status">{toast}</div>}
-  </main></NoteOpener.Provider></VaultProfileProvider>;
+  </main></CardLinksContext.Provider></NoteOpener.Provider></VaultProfileProvider>;
 }
 
 export default App;

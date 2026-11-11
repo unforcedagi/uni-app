@@ -44,7 +44,7 @@ test.describe('decision cards in the chat', () => {
     await expect(card).toBeVisible();
     // T-335: one short row: the question, its task and Context, the options under it; the words field behind details
     await expect(card.locator('.cc-what')).toHaveText('Which layout for the garden page?');
-    await expect(card.locator('.cc-meta')).toHaveText('Decision · Context › · details');
+    await expect(card.locator('.cc-meta')).toHaveText('Decision · Context › · Show all');
     await expect(card.getByRole('textbox')).toHaveCount(0);
     const pick = card.getByRole('group', { name: /^Pick one:/ });
     await expect(pick.getByRole('button')).toHaveText(['A', 'Bdefault', 'C']);
@@ -258,7 +258,7 @@ test.describe('your words on a decision card', () => {
     const card = page.locator('.sh-room .message .decision-card').first();
     await expect(card.getByRole('button', { name: 'C', exact: true })).toBeVisible();
     // T-335: the words field is behind the card's details
-    await card.getByRole('button', { name: 'details', exact: true }).click();
+    await card.getByRole('button', { name: 'Show all', exact: true }).click();
     return card;
   };
 
