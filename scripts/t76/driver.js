@@ -1,4 +1,5 @@
-// T-76 in-page driver, appended to the Tauri init script. Runs in the top frame of the real webview (WebKitGTK).
+// T-76 in-page driver, appended to the Tauri init script. Runs in the top frame of the real webview: WebKitGTK (run.sh)
+// and, in `selftest` mode only, WKWebView (run-mac.sh). Code on the selftest path must work on both.
 // Results go out through the debug-only `t76_write` command, using the real Tauri IPC captured before the mock replaced it.
 (() => {
   if (window.top !== window) return;
@@ -88,11 +89,17 @@
       const ipcPost = (key) => `<script>var r = { t76: 1 }; try { var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc; r.present = !!h; if (h) { var m = { cmd: 't76_write', callback: 1, error: 2, payload: { name: 'frame-ipc.txt', contents: 'from a sandboxed frame' }, options: { headers: {} } }; ${key ? "m.__TAURI_INVOKE_KEY__ = 'forged-key-0000000000';" : ''} h.postMessage(JSON.stringify(m)); r.posted = true; } } catch (e) { r.err = String(e); } r.windowIpc = typeof window.ipc; parent.postMessage(r, '*');<\/script>`;
       const sb = (srcdoc, ms = 3500) => new Promise((res) => { const f = document.createElement('iframe'); f.setAttribute('sandbox', 'allow-scripts'); const h = (e) => { if (e.source === f.contentWindow && e.data && e.data.t76) { clearTimeout(t); removeEventListener('message', h); f.remove(); res(e.data); } }; addEventListener('message', h); const t = setTimeout(() => { removeEventListener('message', h); f.remove(); res('no report'); }, ms); f.srcdoc = srcdoc; document.body.appendChild(f); });
       const exp = { ipcFromFrame: await sb(ipcPost(false)), ipcFromFrameForgedKey: await sb(ipcPost(true)) };
-      // A fresh realm two levels down (frame > child > grandchild), as an app would make one to get globals back.
+      // Fresh realms down to a grandchild (frame > child > grandchild), as an app would make them to get globals back.
+      // Every level reports what it sees and relays what its children report; the frame collects for 5 s, so a silent
+      // level shows as a missing depth rather than as no report at all.
       const js = (v) => JSON.stringify(v).replace(/<\//g, '<\\/');
-      const kid = (depth) => depth === 0 ? `<script>parent.postMessage({ kid: 1, rtc: typeof RTCPeerConnection, webkitRtc: typeof webkitRTCPeerConnection, ipc: !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) }, '*')<\/script>`
-        : `<script>addEventListener('message', function (e) { if (e.data && e.data.kid) parent.postMessage(e.data, '*'); }); var f = document.createElement('iframe'); f.srcdoc = ${js(kid(depth - 1))}; document.documentElement.appendChild(f);<\/script>`;
-      exp.grandchild = await sb(`<script>addEventListener('message', function (e) { if (e.data && e.data.kid) parent.postMessage(Object.assign({ t76: 1 }, e.data), '*'); }); var f = document.createElement('iframe'); f.srcdoc = ${js(kid(1))}; document.documentElement.appendChild(f);<\/script>`, 8000);
+      const level = (depth, max) => `<!doctype html><body><script>var me = { kid: 1, depth: ${depth}, rtc: typeof RTCPeerConnection, webkitRtc: typeof webkitRTCPeerConnection, ipc: !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) };`
+        + (depth === 0
+          ? `var got = [me]; addEventListener('message', function (e) { if (e.data && e.data.kid) got.push(e.data); }); setTimeout(function () { parent.postMessage({ t76: 1, levels: got }, '*'); }, 5000);`
+          : `parent.postMessage(me, '*'); addEventListener('message', function (e) { if (e.data && e.data.kid) parent.postMessage(e.data, '*'); });`)
+        + (depth < max ? `var f = document.createElement('iframe'); f.srcdoc = ${js(level(depth + 1, max))}; document.body.appendChild(f);` : '')
+        + `<\/script></body>`;
+      exp.nested = await sb(level(0, 2), 9000);
       await sleep(1500);
       exp.frameIpcWritten = (await real.invoke('t76_read', { name: 'frame-ipc.txt' })) !== null;
       await out('experiments.json', exp); await out('done', 'ok'); note('done');

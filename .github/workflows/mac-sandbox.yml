@@ -8,9 +8,20 @@ on:
       - 'src/interface/**'
       - 'src-tauri/**'
       - 'scripts/t76/**'
+      # what the harness builds on: the fixture's mock, the T-76 vite plugin, the rail and Settings the driver clicks
+      - 'scripts/browser/areasFixture.ts'
+      - 'vite.config.ts'
+      - 'src/App.tsx'
+      - 'src/shape/Bar.tsx'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
       - 'Cargo.lock'
       - '.github/workflows/mac-sandbox.yml'
   workflow_dispatch:
+
+concurrency:
+  group: mac-sandbox-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -69,6 +80,7 @@ jobs:
           name: mac-sandbox-selftest
           path: |
             ${{ runner.temp }}/t76/selftest.json
+            ${{ runner.temp }}/t76/error.txt
             ${{ runner.temp }}/t76/experiments.json
             ${{ runner.temp }}/t76/env.json
             ${{ runner.temp }}/t76/diag.json

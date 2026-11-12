@@ -345,10 +345,11 @@ What each part really guarantees:
   webview with WebRTC **off**, and the self-test's `WebRTC unavailable in a child frame` check (run in a
   probe-created child frame; constructible means fail) is what keeps the gate closed otherwise.
   - Linux (WebKitGTK): `enable-webrtc` is off by default; `src-tauri` also sets it off explicitly at
-    startup (`disable_webrtc` in `lib.rs`).
-  - macOS (WKWebView) has WebRTC on; `disable_webrtc` turns it off through WebKit's private
-    `_setPeerConnectionEnabled:` preference, which removes `RTCPeerConnection` from every realm, nested frames
-    included (T-335). If a WebKit drops that selector the call logs and the `webrtcChild` check fails again.
+    startup (`seal_webview` in `lib.rs`).
+  - macOS (WKWebView) has WebRTC on; `seal_webview` turns it off at startup through WebKit's private
+    `_setPeerConnectionEnabled:` preference, so frames created after that (every applet frame, and frames an app
+    nests in it) get no `RTCPeerConnection` (T-335). If a WebKit drops that selector the call logs and the
+    `webrtcChild` check fails; the stored pass is keyed on the WebKit version, so a WebKit update re-runs the test.
   - Linux and macOS are proven on the real webview by the harness in `scripts/t76` (`run.sh` on WebKitGTK,
     `run-mac.sh` on WKWebView in `.github/workflows/mac-sandbox.yml`, which runs on every change to the frame,
     the self-test, `src-tauri` or `Cargo.lock`).
@@ -417,13 +418,13 @@ in `src/` would be script execution with the full Tauri command surface. Guard: 
 `allowDangerousHtml` or a `highlight=` prop anywhere in `src/` (`@openparachute/surface-render` renders `highlight`
 output as HTML). There is no allowlist entry; add one only with a written justification in that file.
 
-On Linux and macOS the webkit `ipc` script message handler is removed (`close_ipc_handler`, any new window must call
+On Linux and macOS the webkit `ipc` script message handler is removed (`seal_webview`, any new window must call
 it). WebKit exposes a handler to every frame of the page, and wry's WKWebView delegate forwards any frame's message to
 Tauri without looking at `frameInfo.isMainFrame` (wry 0.55.1 `wry_web_view_delegate.rs`); Tauri then refuses it only
 because the frame cannot know the invoke key (`webview/mod.rs` `on_message`) and, failing that, because the frame's
 `about:srcdoc` URL is a remote origin no capability allows. Both platforms send invokes over `ipc://`, so nothing needs
-the handler. The self-test pass is keyed on app version, user agent and the wry/Tauri versions (`webview_runtime`). If `ipc://` ever
-fails, Tauri's postMessage fallback throws and invokes stay dead; Uni then shows "Uni lost its connection to the app
+the handler. The self-test pass is keyed on app version, user agent and the wry/Tauri versions (`webview_runtime`;
+on macOS also the WebKit framework version, since WKWebView's user agent is frozen). If `ipc://` ever fails, Tauri's postMessage fallback throws and invokes stay dead; Uni then shows "Uni lost its connection to the app
 core. Restart Uni." (`src/ipcLost.ts`).
 
 On Android wry registers its init scripts for every frame and exposes `window.ipc` to every frame, and Tauri sends

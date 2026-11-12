@@ -1,5 +1,5 @@
 // T-77b P3-1: on Linux the app deletes webkit's `ipc` script message handler so sealed frames cannot post to it
-// (src-tauri `close_ipc_handler`). If one `ipc://` fetch ever fails, Tauri falls back to that handler and throws
+// (src-tauri `seal_webview`). If one `ipc://` fetch ever fails, Tauri falls back to that handler and throws
 // this TypeError, and invokes stay dead until restart. Say so instead of failing silently.
 export const IPC_LOST_MESSAGE = "Uni lost its connection to the app core. Restart Uni.";
 
