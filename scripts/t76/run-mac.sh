@@ -50,6 +50,7 @@ const failures = [
   [has("frame-ipc.txt"), "a sandboxed frame wrote through the ipc handler"],
   [[exp.ipcFromFrame, exp.ipcFromFrameForgedKey].some((x) => !x || x.present !== false), "a sandboxed frame found webkit.messageHandlers.ipc"],
   // Required: srcdoc at depths 0 and 1, about:blank at 1 and 2. A depth-2 srcdoc is checked when it loads (older WebKit refuses it).
+  // An about:blank row passes as `unreachable` (its creator cannot read its globals, so it gives an app nothing) or clean.
   [![[0, "srcdoc"], [1, "srcdoc"], [1, "about:blank"], [2, "about:blank"]].every(([d, how]) => levels.some((l) => l.depth === d && l.how === how)), "a nested frame level did not report"],
   [levels.some((l) => !l.unreachable && (l.err || l.rtc !== "undefined" || l.webkitRtc !== "undefined" || l.ipc !== false)), "a nested frame has WebRTC or ipc"],
 ].filter(([bad]) => bad).map(([, why]) => why);

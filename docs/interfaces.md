@@ -352,7 +352,9 @@ What each part really guarantees:
     `webrtcChild` check fails; the stored pass is keyed on the WebKit version, so a WebKit update re-runs the test.
   - Linux and macOS are proven on the real webview by the harness in `scripts/t76` (`run.sh` on WebKitGTK,
     `run-mac.sh` on WKWebView in `.github/workflows/mac-sandbox.yml`, which runs on every change to the frame,
-    the self-test, `src-tauri` or `Cargo.lock`).
+    the self-test, `src-tauri` or `Cargo.lock`). Beyond the self-test it checks nested realms: a srcdoc child and
+    grandchild (WebKit before 2026-01 refuses a third nested srcdoc, so the grandchild counts only where it loads)
+    and an about:blank child at each level, which in a sandboxed frame has its own opaque origin and is unreachable.
   - Android WebView (Chromium) has WebRTC and no switch for it: the `webrtc` and `webrtcChild` checks fail
     there. That is no longer a closed gate by itself: see **Approved-code mode** below.
 - **In-process, so an app can freeze Uni.** The frame shares the host's renderer, so `for(;;){}`, an
@@ -424,7 +426,8 @@ Tauri without looking at `frameInfo.isMainFrame` (wry 0.55.1 `wry_web_view_deleg
 because the frame cannot know the invoke key (`webview/mod.rs` `on_message`) and, failing that, because the frame's
 `about:srcdoc` URL is a remote origin no capability allows. Both platforms send invokes over `ipc://`, so nothing needs
 the handler. The self-test pass is keyed on app version, user agent and the wry/Tauri versions (`webview_runtime`;
-on macOS also the WebKit framework version, since WKWebView's user agent is frozen). If `ipc://` ever fails, Tauri's postMessage fallback throws and invokes stay dead; Uni then shows "Uni lost its connection to the app
+on macOS also the WebKit framework version, since WKWebView's user agent is frozen; if that version can't be read the
+runtime is empty and the gate stays closed). If `ipc://` ever fails, Tauri's postMessage fallback throws and invokes stay dead; Uni then shows "Uni lost its connection to the app
 core. Restart Uni." (`src/ipcLost.ts`).
 
 On Android wry registers its init scripts for every frame and exposes `window.ipc` to every frame, and Tauri sends

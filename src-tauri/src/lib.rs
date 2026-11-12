@@ -3168,7 +3168,10 @@ fn webview_runtime() -> String {
     #[cfg(target_os = "macos")]
     let runtime = match webkit_version() {
         Some(webkit) => format!("{runtime} webkit {webkit}"),
-        None => String::new(),
+        None => {
+            tracing::warn!("webview_runtime: the WebKit framework version is unreadable; applets stay off on this Mac");
+            String::new()
+        }
     };
     runtime
 }
