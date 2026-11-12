@@ -1,7 +1,7 @@
 // T-335 the shape: an ask as a message with buttons. `compact`: home's "wants you" block under a room's row (◆, the line, its buttons inline);
 // otherwise in the room's chat, a message from Uni with the buttons under it. The buttons come from asksCore.askButtons, by the ask's kind
-// (T-335 fixes: do -> Done, Not now; choose -> its options, Not now; look -> Open, Seen; tell -> Seen). Its line opens the ask's sheet
-// (AskSheet: its whole context, the same buttons and Archive). It reads by shape and word, never colour alone: a filled ◆ and "wants you".
+// (T-335 asks in tune: do -> I did it, Seen, Later; choose -> its options, Seen, Later; look -> Open, Seen; tell -> Seen). Its line opens the ask's sheet
+// (AskSheet: its whole context, the same buttons, Reply in the room and Archive). It reads by shape and word, never colour alone: a filled ◆ and "wants you".
 import type { ReactNode } from "react";
 import { askButtons, buttonDoes, seenHint, type AskButton } from "./asksCore.ts";
 import type { Ask } from "./types.ts";
