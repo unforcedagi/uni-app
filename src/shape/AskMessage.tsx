@@ -76,7 +76,7 @@ function AskBody({ ask, onOpen }: { ask: Ask; onOpen: (ask: Ask) => void }) {
     if (!mouse.current) { onOpen(ask); return; }
     wait.current = window.setTimeout(() => { if (!picked()) onOpen(ask); }, 260);
   }}>
-    <span className="sh-ask-what" id={id}>{ask.what}<button type="button" className="sh-ask-open sh-ask-chev" aria-label="Open this ask" aria-describedby={id}
+    <span className="sh-ask-what"><span id={id}>{ask.what}</span><button type="button" className="sh-ask-open sh-ask-chev" aria-label="Open this ask" aria-describedby={id}
       onClick={(e) => { e.stopPropagation(); onOpen(ask); }}> ›</button></span>
     {(ask.next || ask.why) && <span className="sh-ask-why">{ask.next ?? ask.why}</span>}
   </div>;

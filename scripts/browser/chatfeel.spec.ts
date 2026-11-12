@@ -455,6 +455,15 @@ test('copy: a long press on a message\'s words selects them (the system\'s selec
   await expect.poll(async () => (await calls(page, 'plugin:clipboard-manager|write_text')).map((a: any) => a.text)).toEqual(['The bisque firing finished overnight. Twelve pots, one crack.']);
   await expect(page.locator('.toast')).toHaveText('Copied');
   await expect(row).toBeHidden(); // the selection went with the sheet, and the row with it
+  // your own message: its row under selected words has Edit and More; Delete (with its confirm) is in the sheet
+  const own = list(page).locator('article.message[data-ref="k2"]');
+  await holdTouch(page, await wordPoint(own.locator('p').first()));
+  const ownRow = own.getByRole('group', { name: 'Message actions' });
+  await expect(ownRow.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+  await expect(ownRow.getByRole('button', { name: 'More actions', exact: true })).toBeVisible();
+  await expect(ownRow.getByRole('button', { name: /^Delete/ })).toBeHidden();
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  await expect(ownRow).toBeHidden();
   // a hold beside the words (the name and time line) opens the sheet too, and selects nothing
   await holdTouch(page, await besideWords(older));
   await expect(sheet).toBeVisible();

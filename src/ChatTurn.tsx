@@ -147,8 +147,9 @@ export function useSelectedMessage(): string | null {
       // the row goes a moment after the selection does: a tap on one of its buttons can end the selection before its click lands
       if (!sel || sel.isCollapsed) { gone = window.setTimeout(() => { if (window.getSelection()?.isCollapsed !== false) setRef(null); }, 400); return; }
       if (!touch) return;
+      // the message the selection began in: a handle dragged on into the next message keeps that row (no row going, no page jumping)
       const a = art(sel.anchorNode);
-      setRef(a && a === art(sel.focusNode) && !a.classList.contains("outgoing") ? a.dataset.ref! : null);
+      setRef(a && !a.classList.contains("outgoing") ? a.dataset.ref! : null);
     };
     document.addEventListener("pointerdown", down, { capture: true, passive: true });
     document.addEventListener("selectionchange", changed);

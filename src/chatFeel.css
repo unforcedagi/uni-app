@@ -75,6 +75,8 @@
   .msg-actions.always .act { min-width: 44px; height: 44px; }
   .msg-actions.always .act-label { display: none; }
   .msg-actions.always .act-up .act-label { display: inline; }
+  /* your own message's row under selected words: Delete, with its confirm, is in the sheet More opens */
+  .msg-actions.always > button:not(.act) { display: none; }
 }
 
 /* the long-press sheet */
