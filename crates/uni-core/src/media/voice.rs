@@ -109,8 +109,16 @@ fn too_long(seconds: f64, max_part_seconds: f64) -> crate::Error {
     ))
 }
 
-fn convert_failed() -> crate::Error {
-    refuse("Couldn't convert this recording on this device. Retry.")
+/// What a codec that failed partway says. The upload sends the recording as it is instead ([`is_codec_failure`]).
+const CONVERT_FAILED: &str = "Couldn't convert this recording on this device. Retry.";
+
+pub(crate) fn convert_failed() -> crate::Error {
+    refuse(CONVERT_FAILED)
+}
+
+/// The platform's codecs failed on this recording (not the recording itself, nor a stop).
+pub fn is_codec_failure(e: &crate::Error) -> bool {
+    matches!(e, crate::Error::MediaRefused(line) if line == CONVERT_FAILED)
 }
 
 fn stopped() -> crate::Error {
@@ -209,6 +217,10 @@ pub fn convert(input: &Path, work_dir: &Path, codecs: &dyn Codecs, max_part_seco
         }
     }
     parts.push(part.finish(max_part_seconds)?);
+    // Dropped while the last part was being finished: nobody is waiting for these.
+    if stop.load(Ordering::Relaxed) {
+        return Err(stopped());
+    }
     made.0.clear(); // every part made it: the caller has them now
     Ok(Some(Converted { parts, seconds }))
 }
@@ -311,6 +323,28 @@ pub(crate) mod testing {
         }
         fn config(&self) -> Option<Vec<u8>> {
             Some(vec![0x11, 0x88]) // AAC-LC, 48 kHz, mono
+        }
+    }
+
+    /// As [`FakeCodecs`], but every encoder fails partway, as a platform codec can.
+    pub struct FailingCodecs;
+    pub static FAILING: FailingCodecs = FailingCodecs;
+    struct FailingEncoder(usize);
+    impl Codecs for FailingCodecs {
+        fn opus_decoder(&self, head: &OpusHead) -> Result<Option<Box<dyn Decoder>>> {
+            FAKE.opus_decoder(head)
+        }
+        fn aac_encoder(&self, _rate: u32, _bitrate: u32) -> Result<Option<Box<dyn Encoder>>> {
+            Ok(Some(Box::new(FailingEncoder(0))))
+        }
+    }
+    impl Encoder for FailingEncoder {
+        fn encode(&mut self, _pcm: Option<&[i16]>, _out: &mut dyn FnMut(&[u8]) -> Result<()>) -> Result<()> {
+            self.0 += 1;
+            if self.0 > 100 { Err(convert_failed()) } else { Ok(()) }
+        }
+        fn config(&self) -> Option<Vec<u8>> {
+            None
         }
     }
 
@@ -442,12 +476,20 @@ mod tests {
         let tracks_end = whole.windows(4).position(|w| w == [0x1f, 0x43, 0xb6, 0x75]).unwrap();
         std::fs::write(&input, &whole[..tracks_end - 6]).unwrap(); // inside the track: no whole Opus head
         assert!(convert(&input, dir.path(), &FAKE, MAX_PART_SECONDS, &AtomicBool::new(false)).is_err());
-        // A recorder killed partway keeps what it wrote: half a block at the end is dropped, not the recording.
-        std::fs::write(&input, &whole[..whole.len() - 3]).unwrap();
-        let out = convert(&input, dir.path(), &FAKE, MAX_PART_SECONDS, &AtomicBool::new(false)).unwrap().unwrap();
-        assert!((out.seconds - 29.98).abs() < 0.001, "{}", out.seconds);
-        for p in out.parts {
-            std::fs::remove_file(p.path).unwrap();
+        // A recorder killed partway keeps what it wrote, wherever it stopped: inside a block, a block's header or a cluster's
+        // clock (the normalizer takes all of these too). Each cut here loses at most the last two blocks.
+        let whole = webm(&speech(&[(5.0, true)]));
+        let last_cluster = whole.windows(4).rposition(|w| w == [0x1f, 0x43, 0xb6, 0x75]).unwrap();
+        // The cluster's own header and clock and its first blocks, and its last blocks: every kind of element cut.
+        for end in (last_cluster + 1..last_cluster + 60).chain(whole.len() - 40..whole.len()) {
+            std::fs::write(&input, &whole[..end]).unwrap();
+            let out = convert(&input, dir.path(), &FAKE, MAX_PART_SECONDS, &AtomicBool::new(false))
+                .unwrap_or_else(|e| panic!("cut at {end} of {}: {e}", whole.len()))
+                .unwrap();
+            assert!((4.0..5.0).contains(&out.seconds), "cut at {end}: {}", out.seconds);
+            for p in out.parts {
+                std::fs::remove_file(p.path).unwrap();
+            }
         }
         let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(left, vec![std::ffi::OsString::from("rec.webm")]);

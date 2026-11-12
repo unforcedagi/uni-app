@@ -511,7 +511,16 @@ async fn upload_media_with(
     let flag = stop.0.clone();
     let parts = tokio::task::spawn_blocking(move || voice_parts(&from, &name, &dir, codecs, &flag))
         .await
-        .map_err(|_| normalize::refuse("Couldn't prepare the file on this device. Attach it again."))??;
+        .map_err(|_| normalize::refuse("Couldn't prepare the file on this device. Attach it again."))?;
+    // While our relay still takes Opus (until the patches go, target 2026-11-30), a codec that fails on one recording
+    // doesn't keep it from being sent: it goes as it is. Logged, so the week's watch can count them.
+    let parts = match parts {
+        Err(e) if voice::is_codec_failure(&e) => {
+            tracing::warn!("voice: conversion failed on this device; sending the recording as it is");
+            None
+        }
+        other => other?,
+    };
     let Some(parts) = parts else {
         return Ok(vec![upload_media_file(relay_url, keys, input, mime, filename, work_dir).await?]);
     };
@@ -2094,6 +2103,23 @@ mod tests {
         // The parts and their normalized copies are gone; the recording itself is the caller's.
         assert_eq!(std::fs::read_dir(&work).unwrap().count(), 0);
         assert!(input.exists());
+    }
+
+    /// While our relay still takes Opus, a platform codec failing on a recording doesn't stop it being sent: the WebM goes.
+    #[tokio::test]
+    async fn a_codec_that_fails_partway_sends_the_recording_as_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        let input = dir.path().join("voice.webm");
+        std::fs::write(&input, voice::testing::webm(&voice::testing::speech(&[(20.0, true)]))).unwrap();
+        let (port, mut sent) = relay_answering(vec![(200, None)]).await;
+        let media = upload_media_with(&format!("ws://127.0.0.1:{port}"), &Keys::generate(), &input, "audio/webm", "voice.webm", &work, Some(&voice::testing::FAILING))
+            .await
+            .unwrap();
+        assert_eq!(media.len(), 1);
+        assert_eq!(media[0].filename.as_deref(), Some("voice.webm"));
+        assert!(sent.recv().await.unwrap().starts_with(&[0x1a, 0x45, 0xdf, 0xa3]), "the WebM went");
+        assert_eq!(std::fs::read_dir(&work).unwrap().count(), 0);
     }
 
     #[tokio::test]

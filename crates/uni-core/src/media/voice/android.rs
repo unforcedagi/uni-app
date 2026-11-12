@@ -44,7 +44,7 @@ impl Codecs for Android {
         f.set_buffer("csd-1", &(i64::from(head.pre_skip) * 1_000_000_000 / 48_000).to_le_bytes());
         f.set_buffer("csd-2", &80_000_000i64.to_le_bytes());
         let codec = start(MediaCodec::from_decoder_type("audio/opus"), &f, MediaCodecDirection::Decoder)?;
-        Ok(codec.map(|codec| Box::new(Codec { codec, rate: 48_000, channels: usize::from(head.channels), config: None, ended: false, fed: 0 }) as Box<dyn Decoder>))
+        Ok(codec.map(|codec| Box::new(Codec { codec, rate: 48_000, channels: usize::from(head.channels), config: None, ended: false, fed: 0, whole_input: true }) as Box<dyn Decoder>))
     }
 
     fn aac_encoder(&self, rate: u32, bitrate: u32) -> Result<Option<Box<dyn Encoder>>> {
@@ -56,7 +56,7 @@ impl Codecs for Android {
         f.set_i32("bitrate", bitrate as i32);
         f.set_i32("max-input-size", 16 * 1024);
         let codec = start(MediaCodec::from_encoder_type("audio/mp4a-latm"), &f, MediaCodecDirection::Encoder)?;
-        Ok(codec.map(|codec| Box::new(Codec { codec, rate, channels: 1, config: None, ended: false, fed: 0 }) as Box<dyn Encoder>))
+        Ok(codec.map(|codec| Box::new(Codec { codec, rate, channels: 1, config: None, ended: false, fed: 0, whole_input: false }) as Box<dyn Encoder>))
     }
 }
 
@@ -68,6 +68,8 @@ struct Codec {
     ended: bool,
     /// Samples given to an encoder so far: its input timestamps.
     fed: u64,
+    /// Each input is one packet that must go in one buffer (a decoder); otherwise a stream of samples (an encoder).
+    whole_input: bool,
 }
 
 impl Codec {
@@ -128,7 +130,18 @@ impl Codec {
                 let space = buf.buffer_mut();
                 match rest {
                     Some(b) => {
-                        let n = b.len().min(space.len());
+                        // A decoder's packet goes whole (half an Opus packet is noise); an encoder's samples may span buffers,
+                        // but never split one: whole frames of 16-bit samples, `channels` at a time.
+                        let frame = 2 * self.channels.max(1);
+                        let n = if self.whole_input {
+                            if b.len() > space.len() {
+                                tracing::warn!("voice: a packet larger than the decoder's buffer");
+                                return Err(failed());
+                            }
+                            b.len()
+                        } else {
+                            b.len().min(space.len() / frame * frame)
+                        };
                         for (d, s) in space[..n].iter_mut().zip(&b[..n]) {
                             d.write(*s);
                         }

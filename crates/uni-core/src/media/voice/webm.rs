@@ -119,13 +119,26 @@ impl Packets {
         Ok(p)
     }
 
+    /// The next element's ID and size, or `None` at the end. A file that ends inside a header is a killed recorder's, and
+    /// ends there, as long as little is left (as the normalizer allows); a header that can't be read otherwise is damage.
     fn header(&mut self) -> Result<Option<(u32, u64, bool)>> {
         let start = self.at;
-        let Some((id, id_len, _)) = vint(&mut self.r, true).map_err(|_| damaged())? else {
-            return Ok(None);
+        let cut = |e: std::io::Error, len: u64| {
+            if e.kind() == std::io::ErrorKind::UnexpectedEof && len - start <= CUT_SLACK {
+                Ok(None)
+            } else {
+                Err(damaged())
+            }
         };
-        let Some((size, size_len, unknown)) = vint(&mut self.r, false).map_err(|_| damaged())? else {
-            return Err(damaged());
+        let (id, id_len) = match vint(&mut self.r, true) {
+            Ok(Some((id, n, _))) => (id, n),
+            Ok(None) => return Ok(None),
+            Err(e) => return cut(e, self.len),
+        };
+        let (size, size_len, unknown) = match vint(&mut self.r, false) {
+            Ok(Some(v)) => v,
+            Ok(None) => return cut(std::io::ErrorKind::UnexpectedEof.into(), self.len),
+            Err(e) => return cut(e, self.len),
         };
         self.at = start + (id_len + size_len) as u64;
         Ok(Some((id as u32, size, unknown)))
@@ -167,6 +180,8 @@ impl Packets {
             match id {
                 // Entered, never skipped: their children follow.
                 SEGMENT | CLUSTER => {}
+                // A cluster's clock cut off at the end: nothing after it to time.
+                TIMECODE if !unknown && self.at + size > self.len && self.len - self.at <= CUT_SLACK => return Ok(None),
                 TIMECODE => self.cluster_ticks = number(&self.body(size, unknown)?),
                 SIMPLE_BLOCK | BLOCK_GROUP => {
                     if unknown || self.at + size > self.len {
