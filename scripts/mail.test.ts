@@ -6,7 +6,7 @@ import {
   type AccountBoxes, type MailMessage, type MailThread, type SendOutcome,
 } from "../src/mailCore.ts";
 import {
-  addressLine, footDrafts, laterNotNew, mailboxLabel, mailDate, mailTabs, replyDraft, MAIL_FRAME_CSP, mailProblem, mailSrcdoc, placeSources, placeTitle, placeValid, senderLabel, splitQuoted, subjectLabel, threadPeople, toWords, whoTag,
+  addressLine, footDrafts, mailboxLabel, mailDate, mailTabs, replyDraft, MAIL_FRAME_CSP, mailProblem, mailSrcdoc, placeSources, placeTitle, placeValid, senderLabel, splitQuoted, subjectLabel, threadPeople, toWords, whoTag,
   type AccountBoxes as Acct, type Overview,
 } from "../src/mailCore.ts";
 import { restoreTabs, sameTarget, serializeTabs } from "../src/tabs.ts";
@@ -53,7 +53,7 @@ const deciding: Overview = { ...two, accounts: [two.accounts[0], { ...two.accoun
 assert.deepEqual(tabs(deciding, 0, 3).slice(0, 3), ["inbox:2", "later:0", "waiting:3"], "Waiting shows where you decide Uni's held sends");
 assert.equal(mailTabs(deciding, { later: 1, waiting: 3 }).find((t) => t.id === "waiting")?.name, "Waiting (3 waiting)");
 assert.deepEqual(placeSources("inbox", two), [{ account_id: "A", mailbox_id: "A-in", exclude: [], position: 0, flagged: false }], "the Inbox leaves Later mail out");
-assert.deepEqual(placeSources("later", two), [{ account_id: "A", mailbox_id: null, exclude: ["A-junk", "A-trash"], position: 0, flagged: true }], "Later: flagged mail anywhere but Junk and Trash");
+assert.deepEqual(placeSources("later", two), [{ account_id: "A", mailbox_id: null, exclude: ["A-junk", "A-trash", "A-dr"], position: 0, flagged: true }], "Later: threads put off, shown by their mail (not Junk, Trash or an unsent draft)");
 assert.deepEqual(placeSources("uni", two), [{ account_id: "U", mailbox_id: "U-in", exclude: [], position: 0 }], "Uni's mail is Uni's Inbox");
 assert.deepEqual(placeSources("inbox", two, { text: "jars" }), [{ account_id: "A", mailbox_id: null, exclude: ["A-junk", "A-trash"], position: 0 }], "a search reads your whole account, less Junk and Trash");
 assert.deepEqual(placeSources("uni", two, { text: "x" }).map((s) => s.account_id), ["U"], "searching from Uni's tab reads Uni's mail");
@@ -209,10 +209,6 @@ assert.deepEqual(readPending(fake), [p1]);
 console.log("ok   mail (T-210): what is offered, addresses, replies, not verified, send outcomes, pending sends");
 
 // T-335 review: Later is per thread, and both your draft and Uni's sit at the foot
-assert.equal(laterNotNew({ flagged: true, fresh: false }), true, "put off, nothing new: out of the Inbox");
-assert.equal(laterNotNew({ flagged: true, fresh: true }), false, "something new arrived: back in the Inbox");
-assert.equal(laterNotNew({ flagged: false, fresh: false }), false);
-assert.equal(laterNotNew({ flagged: true }), false, "a core that doesn't say: shown");
 const dm = (id: string, o: Partial<MailMessage> = {}): MailMessage => ({ id, thread_id: "t", from: [], to: [], cc: [], reply_to: [], subject: "s", received_at: "", sent_at: null, unread: false, draft: false, uni_drafted: false, mailbox_ids: [], text: "x", html: null, remote_images: 0, links: [], truncated: false, attachments: [], ...o });
 const both: MailThread = { account_id: "A", thread_id: "t", messages: [dm("m1"), dm("own", { draft: true }), dm("u1", { draft: true, uni_drafted: true }), dm("u2", { draft: true, uni_drafted: true })] };
 assert.deepEqual(footDrafts(both, { who: "owner" }), { uni: [both.messages[2], both.messages[3]], own: [both.messages[1]] }, "your draft isn't lost beside Uni's");
@@ -220,4 +216,6 @@ assert.deepEqual(footDrafts(both, { who: "uni" }), { uni: [], own: [] }, "Uni's 
 assert.equal(replyDraft(both, { who: "owner" })?.id, "u2", "Reply opens Uni's newest draft");
 assert.equal(replyDraft({ ...both, messages: [dm("m1"), dm("own", { draft: true }), dm("u1", { draft: true, uni_drafted: true, html: "<b>x</b>" })] }, { who: "owner" })?.id, "own", "Uni's can't be shown whole: your own");
 assert.equal(replyDraft({ ...both, messages: [dm("m1")] }, { who: "owner" }), null, "no draft: a blank reply");
-console.log("ok   mail (T-335 review): Later per thread, the drafts at the foot");
+assert.equal(splitQuoted("See below.\n\n---------- Forwarded message ---------\nFrom: Billing\nInvoice 2291").quoted, null, "a forward's content is not quoted history");
+assert.deepEqual(placeSources("junk", two, { text: "acme" })[0].exclude, ["A-trash"], "a search from Junk searches Junk");
+console.log("ok   mail (T-335 review): the drafts at the foot, forwards, Junk's search");

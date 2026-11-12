@@ -33,15 +33,10 @@ export type ThreadSummary = {
   received_at: string; count: number; unread: boolean; has_attachment: boolean; draft: boolean; uni_drafted: boolean; flagged?: boolean;
   /** T-335: the thread holds a draft Uni wrote (it lives in Drafts, so it isn't the row's own message in the Inbox). */
   uni_draft?: boolean;
-  /** T-335: something new on the thread: an unread message that isn't put off for Later. */
+  /** T-335: something new on the thread: an unread message that isn't put off for Later (what brings a Later thread
+   *  back to the Inbox; the server's Inbox list decides that, and Mail reads it when you open one). */
   fresh?: boolean;
 };
-
-/** T-335: a thread put off for Later stays out of the Inbox until something new arrives on it. Later is the thread's
- *  (any message flagged, as other mail clients may flag only one), so the server's per-message filter isn't enough. */
-export function laterNotNew(t: Pick<ThreadSummary, "flagged" | "fresh">): boolean {
-  return !!t.flagged && t.fresh === false;
-}
 
 /** The drafts at the foot of a thread of yours: Uni's (the reply Uni prepared) and your own, each oldest first. Uni's
  *  account's own drafts stay in its conversation, so it has none here. */
@@ -127,7 +122,8 @@ export function placeSources(p: Place, o: Overview, opts: { text?: string; files
   if (p === "waiting" && !opts.text) return [];
   const files = opts.files ? { with_files: true } : {};
   if (opts.text || p === "later") {
-    const exclude = ["junk", "trash"].flatMap((r) => role(a, r)?.id ?? []);
+    // a search from Junk searches Junk too; Later lists mail, not your unsent drafts (they sit at its threads' foot)
+    const exclude = (p === "junk" ? ["trash"] : p === "later" && !opts.text ? ["junk", "trash", "drafts"] : ["junk", "trash"]).flatMap((r) => role(a, r)?.id ?? []);
     return [{ account_id: a.id, mailbox_id: null, exclude, position: 0, ...(p === "later" ? { flagged: true } : {}), ...files }];
   }
   const box = role(a, BOX[p]!);
@@ -156,7 +152,8 @@ export function yourInboxUnread(o: Overview): number {
 }
 
 /** A plain-text body and the quoted history under it, so a reply reads as what it says: an "On … wrote:" line (or a
- *  closing run of `>` lines) with nothing but quote after it, or an "Original/Forwarded Message" line and what follows.
+ *  closing run of `>` lines) with nothing but quote after it, or an "Original Message" line and what follows. A
+ *  forward's content is what it says, so a "Forwarded message" line folds nothing.
  *  An answer written between quoted lines keeps the whole body open, and nothing folds when nothing is above the quote.
  *  One pass from the end: bodies can be a megabyte. */
 export function splitQuoted(text: string): { body: string; quoted: string | null } {
@@ -166,7 +163,7 @@ export function splitQuoted(text: string): { body: string; quoted: string | null
   let tail = lines.length;
   while (tail > 0 && (quote(lines[tail - 1]) || !lines[tail - 1].trim())) tail--;
   let at = -1;
-  const marker = lines.findIndex((l) => /^-{2,}\s*(Original|Forwarded) Message\s*-{2,}\s*$/i.test(l));
+  const marker = lines.findIndex((l) => /^-{2,}\s*Original Message\s*-{2,}\s*$/i.test(l));
   if (marker > 0) at = marker;
   else {
     const wrote = tail - 1;

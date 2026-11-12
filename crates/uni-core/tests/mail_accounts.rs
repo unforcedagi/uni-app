@@ -26,12 +26,6 @@ fn whole(account: &str) -> Source {
     Source { account_id: account.into(), exclude: vec![format!("{account}-junk"), format!("{account}-trash")], ..Source::default() }
 }
 
-async fn all_rows_with(mail: &MailBridge<'_>) -> bool {
-    let page = mail.threads(&[inbox("A")], None, 50).await.unwrap();
-    let row = |id: &str| page.threads.iter().find(|t| t.thread_id == id).cloned();
-    row("TA-plan").is_some_and(|t| t.uni_draft && !t.draft) && row("Ta4").is_some_and(|t| !t.uni_draft)
-}
-
 fn ids(page: &uni_core::mail::ThreadPage) -> Vec<String> {
     page.threads.iter().map(|t| format!("{}/{}", t.account_id, t.thread_id)).collect()
 }
@@ -148,29 +142,37 @@ async fn later_and_files_narrow_a_list_on_the_server() {
     assert_eq!(ids(&later), ["A/Ta5"], "Later is only flagged mail");
     let files = mail.threads(&[Source { with_files: true, ..whole("A") }], None, 50).await.unwrap();
     assert!(!files.threads.is_empty() && files.threads.iter().all(|t| t.has_attachment), "Files: only mail with attachments");
-    // Later is per thread: a thread with only its newest message flagged (another client's Flag) is put off and has
-    // nothing new; one with an unread message that isn't flagged has something new on it
-    {
+    // Later is the thread's, and the server decides it (paging and totals stay its own): a thread with any message
+    // flagged (here only the oldest, as another client may do) is in Later and out of the Inbox, until something new
+    // (unread, not flagged) arrives on it
+    let set = |id: &str, k: &str, on: bool| {
         let mut st = fake.state.lock().unwrap();
-        let e = st.mail.emails.iter_mut().find(|e| e["id"] == "a3").expect("a3");
-        e["keywords"]["$flagged"] = serde_json::json!(true);
-    }
-    let page = mail.threads(&[inbox("A")], None, 50).await.unwrap();
-    let plan = page.threads.iter().find(|t| t.thread_id == "TA-plan").expect("the plan thread");
-    assert!(plan.flagged && !plan.fresh, "its only unread message is the flagged one: nothing new");
-    {
-        let mut st = fake.state.lock().unwrap();
-        let e = st.mail.emails.iter_mut().find(|e| e["id"] == "a3").expect("a3");
-        e["keywords"].as_object_mut().unwrap().remove("$flagged");
-        let e = st.mail.emails.iter_mut().find(|e| e["id"] == "a1").expect("a1");
-        e["keywords"]["$flagged"] = serde_json::json!(true);
-    }
-    let page = mail.threads(&[inbox("A")], None, 50).await.unwrap();
-    let plan = page.threads.iter().find(|t| t.thread_id == "TA-plan").expect("the plan thread");
-    assert!(plan.flagged && plan.fresh, "an unread message that isn't put off is something new");
+        let e = st.mail.emails.iter_mut().find(|e| e["id"] == id).expect("in the fixture");
+        if on { e["keywords"][k] = serde_json::json!(true); } else { e["keywords"].as_object_mut().unwrap().remove(k); }
+    };
+    let inbox_src = [Source { flagged: Some(false), ..inbox("A") }];
+    let later_src = [Source { flagged: Some(true), ..whole("A") }];
+    let inbox_now = || mail.threads(&inbox_src, None, 50);
+    let later_now = || mail.threads(&later_src, None, 50);
+    set("a1", "$flagged", true);
+    set("a3", "$seen", true);
+    let page = inbox_now().await.unwrap();
+    assert!(!ids(&page).contains(&"A/TA-plan".to_string()), "flagged in part, nothing new: out of the Inbox");
+    assert_eq!(page.total, Some(page.threads.len() as u64), "the server's total counts what the Inbox shows");
+    assert!(ids(&later_now().await.unwrap()).contains(&"A/TA-plan".to_string()), "and in Later");
+    let plan = mail.threads(&[inbox("A")], None, 50).await.unwrap().threads.into_iter().find(|t| t.thread_id == "TA-plan").unwrap();
+    assert!(plan.flagged && !plan.fresh);
+    set("a3", "$seen", false);
+    let page = inbox_now().await.unwrap();
+    let plan = page.threads.iter().find(|t| t.thread_id == "TA-plan").expect("something new: back in the Inbox");
+    assert_eq!(plan.email_id, "a3", "shown by its new message");
+    assert!(plan.flagged && plan.fresh);
+    set("a1", "$flagged", false);
     // the Inbox row of a thread Uni drafted a reply in says so, though the draft itself lives in Drafts
-    let plan = all_rows_with(&mail).await;
-    assert!(plan, "the Inbox row knows the thread holds Uni's draft");
+    let page = mail.threads(&[inbox("A")], None, 50).await.unwrap();
+    let row = |id: &str| page.threads.iter().find(|t| t.thread_id == id).cloned().expect("in the Inbox");
+    assert!(row("TA-plan").uni_draft && !row("TA-plan").draft, "the Inbox row knows the thread holds Uni's draft");
+    assert!(!row("Ta4").uni_draft);
     let next = &later.next[0];
     assert_eq!((next.flagged, next.with_files), (Some(true), false), "the next page keeps the filter");
 }

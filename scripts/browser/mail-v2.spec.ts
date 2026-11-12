@@ -4,7 +4,7 @@
 // Against the mocked command layer (mailMock.ts: Robin Vale's account A and Uni's account U, made up), on the desktop,
 // a phone and the Daylight both ways. Run: npx playwright test --config playwright.mail.config.ts mail-v2
 import { expect, test, type Page } from '@playwright/test';
-import { backToThreads as back, boot, mail, rows, shot, tab } from './mailMock';
+import { backToThreads as back, boot, mail, rows, shot, stacked, tab } from './mailMock';
 
 const thread = (page: Page, subject: string) => page.getByRole('region', { name: `Thread: ${subject}` });
 const calls = (page: Page, cmd: string): Promise<any[]> => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
@@ -251,4 +251,58 @@ test('Enter searches at once, and the pause after typing doesn\'t close the thre
   await expect(thread(page, 'Planning the garden week')).toBeVisible();
   await page.waitForTimeout(700);
   await expect(thread(page, 'Planning the garden week')).toBeVisible();
+});
+
+// ── T-335 third review ──────────────────────────────────────────────────────────────────────────────────────────────
+
+test('a search from Junk finds what is in Junk', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await back(page);
+  await tab(page, 'Junk').click();
+  await expect(rows(page).filter({ hasText: 'Free marmalade for life' })).toHaveCount(1);
+  await mail(page).getByRole('searchbox', { name: 'Search mail' }).fill('prize');
+  await expect(mail(page).locator('.mail-list-title')).toContainText('Search in your mail');
+  await expect(rows(page)).toHaveCount(1);
+  await expect(rows(page).first()).toHaveAccessibleName(/Prize Desk: Free marmalade for life/);
+});
+
+test('Archive from a search keeps the thread in the results, filed', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await mail(page).getByRole('searchbox', { name: 'Search mail' }).fill('workshop');
+  await expect(rows(page)).toHaveCount(1);
+  await rows(page).first().click();
+  await thread(page, 'Workshop photos and slides').getByRole('button', { name: 'Archive' }).click();
+  await expect.poll(async () => (await calls(page, 'mail_archive')).length).toBe(1);
+  await expect(thread(page, 'Workshop photos and slides')).toBeVisible();
+  await back(page);
+  await expect(rows(page)).toHaveCount(1);
+});
+
+test('the thread opened after an Archive is not taken out of Later: only one you open yourself is', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  // the hold thread is a Later thread with something new on it, just below the workshop thread
+  await page.evaluate(() => { const w = window as any; w.__msgs.find((m: any) => m.id === 'a5').flagged = true;
+    w.__msgs.push({ ...w.__msgs.find((m: any) => m.id === 'a5'), id: 'a13', flagged: false, unread: true, html: null, text: 'Your hold expires Friday.', received_at: '2026-10-16T18:00:00Z' }); });
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await expect(rows(page).filter({ hasText: 'hold is ready' })).toHaveAccessibleName(/^Unread\. Later\./);
+  await rows(page).filter({ hasText: 'Workshop photos' }).click();
+  await thread(page, 'Workshop photos and slides').getByRole('button', { name: 'Archive' }).click();
+  await expect(thread(page, 'Your hold is ready')).toBeVisible();
+  await page.waitForTimeout(400);
+  expect((await calls(page, 'mail_flag')).filter((c) => c.flagged === false)).toHaveLength(0);
+});
+
+test('a Refresh keeps the messages you just read open', async ({ page }) => {
+  test.skip(stacked(page), 'Refresh sits on the list on a phone');
+  await boot(page, 'ok', { writes: true });
+  await page.evaluate(() => { const w = window as any; w.__msgs.push({ ...w.__msgs.find((m: any) => m.id === 'a3'), id: 'a12', received_at: '2026-10-19T12:00:00Z', text: 'Also: bring gloves.' }); });
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await rows(page).filter({ hasText: 'garden week' }).click();
+  await expect.poll(async () => (await calls(page, 'mail_mark_seen')).length).toBe(1);
+  const t = thread(page, 'Planning the garden week');
+  await expect(t.locator('.mail-msg[data-folded="false"]')).toHaveCount(2);
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await expect.poll(async () => (await calls(page, 'mail_thread')).length).toBeGreaterThan(1);
+  await page.waitForTimeout(300);
+  await expect(t.locator('.mail-msg[data-folded="false"]')).toHaveCount(2);
 });

@@ -94,8 +94,9 @@ pub struct Source {
     pub exclude: Vec<String>,
     #[serde(default)]
     pub position: u64,
-    /// T-335 Mail v2: Later is the `$flagged` keyword. `Some(true)`: only flagged mail (the Later list); `Some(false)`:
-    /// none of it (the Inbox without what was put off). Absent: either.
+    /// T-335 Mail v2: Later is the `$flagged` keyword, on any message of a thread. `Some(true)`: only Later threads (the
+    /// Later list); `Some(false)`: no Later thread unless something new (unread, not flagged) arrived on it (the Inbox).
+    /// Absent: either.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flagged: Option<bool>,
     /// T-335 Mail v2: only mail with attachments (Files).
@@ -443,14 +444,23 @@ impl MailBridge<'_> {
             if let Some(t) = text {
                 filter.insert("text".into(), json!(t));
             }
-            match s.flagged {
-                Some(true) => drop(filter.insert("hasKeyword".into(), json!("$flagged"))),
-                Some(false) => drop(filter.insert("notKeyword".into(), json!("$flagged"))),
-                None => {}
-            }
             if s.with_files {
                 filter.insert("hasAttachment".into(), json!(true));
             }
+            // T-335: Later is the thread's (any message flagged; other clients may flag only one), and the server
+            // filters it, so paging and totals stay its own. The Inbox leaves a Later thread out until something new
+            // arrives on it: a message that is unread and not flagged.
+            let filter = match s.flagged {
+                Some(true) => {
+                    filter.insert("someInThreadHaveKeyword".into(), json!("$flagged"));
+                    Value::Object(filter)
+                }
+                Some(false) => json!({ "operator": "AND", "conditions": [filter, { "operator": "OR", "conditions": [
+                    { "noneInThreadHaveKeyword": "$flagged" },
+                    { "operator": "AND", "conditions": [{ "notKeyword": "$seen" }, { "notKeyword": "$flagged" }] },
+                ] }] }),
+                None => Value::Object(filter),
+            };
             let a = &s.account_id;
             calls.push(json!(["Email/query", {
                 "accountId": a, "filter": filter, "sort": [{ "property": "receivedAt", "isAscending": false }],

@@ -21,7 +21,7 @@ import { formatSize } from "./media";
 import { initials } from "./messages/messagesView";
 import {
   addressLine, can, canSendFrom, draftEditable, draftFields, readPending, sendOutcomeText, settled, withoutPending, writePending, mailDate, mailDateLong, mailProblem, mailSrcdoc, notVerified, replyFields,
-  senderLabel, subjectLabel, writesOffered, mailTabs, placeAccount, placeSources, placeTitle, placeValid, splitQuoted, threadPeople, toWords, footDrafts, laterNotNew, replyDraft,
+  senderLabel, subjectLabel, writesOffered, mailTabs, placeAccount, placeSources, placeTitle, placeValid, splitQuoted, threadPeople, toWords, footDrafts, replyDraft, uniAccount,
   type AccountBoxes, type MailAttachment, type MailLink, type MailMessage, type MailProblem, type MailThread, type Overview, type Place,
   type PendingSend, type SendOutcome, type Source, type ThreadPage, type ThreadSummary,
   approvalOffered, approveOutcome, canApprove, declineOutcome, fileKind, heldFailure, heldShownWhole, type HeldOutcome, type Parked,
@@ -455,6 +455,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   const notesAsked = useRef(0);
   const noteFrom = useRef(new Map<string, number>()).current;
   const composeSeq = useRef(remembered.compose?.key ?? 0);
+  /** The thread on screen, for a reload to know it is the same one. */
+  const shownThread = useRef<MailThread | null>(null);
   /** The thread just opened from the list: only that load marks it read (a Refresh or a reload doesn't undo Unread). */
   const markOnOpen = useRef<string | null>(null);
   /** A Later thread that something new brought back to the Inbox, just opened from it: reading it takes it out of Later
@@ -561,13 +563,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     setListLoading(true);
     if (!more) setListProblem(null);
     try {
-      const got = await invoke<ThreadPage>("mail_threads", { sources, text: text || null });
+      const page = await invoke<ThreadPage>("mail_threads", { sources, text: text || null });
       if (seq !== listSeq.current) return;
-      // the Inbox (the list that leaves Later out) also drops a thread put off for Later with nothing new on it: Later
-      // is the whole thread's, and the server filters message by message
-      const inbox = sources.some((x) => x.flagged === false);
-      const kept = inbox ? got.threads.filter((t) => !laterNotNew(t)) : got.threads;
-      const page = { ...got, threads: kept, total: got.total != null ? got.total - (got.threads.length - kept.length) : null };
       setList(more
         ? { key, total: page.total, next: page.next, more: page.more, threads: [...more.threads, ...page.threads.filter((t) => !more.threads.some((c) => c.account_id === t.account_id && c.thread_id === t.thread_id))] }
         : { key, total: page.total, next: page.next, more: page.more, threads: page.threads });
@@ -585,10 +582,14 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
 
   const loadThread = useCallback(async (o: Open) => {
     const seq = ++threadSeq.current;
-    setThread(null); setThreadProblem(null); setThreadNote(null); setActionProblem(null);
+    // a reload of the thread on screen keeps it there (and what you opened in it) until the new copy comes
+    const same = (c: { account_id: string; thread_id: string } | null) => !!c && c.account_id === o.accountId && c.thread_id === o.threadId;
+    setThread((cur) => (same(cur) ? cur : null)); setThreadProblem(null); setActionProblem(null);
+    setThreadNote((cur) => (same(shownThread.current) ? cur : null));
     try {
       const t = await invoke<MailThread>("mail_thread", { accountId: o.accountId, threadId: o.threadId });
       if (seq !== threadSeq.current) return;
+      shownThread.current = t;
       setThread(t);
       // opening a thread of your own from the list marks it read, where the bridge offers that (Unread undoes
       // it). Uni's mail stays as Uni left it unless you mark it; a reload never marks.
@@ -653,6 +654,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   };
   /** Close the open thread (a new list doesn't keep showing a thread from the old one). */
   const closeThread = () => {
+    shownThread.current = null;
     // a reply being written under the thread waits behind it, with Resume (never lost out of sight)
     const c = composeRef.current;
     if (c && !c.hidden && c.thread) setCompose({ ...c, hidden: true });
@@ -661,12 +663,13 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   const pick = (p: Place) => { setListNote(null); closeThread(); setPlace(p); queryRef.current = ""; setQuery(""); setTyped(""); setFiles(false); setPane("list"); };
   const runSearch = (text: string) => { if (text !== queryRef.current) { closeThread(); queryRef.current = text; setQuery(text); setPane("list"); } };
   const toggleFiles = () => { closeThread(); setFiles(!files); setPane("list"); };
-  const openThread = (t: Pick<ThreadSummary, "account_id" | "thread_id"> & Partial<Pick<ThreadSummary, "flagged" | "fresh">>) => {
+  /** `auto`: opened because the one before it left the list (Archive, Later), not chosen: it isn't taken out of Later. */
+  const openThread = (t: Pick<ThreadSummary, "account_id" | "thread_id"> & Partial<Pick<ThreadSummary, "flagged" | "fresh">>, auto = false) => {
     // a message being written stays: it waits, with Resume (it comes back under its own thread)
     const c = composeRef.current;
     if (c && !c.hidden && c.thread !== `${t.account_id}/${t.thread_id}`) setCompose({ ...c, hidden: true });
     markOnOpen.current = `${t.account_id}/${t.thread_id}`;
-    unlaterOnOpen.current = placeRef.current === "inbox" && !queryRef.current && t.flagged && t.fresh ? `${t.account_id}/${t.thread_id}` : null;
+    unlaterOnOpen.current = !auto && placeRef.current === "inbox" && !queryRef.current && t.flagged && t.fresh ? `${t.account_id}/${t.thread_id}` : null;
     setOpenHeld(null);
     setOpen({ accountId: t.account_id, threadId: t.thread_id }); setPane("thread");
   };
@@ -736,7 +739,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     if (!same(openRef.current)) return;
     const c = composeRef.current;
     if (c && !c.hidden && c.thread === keyOf(o)) return; // a reply being written keeps its thread
-    if (next) openThread(next);
+    if (next) openThread(next, true);
     else { closeThread(); if (!c || c.hidden) setPane("list"); }
   };
   /** Run one write for the open thread; say what failed, in words. */
@@ -787,7 +790,9 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
       } : null,
       laterLabel: flagged ? (inInbox.length > 0 ? "Back to Inbox" : "Not later") : "Later",
       archive: can(acct, "archive") && inInbox.length > 0 ? () => void act("archive it", () => invoke("mail_archive", { accountId: o.accountId, emailIds: inInbox }), () => {
-        leaveThread(o);
+        // it leaves the Inbox and Later (it is taken out of Later too); elsewhere (Sent, a search) it stays, filed
+        if (!query && (place === "inbox" || place === "later")) leaveThread(o);
+        else void loadThread(o);
         void loadOverview();
         // done with it: it leaves Later too (the archive stands if this fails, and the screen says so)
         if (flagged && can(acct, "flag")) void invoke("mail_flag", { accountId: o.accountId, emailIds: flaggedIds, flagged: false })
@@ -815,7 +820,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   };
   const submitSearch = (e: FormEvent) => { e.preventDefault(); runSearch(typed.trim()); };
   const waitingIn = (id: string) => (held[id] ?? []).filter(waiting).length;
-  const uniAcct = overview?.accounts.find((a) => approvalOffered(a));
+  const uniAcct = overview && approvalOffered(uniAccount(overview)) ? uniAccount(overview) : undefined;
   const tabs = overview ? mailTabs(overview, { later: laterCount, waiting: uniAcct ? waitingIn(uniAcct.id) : 0 }) : [];
   const title = overview ? placeTitle(place, overview, query, files) : "";
   const openAcct = open ? accountOf(open.accountId) : undefined;

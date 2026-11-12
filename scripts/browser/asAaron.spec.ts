@@ -286,12 +286,13 @@ test('a many-pane place\'s header runs the width of its panes on a wide screen',
   test.skip(phone(), 'desktop');
   await mailMock.boot(page, 'ok');
   await expect(mailMock.mail(page)).toBeVisible();
-  const bar = (await page.locator('.mail-bar').boundingBox())!;
+  // T-335 v2: Mail's head is its strip of place tabs; a rail place has no Back of its own, and the first tab sits at
+  // the panes' left edge
+  const bar = (await page.locator('.mail-tabs').boundingBox())!;
   const panes = (await page.locator('.mail-panes').boundingBox())!;
-  // 0.2: a rail place has no Back of its own; the head starts with the place's name, at the panes' left edge
-  await expect(page.locator('.mail-bar').getByRole('button', { name: /^←/ })).toHaveCount(0);
-  const title = (await page.locator('.mail-bar .mail-title').boundingBox())!;
-  expect(title.x - bar.x).toBeLessThanOrEqual(20);
+  await expect(page.locator('.mail-tabs').getByRole('button', { name: /^←/ })).toHaveCount(0);
+  const first = (await page.locator('.mail-tabs [role=tab]').first().boundingBox())!;
+  expect(first.x - bar.x).toBeLessThanOrEqual(20);
   expect(Math.abs(bar.x - panes.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(bar.x + bar.width - (panes.x + panes.width))).toBeLessThanOrEqual(1);
 });

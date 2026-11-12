@@ -91,12 +91,14 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
     const hay = (m: any) => [m.subject, m.text, m.html, ...m.from.map((x: any) => `${x.name} ${x.email}`), ...m.attachments.map((x: any) => x.name)].join(' ').toLowerCase();
     // Email/query with collapseThreads, per source, merged by time (what uni_core::mail::accounts::merge does)
     // __pageSize: pages of that many, each account from its own position (as Email/query does), for Load older
+    const later = (m: any) => msgs.some((x) => x.account === m.account && x.thread_id === m.thread_id && x.flagged);
     const threads = (sources: any[], text: string | null) => {
       let total = 0;
       const rows = sources.flatMap((s) => {
         const hits = msgs.filter((m) => m.account === s.account_id && (s.mailbox_id ? m.box === s.mailbox_id : !s.exclude.includes(m.box)) && (!text || hay(m).includes(text.toLowerCase()))
-          // T-335 Mail v2: Later is the flag (hasKeyword / notKeyword $flagged), Files is hasAttachment, as Rust asks the server
-          && (s.flagged == null || !!m.flagged === s.flagged) && (!s.with_files || m.attachments.length > 0 || (m.files?.length ?? 0) > 0))
+          // T-335 Mail v2, as Rust asks the server: Later is the thread's flag (someInThreadHaveKeyword); the Inbox leaves a
+          // Later thread out unless something new (unread, not flagged) is on it; Files is hasAttachment
+          && (s.flagged == null || (s.flagged ? later(m) : !later(m) || (m.unread && !m.flagged))) && (!s.with_files || m.attachments.length > 0 || (m.files?.length ?? 0) > 0))
           .sort((x, y) => y.received_at.localeCompare(x.received_at));
         const seen = new Set<string>();
         const heads = hits.filter((m) => !seen.has(m.thread_id) && seen.add(m.thread_id));
