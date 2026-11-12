@@ -5,7 +5,16 @@ if (typeof (String.prototype as WithWellFormed).isWellFormed !== "function") {
   Object.defineProperty(String.prototype, "isWellFormed", {
     configurable: true, writable: true,
     // well formed: no lone surrogate (a high one not followed by a low one, or a low one with no high one before it)
-    value(this: string) { return !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(String(this)); },
+    // (a scan by hand, not a regex: a lookbehind is itself missing from the webviews this shim is for)
+    value(this: string) {
+      const t = String(this);
+      for (let i = 0; i < t.length; i++) {
+        const c = t.charCodeAt(i);
+        if (c >= 0xd800 && c <= 0xdbff) { const n = t.charCodeAt(i + 1); if (n >= 0xdc00 && n <= 0xdfff) { i++; continue; } return false; }
+        if (c >= 0xdc00 && c <= 0xdfff) return false;
+      }
+      return true;
+    },
   });
 }
 if (typeof (Object as { hasOwn?: unknown }).hasOwn !== "function") {

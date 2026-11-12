@@ -1,4 +1,4 @@
-/* T-335 the shape: an ask as a message with buttons (AskMessage.tsx). Glow tokens only; on the ink screen it reads by shape and word. */
+/* T-335 the shape: an ask as a card with buttons (AskCard.tsx, T-335 one ask: the one card, in a room, on home, opened in place). Glow tokens only; on the ink screen it reads by shape and word. */
 .sh-ask { font-family: var(--g-font-ui); color: var(--g-ink); }
 .sh-ask-mark { color: var(--g-needs); flex: none; }
 .sh-ask-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -103,3 +103,5 @@
 .sh-ask-wants .sh-ask-body .sh-ask-what { display: inline; font-weight: 500; }
 .sh-ask-wants:not([data-open]) .sh-ask-why { display: none; }
 .sh-ask-wants .cc { margin-top: 8px; }
+/* cards whose room has no row on home */
+.sh-elsewhere { padding: 2px 12px 6px; }

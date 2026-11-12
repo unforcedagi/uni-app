@@ -30,11 +30,14 @@ export type AskCardProps = {
   /** Seconds: what its times are read against. */ now: number;
 };
 
+/** Cards opened, by id: a card that leaves while its write is out and comes back (a write that failed) comes back as it was. */
+const OPENED = new Set<string>();
+
 const sAgo = (t: number, now: number) => { const a = ago(t, now); return a === "now" ? "just now" : /^\d/.test(a) ? `${a} ago` : a; };
 const at = (s: number, now: number) => whenLabel(new Date(s * 1000).toISOString(), now * 1000);
 
 export function AskCard({ card, place, roomName, vault, busy, error, onAct, now }: AskCardProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => OPENED.has(card.id));
   const id = useId();
   const home = place === "home";
   const ended = card.state !== "open" && card.state !== "later";
@@ -43,7 +46,7 @@ export function AskCard({ card, place, roomName, vault, busy, error, onAct, now 
     <span className="sh-card-ended-line"> · {card.ended}{card.state === "lapsed" ? (roomName ? `, with #${roomName}` : ", with its room") : ""}</span>
   </article>;
   const buttons = cardButtons(card, { open, roomName, now });
-  const toggle = () => setOpen((o) => !o);
+  const toggle = () => setOpen((o) => { if (o) OPENED.delete(card.id); else OPENED.add(card.id); return !o; });
   return <article className={`sh-ask sh-card ${home ? "sh-ask-wants" : "sh-ask-msg"}`} data-card={card.id} data-state={card.state} data-kind={card.kind} data-source={card.source}
     data-open={open || undefined} aria-busy={busy || undefined} aria-labelledby={id}>
     {!home && <div className="sh-ask-meta">{place === "tail" && <b>Uni</b>}<span className="sh-ask-mark" aria-hidden="true">◆</span> wants you · {KIND_WORD[card.kind]}
@@ -90,7 +93,7 @@ function Line({ card, home, open, onToggle, labelId }: { card: Card; home: boole
     if (!mouse.current) { onToggle(); return; }
     wait.current = window.setTimeout(() => { if (!picked()) onToggle(); }, 260);
   }}>
-    <span className="sh-ask-what">{home && <span className="sh-ask-mark" aria-hidden="true">◆ </span>}<span id={labelId}>{card.what}</span>
+    <span className="sh-ask-what">{home && <><span className="sh-ask-mark" aria-hidden="true">◆ </span><span className="sh-vh">Wants you: </span></>}<span id={labelId}>{card.what}</span>
       <button type="button" className="sh-ask-open sh-ask-chev" data-card-open aria-expanded={open} aria-label={open ? "Show less" : "Open this ask"} aria-describedby={labelId}
         onClick={(e) => { e.stopPropagation(); onToggle(); }}>{open ? " ˅" : " ›"}</button></span>
     {sub && !open && <span className="sh-ask-why">{sub}</span>}

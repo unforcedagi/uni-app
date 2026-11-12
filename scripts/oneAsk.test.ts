@@ -85,7 +85,10 @@ check("another room's task never lends its words to the card", () => {
 });
 
 check("one rule for buttons: by kind, whatever made the card; opened adds Reply and Archive; an approval card answers on itself", () => {
-  const ch = roomCards([ask({ kind: "choose", options: [{ id: "a", label: "Cone 6" }, { id: "b", label: "Cone 10" }] })], T, POLICY)[0];
+  const ch = roomCards([ask({ kind: "choose", options: [{ id: "a", label: "Cone 6" }, { id: "b", label: "Cone 10" }], until: T + 5 * 86400 })], T, POLICY)[0];
+  // an ask that lapses before Later's day offers no Later: put off past its lapse, it would never come back
+  const soon = roomCards([ask({ kind: "do", until: T + 2 * H })], T, POLICY)[0];
+  assert.deepEqual(cardButtons(soon, { now: T }).map((b) => b.act), ["did", "seen"]);
   const later = `Later · ${new Date((T + 3 * 86400) * 1000).toLocaleDateString("en-US", { weekday: "short" })}`;
   assert.deepEqual(cardButtons(ch, { now: T }).map((b) => b.label), ["Cone 6", "Cone 10", "Seen", later]);
   assert.deepEqual(cardButtons(ch, { now: T, open: true }).map((b) => b.act).slice(-2), ["reply", "archive"]);
@@ -108,7 +111,8 @@ check("answers go in the main line: no e tag ever; only pick, words and did wake
   const words = signEvent(ME, roomAnswer(c, { act: "words", text: "Done it my way" }, T), T - 30);
   const after = roomCards([a, words], T, POLICY)[0];
   assert.equal(after.state, "answered");
-  assert.equal(answersOf([a, words], T, POLICY).get(words.id), a.id);
+  assert.equal(answersOf([a, words], [a.id], POLICY).get(words.id), a.id);
+  assert.equal(answersOf([a, words], [], POLICY).get(words.id), undefined, "only answers to asks the rule knows");
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

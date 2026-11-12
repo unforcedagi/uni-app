@@ -18,6 +18,9 @@ import "./shape.css";
  *  sheet's "in <room>"). (An ask opens in place: T-335 one ask.) */
 export type StoryOpen = { run: RoomRun; room: string };
 
+/** Sent before the surface scrolls a card into view: the App's chat lets go of its newest end (it would snap back while it settles). */
+export const JUMP = "uni:jump-to-card";
+
 /** What a card's button does that only moves the view (the rest are answers, shape.cards.act). */
 export type CardHost = { onOpenLink: (url: string) => void; onOpenRoom: (id: string) => void; onAnswerInRoom: (card: Card) => void };
 
@@ -65,7 +68,7 @@ export function ShapeSurface(p: {
   const openStory = useCallback((run: RoomRun, room: string) => {
     const a = run.state === "waiting" ? askForRun(run, listed.filter((x) => !x.private || x.room === here)) : null;
     if (a?.room && a.room !== here) p.onOpenRoom(a.room);
-    else if (a) document.querySelector(`[data-card="${CSS.escape(a.id)}"]`)?.scrollIntoView({ block: "center" });
+    else if (a) { window.dispatchEvent(new Event(JUMP)); document.querySelector(`[data-card="${CSS.escape(a.id)}"]`)?.scrollIntoView({ block: "center" }); }
     else onStory({ run, room });
   }, [onStory, listed, here, p.onOpenRoom]); // eslint-disable-line react-hooks/exhaustive-deps
   const sheet = story && <RunStory key={story.run.id} vault={p.vault} run={story.run} roomName={nameOf(story.room)} onClose={closeStory} onOpenNote={(id) => { closeStory(); p.onOpenNote(id); }} />;
@@ -74,6 +77,7 @@ export function ShapeSurface(p: {
     <div className="sh-scroll">
       <Home rows={shape.rows} now={shape.now} loading={p.loading} onOpenRoom={p.onOpenRoom} onSearch={p.onSearch}
         renderAsk={(c) => card(c, "home")} renderRun={(run, r) => <RunLine run={run} where="row" onOpen={(x) => openStory(x, r.id)} />}
+        elsewhere={shape.elsewhere}
         emptyHint={p.emptyHint} unseen={shape.unseen} />
     </div>
     {sheet}
@@ -86,11 +90,13 @@ export function ShapeSurface(p: {
   const runs = shape.runs.get(id);
   // the room's cards: one asked by a message the chat holds is drawn there (by the App); the rest (tasks, older asks) after the chat
   const mine = focus.root ? [] : shape.cards.list.byRoom.get(id) ?? [];
-  const after = mine.filter((c) => c.source === "task" || !p.drawnAt.has(c.id));
+  // (a Hermes prompt is answered in this room's composer, where its banner says so: not drawn again after the chat)
+  const after = mine.filter((c) => c.source === "task" || (c.source !== "prompt" && !p.drawnAt.has(c.id)));
   const first = mine[0];
   // what waits on you here: the first card (a tap brings it into view), else a run that waits on you (its story)
   const waits: RoomRun | null = first ? { id: first.id, state: "waiting", title: first.what, line: first.what, startedAt: null } : runs?.waiting ?? null;
-  const showFirst = () => { if (first) document.querySelector(`.sh-room [data-card="${CSS.escape(first.id)}"]`)?.scrollIntoView({ block: "center" }); };
+  // (a jump, as search's is: the chat stops holding its newest end in view, even in its first moments)
+  const showFirst = () => { if (!first) return; window.dispatchEvent(new Event(JUMP)); document.querySelector(`.sh-room [data-card="${CSS.escape(first.id)}"]`)?.scrollIntoView({ block: "center" }); };
   const owed = shape.asks.owed.filter((o) => o.channel === id);
   const tail = (after.length > 0 || owed.length > 0) ? <div className="sh-room-tail">
     {after.map((c) => <div key={c.id} className="sh-room-ask">{card(c, "tail")}</div>)}

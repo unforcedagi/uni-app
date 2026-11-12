@@ -182,3 +182,16 @@ test("6. a reply to a task's ask: a write that fails keeps his words; the next s
   await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body, c.args.replyTo])).toEqual([[ROOM.house, 'T-609: Pasted it from the paper copy', null]]);
   expect((await calls(page, 'vault_transition')).filter((c) => c.args.id === 'ask-key').map((c) => c.args.metadata.answer)).toEqual(['Pasted it from the paper copy', 'Pasted it from the paper copy']);
 });
+
+test('7. a card whose room has no row on home (a retired room) still shows there, apart, and counts', async ({ page }) => {
+  await boot(page, world());
+  const before = Number(await bar(page).textContent());
+  await page.close();
+  const next = await page.context().newPage();
+  await boot(next, world(), { barnCard: true });
+  const apart = next.locator('.sh-elsewhere');
+  await expect(apart.locator('[data-card="barn-card"]')).toHaveCount(1);
+  await expect(apart).toContainText('barn-key');
+  await expect(bar(next)).toHaveText(String(before + 1));
+  await expect(next.locator('.sh-row[data-room="ch-barn"]')).toHaveCount(0);
+});

@@ -535,7 +535,7 @@ test('T-335 asks in tune: each button says what it does; I did it hands a do ask
     'Ends it and tells #House, which does any follow-up',
     'Ends it for good; #House sees it on its next turn',
     `Off your list until ${day} ${mmdd}, then back`,
-    "Your words go to #House's main line, quoting this, and end it",
+    "Your words go to #House's main line as its answer, and end it",
     'Off your list for good; #House sees it on its next turn',
   ]);
   await expect(key.locator('.sh-ask-nochat')).toHaveText("No button here starts a new chat or a thread. Your words go to #House's main line.");

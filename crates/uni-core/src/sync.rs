@@ -448,6 +448,10 @@ mod conversation_tests {
         assert!(got.iter().all(|e| e.verify().is_ok()), "kept exactly as signed");
         assert_eq!(store.ask_events(1_003, 100).unwrap().len(), 3);
         assert_eq!(store.ask_events(0, 2).unwrap().len(), 2);
+        // a message the relay removed (NIP-29 9005) is gone for the rule too
+        store.upsert_aux(&"9".repeat(64), 9005, &answer.id.to_hex(), &uni.public_key().to_hex(), 1_006, "").unwrap();
+        let after: Vec<String> = store.ask_events(0, 100).unwrap().iter().map(|j| Event::from_json(j).unwrap().id.to_hex()).collect();
+        assert!(!after.contains(&answer.id.to_hex()) && after.len() == 4);
     }
 
     #[test]

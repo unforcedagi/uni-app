@@ -6,7 +6,7 @@
 //   tap (Uni's sealed card, or a Hermes prompt). A task that only says "tap the card" folds into that card while the card waits: one card,
 //   carrying the task's words when it is in the same room. Step 4 deletes this layer, once rooms ask with one verb.
 // Pure: no React, no Tauri, no clock but the `now` it is given (unit-tested in scripts/oneAsk.test.ts).
-import { buildAnswer, roomAsks, wakes, type Ask as RoomAsk, type AskState, type Policy, type Template } from "../ask/index.ts";
+import { BUTTON_GRACE_S, buildAnswer, roomAsks, wakes, type Ask as RoomAsk, type AskState, type Policy, type Template } from "../ask/index.ts";
 import { commandLine, type Approval } from "../approvals.ts";
 import { cardIs, waitingTitle } from "../sealedCardCore.ts";
 import { dayWords, laterUntil, type VaultAsk } from "./asksCore.ts";
@@ -69,17 +69,22 @@ export function roomCard(st: AskState, priv: (room: string) => boolean = () => f
 
 /** Every ask the room events hold (any room), each with its state at `now`. Not yet asks ("none") are left out. */
 export function roomCards(events: unknown[], now: number, policy: Policy, priv?: (room: string) => boolean): Card[] {
-  return roomAsks(events, now, policy).map((s) => roomCard(s, priv)).filter((c): c is Card => c !== null);
+  return cardsOf(roomAsks(events, now, policy), priv);
+}
+/** The same from states already worked out (one read of the rule serves the cards and the answers). */
+export function cardsOf(states: readonly AskState[], priv?: (room: string) => boolean): Card[] {
+  return states.map((s) => roomCard(s, priv)).filter((c): c is Card => c !== null);
 }
 
-/** Which room ask each answer message names (answer event id -> ask id), for drawing an answer as a quote of its ask in the main line. */
-export function answersOf(events: unknown[], now: number, policy: Policy): Map<string, string> {
+/** Which room ask each answer message names (answer event id -> ask id), for drawing an answer as a quote of its ask in the main line.
+ *  `asks`: the asks' ids (the states the rule worked out). */
+export function answersOf(events: unknown[], asks: Iterable<string> | readonly AskState[], policy: Pick<Policy, "owner">): Map<string, string> {
   const out = new Map<string, string>();
   const owner = new Set(policy.owner);
-  const asks = new Set(roomAsks(events, now, policy).map((s) => s.id));
+  const ids = new Set([...asks].map((a) => (typeof a === "string" ? a : a.id)));
   for (const e of events as { id?: unknown; pubkey?: unknown; kind?: unknown; tags?: unknown }[]) {
     if (!e || e.kind !== 9 || typeof e.id !== "string" || !owner.has(String(e.pubkey)) || !Array.isArray(e.tags)) continue;
-    const q = (e.tags as unknown[]).find((t): t is string[] => Array.isArray(t) && t[0] === "q" && typeof t[1] === "string" && asks.has(t[1]));
+    const q = (e.tags as unknown[]).find((t): t is string[] => Array.isArray(t) && t[0] === "q" && typeof t[1] === "string" && ids.has(t[1]));
     if (q) out.set(e.id, q[1]);
   }
   return out;
@@ -164,8 +169,8 @@ export function nextChange(cards: Iterable<Card>, now: number): number | null {
   }
   return next;
 }
-/** Buttons stop a minute before the lapse (the library's rule), so a tap can't land after the asker's deadline. */
-const BUTTON_GRACE = 60;
+/** Buttons stop a minute before the lapse (the library's rule, BUTTON_GRACE_S), so a tap can't land after the asker's deadline. */
+export const BUTTON_GRACE = BUTTON_GRACE_S;
 
 // ------------------------------------------------------------------ the buttons: one rule for every card
 
@@ -186,16 +191,21 @@ export function cardButtons(c: Card, o: { open?: boolean; roomName?: string; now
   if (!answerable || (c.until !== null && o.now >= c.until - BUTTON_GRACE)) return [];
   const out: CardButton[] = [];
   const day = laterUntil(new Date(o.now * 1000));
-  const later: CardButton = { label: `Later · ${dayWords(day).split(" ")[0]}`, act: "later", value: day, primary: false, does: `Off your list until ${dayWords(day)}, then back` };
+  const [ly, lm, ld] = day.split("-").map(Number);
+  // (Later is offered only when that day comes before its lapse: put off past it, it would never come back)
+  const laterOk = c.until === null || new Date(ly, lm - 1, ld).getTime() / 1000 < c.until - BUTTON_GRACE;
+  const later: CardButton | null = laterOk ? { label: `Later · ${dayWords(day).split(" ")[0]}`, act: "later", value: day, primary: false, does: `Off your list until ${dayWords(day)}, then back` } : null;
+  const maybeLater = later ? [later] : [];
   const seen: CardButton = { label: "Seen", act: "seen", value: "", primary: false, does: `Ends it for good; ${to} sees it on its next turn` };
   const sealed = c.kind === "approve" || c.kind === "give";
-  if (c.kind === "do") out.push({ label: "I did it", act: "did", value: "", primary: false, does: `Ends it and tells ${to}, which does any follow-up` }, seen, later);
-  else if (c.kind === "choose") out.push(...c.options.map((op): CardButton => ({ label: op.label, act: "pick", value: op.id, primary: false, does: `Your pick goes to ${to} and ends it` })), seen, later);
+  if (c.kind === "do") out.push({ label: "I did it", act: "did", value: "", primary: false, does: `Ends it and tells ${to}, which does any follow-up` }, seen, ...maybeLater);
+  else if (c.kind === "choose") out.push(...c.options.map((op): CardButton => ({ label: op.label, act: "pick", value: op.id, primary: false, does: `Your pick goes to ${to} and ends it` })), seen, ...maybeLater);
   else if (c.kind === "look") out.push(...(c.link ? [{ label: "Open", act: "open", value: c.link, primary: false, does: "Opens the link; Seen then ends it" } as CardButton] : []), seen);
-  else if (sealed) out.push(seen, later);
+  else if (sealed) out.push(seen, ...maybeLater);
   else out.push(seen);
   if (o.open) {
-    if (c.room && !sealed) out.push({ label: "Reply in the room", act: "reply", value: "", primary: false, does: `Your words go to ${to}'s main line, quoting this, and end it` });
+    if (c.room && !sealed) out.push({ label: "Reply in the room", act: "reply", value: "", primary: false,
+      does: c.source === "room" ? `Your words go to ${to}'s main line, quoting this, and end it` : `Your words go to ${to}'s main line as its answer, and end it` });
     out.push({ label: "Archive", act: "archive", value: "", primary: false, does: `Off your list for good; ${to} sees it on its next turn` });
   }
   if (out.length) out[0].primary = true;

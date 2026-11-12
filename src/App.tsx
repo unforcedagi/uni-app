@@ -86,8 +86,8 @@ import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, 
 import NotePane, { usePaneShape } from "./NotePane";
 import { APPROVAL_WINDOW_S, useApprovals } from "./approvalsLive";
 import { ApprovalBanner } from "./shape/ApprovalBanner";
-import { drawCard, ShapeSurface, type CardHost, type StoryOpen } from "./shape/ShapeSurface";
-import { withoutAskBlocks, type Card } from "./shape/oneAsk";
+import { drawCard, JUMP, ShapeSurface, type CardHost, type StoryOpen } from "./shape/ShapeSurface";
+import { BUTTON_GRACE, withoutAskBlocks, type Card } from "./shape/oneAsk";
 import { useShape } from "./shape/useShape";
 import { forgetAsks } from "./shape/useAsks";
 import { Bar } from "./shape/Bar";
@@ -1443,6 +1443,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // so a half-swapped list never overwrites a good mark).
   const gliding = useRef(0);
   const settleUntil = useRef(0);
+  // T-335 one ask: "Waits on you" brings a card into view: a jump, as search's is, so the chat stops holding its newest end
+  useEffect(() => {
+    const jump = () => { stickToEnd.current = false; settleUntil.current = 0; pinned.current = null; };
+    window.addEventListener(JUMP, jump);
+    return () => window.removeEventListener(JUMP, jump);
+  }, []);
   useEffect(() => {
     const el = listEl;
     if (!el) return;
@@ -2068,6 +2074,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (!channel || activeScope.current !== keyFor(channel, root) || sendingRef.current ||
         recordingOrigin.current || recorder.isBusy() || (!draft.trim() && !pending.length)) return;
     const files = manualAttachments(pendingStore.current.get(keyFor(channel, root)) ?? []);
+    // T-335 one ask: an answer is words; with a file attached, say so rather than send it as something else
+    if (answering && answering.room === channel && !root && files.length) { setError("An answer is words only: remove the attachment, or stop answering (×) to send it as a message."); return; }
     if ((!draft.trim() && !files.length) || files.some(attachmentBlocksSend)) {
       setError("Wait for uploads to finish or retry or remove failed files."); return;
     }
@@ -2120,7 +2128,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       // user has switched rooms meanwhile.
       setTick((n) => n + 1);
       await loadRooms();
-      setStatus(recipients.length ? `Message sent · notified ${recipients.length}` : "Message sent");
+      setStatus(ans ? "Answer sent" : recipients.length ? `Message sent · notified ${recipients.length}` : "Message sent");
     } catch (e) {
       // the relay has it and only this device's copy failed: it was sent (putting the text back would invite a second one)
       if (relayAccepted(e)) {
@@ -2439,7 +2447,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // on the list and the task each carries; the answers): the message list is drawn again when any of it changes
   const cardNow = shape.cards.now;
   const asksKey = [...shape.cards.list.asked.values(), ...shape.cards.list.approvals.values()]
-    .map((c) => `${c.id}${c.state}${c.what}${c.until !== null && cardNow >= c.until - 60 ? "!" : ""}${shape.cards.busy(c.id) ? "*" : ""}${shape.cards.error(c.id) ?? ""}`).join(" ") + `|${shape.cards.answers.size}`;
+    .map((c) => `${c.id}${c.state}${c.what}${c.until !== null && cardNow >= c.until - BUTTON_GRACE ? "!" : ""}${shape.cards.busy(c.id) ? "*" : ""}${shape.cards.error(c.id) ?? ""}`).join(" ") + `|${shape.cards.answers.size}`;
   /**
    * T-335: a Hermes approval prompt drawn as its short card. Its state comes from the same store read as Needs you (every room and thread),
    * never from the loaded timeline alone (a room's list has no thread replies). An outcome once read stands. Older than that read: no

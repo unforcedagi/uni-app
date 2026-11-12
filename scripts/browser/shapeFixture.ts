@@ -36,6 +36,7 @@ export type ShapeOpts = {
   /** T-335 one ask: room asks as real signed events (made by the vendored library in the spec, with made-up keys). `me` and `uni` replace
    *  the world's identity and Uni's key so the signatures check; each event is a message in its room; the page's answers are signed by
    *  `window.__signAsMe` (the spec exposes it) and kept across a reload. */ asks?: { me: string; uni: string; events: unknown[] };
+  /** T-335 one ask: one of Uni's cards waiting in the retired room (old-barn, hidden from home's rows). */ barnCard?: boolean;
 };
 
 /** T-335 cards expand: the extra cards' message ids (card event ids are hex; an ask names one by its first 12 or more). */
@@ -191,7 +192,8 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
       [CARD.secret]: { kind: 'single', event_id: CARD.secret, refused: null, rows: [{ rid: 'r4'.padEnd(32, '0'), action: 'quiet.open', credential: 'quiet-key', class: 'routine',
         scope: 'Private words about the practice', ttl_s: 600, uses: 1, payload: null, request_digest: '11223344' + 'c'.repeat(56), expires: nowS + 40 * min, answer: null, asked: nowS - 5 * min }] },
     };
-    const waiting = () => [...(o.cards ? [{ ref: CARD.secret, channel: ROOM.quiet, root: null, ts: nowS - 5 * min, kind: 'single', credential: 'quiet-key', action: 'quiet.open', class: 'routine', rows: 1,
+    const waiting = () => [...(o.barnCard ? [{ ref: 'barn-card', channel: ROOM.barn, root: null, ts: nowS - 2 * min, kind: 'single', credential: 'barn-key', action: 'barn.open', class: 'routine', rows: 1,
+      expires: nowS + 30 * min, fingerprint: '55667788', reach: null }] : []), ...(o.cards ? [{ ref: CARD.secret, channel: ROOM.quiet, root: null, ts: nowS - 5 * min, kind: 'single', credential: 'quiet-key', action: 'quiet.open', class: 'routine', rows: 1,
       expires: nowS + 40 * min, fingerprint: '11223344', reach: null }, { ref: CARD.prod, channel: ROOM.river, root: null, ts: nowS - 20 * min, kind: 'single', credential: 'cf-site', action: 'job.cloudflare', class: 'powerful', rows: 1,
       expires: cards[CARD.prod].rows[0].expires, fingerprint: '7c4e19d2', reach }] : []), ...(w.__cardAnswered ? [] : [{ ref: 'rb-card', channel: ROOM.river, root: null, ts: nowS - 66 * min, kind: 'single', credential: 'billing', action: 'invoice.send', class: 'routine', rows: 1, expires, fingerprint: '9b13b2ae' }])];
 

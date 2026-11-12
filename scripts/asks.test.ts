@@ -142,7 +142,7 @@ check("a task's buttons by kind, by the one card's rule (T-335 one ask): choose 
   assert.equal(says(one({ kind: "do" }), "did"), "Ends it and tells #Kiln Studio, which does any follow-up");
   assert.equal(says(one({ kind: "tell" }), "seen"), "Ends it for good; #Kiln Studio sees it on its next turn");
   assert.equal(says(one({ kind: "do" }), "later"), "Off your list until Sat 11-14, then back");
-  assert.equal(says(one({ kind: "do" }), "reply"), "Your words go to #Kiln Studio's main line, quoting this, and end it");
+  assert.equal(says(one({ kind: "do" }), "reply"), "Your words go to #Kiln Studio's main line as its answer, and end it");
 });
 
 check("Later's day and its write", () => {

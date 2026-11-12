@@ -463,11 +463,13 @@ impl Store {
     }
 
     /// T-335 one ask: the signed events the ask rule reads, at or after `since` (Unix seconds): ask-shaped messages and every edit and
-    /// deletion kept (see `sync::ask_shaped`), newest first, at most `limit`. Unverified: the reader checks each id and signature.
+    /// deletion kept (see `sync::ask_shaped`), newest first, at most `limit`. A message the relay removed (a NIP-29 9005 delete, which the
+    /// shared rule doesn't read) is left out, as the chat leaves it out. Unverified: the reader checks each id and signature.
     pub fn ask_events(&self, since: i64, limit: i64) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT json FROM (
                  SELECT s.json AS json, i.ts AS ts FROM signed_events s JOIN items i ON i.ref = s.ref WHERE i.ts >= ?1
+                   AND NOT EXISTS (SELECT 1 FROM aux_events d WHERE d.target = i.ref AND d.kind = 9005)
                  UNION ALL
                  SELECT s.json, a.ts FROM signed_events s JOIN aux_events a ON a.id = s.ref WHERE a.ts >= ?1 AND a.kind IN (5, 40003)
              ) ORDER BY ts DESC LIMIT ?2",

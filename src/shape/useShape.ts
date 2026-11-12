@@ -16,7 +16,8 @@ import type { RawNote } from "../vault/rawNote";
 import { reader } from "../vault/reader";
 import { homeRows, wantsCount } from "./homeCore";
 import { relayAccepted } from "../voiceOutbox";
-import { answersOf, nextChange, oneList, roomAnswer, roomCards, type Card, type CardButton } from "./oneAsk";
+import { answersOf, cardsOf, nextChange, oneList, roomAnswer, type Card, type CardButton } from "./oneAsk";
+import { roomAsks } from "../ask/index.ts";
 import { useRoomAsks } from "./useRoomAsks";
 import { decisionsFrom, hiddenRooms, keepAsks, nodeTree, privateRooms } from "./shapeCore";
 import { studioLooks } from "./studioCore";
@@ -163,7 +164,9 @@ export function useShape(o: {
   const cardByRoom: ReadonlyMap<string, Ask[]> = useMemo(() => (settled ? keepAsks(asks.cardByRoom, reg) : NO_ASKS), [asks.cardByRoom, reg, settled]);
   useDecisionsFeed({ vault: o.vault, on: o.on && !!o.identity && settled, tree, rooms, priv: privStable, hidden, reg, uniRoom, openNote: o.openNote });
   // T-335 one ask: the room asks (signed events in their rooms, read by the shared rule) beside today's tasks and approvals, as one list
-  const room = useRoomAsks(o.on, o.identity);
+  // (read again when a room's newest message moves: a history fetch stores asks without a live event)
+  const newest = rooms.reduce((n, r) => Math.max(n, r.last_ts ?? 0), 0);
+  const room = useRoomAsks(o.on, o.identity, newest);
   // the clock the cards are read against: bumped at the next moment one changes by the clock (a lapse, Later's end), and once a minute
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((n) => n + 1), []);
@@ -173,8 +176,10 @@ export function useShape(o: {
   // a private room's cards are drawn without their words on home; with the Uni glue on, every room's are, until the registry and the tree are read
   const privacyKnown = !o.on || (settled && tree !== null);
   const isPrivate = useCallback((ch: string) => !privacyKnown || privStable.has(ch), [privacyKnown, privStable]);
-  const asked = useMemo(() => (room.policy ? roomCards(room.events, Math.floor(now), room.policy, isPrivate) : []), [room.events, room.policy, now, isPrivate]);
-  const answers = useMemo(() => (room.policy ? answersOf(room.events, Math.floor(now), room.policy) : new Map<string, string>()), [room.events, room.policy, now]);
+  // the shared rule, once per read and clock tick: the cards and the answers both come from it
+  const states = useMemo(() => (room.policy ? roomAsks(room.events, Math.floor(now), room.policy) : []), [room.events, room.policy, now]);
+  const asked = useMemo(() => cardsOf(states, isPrivate), [states, isPrivate]);
+  const answers = useMemo(() => (room.policy ? answersOf(room.events, states, room.policy) : new Map<string, string>()), [room.events, states, room.policy]);
   const tasks = useMemo(() => [...byRoom.values()].flat() as VaultAsk[], [byRoom]);
   const folding = useMemo(() => [...cardByRoom.values()].flat() as VaultAsk[], [cardByRoom]);
   const list = useMemo(() => oneList({ room: asked, tasks, onCard: folding, approvals: o.approvals, now, priv: isPrivate }), [asked, tasks, folding, o.approvals, now, isPrivate]);
@@ -186,14 +191,18 @@ export function useShape(o: {
     return () => window.clearTimeout(t);
   }, [list, now, bump]);
   const rows = useMemo(() => homeRows(rooms, runs, list.byRoom, { hidden }), [rooms, runs, list.byRoom, hidden]);
-  const wants = wantsCount(rows);
+  // a card whose room has no row on home (a retired room, one this device doesn't list) still wants him: home shows it apart, and it counts
+  const elsewhere = useMemo(() => { const has = new Set(rows.map((r) => r.room.id)); return list.cards.filter((c) => !c.room || !has.has(c.room)); }, [rows, list.cards]);
+  const wants = wantsCount(rows) + elsewhere.length;
 
   // answering a card: a room's ask is answered by one signed message in its room (the library builds it); a task by today's write and post
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const inFlight = useRef(new Set<string>());
   const answerRoom = useCallback(async (c: Card, b: Pick<CardButton, "act" | "value"> | { act: "words"; text: string }) => {
-    if (!c.room || inFlight.current.has(c.id)) return null;
+    // (a send that can't go now says so: the composer keeps his words)
+    if (!c.room) throw new Error("it has no room on this device");
+    if (inFlight.current.has(c.id)) throw new Error("an answer to it is still on its way");
     inFlight.current.add(c.id);
     setBusy((s) => new Set(s).add(c.id));
     setErrors((m) => { const n = new Map(m); n.delete(c.id); return n; });
@@ -239,6 +248,6 @@ export function useShape(o: {
   const looks = useMemo(() => studioLooks(shown, roomName), [shown, roomName]);
   // (only by room: the flat list holds asks the registry hasn't vetted yet, and private ones; nothing outside a room should read them)
   const { asks: _unvetted, ...answering } = asks;
-  return { rows, wants, now, cards, runs, asks: { ...answering, byRoom, cardByRoom }, /* (only once the rooms, the registry and the tree are read: an ask about to be drawn in its room is not "out of sight") */ unseen: privacyKnown && o.on && rooms.length > 0 ? asks.unseen : 0, hidden, priv: privStable, uniRoom, looks, roomName,
+  return { rows, elsewhere, wants, now, cards, runs, asks: { ...answering, byRoom, cardByRoom }, /* (only once the rooms, the registry and the tree are read: an ask about to be drawn in its room is not "out of sight") */ unseen: privacyKnown && o.on && rooms.length > 0 ? asks.unseen : 0, hidden, priv: privStable, uniRoom, looks, roomName,
     /* (T-335 cards expand) a room whose words stay inside it: private, or not yet known not to be */ isPrivate };
 }
