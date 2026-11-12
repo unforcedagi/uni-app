@@ -92,7 +92,9 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
       river[river.length - 5].edited = true;   // the broker's edit: one line in the card's place, no fence
     }
     // T-335 one ask: each room ask (and any answer the spec signed ahead) is a message in its room
-    const kept = sessionStorage.getItem('__askEvents');
+    // (a sealed applet's sandboxed frame runs this script too and has no storage: reading it there throws)
+    let kept: string | null = null;
+    try { kept = sessionStorage.getItem('__askEvents'); } catch { /* sandboxed frame */ }
     w.__askEvents = kept ? JSON.parse(kept) : (o.asks?.events ?? []);
     const asMsg = (ev: any) => ({ ...msg(ev.id, ev.tags.find((t: string[]) => t[0] === 'h')[1], ev.pubkey === ME ? 'me' : 'Uni', nowS - ev.created_at, ev.content), ts: ev.created_at });
     for (const ev of w.__askEvents) if (ev.kind === 9) { const m = asMsg(ev); (msgs[m.channel] ??= []).push(m); msgs[m.channel].sort((a: any, b: any) => a.ts - b.ts); }
