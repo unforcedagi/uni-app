@@ -9,7 +9,12 @@ import { boot, mail, rows, shot, stacked } from './mailMock';
 const tab = (page: Page, name: string) => mail(page).getByRole('tab', { name: new RegExp(`^${name}`) });
 const thread = (page: Page, subject: string) => page.getByRole('region', { name: `Thread: ${subject}` });
 const calls = (page: Page, cmd: string): Promise<any[]> => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
-const back = async (page: Page) => { if (stacked(page)) await mail(page).getByRole('button', { name: /^← (Inbox|Later|Uni's mail|Search|Back)/ }).first().click(); };
+/** On a phone, back from a thread to the list (when a thread is showing). */
+const back = async (page: Page) => {
+  if (!stacked(page)) return;
+  const b = mail(page).locator('.mail-thread-back:visible');
+  if (await b.count()) await b.first().click();
+};
 
 test('the morning: your Inbox first, as tabs, in two-line rows, with Uni\'s own mail left out', async ({ page }) => {
   await boot(page, 'ok', { writes: true, held: true });
@@ -42,9 +47,9 @@ test('reading: earlier messages fold, the newest is open, headers are one line, 
   // the two read messages fold to one line each; the unread newest is open
   await expect(t.locator('.mail-msg[data-folded="true"]')).toHaveCount(2);
   await expect(t.getByText('which day should we start the beds')).toBeVisible();
-  await expect(t.getByText('marmalade jars')).toBeHidden();
+  await expect(t.locator('.mail-text', { hasText: 'marmalade jars' })).toHaveCount(0);
   await t.getByRole('button', { name: /^Mara Quill, Sun/ }).click();
-  await expect(t.getByText('marmalade jars')).toBeVisible();
+  await expect(t.locator('.mail-text', { hasText: 'marmalade jars' })).toBeVisible();
   // one line of who and when; the addresses on request
   const open = t.locator('.mail-msg[data-folded="false"]').last();
   await expect(open.locator('.mail-msg-who')).toContainText('Mara Quill');
@@ -52,6 +57,10 @@ test('reading: earlier messages fold, the newest is open, headers are one line, 
   await expect(open.getByText('mara@example.org')).toBeHidden();
   await open.getByRole('button', { name: 'Details' }).click();
   await expect(open.getByText('mara@example.org')).toBeVisible();
+  // the quoted history under her reply folds
+  await expect(open.getByText('> Saturday works. Bring the jars.')).toHaveCount(0);
+  await open.getByRole('button', { name: 'Show quoted text' }).click();
+  await expect(open.getByText('> Saturday works. Bring the jars.')).toBeVisible();
   await shot(page, 'v2-2-thread');
 });
 
@@ -101,8 +110,8 @@ test('search runs as you type, closes the open thread, and Files lists mail with
   await shot(page, 'v2-4-search');
   await box.fill('');
   await expect(rows(page)).toHaveCount(3);
-  await mail(page).getByRole('button', { name: 'Files' }).click();
-  await expect(mail(page).getByRole('button', { name: 'Files' })).toHaveAttribute('aria-pressed', 'true');
+  await mail(page).getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(mail(page).getByRole('button', { name: 'Files', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(rows(page)).toHaveCount(1);
   await expect(rows(page).first()).toHaveAccessibleName(/Theo Brandt: Workshop photos and slides/);
   expect((await calls(page, 'mail_threads')).at(-1).sources[0].with_files).toBe(true);
@@ -119,16 +128,22 @@ test('Archive takes the thread out and opens the next one; Later moves it to Lat
   await expect(rows(page).filter({ hasText: 'Workshop photos' })).toHaveCount(0);
   expect((await calls(page, 'mail_archive')).at(-1)).toEqual({ accountId: 'A', emailIds: ['a4'] });
   await shot(page, 'v2-5-archived-next');
-  // Later: out of the Inbox, into Later (the flag), and the next thread opens (none left below: back to the list)
+  // Later: out of the Inbox, into Later (the flag on each of its messages), and the next thread opens (none left
+  // below it: the one above)
   await thread(page, 'Your hold is ready').getByRole('button', { name: 'Later' }).click();
+  await expect(thread(page, 'Planning the garden week')).toBeVisible();
   await expect(rows(page).filter({ hasText: 'hold is ready' })).toHaveCount(0);
-  expect((await calls(page, 'mail_flag')).at(-1)).toMatchObject({ accountId: 'A', flagged: true });
-  await expect(tab(page, 'Later')).toHaveAccessibleName(/1/);
+  expect((await calls(page, 'mail_flag')).at(-1)).toMatchObject({ accountId: 'A', flagged: true, emailIds: ['a5', 'a9'] });
+  await back(page);
+  await expect(tab(page, 'Later')).toHaveAccessibleName(/1 put off/);
   await tab(page, 'Later').click();
   await expect(rows(page)).toHaveCount(1);
   await rows(page).first().click();
   await thread(page, 'Your hold is ready').getByRole('button', { name: 'Back to Inbox' }).click();
+  // nothing left in Later: back to its (empty) list
   await expect(rows(page)).toHaveCount(0);
+  await expect(mail(page).getByText('Nothing put off for later.')).toBeVisible();
+  await expect(tab(page, 'Later')).toHaveAccessibleName('Later');
   await tab(page, 'Inbox').click();
   await expect(rows(page).filter({ hasText: 'hold is ready' })).toHaveCount(1);
 });

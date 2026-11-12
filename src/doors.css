@@ -1,0 +1,25 @@
+/* T-335: the doors' shared look (Messages and Mail): pill tabs across the top (the one you're on is ink-filled: a shape,
+   not a colour, for the Daylight; a count is what waits for you), and rows of a monochrome initials disc and two lines
+   (filled disc and bold when unread). Each door adds only what is its own. */
+.door-tabs { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--bg); overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.door-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 10px 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--text-soft); text-align: left; font-size: 14px; }
+.door-row:hover { background: var(--surface); }
+.door-row.selected { background: var(--highlight); box-shadow: inset 3px 0 0 var(--g-accent); }
+.door-avatar { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: var(--g-hair) solid var(--g-line-strong); background: var(--th-card); color: var(--th-ink); font: 600 14px var(--sans); letter-spacing: .02em; }
+.door-row.unread .door-avatar { background: var(--th-ink); color: var(--th-card); }
+.door-row-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.door-row-top, .door-row-bottom { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.door-row-name, .door-row-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.door-row-name { flex: 1; font-weight: 500; color: var(--text); }
+.door-row-top time { flex: none; color: var(--muted); font-size: 12px; }
+.door-row-preview { flex: 1; color: var(--muted); font-size: 13px; }
+.door-row.unread .door-row-name, .door-row.unread .door-row-preview { color: var(--text); font-weight: 700; }
+.door-count { flex: none; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--th-ink); color: var(--th-card); font: 600 12px/18px var(--g-font-ui); text-align: center; }
+.door-tabs::-webkit-scrollbar { display: none; }
+.door-tablist { display: flex; flex: none; gap: 2px; }
+.door-tab { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 13px; border: 1.5px solid transparent; border-radius: 999px; background: transparent; color: var(--text-soft); font: 500 14px var(--sans); white-space: nowrap; cursor: pointer; }
+.door-tab:hover { border-color: var(--line-strong, var(--line)); }
+.door-tab:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.door-tab[aria-selected="true"] { background: var(--th-ink); border-color: var(--th-ink); color: var(--th-card); }
+.door-tab-count { min-width: 20px; padding: 0 6px; border: var(--g-hair) solid currentColor; border-radius: 999px; font: 600 12px/16px var(--g-font-ui); text-align: center; box-sizing: border-box; }
+.door-tab[aria-selected="true"] .door-tab-count { background: var(--th-card); border-color: var(--th-card); color: var(--th-ink); }

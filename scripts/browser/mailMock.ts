@@ -42,7 +42,7 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
     const msgs = [
       msg('a1', 'A', 'TA-plan', 'A-inbox', mara, robin, 'Planning the garden week', '2026-10-18T09:00:00Z', { text: 'Hi Robin,\n\nShall we plan the garden week? I can bring the marmalade jars on Saturday.\n\nMara' }),
       msg('a2', 'A', 'TA-plan', 'A-sent', robin, mara, 'Re: Planning the garden week', '2026-10-18T11:00:00Z', { text: 'Saturday works. Bring the jars.\n\nRobin' }),
-      msg('a3', 'A', 'TA-plan', 'A-inbox', mara, robin, 'Re: Planning the garden week', '2026-10-19T08:30:00Z', { unread: true, text: 'Great. One question: which day should we start the beds, Monday or Tuesday?\n\nMara' }),
+      msg('a3', 'A', 'TA-plan', 'A-inbox', mara, robin, 'Re: Planning the garden week', '2026-10-19T08:30:00Z', { unread: true, text: 'Great. One question: which day should we start the beds, Monday or Tuesday?\n\nMara\n\nOn Sun, Oct 18, Robin Vale wrote:\n> Saturday works. Bring the jars.' }),
       msg('a6', 'A', 'TA-plan', 'A-drafts', robin, mara, 'Re: Planning the garden week', '2026-10-19T09:00:00Z', { draft: true, uni_drafted: true, text: 'Monday suits me. See you then.\n\nRobin' }),
       msg('a4', 'A', 'Ta4', 'A-inbox', theo, robin, 'Workshop photos and slides', '2026-10-17T15:00:00Z', { unread: true, text: 'Here are the notes from the workshop, a proof of the poster, and the installer I mentioned.\n\nTheo',
         attachments: [att('Bnotes-pdf', 'workshop-notes.pdf', 'application/pdf', 13401), att('Bproof-svg', 'poster-proof.png', 'image/png', 160),
