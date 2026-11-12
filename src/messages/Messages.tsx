@@ -9,6 +9,7 @@ import { applyLink, mergeLinks, applyOpened, applyTimeline, asMessagesErr, initi
 import LinkAccounts from "./LinkAccounts.tsx";
 import { Attachment, Lightbox, MessageText, Quote, Reactions } from "./MessageParts.tsx";
 import { enterInsertsNewline } from "../composerCore";
+import { useDoorTabs } from "../doorTabs";
 import "../doors.css";
 import "./Messages.css";
 
@@ -70,24 +71,7 @@ function RoomItem({ r, selected, now, mark, onOpen }: { r: RoomRow; selected: bo
 /** T-310: All, then one tab per network; "Link another network" quietly at the end. Arrow keys move along the tabs. */
 function TabStrip({ tabs, tab, onPick, onLink }: { tabs: Tab[]; tab: TabId; onPick: (t: TabId) => void; onLink: () => void }) {
   const strip = useRef<HTMLDivElement | null>(null);
-  // the tab you're on stays in sight on a phone's sideways strip
-  useLayoutEffect(() => {
-    const el = strip.current, on = el?.querySelector<HTMLElement>('[aria-selected="true"]');
-    if (!el || !on) return;
-    // the strip alone scrolls: nothing around it moves
-    const left = on.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft, right = left + on.offsetWidth;
-    if (left < el.scrollLeft) el.scrollLeft = left;
-    else if (right > el.scrollLeft + el.clientWidth) el.scrollLeft = right - el.clientWidth;
-  }, [tab]);
-  const key = (e: KeyboardEvent<HTMLDivElement>) => {
-    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    if (!step) return;
-    e.preventDefault();
-    const at = tabs.findIndex((t) => t.id === tab);
-    const next = tabs[(at + step + tabs.length) % tabs.length];
-    onPick(next.id);
-    strip.current?.querySelector<HTMLElement>(`[data-tab="${next.id}"]`)?.focus();
-  };
+  const key = useDoorTabs(strip, tabs.map((t) => t.id), tab, onPick);
   return <div className="msgs-tabs door-tabs" ref={strip}>
     <div className="msgs-tablist door-tablist" role="tablist" aria-label="Networks" onKeyDown={key}>
       {tabs.map((t) => <button key={t.id} type="button" role="tab" data-tab={t.id} aria-selected={t.id === tab} aria-controls="msgs-list" tabIndex={t.id === tab ? 0 : -1}

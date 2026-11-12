@@ -218,4 +218,8 @@ assert.equal(replyDraft({ ...both, messages: [dm("m1"), dm("own", { draft: true 
 assert.equal(replyDraft({ ...both, messages: [dm("m1")] }, { who: "owner" }), null, "no draft: a blank reply");
 assert.equal(splitQuoted("See below.\n\n---------- Forwarded message ---------\nFrom: Billing\nInvoice 2291").quoted, null, "a forward's content is not quoted history");
 assert.deepEqual(placeSources("junk", two, { text: "acme" })[0].exclude, ["A-trash"], "a search from Junk searches Junk");
-console.log("ok   mail (T-335 review): the drafts at the foot, forwards, Junk's search");
+assert.equal(splitQuoted("Hi Robin,\n\nOn Sun, Robin wrote:\n> Which day?\nMonday.\n> And the jars?").quoted, null, "an inline reply that ends on a quote stays whole");
+const binned: MailThread = { account_id: "A", thread_id: "t", messages: [dm("m1"), dm("u1", { draft: true, uni_drafted: true, mailbox_ids: ["A-trash"] })] };
+assert.deepEqual(footDrafts(binned, { who: "owner", mailboxes: two.accounts[0].mailboxes }), { uni: [], own: [] }, "a draft thrown in the Trash isn't waiting");
+assert.equal(replyDraft(binned, { who: "owner", mailboxes: two.accounts[0].mailboxes }), null);
+console.log("ok   mail (T-335 review): the drafts at the foot, forwards, Junk's search, inline replies");

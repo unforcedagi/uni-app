@@ -1099,7 +1099,7 @@ mod tests {
     fn the_signed_text_is_domain_separated() {
         let k = key(1);
         let a = bundle("0.3.8", SHELL_API);
-        let m = serde_json::to_string(&verify_channel(&k.pk, &channel_for(&k, "0.3.8", 1, &a, T0, 14)).unwrap()).unwrap();
+        let m = serde_json::to_string(&verify_channel(&k.pk, &channel_for(&k, "0.3.8", SHELL_API, &a, T0, 14)).unwrap()).unwrap();
         // The same manifest signed without the prefix (any other use of the key) doesn't pass as a manifest.
         let sig = base64::engine::general_purpose::STANDARD.encode(k.sk.sign(m.as_bytes()).to_bytes());
         let bare = serde_json::to_vec(&serde_json::json!({"manifest": m, "sig": sig})).unwrap();
@@ -1110,7 +1110,7 @@ mod tests {
     fn an_archive_that_disagrees_with_its_manifest_is_refused() {
         let k = key(1);
         let a = bundle("0.3.9", SHELL_API); // says 0.3.9 inside
-        let c = channel_for(&k, "0.3.8", 1, &a, T0, 14); // signed as 0.3.8
+        let c = channel_for(&k, "0.3.8", SHELL_API, &a, T0, 14); // signed as 0.3.8
         assert!(open(&k.pk, &c, &a, &v("0.3.7"), SHELL_API).unwrap_err().contains("archive says 0.3.9"));
     }
 
@@ -1118,10 +1118,10 @@ mod tests {
     fn an_expired_or_overlong_manifest_is_refused() {
         let k = key(1);
         let a = bundle("0.3.8", SHELL_API);
-        let m = verify_channel(&k.pk, &channel_for(&k, "0.3.8", 1, &a, T0, 14)).unwrap();
+        let m = verify_channel(&k.pk, &channel_for(&k, "0.3.8", SHELL_API, &a, T0, 14)).unwrap();
         assert!(fresh(&m, T0 + 13 * 86400).is_ok());
         assert!(fresh(&m, T0 + 14 * 86400).unwrap_err().contains("expired"));
-        assert!(verify_channel(&k.pk, &channel_for(&k, "0.3.8", 1, &a, T0, 40)).unwrap_err().contains("validity"));
+        assert!(verify_channel(&k.pk, &channel_for(&k, "0.3.8", SHELL_API, &a, T0, 40)).unwrap_err().contains("validity"));
     }
 
     #[test]
@@ -1130,7 +1130,7 @@ mod tests {
         if !RELEASE_PUBKEY_HEX.is_empty() {
             let k = key(1);
             let a = bundle("0.3.8", SHELL_API);
-            let c = channel_for(&k, "0.3.8", 1, &a, T0, 14);
+            let c = channel_for(&k, "0.3.8", SHELL_API, &a, T0, 14);
             assert!(verify_channel(RELEASE_PUBKEY_HEX, &c).unwrap_err().contains("signature does not match"));
         }
     }
@@ -1279,7 +1279,7 @@ mod tests {
         assert!(act(dir.path(), &k).is_some());
         // A newer version, but signed earlier than the manifest already taken (an old signing held back and replayed).
         let a = bundle("0.3.9", SHELL_API);
-        put(dir.path(), "next", &(channel_for(&k, "0.3.9", 1, &a, T0, 14), a));
+        put(dir.path(), "next", &(channel_for(&k, "0.3.9", SHELL_API, &a, T0, 14), a));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
     }
 

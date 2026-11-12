@@ -306,3 +306,40 @@ test('a Refresh keeps the messages you just read open', async ({ page }) => {
   await page.waitForTimeout(300);
   await expect(t.locator('.mail-msg[data-folded="false"]')).toHaveCount(2);
 });
+
+// ── T-335 fourth review ─────────────────────────────────────────────────────────────────────────────────────────────
+
+test('Load older after a Later still brings every thread: none is skipped', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__pageSize = 2; });
+  await boot(page, 'ok', { writes: true });
+  await expect(rows(page)).toHaveCount(2);
+  await rows(page).filter({ hasText: 'garden week' }).click();
+  await thread(page, 'Planning the garden week').getByRole('button', { name: 'Later' }).click();
+  await expect(thread(page, 'Workshop photos and slides')).toBeVisible();
+  await back(page);
+  await mail(page).getByRole('button', { name: 'Load older' }).click();
+  await expect(rows(page).filter({ hasText: 'hold is ready' })).toHaveCount(1);
+});
+
+test('the thread that opens after an Archive stays unread until you open it', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await page.evaluate(() => { (window as any).__msgs.find((m: any) => m.id === 'a5').unread = true; });
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await rows(page).filter({ hasText: 'Workshop photos' }).click();
+  await expect.poll(async () => (await calls(page, 'mail_mark_seen')).length).toBe(1);
+  await thread(page, 'Workshop photos and slides').getByRole('button', { name: 'Archive' }).click();
+  await expect(thread(page, 'Your hold is ready')).toBeVisible();
+  await page.waitForTimeout(400);
+  expect((await calls(page, 'mail_mark_seen')).filter((c) => c.emailIds.includes('a5'))).toHaveLength(0);
+});
+
+test('where a Later thread can\'t come out of Later, opening it leaves it unread (so it stays in the Inbox)', async ({ page }) => {
+  await boot(page, 'ok', { ops: { A: ['mark_seen', 'archive'], U: [] } });
+  await page.evaluate(() => { const w = window as any; w.__msgs.find((m: any) => m.id === 'a1').flagged = true; });
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await expect(rows(page).filter({ hasText: 'garden week' })).toHaveAccessibleName(/^Unread\. Later\./);
+  await rows(page).filter({ hasText: 'garden week' }).click();
+  await expect(thread(page, 'Planning the garden week')).toBeVisible();
+  await page.waitForTimeout(400);
+  expect(await calls(page, 'mail_mark_seen')).toHaveLength(0);
+});

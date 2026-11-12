@@ -40,14 +40,16 @@ export type ThreadSummary = {
 
 /** The drafts at the foot of a thread of yours: Uni's (the reply Uni prepared) and your own, each oldest first. Uni's
  *  account's own drafts stay in its conversation, so it has none here. */
-export function footDrafts(t: MailThread, acct: Pick<AccountBoxes, "who">): { uni: MailMessage[]; own: MailMessage[] } {
+export function footDrafts(t: MailThread, acct: Pick<AccountBoxes, "who"> & Partial<Pick<AccountBoxes, "mailboxes">>): { uni: MailMessage[]; own: MailMessage[] } {
   if (acct.who !== "owner") return { uni: [], own: [] };
-  const drafts = t.messages.filter((m) => m.draft);
+  // a draft thrown away (only in Junk or Trash) isn't waiting for you
+  const binned = new Set((acct.mailboxes ?? []).filter((b) => b.role === "junk" || b.role === "trash").map((b) => b.id));
+  const drafts = t.messages.filter((m) => m.draft && !(m.mailbox_ids.length > 0 && m.mailbox_ids.every((id) => binned.has(id))));
   return { uni: drafts.filter((m) => m.uni_drafted), own: drafts.filter((m) => !m.uni_drafted) };
 }
 
 /** The draft Reply opens: Uni's newest when this app can show it whole, else your own newest, else none (a blank reply). */
-export function replyDraft(t: MailThread, acct: Pick<AccountBoxes, "who">): MailMessage | null {
+export function replyDraft(t: MailThread, acct: Pick<AccountBoxes, "who"> & Partial<Pick<AccountBoxes, "mailboxes">>): MailMessage | null {
   const { uni, own } = footDrafts(t, acct);
   for (const list of [uni, own]) { const d = list[list.length - 1]; if (d && draftEditable(d)) return d; }
   return null;
@@ -162,6 +164,8 @@ export function splitQuoted(text: string): { body: string; quoted: string | null
   // the closing run of quoted (or blank) lines starts at `tail`
   let tail = lines.length;
   while (tail > 0 && (quote(lines[tail - 1]) || !lines[tail - 1].trim())) tail--;
+  // quoted lines with answers between them (an inline reply) stay whole, whatever they end on
+  if (lines.slice(0, tail).some(quote)) return { body: text, quoted: null };
   let at = -1;
   const marker = lines.findIndex((l) => /^-{2,}\s*Original Message\s*-{2,}\s*$/i.test(l));
   if (marker > 0) at = marker;

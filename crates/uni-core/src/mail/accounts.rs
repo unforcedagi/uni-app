@@ -341,7 +341,8 @@ fn thread_summary(account: &str, e: &Value, thread: Option<&Vec<String>>, states
     let unread_any = if members.is_empty() { counts(e) } else { members.iter().any(|m| counts(m)) };
     let attach = e.get("hasAttachment").and_then(Value::as_bool).unwrap_or(false) || members.iter().any(|m| m.get("hasAttachment").and_then(Value::as_bool) == Some(true));
     let flagged = keyword(e, "$flagged") || members.iter().any(|m| keyword(m, "$flagged"));
-    let uni_draft = members.iter().chain(std::iter::once(&e)).any(|m| keyword(m, "$draft") && keyword(m, "$uni-drafted"));
+    // a draft of Uni's thrown away (only in Junk or Trash) isn't one waiting for you
+    let uni_draft = members.iter().chain(std::iter::once(&e)).any(|m| keyword(m, "$draft") && keyword(m, "$uni-drafted") && !only_hidden(m));
     let fresh = if members.is_empty() { counts(e) && !keyword(e, "$flagged") } else { members.iter().any(|m| counts(m) && !keyword(m, "$flagged")) };
     ThreadSummary {
         account_id: account.to_string(),

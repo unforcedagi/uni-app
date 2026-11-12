@@ -27,6 +27,7 @@ import {
   approvalOffered, approveOutcome, canApprove, declineOutcome, fileKind, heldFailure, heldShownWhole, type HeldOutcome, type Parked,
 } from "./mailCore";
 import { beginListing, endDeciding, heldEntries, heldGen, keepAccounts, mergeListing, noteUnread, onHeld, setOutcome, startDeciding, waiting, type HeldEntry } from "./mailHeld";
+import { useDoorTabs } from "./doorTabs";
 import "./doors.css";
 import "./Mail.css";
 
@@ -381,22 +382,7 @@ function ThreadRow({ t, place, note, selected, onOpen }: { t: ThreadSummary; pla
 /** The places as tabs, like Messages'. Arrow keys move along them. */
 function PlaceTabs({ tabs, place, onPick, onRefresh, refreshing }: { tabs: ReturnType<typeof mailTabs>; place: Place; onPick: (p: Place) => void; onRefresh: () => void; refreshing: boolean }) {
   const strip = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = strip.current, on = el?.querySelector<HTMLElement>('[aria-selected="true"]');
-    if (!el || !on) return;
-    const left = on.offsetLeft - el.offsetLeft, right = left + on.offsetWidth;
-    if (left < el.scrollLeft) el.scrollLeft = left;
-    else if (right > el.scrollLeft + el.clientWidth) el.scrollLeft = right - el.clientWidth;
-  }, [place]);
-  const key = (e: KeyboardEvent<HTMLDivElement>) => {
-    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    if (!step) return;
-    e.preventDefault();
-    const at = tabs.findIndex((t) => t.id === place);
-    const next = tabs[(at + step + tabs.length) % tabs.length];
-    onPick(next.id);
-    strip.current?.querySelector<HTMLElement>(`[data-tab="${next.id}"]`)?.focus();
-  };
+  const key = useDoorTabs(strip, tabs.map((t) => t.id), place, onPick);
   return <div className="door-tabs mail-tabs">
     <div className="door-tablist mail-tablist" role="tablist" aria-label="Mail places" ref={strip} onKeyDown={key}>
       {tabs.map((t) => <button key={t.id} type="button" role="tab" data-tab={t.id} aria-selected={t.id === place} aria-controls="mail-list" tabIndex={t.id === place ? 0 : -1}
@@ -597,23 +583,29 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
       const unreadIds = t.messages.filter((m) => m.unread && !m.draft).map((m) => m.id);
       const opened = markOnOpen.current === keyOf(o);
       if (opened) markOnOpen.current = null;
-      if (opened && acct?.who === "owner" && can(acct, "mark_seen") && unreadIds.length > 0) {
+      const back = unlaterOnOpen.current === keyOf(o);
+      if (back) unlaterOnOpen.current = null;
+      const markRead = () => {
+        if (!(opened && acct?.who === "owner" && can(acct, "mark_seen") && unreadIds.length > 0)) return;
         void invoke("mail_mark_seen", { accountId: t.account_id, emailIds: unreadIds, seen: true })
           .then(() => { markShown(o, unreadIds, false); void loadOverview(); })
           .catch((e) => { if (seq === threadSeq.current) setActionProblem(`Couldn't mark it read: ${mailProblem(e).title}`); });
-      }
-      const back = unlaterOnOpen.current === keyOf(o);
-      if (back) unlaterOnOpen.current = null;
+      };
+      // a Later thread that new mail brought back: out of Later first, then read. Read but still in Later, it would
+      // drop out of the Inbox, so where it can't come out of Later it stays unread.
       const flaggedIds = t.messages.filter((m) => m.flagged).map((m) => m.id);
-      if (back && acct?.who === "owner" && can(acct, "flag") && flaggedIds.length > 0) {
-        void invoke("mail_flag", { accountId: t.account_id, emailIds: flaggedIds, flagged: false })
-          .then(() => {
-            setThread((cur) => (cur && cur.account_id === o.accountId && cur.thread_id === o.threadId ? { ...cur, messages: cur.messages.map((m) => (flaggedIds.includes(m.id) ? { ...m, flagged: false } : m)) } : cur));
-            setList((cur) => (cur ? { ...cur, threads: cur.threads.map((r) => (r.account_id === o.accountId && r.thread_id === o.threadId ? { ...r, flagged: false } : r)) } : cur));
-            setLaterCount((n) => Math.max(0, n - 1));
-          })
-          .catch((e) => { if (seq === threadSeq.current) setActionProblem(`Couldn't take it out of Later: ${mailProblem(e).title}`); });
-      }
+      if (back && flaggedIds.length > 0) {
+        if (acct?.who === "owner" && can(acct, "flag")) {
+          void invoke("mail_flag", { accountId: t.account_id, emailIds: flaggedIds, flagged: false })
+            .then(() => {
+              setThread((cur) => (cur && cur.account_id === o.accountId && cur.thread_id === o.threadId ? { ...cur, messages: cur.messages.map((m) => (flaggedIds.includes(m.id) ? { ...m, flagged: false } : m)) } : cur));
+              setList((cur) => (cur ? { ...cur, threads: cur.threads.map((r) => (r.account_id === o.accountId && r.thread_id === o.threadId ? { ...r, flagged: false } : r)) } : cur));
+              setLaterCount((n) => Math.max(0, n - 1));
+              markRead();
+            })
+            .catch((e) => { if (seq === threadSeq.current) setActionProblem(`Couldn't take it out of Later: ${mailProblem(e).title}`); });
+        }
+      } else markRead();
       const got = await invoke<Record<string, string>>("mail_triage", { accountId: t.account_id, emailIds: t.messages.map((m) => m.id) }).catch(() => ({} as Record<string, string>));
       if (seq !== threadSeq.current) return;
       const latest = [...t.messages].reverse().find((m) => got[m.id]);
@@ -668,7 +660,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     // a message being written stays: it waits, with Resume (it comes back under its own thread)
     const c = composeRef.current;
     if (c && !c.hidden && c.thread !== `${t.account_id}/${t.thread_id}`) setCompose({ ...c, hidden: true });
-    markOnOpen.current = `${t.account_id}/${t.thread_id}`;
+    // opened because the one before it left the list: shown, not chosen, so it stays unread until you open it
+    markOnOpen.current = auto ? null : `${t.account_id}/${t.thread_id}`;
     unlaterOnOpen.current = !auto && placeRef.current === "inbox" && !queryRef.current && t.flagged && t.fresh ? `${t.account_id}/${t.thread_id}` : null;
     setOpenHeld(null);
     setOpen({ accountId: t.account_id, threadId: t.thread_id }); setPane("thread");
@@ -735,7 +728,9 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     const at = rows.findIndex((r) => r.account_id === o.accountId && r.thread_id === o.threadId);
     const rest = rows.filter((_, i) => i !== at);
     const next = at < 0 ? undefined : rest[at] ?? rest[at - 1];
-    setList((cur) => (cur ? { ...cur, threads: cur.threads.filter((r) => !(r.account_id === o.accountId && r.thread_id === o.threadId)), total: cur.total != null ? Math.max(0, cur.total - 1) : cur.total } : cur));
+    // it left the server's list too, so that account's next page starts one earlier (else Load older skips a thread)
+    setList((cur) => (cur ? { ...cur, threads: cur.threads.filter((r) => !(r.account_id === o.accountId && r.thread_id === o.threadId)), total: cur.total != null ? Math.max(0, cur.total - 1) : cur.total,
+      next: at < 0 ? cur.next : cur.next.map((x) => (x.account_id === o.accountId ? { ...x, position: Math.max(0, x.position - 1) } : x)) } : cur));
     if (!same(openRef.current)) return;
     const c = composeRef.current;
     if (c && !c.hidden && c.thread === keyOf(o)) return; // a reply being written keeps its thread

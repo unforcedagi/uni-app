@@ -173,6 +173,15 @@ async fn later_and_files_narrow_a_list_on_the_server() {
     let row = |id: &str| page.threads.iter().find(|t| t.thread_id == id).cloned().expect("in the Inbox");
     assert!(row("TA-plan").uni_draft && !row("TA-plan").draft, "the Inbox row knows the thread holds Uni's draft");
     assert!(!row("Ta4").uni_draft);
+    // a draft of Uni's thrown away (in Trash, still a draft) is no draft waiting for you
+    {
+        let mut st = fake.state.lock().unwrap();
+        for e in st.mail.emails.iter_mut().filter(|e| e["id"] == "a6" || e["id"] == "a8") {
+            e["mailboxIds"] = serde_json::json!({ "A-trash": true });
+        }
+    }
+    let page = mail.threads(&[inbox("A")], None, 50).await.unwrap();
+    assert!(!page.threads.iter().find(|t| t.thread_id == "TA-plan").unwrap().uni_draft, "Uni's draft in Trash isn't waiting");
     let next = &later.next[0];
     assert_eq!((next.flagged, next.with_files), (Some(true), false), "the next page keeps the filter");
 }
