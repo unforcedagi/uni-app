@@ -437,12 +437,18 @@ fn watched_body(file: tokio::fs::File, progress: Arc<UploadProgress>) -> reqwest
 /// A recording in Opus (WebM), as the AAC parts stock Buzz takes, each named for the message: `(path, name)` in order.
 /// `None`: not a WebM, or this device has no codecs for it, so it goes as it is. The parts are raw M4A for
 /// [`upload_media_file`]'s normalizer; the caller removes them.
-pub fn voice_parts(input: &Path, filename: &str, work_dir: &Path, codecs: Option<&dyn voice::Codecs>) -> Result<Option<Vec<(PathBuf, String)>>> {
+pub fn voice_parts(
+    input: &Path,
+    filename: &str,
+    work_dir: &Path,
+    codecs: Option<&dyn voice::Codecs>,
+    stop: &std::sync::atomic::AtomicBool,
+) -> Result<Option<Vec<(PathBuf, String)>>> {
     let Some(codecs) = codecs else { return Ok(None) };
     if !voice::is_webm(input) {
         return Ok(None);
     }
-    let Some(converted) = voice::convert(input, work_dir, codecs, voice::MAX_PART_SECONDS)? else {
+    let Some(converted) = voice::convert(input, work_dir, codecs, voice::MAX_PART_SECONDS, stop)? else {
         return Ok(None);
     };
     let stem = filename.rsplit_once('.').map_or(filename, |(s, _)| s);
@@ -452,9 +458,18 @@ pub fn voice_parts(input: &Path, filename: &str, work_dir: &Path, codecs: Option
             .parts
             .into_iter()
             .enumerate()
-            .map(|(k, p)| (p.path, if n == 1 { format!("{stem}.m4a") } else { format!("{stem} ({} of {n}).m4a", k + 1) }))
+            // The part first: a phone shows the start of a long name and cuts the rest.
+            .map(|(k, p)| (p.path, if n == 1 { format!("{stem}.m4a") } else { format!("{} of {n} · {stem}.m4a", k + 1) }))
             .collect(),
     ))
+}
+
+/// Tells a conversion running on another thread to stop when the upload it serves is dropped.
+struct StopOnDrop(Arc<std::sync::atomic::AtomicBool>);
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// Removes every file it holds, however the upload ends.
@@ -492,7 +507,9 @@ async fn upload_media_with(
     codecs: Option<&'static dyn voice::Codecs>,
 ) -> Result<Vec<MediaRef>> {
     let (from, name, dir) = (input.to_path_buf(), upload_filename(filename), work_dir.to_path_buf());
-    let parts = tokio::task::spawn_blocking(move || voice_parts(&from, &name, &dir, codecs))
+    let stop = StopOnDrop(Arc::new(std::sync::atomic::AtomicBool::new(false)));
+    let flag = stop.0.clone();
+    let parts = tokio::task::spawn_blocking(move || voice_parts(&from, &name, &dir, codecs, &flag))
         .await
         .map_err(|_| normalize::refuse("Couldn't prepare the file on this device. Attach it again."))??;
     let Some(parts) = parts else {
@@ -2063,7 +2080,7 @@ mod tests {
             .await
             .unwrap();
         let names: Vec<_> = media.iter().map(|m| m.filename.clone().unwrap()).collect();
-        assert_eq!(names, ["voice 09-12 (1 of 3).m4a", "voice 09-12 (2 of 3).m4a", "voice 09-12 (3 of 3).m4a"]);
+        assert_eq!(names, ["1 of 3 · voice 09-12.m4a", "2 of 3 · voice 09-12.m4a", "3 of 3 · voice 09-12.m4a"]);
         let stored: Vec<_> = (0..3).map(|_| rx.try_recv().unwrap()).collect();
         for (m, (sha, duration)) in media.iter().zip(&stored) {
             assert_eq!(m.sha256.as_deref(), Some(sha.as_str()), "uploaded in order");

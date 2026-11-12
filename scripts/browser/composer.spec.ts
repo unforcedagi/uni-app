@@ -384,7 +384,7 @@ test('A long recording goes as its parts, in order, in one voice message', async
   // Rust converts a long recording to AAC parts of at most 9:50 and uploads each; the message carries them all, with the
   // length each upload's answer gave (the relay checks imeta duration against it).
   const parts = [1, 2, 3].map((k) => ({ url: `https://example.invalid/media/${String(k).repeat(64)}.mp4`, mime: 'video/mp4', sha256: String(k).repeat(64),
-    size: 1000 * k, dim: '640x360', blurhash: null, alt: null, filename: `voice (${k} of 3).m4a`, duration: k === 3 ? 61.44 : 589.995 }));
+    size: 1000 * k, dim: '640x360', blurhash: null, alt: null, filename: `${k} of 3 · voice.m4a`, duration: k === 3 ? 61.44 : 589.995 }));
   await page.evaluate((p) => { (window as any).uploadParts = p; }, parts);
   await recordClip(page);
   await expect.poll(async () => (await voicePosts(page)).length).toBe(1);

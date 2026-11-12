@@ -27,7 +27,7 @@ fn main() {
         let input = Path::new(path);
         let name = input.file_name().unwrap().to_string_lossy().to_string();
         let started = std::time::Instant::now();
-        let parts = match uni_core::media::voice_parts(input, &name, out, codecs) {
+        let parts = match uni_core::media::voice_parts(input, &name, out, codecs, &std::sync::atomic::AtomicBool::new(false)) {
             Ok(Some(parts)) => parts,
             Ok(None) => {
                 println!("{name}: not converted");
