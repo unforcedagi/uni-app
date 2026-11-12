@@ -53,7 +53,9 @@ test('opening a thread marks it read, Unread undoes it, Later puts every message
   await expect(tab(page, 'Later')).toHaveAccessibleName(/1 put off/);
   await pickTab(page, 'Later');
   await expect(rows(page)).toHaveCount(1);
-  await expect(rows(page).nth(0)).toHaveAccessibleName(/^Unread\. Draft by Uni\. Mara Quill/);
+  // put off means seen: Later marked the thread read (it was marked unread above)
+  await expect(rows(page).nth(0)).toHaveAccessibleName(/^Draft by Uni\. Mara Quill/);
+  expect((await calls(page, 'mail_mark_seen')).at(-1)).toEqual({ accountId: 'A', emailIds: ['a3'], seen: true });
   await rows(page).nth(0).click();
   await expect(thread(page, 'Planning the garden week').getByRole('button', { name: 'Back to Inbox', exact: true })).toBeVisible();
   await shot(page, 'w1-later');

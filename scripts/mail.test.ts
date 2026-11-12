@@ -6,7 +6,7 @@ import {
   type AccountBoxes, type MailMessage, type MailThread, type SendOutcome,
 } from "../src/mailCore.ts";
 import {
-  addressLine, footDrafts, mailboxLabel, mailDate, mailTabs, replyDraft, MAIL_FRAME_CSP, mailProblem, mailSrcdoc, placeSources, placeTitle, placeValid, senderLabel, splitQuoted, subjectLabel, threadPeople, toWords, whoTag,
+  addressLine, footDrafts, mailDate, mailTabs, replyDraft, MAIL_FRAME_CSP, mailProblem, mailSrcdoc, placeSources, placeTitle, placeValid, senderLabel, splitQuoted, subjectLabel, threadPeople, toWords, whoTag,
   type AccountBoxes as Acct, type Overview,
 } from "../src/mailCore.ts";
 import { restoreTabs, sameTarget, serializeTabs } from "../src/tabs.ts";
@@ -37,13 +37,11 @@ assert.equal(senderLabel([{ name: null, email: "a@x" }, { name: "B", email: "b@x
 assert.equal(senderLabel([]), "(no sender)");
 assert.equal(addressLine([{ name: "Ada", email: "ada@x" }, { name: null, email: "b@x" }]), "Ada <ada@x>, b@x");
 assert.equal(subjectLabel("  "), "(no subject)");
-assert.equal(mailboxLabel({ id: "1", name: "INBOX", role: "inbox", parent_id: null, total: 0, unread: 0 }), "Inbox");
-assert.equal(mailboxLabel({ id: "2", name: "Junk Mail", role: "junk", parent_id: null, total: 0, unread: 0 }), "Junk Mail");
 
 // T-45 v2: which accounts and mailboxes a list reads
 const box = (id: string, role: string, unread = 0) => ({ id, name: role, role, parent_id: null, total: unread, unread });
 const two: Overview = { login: "robin@example.com", multi: true, accounts: [
-  { id: "A", name: "robin@example.com", who: "owner", mailboxes: [box("A-in", "inbox", 2), box("A-dr", "drafts"), box("A-junk", "junk", 4), box("A-trash", "trash")] },
+  { id: "A", name: "robin@example.com", who: "owner", mailboxes: [box("A-in", "inbox", 2), box("A-dr", "drafts"), box("A-junk", "junk", 4), box("A-trash", "trash")], operations: ["flag"] },
   { id: "U", name: "uni@example.com", who: "uni", mailboxes: [box("U-in", "inbox", 1), box("U-sent", "sent")] },
 ] };
 // T-335 Mail v2: places as tabs. Your Inbox first; Uni's own mail one tab away; Waiting only where you decide Uni's sends
@@ -54,6 +52,10 @@ assert.deepEqual(tabs(deciding, 0, 3).slice(0, 3), ["inbox:2", "later:0", "waiti
 assert.equal(mailTabs(deciding, { later: 1, waiting: 3 }).find((t) => t.id === "waiting")?.name, "Waiting (3 waiting)");
 assert.deepEqual(placeSources("inbox", two), [{ account_id: "A", mailbox_id: "A-in", exclude: [], position: 0, flagged: false }], "the Inbox leaves Later mail out");
 assert.deepEqual(placeSources("later", two), [{ account_id: "A", mailbox_id: null, exclude: ["A-junk", "A-trash", "A-dr"], position: 0, flagged: true }], "Later: threads put off, shown by their mail (not Junk, Trash or an unsent draft)");
+assert.deepEqual(placeSources("later", two, { text: "x" })[0].exclude, ["A-junk", "A-trash", "A-dr"], "Later's search reads what Later lists");
+const noFlag: Overview = { ...two, accounts: [{ ...two.accounts[0], operations: [] }, two.accounts[1]] };
+assert.deepEqual(tabs(noFlag), ["inbox:2", "drafts:0", "junk:4", "uni:0"], "no flag on this bridge: no Later");
+assert.deepEqual(placeSources("inbox", noFlag), [{ account_id: "A", mailbox_id: "A-in", exclude: [], position: 0 }], "and the Inbox is the whole Inbox: nothing could bring a flagged thread back");
 assert.deepEqual(placeSources("uni", two), [{ account_id: "U", mailbox_id: "U-in", exclude: [], position: 0 }], "Uni's mail is Uni's Inbox");
 assert.deepEqual(placeSources("inbox", two, { text: "jars" }), [{ account_id: "A", mailbox_id: null, exclude: ["A-junk", "A-trash"], position: 0 }], "a search reads your whole account, less Junk and Trash");
 assert.deepEqual(placeSources("uni", two, { text: "x" }).map((s) => s.account_id), ["U"], "searching from Uni's tab reads Uni's mail");

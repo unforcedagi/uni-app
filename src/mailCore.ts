@@ -100,12 +100,20 @@ const BOX: Partial<Record<Place, string>> = { inbox: "inbox", drafts: "drafts", 
 /** The tabs this overview has: a place shows when its account and mailbox exist (Waiting where you decide Uni's held
  *  sends). Counts: unread in Inbox and Junk, drafts in Drafts, `later` and `waiting` as given; Uni's mail has none
  *  (reading it is Uni's job). */
+const LABEL: Record<Place, string> = { inbox: "Inbox", later: "Later", waiting: "Waiting", drafts: "Drafts", sent: "Sent", archive: "Archive", junk: "Junk", uni: "Uni's mail" };
+
+/** Later is the flag, so it exists where the bridge lets you set the flag on your mail. Without it the Inbox is the
+ *  whole Inbox (nothing could bring a flagged thread back). */
+export function laterOffered(o: Overview): boolean {
+  return can(ownAccount(o), "flag");
+}
+
 export function mailTabs(o: Overview, counts: { later: number; waiting: number }): PlaceTab[] {
-  const own = ownAccount(o), uni = uniAccount(o);
-  const label: Record<Place, string> = { inbox: "Inbox", later: "Later", waiting: "Waiting", drafts: "Drafts", sent: "Sent", archive: "Archive", junk: "Junk", uni: "Uni's mail" };
+  const uni = uniAccount(o);
+  const label = LABEL;
   return PLACES.flatMap((id): PlaceTab[] => {
     if (id === "waiting" && !approvalOffered(uni)) return [];
-    if (id === "later" && !own) return [];
+    if (id === "later" && !laterOffered(o)) return [];
     const r = BOX[id];
     const box = r ? role(placeAccount(id, o), r) : undefined;
     if (r && !box) return [];
@@ -125,18 +133,18 @@ export function placeSources(p: Place, o: Overview, opts: { text?: string; files
   const files = opts.files ? { with_files: true } : {};
   if (opts.text || p === "later") {
     // a search from Junk searches Junk too; Later lists mail, not your unsent drafts (they sit at its threads' foot)
-    const exclude = (p === "junk" ? ["trash"] : p === "later" && !opts.text ? ["junk", "trash", "drafts"] : ["junk", "trash"]).flatMap((r) => role(a, r)?.id ?? []);
+    const exclude = (p === "junk" ? ["trash"] : p === "later" ? ["junk", "trash", "drafts"] : ["junk", "trash"]).flatMap((r) => role(a, r)?.id ?? []);
     return [{ account_id: a.id, mailbox_id: null, exclude, position: 0, ...(p === "later" ? { flagged: true } : {}), ...files }];
   }
   const box = role(a, BOX[p]!);
   if (!box) return [];
   // the Inbox leaves out what you put off: it is in Later until you bring it back (or new mail arrives on it)
-  return [{ account_id: a.id, mailbox_id: box.id, exclude: [], position: 0, ...(p === "inbox" ? { flagged: false } : {}), ...files }];
+  return [{ account_id: a.id, mailbox_id: box.id, exclude: [], position: 0, ...(p === "inbox" && laterOffered(o) ? { flagged: false } : {}), ...files }];
 }
 
 /** The list's name, read aloud and shown when a search or Files narrows it. */
 export function placeTitle(p: Place, o: Overview, text: string, files: boolean): string {
-  const tab = mailTabs(o, { later: 0, waiting: 0 }).find((t) => t.id === p)?.label ?? "Mail";
+  const tab = LABEL[p];
   const whose = placeAccount(p, o)?.who === "uni" ? "Uni's mail" : "your mail";
   if (text) return `Search in ${p === "later" ? "Later" : whose}${files ? ", with files" : ""}`;
   return files ? `${tab}, with files` : tab;
@@ -279,11 +287,6 @@ export function addressLine(list: Address[]): string {
 
 export function subjectLabel(subject: string): string {
   return subject.trim() || "(no subject)";
-}
-
-/** Mailbox name; the Inbox is called Inbox whatever the server names it. */
-export function mailboxLabel(b: Mailbox): string {
-  return b.role === "inbox" ? "Inbox" : b.name || "(unnamed)";
 }
 
 /**

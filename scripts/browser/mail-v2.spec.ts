@@ -343,3 +343,49 @@ test('where a Later thread can\'t come out of Later, opening it leaves it unread
   await page.waitForTimeout(400);
   expect(await calls(page, 'mail_mark_seen')).toHaveLength(0);
 });
+
+// ── T-335 fifth review ──────────────────────────────────────────────────────────────────────────────────────────────
+
+test('an Archive from a search that lands after you opened another thread leaves that one on screen', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await mail(page).getByRole('searchbox', { name: 'Search mail' }).fill('example');
+  await expect(mail(page).locator('.mail-list-title')).toContainText('Search in your mail');
+  await expect(rows(page).filter({ hasText: 'Workshop photos' })).toHaveCount(1);
+  await rows(page).filter({ hasText: 'Workshop photos' }).click();
+  await page.evaluate(() => { (window as any).__archiveDelay = 800; });
+  await thread(page, 'Workshop photos and slides').getByRole('button', { name: 'Archive' }).click();
+  await back(page);
+  await rows(page).filter({ hasText: 'hold is ready' }).click();
+  await expect(thread(page, 'Your hold is ready')).toBeVisible();
+  await expect.poll(async () => (await calls(page, 'mail_archive')).length).toBe(1);
+  await page.waitForTimeout(1200);
+  await expect(thread(page, 'Your hold is ready')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Thread: Workshop photos and slides' })).toHaveCount(0);
+});
+
+test('Later puts a thread off as seen: no unread count is left with no row to clear it', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await rows(page).filter({ hasText: 'garden week' }).click();
+  const t = thread(page, 'Planning the garden week');
+  await t.getByRole('button', { name: 'Unread', exact: true }).click();
+  await expect(t.getByRole('button', { name: 'Mark read' })).toBeVisible();
+  await t.getByRole('button', { name: 'Later', exact: true }).click();
+  await expect.poll(async () => (await calls(page, 'mail_mark_seen')).at(-1)).toEqual({ accountId: 'A', emailIds: ['a3'], seen: true });
+  expect((await calls(page, 'mail_flag')).at(-1)).toMatchObject({ flagged: true });
+});
+
+test('Mark read on a Later thread that new mail brought back takes it out of Later first', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await page.evaluate(() => { const w = window as any; w.__msgs.find((m: any) => m.id === 'a5').flagged = true;
+    w.__msgs.push({ ...w.__msgs.find((m: any) => m.id === 'a5'), id: 'a13', flagged: false, unread: true, html: null, text: 'Your hold expires Friday.', received_at: '2026-10-16T18:00:00Z' }); });
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await rows(page).filter({ hasText: 'Workshop photos' }).click();
+  await thread(page, 'Workshop photos and slides').getByRole('button', { name: 'Archive' }).click();
+  // opened after the Archive: not chosen, so still unread and still in Later
+  const hold = thread(page, 'Your hold is ready');
+  await hold.getByRole('button', { name: 'Mark read' }).click();
+  await expect.poll(async () => (await calls(page, 'mail_mark_seen')).length).toBeGreaterThan(1);
+  const flags = await calls(page, 'mail_flag');
+  expect(flags.at(-1)).toMatchObject({ accountId: 'A', flagged: false, emailIds: ['a5'] });
+  await expect(hold.getByRole('button', { name: 'Later', exact: true })).toBeVisible();
+});

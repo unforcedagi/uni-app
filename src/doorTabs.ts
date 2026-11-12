@@ -18,7 +18,8 @@ export function useDoorTabs<T extends string>(strip: RefObject<HTMLElement | nul
     if (!step || ids.length === 0) return;
     e.preventDefault();
     const at = ids.indexOf(current);
-    const next = ids[(at + step + ids.length) % ids.length];
+    // the current tab may have just gone (a Refresh): the arrows start from either end
+    const next = at < 0 ? ids[step > 0 ? 0 : ids.length - 1] : ids[(at + step + ids.length) % ids.length];
     onPick(next);
     strip.current?.querySelector<HTMLElement>(`[data-tab="${next}"]`)?.focus();
   };
