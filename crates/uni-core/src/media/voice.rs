@@ -83,7 +83,7 @@ pub struct Converted {
 }
 
 /// Removes files it holds unless told they're kept.
-struct Remove(Vec<PathBuf>);
+pub(crate) struct Remove(pub(crate) Vec<PathBuf>);
 impl Drop for Remove {
     fn drop(&mut self) {
         for p in &self.0 {
@@ -207,8 +207,11 @@ pub fn convert(input: &Path, work_dir: &Path, codecs: &dyn Codecs, max_part_seco
             rest = &rest[take..];
             if cut_at.get(next) == Some(&at) {
                 next += 1;
-                let following = Writing::start(work_dir.join(format!("{stem}-{}.m4a", next + 1)), rate, codecs, &mut made)?;
-                parts.push(std::mem::replace(&mut part, following).finish(max_part_seconds)?);
+                // One encoder at a time: the platform has only so many.
+                let following = work_dir.join(format!("{stem}-{}.m4a", next + 1));
+                let done = std::mem::replace(&mut part, Writing::pending(following));
+                parts.push(done.finish(max_part_seconds)?);
+                part.begin(rate, codecs, &mut made)?;
             }
         }
         pcm.clear();
@@ -225,36 +228,47 @@ pub fn convert(input: &Path, work_dir: &Path, codecs: &dyn Codecs, max_part_seco
     Ok(Some(Converted { parts, seconds }))
 }
 
-/// One part being encoded.
+/// One part being encoded, or (between parts) about to be.
 struct Writing {
     path: PathBuf,
-    writer: m4a::M4aWriter,
-    encoder: Box<dyn Encoder>,
+    open: Option<(m4a::M4aWriter, Box<dyn Encoder>)>,
 }
 
 impl Writing {
     fn start(path: PathBuf, rate: u32, codecs: &dyn Codecs, made: &mut Remove) -> Result<Self> {
-        made.0.push(path.clone());
-        let writer = m4a::M4aWriter::create(&path, rate, 1)?;
+        let mut w = Writing::pending(path);
+        w.begin(rate, codecs, made)?;
+        Ok(w)
+    }
+
+    fn pending(path: PathBuf) -> Self {
+        Writing { path, open: None }
+    }
+
+    fn begin(&mut self, rate: u32, codecs: &dyn Codecs, made: &mut Remove) -> Result<()> {
+        made.0.push(self.path.clone());
+        let writer = m4a::M4aWriter::create(&self.path, rate, 1)?;
         let encoder = codecs.aac_encoder(rate, AAC_BITRATE)?.ok_or_else(convert_failed)?;
-        Ok(Writing { path, writer, encoder })
+        self.open = Some((writer, encoder));
+        Ok(())
     }
 
     fn encode(&mut self, pcm: &[i16]) -> Result<()> {
-        let writer = &mut self.writer;
-        self.encoder.encode(Some(pcm), &mut |f| writer.frame(f))
+        let (writer, encoder) = self.open.as_mut().ok_or_else(convert_failed)?;
+        encoder.encode(Some(pcm), &mut |f| writer.frame(f))
     }
 
-    fn finish(mut self, max_part_seconds: f64) -> Result<Part> {
-        let writer = &mut self.writer;
-        self.encoder.encode(None, &mut |f| writer.frame(f))?;
-        let config = self.encoder.config().ok_or_else(convert_failed)?;
-        let seconds = self.writer.seconds();
+    fn finish(self, max_part_seconds: f64) -> Result<Part> {
+        let (mut writer, mut encoder) = self.open.ok_or_else(convert_failed)?;
+        encoder.encode(None, &mut |f| writer.frame(f))?;
+        let config = encoder.config().ok_or_else(convert_failed)?;
+        drop(encoder);
+        let seconds = writer.seconds();
         // The cuts leave room for the codec's own additions, so either of these is a fault, not a long recording.
-        if self.writer.frames() == 0 || seconds > max_part_seconds {
+        if writer.frames() == 0 || seconds > max_part_seconds {
             return Err(convert_failed());
         }
-        self.writer.finish(&config, AAC_BITRATE)?;
+        writer.finish(&config, AAC_BITRATE)?;
         Ok(Part { path: self.path, seconds })
     }
 }

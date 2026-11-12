@@ -82,6 +82,8 @@ const UPLOAD_BUSY_WAITS: [Duration; 6] = [
 static UPLOAD_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 /// Large files take one turn at a time, leaving the other for what's quick: a voice note shouldn't wait behind two videos.
 static LARGE_UPLOAD_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+/// Recordings being converted to AAC at once ([`upload_media`]).
+static VOICE_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 const LARGE_UPLOAD_BYTES: u64 = 25 * 1024 * 1024;
 /// Past this much sent, a lost connection isn't retried by itself: the whole file would go again, on someone's phone data,
 /// with nothing on screen. Below it is where a relay hanging up on a file it won't read shows up. Retry is one tap.
@@ -452,7 +454,15 @@ pub fn voice_parts(
         return Ok(None);
     };
     let stem = filename.rsplit_once('.').map_or(filename, |(s, _)| s);
+    let stem = if stem.trim().is_empty() { "voice" } else { stem };
     let n = converted.parts.len();
+    // Within the relay's 255 bytes with the part and ".m4a" added, so the ending that marks it as sound stays.
+    let room = 255 - format!("{n} of {n} · .m4a").len();
+    let mut end = stem.len().min(room);
+    while !stem.is_char_boundary(end) {
+        end -= 1;
+    }
+    let stem = &stem[..end];
     Ok(Some(
         converted
             .parts
@@ -472,15 +482,6 @@ impl Drop for StopOnDrop {
     }
 }
 
-/// Removes every file it holds, however the upload ends.
-struct RemoveAll(Vec<PathBuf>);
-impl Drop for RemoveAll {
-    fn drop(&mut self) {
-        for p in &self.0 {
-            let _ = std::fs::remove_file(p);
-        }
-    }
-}
 
 /// Upload what the user attached or recorded, as one attachment or, for a long recording, several in order.
 ///
@@ -506,13 +507,19 @@ async fn upload_media_with(
     work_dir: &Path,
     codecs: Option<&'static dyn voice::Codecs>,
 ) -> Result<Vec<MediaRef>> {
+    if codecs.is_none() || !voice::is_webm(input) {
+        return Ok(vec![upload_media_file(relay_url, keys, input, mime, filename, work_dir).await?]);
+    }
+    // One conversion at a time: each holds a decoder and an encoder, and a platform has only so many (one that can't
+    // start one would send the recording as WebM).
+    let _converting = VOICE_GATE.acquire().await.map_err(|_| normalize::refuse("Couldn't start the upload. Attach it again."))?;
     let (from, name, dir) = (input.to_path_buf(), upload_filename(filename), work_dir.to_path_buf());
     let stop = StopOnDrop(Arc::new(std::sync::atomic::AtomicBool::new(false)));
     let flag = stop.0.clone();
     // The parts' remover is made on the conversion's own thread: if this upload is dropped before the answer is taken, the
     // answer is dropped there, and the parts with it.
     let parts = tokio::task::spawn_blocking(move || {
-        voice_parts(&from, &name, &dir, codecs, &flag).map(|o| o.map(|parts| (RemoveAll(parts.iter().map(|(p, _)| p.clone()).collect()), parts)))
+        voice_parts(&from, &name, &dir, codecs, &flag).map(|o| o.map(|parts| (voice::Remove(parts.iter().map(|(p, _)| p.clone()).collect()), parts)))
     })
         .await
         .map_err(|_| normalize::refuse("Couldn't prepare the file on this device. Attach it again."))?;
@@ -2106,6 +2113,23 @@ mod tests {
         // The parts and their normalized copies are gone; the recording itself is the caller's.
         assert_eq!(std::fs::read_dir(&work).unwrap().count(), 0);
         assert!(input.exists());
+    }
+
+    /// A part's name stays within the relay's 255 bytes and keeps the ".m4a" that makes it a voice note, however long the
+    /// recording's name was (cut on a character, not inside one).
+    #[test]
+    fn long_recording_names_still_end_in_m4a() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("in.webm");
+        let runs = [(500.0, true), (1.0, false), (300.0, true)];
+        std::fs::write(&input, voice::testing::webm(&voice::testing::speech(&runs))).unwrap();
+        let name = format!("{}.webm", "é".repeat(200));
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let parts = voice_parts(&input, &upload_filename(&name), dir.path(), Some(&voice::testing::FAKE), &stop).unwrap().unwrap();
+        assert_eq!(parts.len(), 2);
+        for (path, n) in &parts {
+            assert!(n.len() <= 255 && n.ends_with(".m4a") && n.starts_with(&format!("{} of 2 · é", if path == &parts[0].0 { 1 } else { 2 })), "{n}");
+        }
     }
 
     /// While our relay still takes Opus, a platform codec failing on a recording doesn't stop it being sent: the WebM goes.
