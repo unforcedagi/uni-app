@@ -1,0 +1,513 @@
+{
+  "about": [
+    "The one file of cases both suites run (python/tests, ts/test). Each case is steps and checks.",
+    "Steps become real signed events: keys are sha256('uni-ask case key: ' + name); signing uses BIP-340 with 32 zero bytes of aux, so both languages make identical events.",
+    "Typed steps (ask, answer, reply, close, edit, delete) go through the library's own builders; a step with 'kind' is raw and is used as written.",
+    "'@T' is 1800000000; '@T+90', '@T+2h', '@T+1d-60' are offsets (s, m, h, d). '{{name}}' in tags or content is a step's event id, or a key's pubkey; '{{deep:N}}' is N '[' then N ']'.",
+    "A check sees the events whose 'arrives' (default: 'at') is not after its 'now'. A 'literal' step is an event used exactly as written, unsigned.",
+    "A check names 'now' and either one 'ask' with a partial 'expect' (answer.event names a step; {'$min': [a, b]} is the step with the smaller id), or a 'room' with the 'list' of [ask, state] from room_asks.",
+    "Every check also runs with the events reversed: order must not matter.",
+    "covers: the design note's twelve cases (case 1-12) and Aaron's symptom table (S1-S9, rows of section 1)."
+  ],
+  "policy": {"askers": ["uni", "broker"], "owner": ["aaron"]},
+  "cases": [
+    {
+      "name": "lapse: the clock alone takes an ask off the list",
+      "covers": ["case 12", "S3", "S8"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "tell", "what": "The nightly backup moved to 03:30", "why": "So you know before tonight", "until": "@T+1d"}}
+      ],
+      "checks": [
+        {"now": "@T+1h", "ask": "ask1", "expect": {"state": "open", "on_list": true, "buttons": true, "needs_close": false, "answer": null, "close": null}},
+        {"now": "@T+1d-61", "ask": "ask1", "expect": {"state": "open", "buttons": true}},
+        {"now": "@T+1d-60", "ask": "ask1", "expect": {"state": "open", "on_list": true, "buttons": false}},
+        {"now": "@T+1d", "ask": "ask1", "expect": {"state": "lapsed", "on_list": false, "buttons": false, "needs_close": true}},
+        {"now": "@T+20d", "ask": "ask1", "expect": {"state": "lapsed", "on_list": false}}
+      ]
+    },
+    {
+      "name": "Seen ends an ask for good; an edit can't reopen it",
+      "covers": ["call 2a", "case 11", "case 12"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "choose", "what": "Which name for the app?", "why": "The store listing is due", "until": "@T+3d",
+                   "options": [{"id": "a", "label": "Uni"}, {"id": "b", "label": "Uni Shell"}]}},
+        {"id": "seen1", "type": "answer", "by": "aaron", "at": "@T+1h", "ask": "ask1", "a": "seen"},
+        {"id": "reopen", "type": "edit", "by": "uni", "at": "@T+2h", "ask": "ask1",
+         "block": {"kind": "choose", "what": "Which name for the app? (still need you)", "why": "The store listing is due", "until": "@T+5d",
+                   "options": [{"id": "a", "label": "Uni"}, {"id": "b", "label": "Uni Shell"}]}}
+      ],
+      "checks": [
+        {"now": "@T+30m", "ask": "ask1", "expect": {"state": "open", "on_list": true}},
+        {"now": "@T+1h", "ask": "ask1", "expect": {"state": "answered", "on_list": false, "buttons": false, "answer": {"event": "seen1", "type": "seen", "via": "room"}, "close": null}},
+        {"now": "@T+3h", "ask": "ask1", "expect": {"state": "answered", "on_list": false, "answer": {"event": "seen1"}, "ignored": [["reopen", "edit-keeps-ask"]]}},
+        {"now": "@T+4d", "ask": "ask1", "expect": {"state": "answered", "answer": {"event": "seen1"}}}
+      ]
+    },
+    {
+      "name": "Archive ends an ask the same way",
+      "covers": ["call 2a", "case 12"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "look", "what": "Look at the new home screen", "why": "It ships Friday", "until": "@T+2d"}},
+        {"id": "arch", "type": "answer", "by": "aaron", "at": "@T+10m", "ask": "ask1", "a": "archive"}
+      ],
+      "checks": [
+        {"now": "@T+11m", "ask": "ask1", "expect": {"state": "answered", "on_list": false, "answer": {"event": "arch", "type": "archive"}}}
+      ]
+    },
+    {
+      "name": "Reply is an answer: your words quoting the ask, in the main line",
+      "covers": ["S5", "call 3"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "do", "what": "Merge the release PR", "why": "The build is held until it lands", "until": "@T+2d", "task": "T-335"}},
+        {"id": "rep", "type": "reply", "by": "aaron", "at": "@T+10m", "ask": "ask1", "text": "Merged it just now."}
+      ],
+      "checks": [
+        {"now": "@T+5m", "ask": "ask1", "expect": {"state": "open"}},
+        {"now": "@T+11m", "ask": "ask1", "expect": {"state": "answered", "on_list": false, "answer": {"event": "rep", "type": "words", "text": "Merged it just now.", "via": "room"}}}
+      ]
+    },
+    {
+      "name": "A legacy thread reply (e tag) still counts as words",
+      "covers": ["S9", "call 4"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "do", "what": "Send the invoice", "why": "It is due Friday", "until": "@T+2d"}},
+        {"id": "thr", "type": "reply", "by": "aaron", "at": "@T+1h", "ask": "ask1", "text": "Sent.", "ref": "e"}
+      ],
+      "checks": [
+        {"now": "@T+2h", "ask": "ask1", "expect": {"state": "answered", "answer": {"event": "thr", "type": "words", "text": "Sent."}}}
+      ]
+    },
+    {
+      "name": "Typing without quoting the ask leaves it open until the room closes it",
+      "covers": ["S5", "case 12"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "do", "what": "Renew the domain", "why": "It expires next week", "until": "@T+5d"}},
+        {"id": "chat", "by": "aaron", "at": "@T+5m", "kind": 9, "tags": [["h", "room-a"]], "content": "done with the domain"},
+        {"id": "cl", "type": "close", "by": "uni", "at": "@T+6m", "ask": "ask1", "why": "done"}
+      ],
+      "checks": [
+        {"now": "@T+5m", "ask": "ask1", "expect": {"state": "open", "ignored": []}},
+        {"now": "@T+6m", "ask": "ask1", "expect": {"state": "closed", "on_list": false, "answer": null, "close": {"event": "cl", "why": "done"}}}
+      ]
+    },
+    {
+      "name": "Deadline: an answer at until counts, one second later doesn't",
+      "covers": ["case 1"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "choose", "what": "Lunch spot?", "why": "Booking closes at noon", "until": "@T+1h",
+                   "options": [{"id": "a", "label": "Thai"}, {"id": "b", "label": "Tacos"}]}},
+        {"id": "ask2", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "choose", "what": "Dinner spot?", "why": "Booking closes at six", "until": "@T+1h",
+                   "options": [{"id": "a", "label": "Thai"}, {"id": "b", "label": "Tacos"}]}},
+        {"id": "ontime", "type": "answer", "by": "aaron", "at": "@T+1h", "ask": "ask1", "a": "pick", "pick": "b"},
+        {"id": "late", "type": "answer", "by": "aaron", "at": "@T+1h+1", "ask": "ask2", "a": "pick", "pick": "b"}
+      ],
+      "checks": [
+        {"now": "@T+2h", "ask": "ask1", "expect": {"state": "answered", "answer": {"event": "ontime", "type": "pick", "pick": "b"}}},
+        {"now": "@T+2h", "ask": "ask2", "expect": {"state": "lapsed", "answer": null, "needs_close": true, "ignored": [["late", "late"]]}}
+      ]
+    },
+    {
+      "name": "Two clocks: the asker's late close overrides an answer stamped in time",
+      "covers": ["case 1"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "do", "what": "Approve the post text", "why": "It goes out at 10", "until": "@T+1h"}},
+        {"id": "did", "type": "answer", "by": "aaron", "at": "@T+1h-10", "ask": "ask1", "a": "did"},
+        {"id": "lateclose", "type": "close", "by": "uni", "at": "@T+1h+20", "ask": "ask1", "why": "late"}
+      ],
+      "checks": [
+        {"now": "@T+1h-5", "ask": "ask1", "expect": {"state": "answered", "answer": {"event": "did", "type": "did"}}},
+        {"now": "@T+1h+30", "ask": "ask1", "expect": {"state": "closed", "close": {"event": "lateclose", "why": "late"}, "on_list": false}}
+      ]
+    },
+    {
+      "name": "Two devices: a pick outranks Seen whatever the order",
+      "covers": ["case 2"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "choose", "what": "Which cover?", "why": "Printer needs it", "until": "@T+1d",
+                   "options": [{"id": "a", "label": "Blue"}, {"id": "b", "label": "Green"}]}},
+        {"id": "seen1", "type": "answer", "by": "aaron", "at": "@T+60", "ask": "ask1", "a": "seen"},
+        {"id": "pick1", "type": "answer", "by": "aaron", "at": "@T+120", "ask": "ask1", "a": "pick", "pick": "a"},
+        {"id": "ask2", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "choose", "what": "Which font?", "why": "Printer needs it", "until": "@T+1d",
+                   "options": [{"id": "a", "label": "Serif"}, {"id": "b", "label": "Sans"}]}},
+        {"id": "pick2", "type": "answer", "by": "aaron", "at": "@T+60", "ask": "ask2", "a": "pick", "pick": "b"},
+        {"id": "arch2", "type": "answer", "by": "aaron", "at": "@T+120", "ask": "ask2", "a": "archive"}
+      ],
+      "checks": [
+        {"now": "@T+90", "ask": "ask1", "expect": {"state": "answered", "answer": {"event": "seen1", "type": "seen"}}},
+        {"now": "@T+180", "ask": "ask1", "expect": {"state": "answered", "answer": {"event": "pick1", "type": "pick", "pick": "a"}}},
+        {"now": "@T+180", "ask": "ask2", "expect": {"state": "answered", "answer": {"event": "pick2", "type": "pick", "pick": "b"}}}
+      ]
+    },
+    {
+      "name": "Two devices: among equals the earliest stands, then the smaller id",
+      "covers": ["case 2"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "choose", "what": "Which date?", "why": "Venue holds it till Friday", "until": "@T+1d",
+                   "options": [{"id": "fri", "label": "Friday"}, {"id": "sat", "label": "Saturday"}]}},
+        {"id": "p1", "type": "answer", "by": "aaron", "at": "@T+300", "ask": "ask1", "a": "pick", "pick": "fri"},
+        {"id": "p2", "type": "answer", "by": "aaron", "at": "@T+200", "ask": "ask1", "a": "pick", "pick": "sat"},
+        {"id": "ask2", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "choose", "what": "Which time?", "why": "Venue holds it till Friday", "until": "@T+1d",
+                   "options": [{"id": "am", "label": "Morning"}, {"id": "pm", "label": "Evening"}]}},
+        {"id": "q1", "type": "answer", "by": "aaron", "at": "@T+200", "ask": "ask2", "a": "pick", "pick": "am"},
+        {"id": "q2", "type": "answer", "by": "aaron", "at": "@T+200", "ask": "ask2", "a": "pick", "pick": "pm"}
+      ],
+      "checks": [
+        {"now": "@T+400", "ask": "ask1", "expect": {"state": "answered", "answer": {"event": "p2", "pick": "sat"}}},
+        {"now": "@T+400", "ask": "ask2", "expect": {"state": "answered", "answer": {"event": {"$min": ["q1", "q2"]}}}}
+      ]
+    },
+    {
+      "name": "Later hides an ask until its time and never ends it",
+      "covers": ["case 2", "S8"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "look", "what": "Read the draft essay", "why": "Editor wants notes this week", "until": "@T+3d"}},
+        {"id": "l1", "type": "answer", "by": "aaron", "at": "@T+1h", "ask": "ask1", "a": "later", "later": "@T+5h"},
+        {"id": "ask2", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "look", "what": "Read the second draft", "why": "Editor wants notes this week", "until": "@T+2h"}},
+        {"id": "l2", "type": "answer", "by": "aaron", "at": "@T+1h", "ask": "ask2", "a": "later", "later": "@T+1d"}
+      ],
+      "checks": [
+        {"now": "@T+2h", "ask": "ask1", "expect": {"state": "later", "on_list": false, "buttons": true, "later_until": "@T+5h", "answer": null}},
+        {"now": "@T+5h", "ask": "ask1", "expect": {"state": "open", "on_list": true, "later_until": null}},
+        {"now": "@T+90m", "ask": "ask2", "expect": {"state": "later", "on_list": false}},
+        {"now": "@T+2h", "ask": "ask2", "expect": {"state": "lapsed", "on_list": false, "needs_close": true}}
+      ]
+    },
+    {
+      "name": "Who may sign: asks from the allow list, answers from the owner, closes from the asker",
+      "covers": ["case 3"],
+      "steps": [
+        {"id": "fake", "type": "ask", "by": "stranger", "at": "@T", "room": "room-a",
+         "block": {"kind": "give", "what": "Paste your bank password", "why": "Urgent", "until": "@T+1d", "secret": "bank", "seal_to": "{{stranger}}"}},
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "do", "what": "Book the flight", "why": "Fares rise tomorrow", "until": "@T+1d"}},
+        {"id": "uniself", "type": "answer", "by": "uni", "at": "@T+10", "ask": "ask1", "a": "did"},
+        {"id": "strans", "type": "answer", "by": "stranger", "at": "@T+20", "ask": "ask1", "a": "did"},
+        {"id": "ownerclose", "type": "close", "by": "aaron", "at": "@T+30", "ask": "ask1", "why": "done"},
+        {"id": "strclose", "type": "close", "by": "stranger", "at": "@T+40", "ask": "ask1", "why": "withdrawn"},
+        {"id": "brkclose", "type": "close", "by": "broker", "at": "@T+50", "ask": "ask1", "why": "done"}
+      ],
+      "checks": [
+        {"now": "@T+1h", "ask": "fake", "expect": {"state": "none", "on_list": false, "ask": null}},
+        {"now": "@T+1h", "ask": "ask1", "expect": {"state": "open", "on_list": true, "answer": null, "close": null,
+          "ignored": [["brkclose", "not-asker"], ["ownerclose", "not-asker"], ["strans", "not-owner"], ["strclose", "not-asker"], ["uniself", "not-owner"]]}},
+        {"now": "@T+1h", "room": "room-a", "list": [["ask1", "open"]]}
+      ]
+    },
+    {
+      "name": "A broken signature or a tampered message counts for nothing",
+      "covers": ["case 3"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "do", "what": "Rotate the API key", "why": "It leaked in a log", "until": "@T+1d"}},
+        {"id": "badsig", "type": "answer", "by": "aaron", "at": "@T+10", "ask": "ask1", "a": "did", "corrupt": "sig"},
+        {"id": "tamper", "type": "answer", "by": "aaron", "at": "@T+20", "ask": "ask1", "a": "seen", "corrupt": "id"},
+        {"id": "ask2", "type": "ask", "by": "uni", "at": "@T", "room": "room-a", "corrupt": "id",
+         "block": {"kind": "tell", "what": "Tampered ask", "why": "Should not show", "until": "@T+1d"}}
+      ],
+      "checks": [
+        {"now": "@T+1h", "ask": "ask1", "expect": {"state": "open", "answer": null, "ignored": [["badsig", "bad-sig"], ["tamper", "bad-id"]]}},
+        {"now": "@T+1h", "ask": "ask2", "expect": {"state": "none"}},
+        {"now": "@T+1h", "room": "room-a", "list": [["ask1", "open"]]}
+      ]
+    },
+    {
+      "name": "Approval: answered only by the approver's close after a sealed signature",
+      "covers": ["case 4", "S4", "call 2a"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "broker", "at": "@T", "room": "room-a",
+         "block": {"kind": "approve", "what": "Uni asks to use the deploy key", "why": "To ship the site fix", "until": "@T+1d", "default": "decline",
+                   "grant": {"action": "deploy", "credential": "site-deploy", "uses": 1}}},
+        {"id": "yes", "type": "reply", "by": "aaron", "at": "@T+60", "ask": "ask1", "text": "yes"},
+        {"id": "rawdid", "by": "aaron", "at": "@T+70", "kind": 9, "tags": [["h", "room-a"], ["q", "{{ask1}}", "", "{{broker}}"]],
+         "content": "Did it.\n\n```uni-answer\n{\"v\":1,\"ask\":\"{{ask1}}\",\"a\":\"did\"}\n```"},
+        {"id": "uniclose", "type": "close", "by": "uni", "at": "@T+80", "ask": "ask1", "why": "approved"},
+        {"id": "approved", "type": "close", "by": "broker", "at": "@T+120", "ask": "ask1", "why": "approved"}
+      ],
+      "checks": [
+        {"now": "@T+100", "ask": "ask1", "expect": {"state": "open", "on_list": true, "answer": null,
+          "ignored": [["rawdid", "takes-signature"], ["uniclose", "not-asker"], ["yes", "takes-signature"]]}},
+        {"now": "@T+200", "ask": "ask1", "expect": {"state": "answered", "on_list": false,
+          "answer": {"event": "approved", "type": "approve", "via": "signature"}, "close": {"event": "approved", "why": "approved"}}},
+        {"now": "@T+200", "room": "room-a", "list": [["ask1", "answered"]]}
+      ]
+    },
+    {
+      "name": "Approval: Seen ends it, and the approver's later decision still shows as the answer",
+      "covers": ["case 4", "call 2a"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "broker", "at": "@T", "room": "room-a",
+         "block": {"kind": "approve", "what": "Uni asks to read the mail archive", "why": "To answer the auditor", "until": "@T+1d", "default": "decline",
+                   "grant": {"action": "read", "credential": "mail-archive"}}},
+        {"id": "seen1", "type": "answer", "by": "aaron", "at": "@T+60", "ask": "ask1", "a": "seen"},
+        {"id": "decl", "type": "close", "by": "broker", "at": "@T+90", "ask": "ask1", "why": "declined"}
+      ],
+      "checks": [
+        {"now": "@T+70", "ask": "ask1", "expect": {"state": "answered", "answer": {"event": "seen1", "type": "seen"}}},
+        {"now": "@T+100", "ask": "ask1", "expect": {"state": "answered", "answer": {"event": "decl", "type": "decline", "via": "signature"}, "close": {"event": "decl", "why": "declined"}}}
+      ]
+    },
+    {
+      "name": "A default at the lapse: off the list by the clock, 'default taken' only once the asker closes",
+      "covers": ["case 8", "case 10", "call 2c"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "choose", "what": "Keep the old logo on the invoice?", "why": "Invoices go out Monday", "until": "@T+2d", "default": "keep",
+                   "options": [{"id": "keep", "label": "Keep it"}, {"id": "new", "label": "Use the new one"}]}},
+        {"id": "dflt", "type": "close", "by": "uni", "at": "@T+2d+90", "ask": "ask1", "why": "default"}
+      ],
+      "checks": [
+        {"now": "@T+2d", "ask": "ask1", "expect": {"state": "lapsed", "on_list": false, "needs_close": true, "close": null, "ask": {"default": "keep"}}},
+        {"now": "@T+2d+90", "ask": "ask1", "expect": {"state": "closed", "on_list": false, "needs_close": false, "close": {"event": "dflt", "why": "default"}}}
+      ]
+    },
+    {
+      "name": "An ask belongs to its room's id: an answer from another room doesn't count; a folded room re-asks",
+      "covers": ["case 7"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "do", "what": "Sign the lease", "why": "Landlord needs it by the 1st", "until": "@T+3d"}},
+        {"id": "wrongroom", "type": "answer", "by": "aaron", "at": "@T+60", "ask": "ask1", "a": "did", "room": "room-b"},
+        {"id": "ask2", "type": "ask", "by": "uni", "at": "@T+1h", "room": "room-b",
+         "block": {"kind": "do", "what": "Sign the lease", "why": "Landlord needs it by the 1st (room folded into this one)", "until": "@T+3d"}},
+        {"id": "over", "type": "close", "by": "uni", "at": "@T+1h+1", "ask": "ask1", "why": "overtaken"}
+      ],
+      "checks": [
+        {"now": "@T+30m", "ask": "ask1", "expect": {"state": "open", "ignored": [["wrongroom", "other-room"]]}},
+        {"now": "@T+2h", "ask": "ask1", "expect": {"state": "closed", "close": {"event": "over", "why": "overtaken"}}},
+        {"now": "@T+2h", "room": "room-a", "list": [["ask1", "closed"]]},
+        {"now": "@T+2h", "room": "room-b", "list": [["ask2", "open"]]}
+      ]
+    },
+    {
+      "name": "Things that are not asks",
+      "covers": ["case 9", "S1"],
+      "steps": [
+        {"id": "plain", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]], "content": "The run is waiting on you."},
+        {"id": "card", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "🔑 Uni asks to use x\n\n```uni-card\n{\"rid\":\"abc\"}\n```"},
+        {"id": "badkind", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"wait\",\"what\":\"a\",\"why\":\"b\",\"until\":1800003600}\n```"},
+        {"id": "nowhy", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "tap the card\n\n```uni-ask\n{\"v\":1,\"kind\":\"do\",\"what\":\"tap the card\",\"until\":1800003600}\n```"},
+        {"id": "blankwhat", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"do\",\"what\":\" \\n \",\"why\":\"b\",\"until\":1800003600}\n```"},
+        {"id": "toolong", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"do\",\"what\":\"a\",\"why\":\"b\",\"until\":1801209601}\n```"},
+        {"id": "past", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"do\",\"what\":\"a\",\"why\":\"b\",\"until\":1800000000}\n```"},
+        {"id": "oneopt", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"choose\",\"what\":\"a\",\"why\":\"b\",\"until\":1800003600,\"options\":[{\"id\":\"a\",\"label\":\"A\"}]}\n```"},
+        {"id": "baddefault", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"choose\",\"what\":\"a\",\"why\":\"b\",\"until\":1800003600,\"default\":\"c\",\"options\":[{\"id\":\"a\",\"label\":\"A\"},{\"id\":\"b\",\"label\":\"B\"}]}\n```"},
+        {"id": "nogrant", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"approve\",\"what\":\"a\",\"why\":\"b\",\"until\":1800003600}\n```"},
+        {"id": "twoblocks", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"do\",\"what\":\"a\",\"why\":\"b\",\"until\":1800003600}\n```\n\n```uni-ask\n{\"v\":1,\"kind\":\"do\",\"what\":\"c\",\"why\":\"d\",\"until\":1800003600}\n```"},
+        {"id": "boolu", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"do\",\"what\":\"a\",\"why\":\"b\",\"until\":true}\n```"},
+        {"id": "noroom", "by": "uni", "at": "@T", "kind": 9, "tags": [],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"do\",\"what\":\"a\",\"why\":\"b\",\"until\":1800003600}\n```"},
+        {"id": "floatu", "by": "uni", "at": "@T", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1.0,\"kind\":\"do\",\"what\":\"Float until is whole\",\"why\":\"b\",\"until\":1800003600.0}\n```"},
+        {"id": "emoji200", "by": "uni", "at": "@T+1", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"tell\",\"what\":\"🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱\",\"why\":\"200 code points is allowed\",\"until\":1800003600}\n```"},
+        {"id": "emoji201", "by": "uni", "at": "@T+2", "kind": 9, "tags": [["h", "room-a"]],
+         "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"tell\",\"what\":\"🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱🌱\",\"why\":\"201 code points is too long\",\"until\":1800003600}\n```"}
+      ],
+      "checks": [
+        {"now": "@T+60", "ask": "plain", "expect": {"state": "none"}},
+        {"now": "@T+60", "ask": "card", "expect": {"state": "none"}},
+        {"now": "@T+60", "ask": "nowhy", "expect": {"state": "none"}},
+        {"now": "@T+60", "ask": "floatu", "expect": {"state": "open", "ask": {"until": "@T+1h", "kind": "do"}}},
+        {"now": "@T+60", "room": "room-a", "list": [["floatu", "open"], ["emoji200", "open"]]}
+      ]
+    },
+    {
+      "name": "Edits: the asker's edit without the block is the close; the first close stands; answers after it don't count",
+      "covers": ["case 11"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "choose", "what": "Which venue?", "why": "Deposit due", "until": "@T+2d",
+                   "options": [{"id": "a", "label": "Hall"}, {"id": "b", "label": "Park"}]}},
+        {"id": "bare", "by": "uni", "at": "@T+60", "kind": 40003, "tags": [["h", "room-a"], ["e", "{{ask1}}"]], "content": "Settled in the meeting."},
+        {"id": "second", "type": "close", "by": "uni", "at": "@T+90", "ask": "ask1", "why": "done"},
+        {"id": "afterpick", "type": "answer", "by": "aaron", "at": "@T+120", "ask": "ask1", "a": "pick", "pick": "a"},
+        {"id": "ownedit", "by": "aaron", "at": "@T+130", "kind": 40003, "tags": [["h", "room-a"], ["e", "{{ask1}}"]], "content": "Owner edits the agent's message"}
+      ],
+      "checks": [
+        {"now": "@T+200", "ask": "ask1", "expect": {"state": "closed", "answer": null, "close": {"event": "bare", "why": "closed"},
+          "ignored": [["afterpick", "after-close"], ["ownedit", "not-asker"], ["second", "not-first-close"]]}}
+      ]
+    },
+    {
+      "name": "A deletion by the asker withdraws the ask; anyone else's does nothing",
+      "covers": ["case 11"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "tell", "what": "Heads-up on the move", "why": "Movers come Tuesday", "until": "@T+2d"}},
+        {"id": "ask2", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "tell", "what": "Heads-up on the van", "why": "Pickup Tuesday", "until": "@T+2d"}},
+        {"id": "del1", "type": "delete", "by": "uni", "at": "@T+60", "ask": "ask1"},
+        {"id": "del2", "type": "delete", "by": "aaron", "at": "@T+60", "ask": "ask2"}
+      ],
+      "checks": [
+        {"now": "@T+120", "ask": "ask1", "expect": {"state": "closed", "close": {"event": "del1", "why": "withdrawn"}}},
+        {"now": "@T+120", "ask": "ask2", "expect": {"state": "open", "ignored": [["del2", "not-asker"]]}}
+      ]
+    },
+    {
+      "name": "An answer the room then acts on stays the answer",
+      "covers": ["case 12", "S6"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "choose", "what": "Ship tonight or tomorrow?", "why": "Release window", "until": "@T+1d",
+                   "options": [{"id": "tonight", "label": "Tonight"}, {"id": "tomorrow", "label": "Tomorrow"}]}},
+        {"id": "pick1", "type": "answer", "by": "aaron", "at": "@T+60", "ask": "ask1", "a": "pick", "pick": "tomorrow"},
+        {"id": "done", "type": "close", "by": "uni", "at": "@T+3600", "ask": "ask1", "why": "done"}
+      ],
+      "checks": [
+        {"now": "@T+2h", "ask": "ask1", "expect": {"state": "answered", "answer": {"event": "pick1", "pick": "tomorrow"}, "close": {"event": "done", "why": "done"}}}
+      ]
+    },
+    {
+      "name": "Six cards out of tune: one answered in chat, one half-answered and re-asked, three real, one approved",
+      "covers": ["S7", "S4", "S2"],
+      "steps": [
+        {"id": "d1", "type": "ask", "by": "uni", "at": "@T", "room": "dev", "block": {"kind": "do", "what": "Merge #212", "why": "Blocks the release", "until": "@T+3d"}},
+        {"id": "d2", "type": "ask", "by": "uni", "at": "@T+10", "room": "dev", "block": {"kind": "choose", "what": "Icon and name?", "why": "Store listing", "until": "@T+3d",
+          "options": [{"id": "keep", "label": "Keep both"}, {"id": "new", "label": "New both"}]}},
+        {"id": "d3", "type": "ask", "by": "uni", "at": "@T+20", "room": "dev", "block": {"kind": "look", "what": "Look at the crash log", "why": "Second crash today", "until": "@T+3d", "context": "Both crashes are in the audio upload path, after the relay reconnects."}},
+        {"id": "d4", "type": "ask", "by": "uni", "at": "@T+30", "room": "dev", "block": {"kind": "do", "what": "Renew the signing cert", "why": "Expires Sunday", "until": "@T+3d"}},
+        {"id": "d5", "type": "ask", "by": "uni", "at": "@T+40", "room": "dev", "block": {"kind": "tell", "what": "CI moved to the new runner", "why": "Builds may queue today", "until": "@T+3d"}},
+        {"id": "d7", "type": "ask", "by": "broker", "at": "@T+50", "room": "dev", "block": {"kind": "approve", "what": "Uni asks to use the store key", "why": "Upload the build", "until": "@T+1d", "default": "decline", "grant": {"action": "upload"}}},
+        {"id": "chat1", "type": "reply", "by": "aaron", "at": "@T+1h", "ask": "d1", "text": "Merged #212 this morning."},
+        {"id": "half", "type": "reply", "by": "aaron", "at": "@T+1h+5", "ask": "d2", "text": "Keep the name. Not sure on the icon yet."},
+        {"id": "d6", "type": "ask", "by": "uni", "at": "@T+2h", "room": "dev", "block": {"kind": "choose", "what": "The icon: which one?", "why": "Name is settled; the icon is still open", "until": "@T+3d",
+          "options": [{"id": "old", "label": "Old icon"}, {"id": "new", "label": "New icon"}]}},
+        {"id": "d2over", "type": "close", "by": "uni", "at": "@T+2h+1", "ask": "d2", "why": "overtaken"},
+        {"id": "d7ok", "type": "close", "by": "broker", "at": "@T+2h+2", "ask": "d7", "why": "approved"}
+      ],
+      "checks": [
+        {"now": "@T+30m", "room": "dev", "list": [["d1", "open"], ["d2", "open"], ["d3", "open"], ["d4", "open"], ["d5", "open"], ["d7", "open"]]},
+        {"now": "@T+3h", "room": "dev", "list": [["d1", "answered"], ["d2", "answered"], ["d3", "open"], ["d4", "open"], ["d5", "open"], ["d7", "answered"], ["d6", "open"]]},
+        {"now": "@T+3h", "ask": "d3", "expect": {"ask": {"what": "Look at the crash log", "why": "Second crash today", "context": "Both crashes are in the audio upload path, after the relay reconnects."}}},
+        {"now": "@T+3h", "ask": "d2", "expect": {"state": "answered", "answer": {"event": "half", "type": "words"}, "close": {"event": "d2over", "why": "overtaken"}}}
+      ]
+    },
+    {
+      "name": "Give: a secret request ends only by the asker's 'given' close",
+      "covers": ["case 4"],
+      "steps": [
+        {"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a",
+         "block": {"kind": "give", "what": "The X API token", "why": "The poster needs it", "until": "@T+1h", "secret": "x-api", "seal_to": "{{uni}}"}},
+        {"id": "given", "type": "close", "by": "uni", "at": "@T+600", "ask": "ask1", "why": "given"}
+      ],
+      "checks": [
+        {"now": "@T+300", "ask": "ask1", "expect": {"state": "open", "ask": {"secret": "x-api"}}},
+        {"now": "@T+700", "ask": "ask1", "expect": {"state": "answered", "answer": {"event": "given", "type": "give", "via": "signature"}}}
+      ]
+    },
+    {"name": "Hostile messages cannot break a reader: nesting bombs, out-of-range numbers, a lone surrogate", "covers": ["case 3", "case 10"], "steps": [{"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a", "block": {"kind": "do", "what": "Check the backups", "why": "Weekly", "until": "@T+1d"}}, {"id": "bomb", "by": "stranger", "at": "@T+10", "kind": 9, "tags": [["h", "room-a"], ["q", "{{ask1}}"]], "content": "x\n\n```uni-answer\n{{deep:20000}}\n```"}, {"id": "deepown", "by": "aaron", "at": "@T+20", "kind": 9, "tags": [["h", "room-a"], ["q", "{{ask1}}", "", "{{uni}}"]], "content": "Did it.\n\n```uni-answer\n{\"v\":1,\"ask\":\"{{ask1}}\",\"a\":\"did\",\"x\":{{deep:32}}}\n```"}, {"id": "bignum", "by": "aaron", "at": "@T+30", "kind": 9, "tags": [["h", "room-a"], ["q", "{{ask1}}", "", "{{uni}}"]], "content": "Did it.\n\n```uni-answer\n{\"v\":1,\"ask\":\"{{ask1}}\",\"a\":\"did\",\"x\":9007199254740992}\n```"}, {"id": "biglater", "by": "aaron", "at": "@T+40", "kind": 9, "tags": [["h", "room-a"], ["q", "{{ask1}}", "", "{{uni}}"]], "content": "Later.\n\n```uni-answer\n{\"v\":1,\"ask\":\"{{ask1}}\",\"a\":\"later\",\"later\":18000072000000000001}\n```"}, {"id": "lone", "literal": {"id": "0000000000000000000000000000000000000000000000000000000000000001", "pubkey": "{{aaron}}", "created_at": "@T+50", "kind": 9, "tags": [["h", "room-a"], ["q", "{{ask1}}"]], "content": "hi \ud800 there", "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"}}, {"id": "lonesigned", "literal": {"id": "4c08138432339c20f0d1b8f8b76cd64afe353d7f26b06819f237caeca2886dd3", "pubkey": "{{aaron}}", "created_at": "@T+55", "kind": 9, "tags": [["h", "room-a"], ["q", "{{ask1}}", "", "{{uni}}"], ["p", "{{uni}}"]], "content": "yes \ud800 done", "sig": "c3dd72421b30e2a97c0be21d943e247a101b0342ad3902ce4e596373844e42d7364a4849fa4d1deab9f9f8192e87e77a0062994acdf751b5cdb4477bf1a02caa"}}, {"id": "hugetime", "arrives": "@T+57", "literal": {"id": "0000000000000000000000000000000000000000000000000000000000000002", "pubkey": "{{aaron}}", "created_at": 1000000000000000000000, "kind": 9, "tags": [["h", "room-a"], ["q", "{{ask1}}"]], "content": "far future", "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"}}, {"id": "ask2", "by": "uni", "at": "@T+60", "kind": 9, "tags": [["h", "room-a"]], "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"approve\",\"what\":\"Whole floats and decimals read the same\",\"why\":\"b\",\"until\":1800003600,\"grant\":{\"uses\":1.0,\"ratio\":0.5,\"neg\":-0.0}}\n```"}, {"id": "ask3", "by": "uni", "at": "@T+70", "kind": 9, "tags": [["h", "room-a"]], "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"approve\",\"what\":\"Too big a number\",\"why\":\"b\",\"until\":1800003600,\"grant\":{\"n\":9007199254740992}}\n```"}, {"id": "ask4", "by": "uni", "at": "@T+80", "kind": 9, "tags": [["h", "room-a"]], "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"approve\",\"what\":\"Nested exactly 32 deep\",\"why\":\"b\",\"until\":1800003600,\"grant\":{\"x\":{{deep:30}}}}\n```"}, {"id": "ask5", "by": "uni", "at": "@T+90", "kind": 9, "tags": [["h", "room-a"]], "content": "x\n\n```uni-ask\n{\"v\":1,\"kind\":\"approve\",\"what\":\"Nested 33 deep\",\"why\":\"b\",\"until\":1800003600,\"grant\":{\"x\":{{deep:31}}}}\n```"}], "checks": [{"now": "@T+1h-1", "ask": "ask1", "expect": {"state": "open", "answer": null, "later_until": null, "ignored": [["biglater", "bad-block"], ["bignum", "bad-block"], ["bomb", "not-owner"], ["deepown", "bad-block"], ["hugetime", "bad-id"], ["lone", "bad-id"], ["lonesigned", "bad-id"]]}}, {"now": "@T+1h-1", "ask": "ask2", "expect": {"state": "open", "ask": {"grant": {"uses": 1, "ratio": 0.5, "neg": 0}}}}, {"now": "@T+1h-1", "room": "room-a", "list": [["ask1", "open"], ["ask2", "open"], ["ask4", "open"]]}]},
+    {"name": "The most recent Later wins, even when it is sooner", "covers": ["case 2"], "steps": [{"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a", "block": {"kind": "look", "what": "Skim the minutes", "why": "Board meets Thursday", "until": "@T+3d"}}, {"id": "l1", "type": "answer", "by": "aaron", "at": "@T+1h", "ask": "ask1", "a": "later", "later": "@T+5h"}, {"id": "l2", "type": "answer", "by": "aaron", "at": "@T+2h", "ask": "ask1", "a": "later", "later": "@T+150m"}], "checks": [{"now": "@T+2h+10m", "ask": "ask1", "expect": {"state": "later", "later_until": "@T+150m"}}, {"now": "@T+3h", "ask": "ask1", "expect": {"state": "open", "on_list": true, "later_until": null}}]},
+    {"name": "The reader checks for itself: a pick not offered, a close from another room, 'approved' on an ask that isn't an approval", "covers": ["case 3", "case 4", "case 7"], "steps": [{"id": "ask1", "type": "ask", "by": "uni", "at": "@T", "room": "room-a", "block": {"kind": "choose", "what": "Which color?", "why": "Paint order", "until": "@T+1d", "options": [{"id": "a", "label": "Red"}, {"id": "b", "label": "Blue"}]}}, {"id": "ask2", "type": "ask", "by": "uni", "at": "@T", "room": "room-a", "block": {"kind": "do", "what": "Order the paint", "why": "Painter starts Monday", "until": "@T+1d"}}, {"id": "ask3", "type": "ask", "by": "uni", "at": "@T", "room": "room-a", "block": {"kind": "do", "what": "Pay the painter", "why": "Invoice due", "until": "@T+1d"}}, {"id": "pz", "by": "aaron", "at": "@T+10", "kind": 9, "tags": [["h", "room-a"], ["q", "{{ask1}}", "", "{{uni}}"]], "content": "Picked: Green\n\n```uni-answer\n{\"v\":1,\"ask\":\"{{ask1}}\",\"a\":\"pick\",\"pick\":\"z\"}\n```"}, {"id": "pdo", "by": "aaron", "at": "@T+20", "kind": 9, "tags": [["h", "room-a"], ["q", "{{ask2}}", "", "{{uni}}"]], "content": "Picked: a\n\n```uni-answer\n{\"v\":1,\"ask\":\"{{ask2}}\",\"a\":\"pick\",\"pick\":\"a\"}\n```"}, {"id": "xroom", "by": "uni", "at": "@T+30", "kind": 40003, "tags": [["h", "room-b"], ["e", "{{ask1}}"]], "content": "Closed (done): Which color?\n\n```uni-ask-close\n{\"v\":1,\"ask\":\"{{ask1}}\",\"why\":\"done\"}\n```"}, {"id": "fakeok", "type": "close", "by": "uni", "at": "@T+40", "ask": "ask3", "why": "approved"}], "checks": [{"now": "@T+60", "ask": "ask1", "expect": {"state": "open", "close": null, "ignored": [["pz", "bad-pick"], ["xroom", "other-room"]]}}, {"now": "@T+60", "ask": "ask2", "expect": {"state": "open", "ignored": [["pdo", "bad-pick"]]}}, {"now": "@T+60", "ask": "ask3", "expect": {"state": "closed", "answer": null, "close": {"event": "fakeok", "why": "approved"}}}]},
+    {"name": "An ask from a clock far ahead lapses at once instead of staying open for a month", "covers": ["case 1", "call 2c"], "steps": [{"id": "ask1", "type": "ask", "by": "uni", "at": "@T+30d", "arrives": "@T", "room": "room-a", "block": {"kind": "do", "what": "Clock is wrong", "why": "Test", "until": "@T+30d+1h"}}, {"id": "ask2", "type": "ask", "by": "uni", "at": "@T+5m", "arrives": "@T", "room": "room-a", "block": {"kind": "do", "what": "Clock a little ahead", "why": "Test", "until": "@T+14d"}}], "checks": [{"now": "@T+1h", "ask": "ask1", "expect": {"state": "lapsed", "on_list": false, "needs_close": true}}, {"now": "@T+1h", "ask": "ask2", "expect": {"state": "open", "on_list": true}}]},
+    {"name": "A 14-day ask read by a clock a minute behind stays open", "covers": ["case 1", "call 2c"], "steps": [{"id": "ask1", "type": "ask", "by": "uni", "at": "@T+60", "arrives": "@T", "room": "room-a", "block": {"kind": "choose", "what": "Pick a week", "why": "Booking", "until": "@T+60+14d", "default": "a", "options": [{"id": "a", "label": "This week"}, {"id": "b", "label": "Next week"}]}}], "checks": [{"now": "@T", "ask": "ask1", "expect": {"state": "open", "on_list": true, "needs_close": false}}, {"now": "@T+60+14d", "ask": "ask1", "expect": {"state": "lapsed", "needs_close": true}}]}
+  ],
+  "builds": [
+    {"name": "ask: choose with default", "fn": "ask", "now": "@T", "room": "room-a",
+     "args": {"kind": "choose", "what": "Which name?", "why": "The listing is due", "until": "@T+1d", "default": "a", "task": "T-335",
+              "options": [{"id": "a", "label": "Uni"}, {"id": "b", "label": "Uni Shell"}]},
+     "expect": {"kind": 9, "tags": [["h", "room-a"]],
+                "content": "Which name?\nThe listing is due\n\n- Uni\n- Uni Shell\n\n```uni-ask\n{\"v\":1,\"kind\":\"choose\",\"what\":\"Which name?\",\"why\":\"The listing is due\",\"until\":1800086400,\"options\":[{\"id\":\"a\",\"label\":\"Uni\"},{\"id\":\"b\",\"label\":\"Uni Shell\"}],\"default\":\"a\",\"task\":\"T-335\"}\n```"}},
+    {"name": "ask: tell with context, non-ASCII kept as is", "fn": "ask", "now": "@T", "room": "room-a",
+     "args": {"kind": "tell", "what": "Café \"move\" done", "why": "FYI — no action", "until": "@T+1h", "context": "Line one\nLine two"},
+     "expect": {"kind": 9, "tags": [["h", "room-a"]],
+                "content": "Café \"move\" done\nFYI — no action\n\nLine one\nLine two\n\n```uni-ask\n{\"v\":1,\"kind\":\"tell\",\"what\":\"Café \\\"move\\\" done\",\"why\":\"FYI — no action\",\"context\":\"Line one\\nLine two\",\"until\":1800003600}\n```"}},
+    {"name": "answer: pick wakes the room", "fn": "answer", "ask": "choose", "args": {"a": "pick", "pick": "b"},
+     "expect": {"kind": 9, "tags": [["h", "room-a"], ["q", "{{ask}}", "", "{{uni}}"], ["p", "{{uni}}"]],
+                "content": "Picked: Uni Shell\n\n```uni-answer\n{\"v\":1,\"ask\":\"{{ask}}\",\"a\":\"pick\",\"pick\":\"b\"}\n```"}},
+    {"name": "answer: seen is quiet", "fn": "answer", "ask": "choose", "args": {"a": "seen"},
+     "expect": {"kind": 9, "tags": [["h", "room-a"], ["q", "{{ask}}", "", "{{uni}}"]],
+                "content": "Seen.\n\n```uni-answer\n{\"v\":1,\"ask\":\"{{ask}}\",\"a\":\"seen\"}\n```"}},
+    {"name": "answer: later is quiet and carries its time", "fn": "answer", "ask": "choose", "now": "@T+60", "args": {"a": "later", "later": "@T+2h"},
+     "expect": {"kind": 9, "tags": [["h", "room-a"], ["q", "{{ask}}", "", "{{uni}}"]],
+                "content": "Later.\n\n```uni-answer\n{\"v\":1,\"ask\":\"{{ask}}\",\"a\":\"later\",\"later\":1800007200}\n```"}},
+    {"name": "answer: did wakes the room", "fn": "answer", "ask": "choose", "args": {"a": "did"},
+     "expect": {"kind": 9, "tags": [["h", "room-a"], ["q", "{{ask}}", "", "{{uni}}"], ["p", "{{uni}}"]],
+                "content": "Did it.\n\n```uni-answer\n{\"v\":1,\"ask\":\"{{ask}}\",\"a\":\"did\"}\n```"}},
+    {"name": "answer: archive is quiet", "fn": "answer", "ask": "choose", "args": {"a": "archive"},
+     "expect": {"kind": 9, "tags": [["h", "room-a"], ["q", "{{ask}}", "", "{{uni}}"]],
+                "content": "Archived.\n\n```uni-answer\n{\"v\":1,\"ask\":\"{{ask}}\",\"a\":\"archive\"}\n```"}},
+    {"name": "answer: a reply is your words, quoting the ask, no thread", "fn": "answer", "ask": "choose", "args": {"a": "words", "text": "Neither — call it Shell."},
+     "expect": {"kind": 9, "tags": [["h", "room-a"], ["q", "{{ask}}", "", "{{uni}}"], ["p", "{{uni}}"]],
+                "content": "Neither — call it Shell."}},
+    {"name": "close: done", "fn": "close", "ask": "choose", "args": {"why": "done"},
+     "expect": {"kind": 40003, "tags": [["h", "room-a"], ["e", "{{ask}}"]],
+                "content": "Closed (done): Which name?\n\n```uni-ask-close\n{\"v\":1,\"ask\":\"{{ask}}\",\"why\":\"done\"}\n```"}},
+    {"name": "sealed answer: the approval rumor", "fn": "sealed", "ask": "approve", "args": {"decision": "approve"},
+     "expect": {"kind": 46043, "tags": [["h", "room-a"], ["q", "{{ask}}"]],
+                "content": "{\"v\":1,\"ask\":\"{{ask}}\",\"a\":\"approve\"}"}},
+    {"name": "refuse: an ask without why", "fn": "ask", "now": "@T", "room": "room-a", "args": {"kind": "do", "what": "tap the card", "until": "@T+1h"}, "error": true},
+    {"name": "refuse: an ask past 14 days", "fn": "ask", "now": "@T", "room": "room-a", "args": {"kind": "do", "what": "a", "why": "b", "until": "@T+14d+1"}, "error": true},
+    {"name": "allow: an ask at exactly 14 days", "fn": "ask", "now": "@T", "room": "room-a", "args": {"kind": "do", "what": "a", "why": "b", "until": "@T+14d"},
+     "expect": {"kind": 9, "tags": [["h", "room-a"]], "content": "a\nb\n\n```uni-ask\n{\"v\":1,\"kind\":\"do\",\"what\":\"a\",\"why\":\"b\",\"until\":1801209600}\n```"}},
+    {"name": "refuse: a pick that isn't an option", "fn": "answer", "ask": "choose", "args": {"a": "pick", "pick": "z"}, "error": true},
+    {"name": "refuse: a pick on a do ask", "fn": "answer", "ask": "do", "args": {"a": "pick", "pick": "a"}, "error": true},
+    {"name": "refuse: words on an approval", "fn": "answer", "ask": "approve", "args": {"a": "words", "text": "yes"}, "error": true},
+    {"name": "refuse: later not after now", "fn": "answer", "ask": "choose", "now": "@T+60", "args": {"a": "later", "later": "@T+60"}, "error": true},
+    {"name": "refuse: an unknown close reason", "fn": "close", "ask": "choose", "args": {"why": "whatever"}, "error": true},
+    {"name": "refuse: an ask whose text holds a fence line", "fn": "ask", "now": "@T", "room": "room-a", "args": {"kind": "do", "what": "x\n```uni-ask", "why": "b", "until": "@T+1h"}, "error": true},
+    {"name": "refuse: an ask whose text holds an answer fence line", "fn": "ask", "now": "@T", "room": "room-a", "args": {"kind": "do", "what": "a", "why": "b", "until": "@T+1h", "context": "see\n```uni-answer\n{}\n```"}, "error": true},
+    {"name": "refuse: a grant number a reader can't read the same everywhere", "fn": "ask", "now": "@T", "room": "room-a", "args": {"kind": "approve", "what": "a", "why": "b", "until": "@T+1h", "grant": {"n": 9007199254740992}}, "error": true},
+    {"name": "refuse: words holding an answer fence line", "fn": "answer", "ask": "choose", "args": {"a": "words", "text": "look:\n```uni-answer\nhi\n```"}, "error": true},
+    {"name": "close: a two-line what folds to one line", "fn": "close", "ask": "multiline", "args": {"why": "done"}, "expect": {"kind": 40003, "tags": [["h", "room-a"], ["e", "{{ask}}"]], "content": "Closed (done): Line one Line two\n\n```uni-ask-close\n{\"v\":1,\"ask\":\"{{ask}}\",\"why\":\"done\"}\n```"}},
+    {"name": "build: whole floats and tuples are written as the TypeScript twin writes them", "fn": "ask", "now": "@T", "room": "room-a", "args": {"kind": "approve", "what": "a", "why": "b", "until": "@T+1h", "grant": {"uses": 1.0, "ratio": 0.5}}, "expect": {"kind": 9, "tags": [["h", "room-a"]], "content": "a\nb\n\n```uni-ask\n{\"v\":1,\"kind\":\"approve\",\"what\":\"a\",\"why\":\"b\",\"until\":1800003600,\"grant\":{\"uses\":1,\"ratio\":0.5}}\n```"}},
+    {"name": "build: decimals are written as JavaScript writes them", "fn": "ask", "now": "@T", "room": "room-a", "args": {"kind": "approve", "what": "a", "why": "b", "until": "@T+1h", "grant": {"small": 1e-05, "tiny": 1e-07, "big": 123456789.5}}, "expect": {"kind": 9, "tags": [["h", "room-a"]], "content": "a\nb\n\n```uni-ask\n{\"v\":1,\"kind\":\"approve\",\"what\":\"a\",\"why\":\"b\",\"until\":1800003600,\"grant\":{\"small\":0.00001,\"tiny\":1e-7,\"big\":123456789.5}}\n```"}},
+    {"name": "refuse: a later time out of range", "fn": "answer", "ask": "choose", "now": "@T", "args": {"a": "later", "later": 1e+300}, "error": true},
+    {"name": "build: integer-like keys come first, as in JavaScript", "fn": "ask", "now": "@T", "room": "room-a", "args": {"kind": "approve", "what": "a", "why": "b", "until": "@T+1h", "grant": {"b": 1, "10": 2, "2": 3, "01": 4}}, "expect": {"kind": 9, "tags": [["h", "room-a"]], "content": "a\nb\n\n```uni-ask\n{\"v\":1,\"kind\":\"approve\",\"what\":\"a\",\"why\":\"b\",\"until\":1800003600,\"grant\":{\"2\":3,\"10\":2,\"b\":1,\"01\":4}}\n```"}}
+  ],
+  "build_asks": {
+    "about": "The asks the build cases answer or close, made by 'uni' (approve: 'broker') at @T in room-a.",
+    "choose": {"by": "uni", "block": {"kind": "choose", "what": "Which name?", "why": "The listing is due", "until": "@T+1d", "options": [{"id": "a", "label": "Uni"}, {"id": "b", "label": "Uni Shell"}]}},
+    "do": {"by": "uni", "block": {"kind": "do", "what": "Do it", "why": "Now", "until": "@T+1d"}},
+    "multiline": {"by": "uni", "block": {"kind": "do", "what": "Line one\nLine two", "why": "Folding", "until": "@T+1d"}},
+    "approve": {"by": "broker", "block": {"kind": "approve", "what": "Use the key", "why": "Deploy", "until": "@T+1d", "default": "decline", "grant": {"action": "deploy"}}}
+  },
+  "pins": [
+    {"case": "Later hides an ask until its time and never ends it", "step": "l1", "id": "0cb419e4ef1e7ac97910bad517ab1e52919a069d43fa5e9d9c736ff3b40d9e63"},
+    {"case": "Approval: answered only by the approver's close after a sealed signature", "step": "ask1", "id": "5d7dd3aacdba155fc33bec2aa0f8eea5c475d0574f3f31f33cf03b5e0e376ce4"},
+    {"case": "Approval: answered only by the approver's close after a sealed signature", "step": "yes", "id": "41dde5221fafad6564f94742199217a7192ffff1dcc003aa5cdbe1144da694dd"},
+    {"case": "Things that are not asks", "step": "emoji200", "id": "73d23a7b9de0b8ed5c109be852da215cedb704f6a4a08ce733657c5442b6ff64"},
+    {"case": "Six cards out of tune: one answered in chat, one half-answered and re-asked, three real, one approved", "step": "d3", "id": "9acc0123fe1c648fb363744122b7bd1f783c58e32990b06f5f108f2c3606607a"},
+    {"case": "Six cards out of tune: one answered in chat, one half-answered and re-asked, three real, one approved", "step": "chat1", "id": "b27353bf265506385d0ac490a142ba750c19fc1fea9f6eb462b0207c9092bf6c"},
+    {"case": "Six cards out of tune: one answered in chat, one half-answered and re-asked, three real, one approved", "step": "d2over", "id": "944ce4796a58cbc1b6e173b968cee186cdb18af13487ba1a0289be34e3f2f092"}
+  ],
+  "pager": [
+    {"name": "2500 events, one per second, read in two pages", "limit": 2000, "runs": [{"from": "@T", "count": 2500, "per_second": 1}], "expect": {"count": 2500, "truncated": false}},
+    {"name": "a page boundary inside one busy second loses nothing", "limit": 2000, "runs": [{"from": "@T", "count": 10, "per_second": 1}, {"from": "@T+10", "count": 30, "per_second": 30}, {"from": "@T+11", "count": 1990, "per_second": 1}], "expect": {"count": 2030, "truncated": false}},
+    {"name": "more than a page in one second is reported, not looped on", "limit": 2000, "runs": [{"from": "@T", "count": 5, "per_second": 1}, {"from": "@T+100", "count": 2005, "per_second": 2005}], "expect": {"count": 2005, "truncated": true}},
+    {"name": "a short first page is the whole room", "limit": 2000, "runs": [{"from": "@T", "count": 7, "per_second": 1}], "expect": {"count": 7, "truncated": false}},
+    {"name": "a relay that caps pages at 1 is still read whole (one event a second; its cap is never learned, the known gap)", "limit": 2000, "relay_cap": 1, "runs": [{"from": "@T", "count": 5, "per_second": 1}], "expect": {"count": 5, "truncated": false}},
+    {"name": "a capped relay that also ignores until is reported", "limit": 2000, "relay_cap": 500, "ignore_until": true, "runs": [{"from": "@T", "count": 3000, "per_second": 1}], "expect": {"count": 500, "truncated": true}},
+    {"name": "a capped relay whose newest second is busier than its cap still reaches the older events", "limit": 2000, "relay_cap": 500, "runs": [{"from": "@T", "count": 10, "per_second": 1}, {"from": "@T+100", "count": 500, "per_second": 500}], "expect": {"count": 510, "truncated": false}},
+    {"name": "a relay capped below the limit, with a busy second later on, steps back and reports it", "limit": 2000, "relay_cap": 500, "runs": [{"from": "@T", "count": 5, "per_second": 1}, {"from": "@T+10", "count": 600, "per_second": 600}, {"from": "@T+11", "count": 700, "per_second": 1}], "expect": {"count": 1205, "truncated": true}},
+    {"name": "a two-event room in one second is read whole and not flagged", "limit": 2000, "runs": [{"from": "@T", "count": 2, "per_second": 2}], "expect": {"count": 2, "truncated": false}},
+    {"name": "a relay that caps pages below the limit is still read to the end", "limit": 2000, "relay_cap": 500, "runs": [{"from": "@T", "count": 1200, "per_second": 1}], "expect": {"count": 1200, "truncated": false}},
+    {"name": "a relay that ignores until stops after two stuck pages, reported", "limit": 2000, "ignore_until": true, "runs": [{"from": "@T", "count": 3000, "per_second": 1}], "expect": {"count": 2000, "truncated": true}}
+  ]
+}

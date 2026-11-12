@@ -1,3 +1,5 @@
+// T-335 one ask: built-ins the vendored ask library needs, before anything reads an ask
+import "./ask/shim";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
