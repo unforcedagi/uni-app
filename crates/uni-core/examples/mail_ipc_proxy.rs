@@ -70,7 +70,7 @@ async fn run(ctx: &Ctx, cmd: &str, a: &Value) -> Result<Value, MailError> {
             let o = mail.overview().await?;
             let mut out = Vec::new();
             for acct in &o.accounts {
-                let source = Source { account_id: acct.id.clone(), mailbox_id: None, exclude: Vec::new(), position: 0 };
+                let source = Source { account_id: acct.id.clone(), ..Source::default() };
                 let page = mail.threads(&[source], Some(&text), PAGE_SIZE).await?;
                 for t in page.threads {
                     for m in mail.thread(&acct.id, &t.thread_id).await?.messages {

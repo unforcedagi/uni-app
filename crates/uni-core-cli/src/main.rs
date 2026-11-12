@@ -398,9 +398,9 @@ async fn main() -> Result<()> {
                     .filter_map(|a| {
                         let role = |r: &str| a.mailboxes.iter().find(|b| b.role.as_deref() == Some(r)).map(|b| b.id.clone());
                         if search.is_some() {
-                            Some(uni_core::mail::Source { account_id: a.id.clone(), mailbox_id: None, exclude: ["junk", "trash"].iter().filter_map(|r| role(r)).collect(), position: 0 })
+                            Some(uni_core::mail::Source { account_id: a.id.clone(), exclude: ["junk", "trash"].iter().filter_map(|r| role(r)).collect(), ..Default::default() })
                         } else {
-                            Some(uni_core::mail::Source { account_id: a.id.clone(), mailbox_id: Some(role("inbox")?), exclude: vec![], position: 0 })
+                            Some(uni_core::mail::Source { account_id: a.id.clone(), mailbox_id: Some(role("inbox")?), ..Default::default() })
                         }
                     })
                     .collect();

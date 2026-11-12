@@ -596,7 +596,7 @@ mod tests {
     }
 
     fn src(account: &str, position: u64) -> Source {
-        Source { account_id: account.into(), mailbox_id: Some(format!("{account}-inbox")), exclude: vec![], position }
+        Source { account_id: account.into(), mailbox_id: Some(format!("{account}-inbox")), position, ..Source::default() }
     }
 
     fn session(roles: Value, extra: Value) -> Value {

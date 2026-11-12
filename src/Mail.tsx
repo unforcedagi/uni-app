@@ -364,14 +364,14 @@ function ThreadRow({ t, place, note, selected, onOpen }: { t: ThreadSummary; pla
     <span className="door-avatar" aria-hidden="true">{initials(who?.name?.trim() || who?.email || "?")}</span>
     <span className="door-row-text">
       <span className="door-row-top">
-        <span className="door-row-name mail-from">{t.draft ? <em>{party}</em> : party}{t.count > 1 && <small className="mail-row-count"> {t.count}</small>}</span>
+        <span className="door-row-name mail-from">{t.draft ? <em>{party}</em> : party}{t.count > 1 && <small className="mail-row-count"> · {t.count}</small>}</span>
         {uniDraft && <span className="mail-draft-tag small" aria-hidden="true">Uni drafted</span>}
         {t.flagged && place !== "later" && <span className="mail-row-later" aria-hidden="true">Later</span>}
         {t.has_attachment && <span className="mail-row-files" aria-hidden="true">📎</span>}
         <time dateTime={t.received_at}>{mailDate(t.received_at)}</time>
       </span>
       <span className="door-row-bottom mail-row-line"><span className="mail-row-subject">{subjectLabel(t.subject)}</span>
-        {!note && t.preview && <span className="door-row-preview mail-row-preview"> — {t.preview}</span>}</span>
+        {!note && t.preview && t.preview.trim() !== t.subject.trim() && <span className="door-row-preview mail-row-preview">{t.preview}</span>}</span>
       {note && <span className="mail-row-triage"><span className="mail-row-triage-who">Uni:</span> {note}</span>}
     </span>
   </button></li>;

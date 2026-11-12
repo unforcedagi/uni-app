@@ -310,19 +310,22 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
 export const width = (page: Page) => page.viewportSize()?.width ?? 1440;
 /** One pane at a time (a phone). */
 export const stacked = (page: Page) => width(page) < 700;
-/** The mailboxes sit behind ☰ (a phone, or the Daylight upright). */
-export const boxesHidden = (page: Page) => width(page) < 1100;
+/** T-335 v2: Mail's places are tabs (Inbox, Later, Waiting, Drafts, Sent, Archive, Junk, Uni's mail). */
 export const mail = (page: Page) => page.getByRole('region', { name: 'Mail' }).last();
 export const rows = (page: Page) => page.locator('.mail-row');
+export const tab = (page: Page, name: string) => mail(page).getByRole('tab', { name: new RegExp(`^${name.replace(/[.?()]/g, '\\$&')}`) });
 
-export async function pickBox(page: Page, group: "Your mailboxes" | "Uni's mailboxes" | null, name: string) {
-  if (boxesHidden(page)) await page.getByRole('button', { name: '☰ Mailboxes' }).click();
-  const nav = page.getByRole('navigation', { name: 'Mailboxes' });
-  await (group ? nav.getByRole('group', { name: group }) : nav).getByRole('button', { name: new RegExp(`^${name}`) }).click();
+/** Open a place's tab (on a phone, back from a thread first: the tabs give way to it). */
+export async function pickTab(page: Page, name: string) {
+  await backToThreads(page);
+  await tab(page, name).click();
 }
 
+/** On a phone, back from a thread (or a held send) to the list, when one is showing. */
 export async function backToThreads(page: Page) {
-  if (stacked(page)) await page.getByRole('button', { name: '← Threads' }).first().click();
+  if (!stacked(page)) return;
+  const b = mail(page).locator('.mail-thread-back:visible');
+  if (await b.count()) await b.first().click();
 }
 
 /** MAIL_SHOTS=<dir>: keep a screenshot of each step, for looking at (never committed). */
