@@ -1,3 +1,5 @@
+// T-335 one ask: removed the banner over the composer for a waiting card (and its Show), because the card is now one card at its own message
+// (the banner speaks only for a Hermes prompt); the strip's "Waits on you" brings it into view instead.
 import { test, expect, type Page } from '@playwright/test';
 import { startInRoom } from './startInRoom';
 
@@ -324,16 +326,26 @@ test('a send that failed and a card that then expired: Expired, and no Try again
   await expect(c.getByRole('button', { name: 'Try again' })).toHaveCount(0);
 });
 
-test('a waiting card is flagged over the composer and Show brings it into view', async ({ page }) => {
+test('a waiting card is one card at its message, drawn once, with no banner over the composer; Waits on you brings it into view; Deny ends it', async ({ page }) => {
   const waiting = [{ ref: 'm1', channel: 'test', root: null, ts: now() - 30, kind: 'single', credential: 'dns-zone', action: 'dns.edit', class: 'powerful', rows: 1, expires: now() + 900, fingerprint: '9b13b2ae' }];
-  await boot(page, { messages: [msg('m1', single(), now() - 30)], cards: { m1: view([row()]) }, waiting });
-  const banner = page.locator('.approval-banner');
-  await expect(banner).toContainText('Uni asks for your tap: dns-zone · dns.edit. Answer on its card · ends');
-  await banner.getByRole('button', { name: 'Show' }).click();
+  // (a long chat after it, so the card starts out of view and "Waits on you" has to bring it back)
+  const after = Array.from({ length: 40 }, (_, i) => msg(`f${i}`, `A later line, number ${i + 1}.`, now() - 29 + i, ME, 'Robin'));
+  await boot(page, { messages: [msg('m1', single(), now() - 30), ...after], cards: { m1: view([row()]) }, waiting });
+  const one = page.locator('article.approval-waiting[data-ref="m1"] [data-card="m1"]');
+  await expect(one).toHaveAttribute('data-source', 'card');
+  await expect(page.locator('[data-card="m1"]')).toHaveCount(1);
+  await expect(card(page, 'Approve use of dns-zone')).toHaveCount(1);
+  await expect(one.getByRole('region', { name: 'Approve use of dns-zone', exact: true })).toBeVisible();
+  await expect(page.locator('.approval-banner')).toHaveCount(0);
+  await expect(card(page, 'Approve use of dns-zone')).not.toBeInViewport();
+  // (the room holds its end for 1.5 s after it opens, SETTLE_MS in App.tsx, and undoes a tap on "Waits on you" made before then: reported)
+  await page.waitForTimeout(1600);
+  await page.locator('.sh-strip .sh-run[data-run="waiting"]').click();
   await expect(card(page, 'Approve use of dns-zone')).toBeInViewport();
-  await expect(page.locator('article.approval-waiting[data-ref="m1"]')).toHaveCount(1);
   await card(page, 'Approve use of dns-zone').getByRole('button', { name: 'Deny' }).click();
-  await expect(banner).toHaveCount(0);
+  await expect(page.locator('[data-card="m1"]')).toHaveCount(0);
+  await expect(page.locator('.sh-strip .sh-run[data-run="waiting"]')).toHaveCount(0);
+  await expect(page.locator('.approval-banner')).toHaveCount(0);
 });
 
 test('the unlock grace: a routine card says "Unlocked · 4 min"; a powerful card, a permanent mint and a morning card choosing one never do', async ({ page }) => {

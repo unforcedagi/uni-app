@@ -1,6 +1,8 @@
+// T-335 one ask: removed the pinned approval's countdown clock (home no longer pins approvals: a waiting card is a card on its room's row)
+// and the ask sheet's modal checks (Escape closing it, Settings over it), because an ask now opens in place, in its card (no sheet).
 // T-335 the shape, end to end on the real build with Tauri faked (shapeFixture.ts, a made-up world): home is the rooms, newest first, with
-// what moves and what wants you; answering an ask from home writes the vault once and tells that room; the expiring card is pinned with
-// its clock and leaves once approved; a room has its strip, its asks as messages and a run's story; Back goes home; the bar switches the
+// what moves and what wants you; answering an ask from home writes the vault once and tells that room (flat, never in a thread); an approval
+// card waits on its room's row and leaves once approved; a room has its strip, its asks as cards and a run's story; Back goes home; the bar switches the
 // places (and Settings, T-335 fixes); the drawer opens each applet in its frame; search starts where you are; a private room keeps its words; the ink screen
 // reads by shape and word. Screenshots, named like the prototype's, go to test-results/shape-shots (never committed).
 // Run: pnpm test:shape
@@ -19,8 +21,24 @@ async function openRoomFromHome(page: Page, room: string) {
   await expect(page.locator('.composer textarea')).toBeVisible();
 }
 
+/** (T-335 one ask) Put the room's card out of view: the reader scrolls the list to its top, so "Waits on you" has to bring it back. */
+async function cardOutOfView(page: Page, card: ReturnType<Page['locator']>) {
+  await expect(card).toHaveCount(1);
+  const list = page.locator('.sh-room-chat .message-list');
+  await list.hover();
+  await page.mouse.wheel(0, -4000);
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(0);
+  await expect(card).not.toBeInViewport();
+}
+/** (T-335 one ask) Uni's room with a long chat (made-up lines), so its card can be out of view: added before the room is opened. */
+const longUni = (page: Page) => page.evaluate((room) => {
+  const w = window as any, l = w.__msgs[room], last = l[l.length - 1];
+  for (let i = 1; i <= 30; i++) l.push({ ...last, ref: `u-long-${i}`, body: `A made-up line about the week, number ${i}.`, ts: last.ts + i });
+}, ROOM.uni);
+
 /** A waiting approval's message carries a rule down its left side: its text (the name, the first letter of its body) starts right of the
- *  rule, never under it. The rule is an inset box-shadow on the message or its content; its right edge is that box's left plus its width. */
+ *  rule, never under it. The rule is an inset box-shadow on the message or its content; its right edge is that box's left plus its width.
+ *  (T-335 one ask: a waiting card's body is its one card, `.sh-card`, drawn at its message; a prompt's is still its markdown.) */
 async function ruleClearsText(page: Page, ref: string) {
   const m = page.locator(`.sh-room .message.approval-waiting[data-ref="${ref}"]`);
   await m.scrollIntoViewIfNeeded();
@@ -38,9 +56,10 @@ async function ruleClearsText(page: Page, ref: string) {
       const range = document.createRange(); const i = t.textContent!.search(/\S/); range.setStart(t, i); range.setEnd(t, i + 1);
       return range.getBoundingClientRect().left;
     };
-    return { ruleRight: ruled.getBoundingClientRect().left + w, name: firstGlyph(el.querySelector('.message-meta')), body: firstGlyph(el.querySelector('.md, .message-content p')) };
+    return { ruleRight: ruled.getBoundingClientRect().left + w, name: firstGlyph(el.querySelector('.message-meta')), body: firstGlyph(el.querySelector('.sh-card, .md, .message-content p')) };
   });
   expect(r, 'the waiting message has its rule').not.toBeNull();
+  expect(r!.body, 'its body is drawn').not.toBeNull();
   expect(r!.name!, 'its name starts right of the rule').toBeGreaterThanOrEqual(r!.ruleRight);
   expect(r!.body!, 'its first line starts right of the rule').toBeGreaterThanOrEqual(r!.ruleRight);
 }
@@ -84,13 +103,17 @@ test('home: rooms newest first, the moving line, the asks with their buttons, a 
   for (const words of ['A line for a place this device lacks', 'T-608']) expect(dom, words).not.toContain(words);
   for (const words of ['Private words about the practice', 'A quiet line that stays in its room', 'T-605', 'A family line that stays at the table', 'T-606',
     'Family words about the seating', 'A kitchen line that stays private', 'T-607']) expect(dom, words).not.toContain(words);
-  // the bar counts what wants you: five asks, the three waiting in private rooms, the pinned card, and Teaching's run that waits on you
-  await expect(bar(page).getByRole('button', { name: /^Rooms, 10 things want you$/ })).toBeVisible();
+  // the bar counts what wants you (T-335 one ask: the cards on the rows): five asks (T-601, T-602, T-603, T-604, T-609), the three waiting in
+  // private rooms (T-605, T-606, T-607), and the approval card on Riverbend's row; Teaching's run that waits on you is not an ask, and T-608
+  // (no room on this device) is said apart. The rows' own counts add up to it.
+  await expect(row(page, ROOM.river).locator('[data-card="rb-card"]')).toHaveAttribute('data-source', 'card');
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 9 things want you$/ })).toBeVisible();
+  expect(await page.locator('.sh-row[data-wants]').evaluateAll((els) => els.reduce((n, e) => n + Number(e.getAttribute('data-wants')), 0))).toBe(9);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await shot(page, '01-home');
 });
 
-test('answering from home: Seen and a choice each write the vault once, tell that room, and the ask leaves its row', async ({ page }) => {
+test('answering from home: Seen and a choice each write the vault once, tell that room in its main line, and the ask leaves its row', async ({ page }) => {
   await bootShape(page);
   await expect(row(page, ROOM.uni).locator('.sh-ask-wants')).toBeVisible();
   await row(page, ROOM.uni).locator('.sh-ask-btn[data-act="seen"]').click();
@@ -101,14 +124,16 @@ test('answering from home: Seen and a choice each write the vault once, tell tha
   expect(seen[0].args).toMatchObject({ from: 'open', to: 'done', metadata: { needs_aaron: false, needs_aaron_why: 'seen' } });
   // a choice: the answer is written with the close, and the room is told, addressed to its Uni
   await row(page, ROOM.river).getByRole('button', { name: 'Yes, Thursday 2pm' }).click();
-  await expect(row(page, ROOM.river).locator('.sh-ask')).toHaveCount(0);
+  await expect(row(page, ROOM.river).locator('[data-card="ask-walk"]')).toHaveCount(0);
   await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body, c.args.recipients])).toContainEqual([ROOM.river, 'T-602: Yes, Thursday 2pm', [UNI]]);
+  // (T-335 one ask: flat, though T-602 names a reply_root: never a thread reply)
+  expect((await calls(page, 'post_message')).map((c) => c.args.replyTo)).toEqual([null, null]);
   const answered = (await calls(page, 'vault_transition')).filter((c) => c.args.id === 'ask-walk');
   expect(answered).toHaveLength(1);
   expect(answered[0].args.metadata).toMatchObject({ answer: 'Yes, Thursday 2pm', decided: 'Yes, Thursday 2pm' });
   // nothing was posted anywhere else
   expect((await calls(page, 'post_message')).map((c) => c.args.channel).sort()).toEqual([ROOM.river, ROOM.uni]);
-  await expect(bar(page).getByRole('button', { name: /^Rooms, 8 things want you$/ })).toBeVisible();
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 7 things want you$/ })).toBeVisible();
 });
 
 test('inside a private room its ask is drawn in full, in the chat and the strip, and is answered there; home still has none of its words', async ({ page }) => {
@@ -133,52 +158,65 @@ test('inside a private room its ask is drawn in full, in the chat and the strip,
   await expect(row(page, ROOM.quiet).locator('.sh-row-hush')).toHaveCount(0);
   await expect(row(page, ROOM.family).locator('.sh-row-hush')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain('A family line that stays at the table');
-  await expect(bar(page).getByRole('button', { name: /^Rooms, 9 things want you$/ })).toBeVisible();
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 8 things want you$/ })).toBeVisible();
 });
 
-test('the expiring card is pinned with its clock, is approved in place, and leaves', async ({ page }) => {
+test('an approval card waits on its room\'s row, opens to its whole text, is approved in place, and leaves', async ({ page }) => {
   await bootShape(page);
-  const pin = page.locator('.sh-pin[data-ref="rb-card"]');
-  await expect(pin).toBeVisible();
-  await expect(pin).toContainText('Riverbend Commons');
-  await expect(pin.getByRole('timer')).toHaveText(/^expires in (8:[0-5]\d|9:00)$/);
-  await pin.getByRole('button', { name: 'Approve' }).click();
-  await expect.poll(async () => (await calls(page, 'sealed_answer')).map((c) => c.args.decision)).toEqual(['approve']);
+  // (T-335 one ask: no pin over the rooms and no countdown: the card is one of Riverbend's cards, the card itself drawn in its frame)
   await expect(page.locator('.sh-pin')).toHaveCount(0);
-  await expect(bar(page).getByRole('button', { name: /^Rooms, 9 things want you$/ })).toBeVisible();
+  const card = row(page, ROOM.river).locator('[data-card="rb-card"]');
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute('data-source', 'card');
+  await expect(row(page, ROOM.river)).toHaveAttribute('data-wants', '2');
+  // T-335 cards expand: on home, the card opens the same way it does in its room (moved here from cardsExpand.spec.ts: its world has no room
+  // on Riverbend's row for an approval card)
+  const sealed = card.getByRole('region', { name: 'Approve use of billing', exact: true });
+  await sealed.getByRole('button', { name: 'Show all' }).click();
+  await expect(sealed.getByRole('definition').filter({ hasText: 'Send the October invoice' }).first()).toBeVisible();
+  await expect(sealed.getByRole('button', { name: 'Show less' })).toBeVisible();
+  await sealed.getByRole('button', { name: 'Approve' }).click();
+  await expect.poll(async () => (await calls(page, 'sealed_answer')).map((c) => c.args.decision)).toEqual(['approve']);
+  await expect(card).toHaveCount(0);
+  await expect(row(page, ROOM.river)).toHaveAttribute('data-wants', '1');
+  await expect(bar(page).getByRole('button', { name: /^Rooms, 8 things want you$/ })).toBeVisible();
 });
 
-test('T-335 copy: an ask in a room is words a long press selects (not a button\'s label); a tap on them still opens its sheet', async ({ page }) => {
+test('T-335 copy: an ask in a room is words a long press selects (not a button\'s label); a tap on them still opens it in place', async ({ page }) => {
   await bootShape(page);
   await openRoomFromHome(page, ROOM.uni);
-  const ask = page.locator('.message-list .sh-ask-msg[data-id="ask-summary"]');
+  const ask = page.locator('.message-list [data-card="ask-summary"]');
   const words = ask.locator('.sh-ask-what');
+  const toggle = ask.locator('[data-card-open]');
   await holdTouch(page, await wordPoint(words));
   expect((await page.evaluate(() => String(window.getSelection()))).trim()).not.toBe('');
-  await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
-  // a mouse's double-click selects a word and opens nothing; a single click (or a tap) opens the sheet
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(ask.locator('.sh-ask-facts')).toHaveCount(0);
+  // a mouse's double-click selects a word and opens nothing; a single click (or a tap) opens it in place
   await page.evaluate(() => window.getSelection()?.removeAllRanges());
   await words.dblclick({ position: { x: 30, y: 8 } });
   await page.waitForTimeout(500);
-  await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await page.evaluate(() => window.getSelection()?.removeAllRanges());
   await words.click({ position: { x: 12, y: 8 } });
-  await expect(page.locator('.sh-ask-sheet')).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(ask.locator('.sh-ask-facts')).toBeVisible();
 });
 
 test("a room: its strip, its ask as a message, the run's story from the moving line, the jump to the ask, and Back to home", async ({ page }) => {
   await bootShape(page);
+  await longUni(page);
   await openRoomFromHome(page, ROOM.uni);
   const room = page.locator('.sh-room');
   await expect(room.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
   const strip = room.locator('.sh-strip');
   await expect(strip.locator('.sh-run[data-run="moving"]')).toContainText('MovingReading 14 notes from this week');
   await expect(strip.locator('.sh-run[data-run="waiting"]')).toContainText('Waits on youThe weekly summary is ready to read');
-  // the ask is a message at the end of the room's chat, after its last message, inside the scroller
-  const ask = page.locator('.message-list .sh-ask-msg[data-id="ask-summary"]');
+  // the ask (a task: it has no message here) is a card at the end of the room's chat, after its last message, inside the scroller
+  const ask = page.locator('.message-list [data-card="ask-summary"]');
   await expect(ask).toContainText('The weekly summary is ready to read');
-  await expect(ask.getByRole('button', { name: /^Seen:/ })).toBeVisible();
-  const after = await page.evaluate(() => { const a = document.querySelector('.sh-ask-msg')!, last = [...document.querySelectorAll('.message-list article.message')].pop()!; return !!(last.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING); });
+  await expect(ask.getByRole('button', { name: 'Seen', exact: true })).toHaveAttribute('title', /^Seen: /);
+  const after = await page.evaluate(() => { const a = document.querySelector('[data-card="ask-summary"]')!, last = [...document.querySelectorAll('.message-list article.message')].pop()!; return !!(last.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING); });
   expect(after).toBe(true);
   // the places bar stays in a room (T-335 fixes)
   await expect(bar(page)).toBeVisible();
@@ -193,11 +231,11 @@ test("a room: its strip, its ask as a message, the run's story from the moving l
   await shot(page, '05-run-story');
   await story.getByRole('button', { name: 'Close' }).click();
   await expect(story).toHaveCount(0);
-  // "Waits on you" opens the ask to its context (T-335 fixes)
+  // "Waits on you" brings the ask's card into view (T-335 one ask: no sheet; it opens in place)
+  await cardOutOfView(page, ask);
   await strip.locator('.sh-run[data-run="waiting"]').click();
-  await expect(page.getByRole('dialog', { name: 'The weekly summary is ready to read' })).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
+  await expect(ask).toBeInViewport();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   // Back: home
   await room.getByRole('button', { name: 'Back to rooms' }).click();
   await expect(home(page)).toBeVisible();
@@ -287,19 +325,23 @@ test('the ink screen: every mark reads by shape and word, not by colour', async 
   await bootShape(page);
   await expect(row(page, ROOM.uni)).toBeVisible();
   await page.evaluate(() => { document.documentElement.dataset.screen = 'ink'; });
-  // wants you: a filled diamond plus words (for a screen reader too); moving: a dot plus its line; counts: black pills with numbers
+  // wants you: a filled diamond plus its words (T-335 one ask: on home the card no longer says "wants you" in words, for a screen reader
+  // either: reported, not asserted); moving: a dot plus its line; counts: black pills with numbers
   const want = row(page, ROOM.uni).locator('.sh-ask-wants');
   await expect(want.locator('.sh-ask-mark')).toHaveText('◆');
-  await expect(want.locator('.sh-ask-open')).toHaveAttribute('aria-label', /^Wants you: The weekly summary is ready to read/);
+  // (T-335 one ask: the card is named by its words, and its open control says what it does)
+  await expect(want).toHaveAccessibleName('The weekly summary is ready to read');
+  await expect(want.locator('[data-card-open]')).toHaveAccessibleName('Open this ask');
   await expect(row(page, ROOM.uni).locator('.sh-run[data-run="moving"] .sh-run-dot')).toHaveCount(1);
   await expect(row(page, ROOM.uni).locator('.sh-run[data-run="moving"]')).toHaveAttribute('aria-label', /^Moving: Reading 14 notes/);
   // a private room's wordless mark: the same filled diamond, and words that say only that something waits
   await expect(row(page, ROOM.quiet).locator('.sh-row-hush .sh-mark-needs')).toHaveText(/^◆\uFE0E?$/);
   await expect(row(page, ROOM.quiet).locator('.sh-row-hush')).toContainText('Something waits in here');
   const count = bar(page).locator('.sh-place-rooms .sh-count');
-  await expect(count).toHaveText('10');
+  await expect(count).toHaveText('9');
   expect(await count.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(0, 0, 0)');
-  expect(await page.locator('.sh-pin').first().evaluate((e) => getComputedStyle(e).borderTopColor)).toBe('rgb(0, 0, 0)');
+  // the approval card waiting on Riverbend's row (once pinned over the rooms) is outlined in black like every card
+  expect(await row(page, ROOM.river).locator('[data-card="rb-card"]').evaluate((e) => getComputedStyle(e).borderTopColor)).toBe('rgb(0, 0, 0)');
   await shot(page, '11-home-ink');
   await openRoomFromHome(page, ROOM.uni);
   await expect(page.locator('.sh-strip .sh-run[data-run="waiting"] .sh-run-word')).toHaveText('Waits on you');
@@ -333,13 +375,15 @@ test("after midnight the room's list starts below its strip: nothing is drawn un
 test("one question, one set of buttons: an ask threaded under the room's newest message takes the place of its quick replies", async ({ page }) => {
   await bootShape(page);
   await openRoomFromHome(page, ROOM.river);
-  // Mira's yes-or-no question is the newest message, and Uni's ask T-602 is threaded under it (reply_root)
-  await expect(page.locator('.sh-ask-msg[data-id="ask-walk"]').getByRole('button', { name: 'Friday instead' })).toBeVisible();
+  // Mira's yes-or-no question is the newest message, and Uni's ask T-602 was asked under it (reply_root)
+  await expect(page.locator('[data-card="ask-walk"]').getByRole('button', { name: 'Friday instead' })).toBeVisible();
   await expect(page.getByRole('group', { name: 'Quick replies' })).toHaveCount(0);
   // answered, the ask leaves: Mira's question offers its quick replies again
-  await page.locator('.sh-ask-msg[data-id="ask-walk"]').getByRole('button', { name: 'Friday instead' }).click();
-  await expect(page.locator('.sh-ask-msg[data-id="ask-walk"]')).toHaveCount(0);
+  await page.locator('[data-card="ask-walk"]').getByRole('button', { name: 'Friday instead' }).click();
+  await expect(page.locator('[data-card="ask-walk"]')).toHaveCount(0);
   await expect(page.getByRole('group', { name: 'Quick replies' }).getByRole('button', { name: 'Yes' })).toBeVisible();
+  // its answer is in the room's main line, not threaded under Mira's question (T-335 one ask)
+  await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body, c.args.replyTo])).toEqual([[ROOM.river, 'T-602: Friday instead', null]]);
 });
 
 test("the composer's placeholder is never cut off: a room name that doesn't fit on a phone leaves just \"Message\"", async ({ page }) => {
@@ -376,14 +420,7 @@ test('wide: the bar is the left rail, beside home and beside a room, never over 
   await page.evaluate(() => { document.documentElement.dataset.screen = 'ink'; });
   await ruleClearsText(page, 'rb-card');
   await page.evaluate(() => { delete document.documentElement.dataset.screen; });
-  // a sheet covers the place, never the rail: Settings on the rail opens over an ask's sheet (T-335 fixes)
-  await page.locator('.sh-room').getByRole('button', { name: 'Back to rooms' }).click();
-  await openRoomFromHome(page, ROOM.uni);
-  await page.locator('.sh-strip .sh-run[data-run="waiting"]').click();
-  await expect(page.locator('.sh-ask-sheet')).toBeVisible();
-  await bar(page).getByRole('button', { name: 'Settings' }).click();
-  await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
-  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  // (T-335 one ask: the check that Settings on the rail opens over an ask's sheet is gone with the sheet)
 });
 });
 
@@ -433,116 +470,126 @@ const barOnTop = (page: Page) => page.evaluate(() => {
 const bottomOf = async (page: Page, sel: string) => { const b = await page.locator(sel).first().boundingBox(); return b!.y + b!.height; };
 const topOf = async (page: Page, sel: string) => (await page.locator(sel).first().boundingBox())!.y;
 
-test('"Waits on you" opens to its context: the next action, why now, the body with live links, and its buttons', async ({ page }) => {
+test('"Waits on you" brings its card into view, and the card opens in place to its context: the next action, why now, the body with live links, and its buttons', async ({ page }) => {
   await bootShape(page);
+  await longUni(page);
   await openRoomFromHome(page, ROOM.uni);
+  const card = page.locator('.sh-room [data-card="ask-summary"]');
+  await cardOutOfView(page, card);
   await page.locator('.sh-strip .sh-run[data-run="waiting"]').click();
-  const sheet = page.getByRole('dialog', { name: 'The weekly summary is ready to read' });
-  await expect(sheet).toBeVisible();
-  await expect(sheet.locator('.sh-ask-sheet-kind')).toHaveText(/Waits on you · For you to know · T-601 · in Uni/);
-  await expect(sheet.locator('.sh-ask-next')).toHaveText('Read the summary of the week');
-  await expect(sheet.locator('.sh-ask-facts')).toContainText('Read it now, or save it for Sunday.');
+  await expect(card).toBeInViewport();
+  // (T-335 one ask: no sheet; the card opens where it is)
+  await card.locator('[data-card-open]').click();
+  await expect(card.locator('[data-card-open]')).toHaveAttribute('aria-expanded', 'true');
+  await expect(card.locator('.sh-ask-meta')).toHaveText(/wants you · For you to know · T-601/);
+  await expect(card.locator('.sh-ask-next')).toHaveText('Read the summary of the week');
+  await expect(card.locator('.sh-ask-facts')).toContainText('Asked by#Uni');
+  await expect(card.locator('.sh-ask-facts')).toContainText('Read it now, or save it for Sunday.');
   // the body as tasks.py wrote it, rendered: its sections, its steps, its links live
-  await expect(sheet.locator('.sh-ask-context .md-h')).toHaveText(['Why', 'Steps', 'Links', 'Time', 'Already answered']);
-  await expect(sheet.locator('.sh-ask-context li').first()).toHaveText('Open the summary');
+  await expect(card.locator('.sh-ask-context .md-h')).toHaveText(['Why', 'Steps', 'Links', 'Time', 'Already answered']);
+  await expect(card.locator('.sh-ask-context li').first()).toHaveText('Open the summary');
   expect((await calls(page, 'vault_note')).map((c) => c.args.noteRef)).toContain('ask-summary');
-  await sheet.locator('.sh-ask-context a[href="https://example.com/notes/week-45"]').click();
+  await card.locator('.sh-ask-context a[href="https://example.com/notes/week-45"]').click();
   await expect.poll(async () => (await calls(page, 'open_link')).map((c) => c.args.url)).toContain('https://example.com/notes/week-45');
   // a tell: Seen, Reply in the room and Archive
-  await expect(sheet.locator('.sh-ask-btn')).toHaveText(['Seen', 'Reply in the room', 'Archive']);
-  await shot(page, '06-ask-sheet');
-  // a note it cites by id opens as the note, the sheet out of its way
+  await expect(card.locator('.sh-ask-btn')).toHaveText(['Seen', 'Reply in the room', 'Archive']);
+  await shot(page, '06-ask-open');
+  // a note it cites by id opens as the note
   // (it cites the note by its bare id; the link reads as the note's title)
   expect(await page.evaluate(() => (window as any).__tasks.find((t: any) => t.id === 'ask-summary').content)).toContain(`uni:${PLOT_NOTE}`);
-  await sheet.locator('.sh-ask-context').getByRole('link', { name: 'Plot map, printed' }).click();
-  await expect(sheet).toHaveCount(0);
+  await card.locator('.sh-ask-context').getByRole('link', { name: 'Plot map, printed' }).click();
   await expect(page.locator('.note-sheet')).toContainText('The printed plot map for the shed wall.');
   await page.locator('.note-sheet .note-back').click();
   await expect(page.locator('.note-sheet')).toHaveCount(0);
-  // Seen from the sheet: one write, its room told, the sheet and the ask gone
-  await page.locator('.sh-strip .sh-run[data-run="waiting"]').click();
-  await sheet.getByRole('button', { name: /^Seen:/ }).click();
-  await expect(sheet).toHaveCount(0);
-  await expect(page.locator('.sh-ask-msg[data-id="ask-summary"]')).toHaveCount(0);
+  // Seen from the opened card: one write, its room told, the card gone
+  await card.getByRole('button', { name: 'Seen', exact: true }).click();
+  await expect(card).toHaveCount(0);
   await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body])).toContainEqual([ROOM.uni, 'T-601: seen.']);
   const seen = (await calls(page, 'vault_transition')).filter((c) => c.args.id === 'ask-summary');
   expect(seen).toHaveLength(1);
   expect(seen[0].args).toMatchObject({ from: 'open', to: 'done', metadata: { needs_aaron: false, needs_aaron_why: 'seen' } });
 });
 
-test('T-335 asks in tune: each button says what it does; I did it hands a do ask back, Later puts one off to a day it names, Reply in the room opens its own chat with the ask quoted (never a new chat), Archive takes one out of view', async ({ page }) => {
+test('T-335 asks in tune: each button says what it does; I did it hands a do ask back, Later puts one off to a day it names, Reply in the room makes its room\'s composer answer it (never a new chat), Archive takes one out of view', async ({ page }) => {
   await bootShape(page);
   // Later's day, as the page reckons it (three days on, local)
   const d = new Date(); d.setDate(d.getDate() + 3);
   const day = d.toLocaleDateString('en-US', { weekday: 'short' });
   const mmdd = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const later = `Later · ${day}`;
-  // a run that waits on you opens the ask on its task (it lives in another room), not a story with nothing to do
+  // a run that waits on you, when its task is an ask, opens that ask's room (T-609 lives in House), not a story with nothing to do
   await row(page, ROOM.teach).locator('.sh-run[data-run="waiting"]').click();
-  const key = page.getByRole('dialog', { name: 'Paste the boiler portal key' });
+  await expect(page.locator('.sh-room h1')).toHaveText('House');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const key = page.locator('.sh-room [data-card="ask-key"]');
   await expect(key).toBeVisible();
-  await expect(key.locator('.sh-ask-sheet-kind')).toHaveText(/To do · T-609 · in House/);
+  await expect(key.locator('.sh-ask-meta')).toHaveText(/wants you · To do · T-609/);
+  await key.locator('[data-card-open]').click();
   await expect(key.locator('.sh-ask-next')).toHaveText('Paste the portal key into the boiler page');
   await expect(key.locator('.sh-ask-facts')).toContainText('No default: it waits for you');
   // the words say what happens: no Done, no Not now
   await expect(key.locator('.sh-ask-btn')).toHaveText(['I did it', 'Seen', later, 'Reply in the room', 'Archive']);
-  // and the sheet says it beside them, and that none of them starts a new chat
+  // and the opened card says it beside them, and that none of them starts a new chat or a thread
   await expect(key.locator('.sh-ask-does dt')).toHaveText(['I did it', 'Seen', later, 'Reply in the room', 'Archive']);
   await expect(key.locator('.sh-ask-does dd')).toHaveText([
-    'Closes it for you and tells #House, which does any follow-up',
-    'Off your list; it stays with #House until it needs you again',
+    'Ends it and tells #House, which does any follow-up',
+    'Ends it for good; #House sees it on its next turn',
     `Off your list until ${day} ${mmdd}, then back`,
-    "Opens #House's own chat with this ask quoted",
-    'Out of your view for good; #House is told',
+    "Your words go to #House's main line, quoting this, and end it",
+    'Off your list for good; #House sees it on its next turn',
   ]);
-  await expect(key.locator('.sh-ask-nochat')).toHaveText("No button here starts a new chat. Your words go to #House's own chat.");
+  await expect(key.locator('.sh-ask-nochat')).toHaveText("No button here starts a new chat or a thread. Your words go to #House's main line.");
   await key.locator('.sh-ask-does').scrollIntoViewIfNeeded();
-  await shot(page, 'ask-sheet-buttons');
-  // Reply in the room: the sheet goes, House's own chat opens with the ask quoted in its composer; nothing is sent and nothing written
+  await shot(page, 'ask-open-buttons');
+  // Reply in the room: House's composer answers it (T-335 one ask: a chip says so; nothing is put in the composer); nothing is sent or written
   const posted = (await calls(page, 'post_message')).length;
   await key.getByRole('button', { name: 'Reply in the room' }).click();
-  await expect(key).toHaveCount(0);
-  await expect(page.locator('.sh-room')).toBeVisible();
+  await expect(page.locator('.sh-room h1')).toHaveText('House');
   await expect(page.locator('.composer textarea')).toHaveAttribute('placeholder', 'Message House');
-  await expect(page.locator('.composer textarea')).toHaveValue('> T-609 · Paste the boiler portal key\n> Paste the portal key into the boiler page\n\n');
+  await expect(page.locator('.composer-answering')).toHaveText(/Answering Paste the boiler portal key: what you send goes to the main line as its answer\./);
+  await expect(page.locator('.composer textarea')).toHaveValue('');
   await shot(page, 'ask-reply-in-room');
   expect((await calls(page, 'post_message')).length).toBe(posted);
   expect((await calls(page, 'vault_patch_meta')).filter((c) => c.args.id === 'ask-key')).toHaveLength(0);
   expect((await calls(page, 'vault_transition')).filter((c) => c.args.id === 'ask-key')).toHaveLength(0);
-  await page.getByRole('button', { name: 'Back to rooms' }).click();
-  await expect(home(page)).toBeVisible();
-  // I did it: out of his view (Seen's write: it stays open), and its room is told, addressed to its Uni, to take it back
-  await row(page, ROOM.teach).locator('.sh-run[data-run="waiting"]').click();
-  await expect(key).toBeVisible();
+  // he can stop answering: the chip goes, the card still waits
+  await page.getByRole('button', { name: 'Stop answering' }).click();
+  await expect(page.locator('.composer-answering')).toHaveCount(0);
+  // I did it: out of his view (Seen's write: it stays open), and its room is told, addressed to its Uni, to take it back, in its main line
   await key.getByRole('button', { name: 'I did it', exact: true }).click();
   await expect(key).toHaveCount(0);
-  await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body, c.args.recipients]))
-    .toContainEqual([ROOM.house, 'T-609: I did this. Hand it back to this room for any follow-up (tasks.py handback T-609), then post [done T-609].', [UNI]]);
+  await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body, c.args.recipients, c.args.replyTo]))
+    .toContainEqual([ROOM.house, 'T-609: I did this. Hand it back to this room for any follow-up (tasks.py handback T-609), then post [done T-609].', [UNI], null]);
   const done = (await calls(page, 'vault_patch_meta')).filter((c) => c.args.id === 'ask-key');
   expect(done).toHaveLength(1);
   expect(done[0].args.metadata).toMatchObject({ needs_aaron: false, needs_aaron_why: 'seen' });
+  await page.getByRole('button', { name: 'Back to rooms' }).click();
+  await expect(home(page)).toBeVisible();
   await expect(row(page, ROOM.house).locator('.sh-ask')).toHaveCount(0);
   // a choose ask: its options, Seen and Later, inline on home too; Later writes the snooze alone and tells its room the day, quietly
-  await expect(row(page, ROOM.river).locator('.sh-ask-btn')).toHaveText(['Yes, Thursday 2pm', 'Friday instead', 'Seen', later]);
-  await row(page, ROOM.river).locator('.sh-ask-btn[data-act="later"]').click();
-  await expect(row(page, ROOM.river).locator('.sh-ask')).toHaveCount(0);
-  await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body, c.args.recipients]))
-    .toContainEqual([ROOM.river, `T-602: later. It's back on my list ${day} ${mmdd}.`, []]);
+  const walk = row(page, ROOM.river).locator('[data-card="ask-walk"]');
+  await expect(walk.locator('.sh-ask-btn')).toHaveText(['Yes, Thursday 2pm', 'Friday instead', 'Seen', later]);
+  await walk.locator('.sh-ask-btn[data-act="later"]').click();
+  await expect(walk).toHaveCount(0);
+  await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body, c.args.recipients, c.args.replyTo]))
+    .toContainEqual([ROOM.river, `T-602: later. It's back on my list ${day} ${mmdd}.`, [], null]);
   const put = (await calls(page, 'vault_patch_meta')).filter((c) => c.args.id === 'ask-walk');
   expect(put).toHaveLength(1);
   expect(put[0].args.metadata).toEqual({ snoozed_until: `${d.getFullYear()}-${mmdd}` });
   // it stays off after the next read, though the sweep hasn't written needs_aaron yet
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await page.waitForTimeout(500);
-  await expect(row(page, ROOM.river).locator('.sh-ask')).toHaveCount(0);
-  // a look ask: Open and Seen (and, in its sheet, Reply in the room and Archive)
-  await row(page, ROOM.studio).locator('.sh-ask-open').click();
-  const cut = page.getByRole('dialog', { name: 'Cut 3 is ready to watch' });
+  await expect(walk).toHaveCount(0);
+  // a look ask: Open and Seen (and, opened, Reply in the room and Archive)
+  const cut = row(page, ROOM.studio).locator('[data-card="ask-cut"]');
+  await expect(cut.locator('.sh-ask-btn')).toHaveText(['Open ↗', 'Seen']);
+  await cut.locator('[data-card-open]').click();
   await expect(cut.locator('.sh-ask-btn')).toHaveText(['Open ↗', 'Seen', 'Reply in the room', 'Archive']);
-  await cut.getByRole('button', { name: 'Close' }).click();
+  await cut.getByRole('button', { name: 'Show less' }).click();
+  await expect(cut.locator('.sh-ask-btn')).toHaveText(['Open ↗', 'Seen']);
   // an ask with no body and no next action: what there is, said so, and its buttons all the same; Archive takes it out of view
-  await row(page, ROOM.post).locator('.sh-ask-open').click();
-  const sign = page.getByRole('dialog', { name: 'Sign What the garden taught us and post it?' });
+  const sign = row(page, ROOM.post).locator('[data-card="ask-sign"]');
+  await sign.locator('[data-card-open]').click();
   await expect(sign.locator('.sh-ask-fault')).toHaveText('This ask came without its context. You can still answer it or archive it.');
   await expect(sign.locator('.sh-ask-btn')).toHaveText(['Sign and post', 'Not yet', 'Seen', later, 'Reply in the room', 'Archive']);
   await sign.getByRole('button', { name: 'Archive' }).click();
@@ -555,7 +602,30 @@ test('T-335 asks in tune: each button says what it does; I did it hands a do ask
   await expect(row(page, ROOM.post).locator('.sh-ask')).toHaveCount(0);
 });
 
-test('the bar shows everywhere: inside a room, under its run story and an ask, on a phone and the Daylight; it steps aside only for the keyboard', async ({ page }) => {
+test('T-335 one ask: Reply in the room on a task, from home: its room opens answering it; what he sends is its answer, one vault write and "T-NN: his words" in the main line', async ({ page }) => {
+  await bootShape(page);
+  const onHome = row(page, ROOM.studio).locator('[data-card="ask-cut"]');
+  await onHome.locator('[data-card-open]').click();
+  await onHome.getByRole('button', { name: 'Reply in the room' }).click();
+  await expect(page.locator('.sh-room h1')).toHaveText('Studio');
+  await expect(page.locator('.composer-answering')).toContainText('Cut 3 is ready to watch');
+  await expect(page.locator('.composer textarea')).toHaveValue('');
+  expect(await calls(page, 'post_message')).toEqual([]);
+  const cut = page.locator('.sh-room [data-card="ask-cut"]');
+  await page.locator('.composer textarea').fill('Watched it: trim the last shot');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body, c.args.recipients, c.args.replyTo]))
+    .toEqual([[ROOM.studio, 'T-603: Watched it: trim the last shot', [UNI], null]]);
+  const answered = (await calls(page, 'vault_transition')).filter((c) => c.args.id === 'ask-cut');
+  expect(answered).toHaveLength(1);
+  expect(answered[0].args).toMatchObject({ from: 'open', to: 'done', metadata: { answer: 'Watched it: trim the last shot' } });
+  await expect(cut).toHaveCount(0);
+  await expect(page.locator('.composer-answering')).toHaveCount(0);
+  // his words went once: as the answer, not also as a plain message
+  expect(await calls(page, 'post_answer')).toEqual([]);
+});
+
+test('the bar shows everywhere: inside a room, under its run story and beside an opened ask, on a phone and the Daylight; it steps aside only for the keyboard', async ({ page }) => {
   await bootShape(page);
   for (const size of [{ width: 390, height: 844 }, { width: 828, height: 1104 }]) {
     await page.setViewportSize(size);
@@ -572,17 +642,17 @@ test('the bar shows everywhere: inside a room, under its run story and an ask, o
     expect(await bottomOf(page, '.sh-story')).toBeLessThanOrEqual(await topOf(page, '.sh-bar') + 0.5);
     if (size.width === 390) await shot(page, '07-story-with-bar');
     await story.getByRole('button', { name: 'Close' }).click();
-    // and an ask's sheet
+    // and an ask opened in place (T-335 one ask: no sheet); the bar is live beside it: Settings opens and a second tap puts it away
     await page.locator('.sh-strip .sh-run[data-run="waiting"]').click();
-    await expect(page.locator('.sh-ask-sheet')).toBeVisible();
+    const ask = page.locator('.sh-room [data-card="ask-summary"]');
+    await expect(ask).toBeInViewport();
+    await ask.locator('[data-card-open]').click();
+    await expect(ask.locator('.sh-ask-facts')).toBeVisible();
     expect(await barOnTop(page)).toBe(true);
-    // the bar is live under it: Settings from the bar puts the sheet away
     await bar(page).getByRole('button', { name: 'Settings' }).click();
-    await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
     await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
     await bar(page).getByRole('button', { name: 'Settings' }).click();
-    await page.locator('.sh-strip .sh-run[data-run="waiting"]').click();
-    await page.locator('.sh-ask-sheet').getByRole('button', { name: 'Close' }).click();
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
     // the keyboard: typing in the composer, the bar steps aside and the composer stays in view; done typing, it is back
     await page.locator('.composer textarea').focus();
     await expect(bar(page)).toBeHidden();
@@ -632,11 +702,12 @@ test('Settings is a place on the bar, from home and from inside a room, with Cla
   await expect(page.locator('.sh-home').getByRole('button', { name: 'Settings' })).toHaveCount(0);
 });
 
-test("a write that fails keeps the ask's sheet open, with why, and the next tap goes through", async ({ page }) => {
+test("a write that fails keeps the ask's card, with why, and the next tap goes through", async ({ page }) => {
   await bootShape(page, { writeFails: 1 });
-  await row(page, ROOM.house).locator('.sh-ask-open').click();
-  const key = page.getByRole('dialog', { name: 'Paste the boiler portal key' });
+  const key = row(page, ROOM.house).locator('[data-card="ask-key"]');
+  await key.locator('[data-card-open]').click();
   await key.getByRole('button', { name: 'I did it', exact: true }).click();
+  // (the card comes back with why; it comes back closed, since it left the list while the write was out: reported, not asserted)
   await expect(key.getByRole('alert')).toHaveText(/^Couldn't mark it done: vault unreachable/);
   expect(await calls(page, 'post_message')).toEqual([]);
   await key.getByRole('button', { name: 'I did it', exact: true }).click();
@@ -648,7 +719,9 @@ test("a public room's run that waits on a private room's ask opens its story, ne
   await bootShape(page, { leakRun: true });
   await row(page, ROOM.garden).locator('.sh-run[data-run="waiting"]').click();
   await expect(page.getByRole('dialog', { name: 'Checking the shed lock' })).toBeVisible();
-  await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
+  // (T-335 one ask: an ask's run opens the ask's room; this one stays home, and no card of it is drawn)
+  await expect(page.locator('.sh-room')).toHaveCount(0);
+  await expect(page.locator('[data-card="ask-quiet"]')).toHaveCount(0);
   const dom = await page.evaluate(() => document.documentElement.outerHTML);
   for (const words of ['A quiet line that stays in its room', 'T-605']) expect(dom, words).not.toContain(words);
 });

@@ -1,9 +1,11 @@
+// T-335 one ask: removed the ask sheet (an ask, and the task folded into its waiting card, open in place) and the home pin (an approval card is
+// a card on its room's row; the pinned card's Show all moved to shape.spec.ts, where Riverbend's row has room to draw it).
 // T-335 cards expand (11-11), on the real build with Tauri faked (shapeFixture.ts `cards`: a made-up world). Aaron: "I can't see the full text,
 // theres no option to expand; and the cards often contain not much context; so in the case of those two I don't really know what they're even
 // asking about". Proves, one test per point:
-//   1. a card opens on a tap to its whole text, never cut off, and closes again (in a room and pinned on home);
+//   1. a card opens on a tap to its whole text, never cut off, and closes again;
 //   2. opened, it first says what it asks: what a yes does, what it touches (production, which account), who asked and why now (from the ask
-//      in its room that points at it), and an ask's sheet says what its button does and shows its card;
+//      in its room that points at it, folded into it: one card), and the one card, opened in place, says who asked and why now;
 //   3. a card that no longer waits says so and offers to ask the room for a fresh one (an expired card; an ask whose card the broker ended),
 //      while an ask whose card waits says until when.
 // Run: pnpm exec playwright test --config playwright.cardsexpand.config.ts
@@ -39,12 +41,6 @@ test('1. a card opens on a tap to its whole text and closes again', async ({ pag
   await card.getByRole('button', { name: 'Show less' }).click();
   await expect(card.getByRole('button', { name: 'Show all' })).toHaveAttribute('aria-expanded', 'false');
   expect(await clipped(what)).toBe(true);
-  // pinned on home, the same card opens the same way
-  await page.getByRole('button', { name: 'Back to rooms' }).click();
-  const pin = page.locator('.sh-pin[data-ref="rb-card"]');
-  await pin.getByRole('button', { name: 'Show all' }).click();
-  await expect(pin.getByRole('definition').filter({ hasText: 'Send the October invoice' }).first()).toBeVisible();
-  await expect(pin.getByRole('button', { name: 'Show less' })).toBeVisible();
 });
 
 test('2. opened, a card says what it asks: what a yes does, what it touches, who asked and why now', async ({ page }) => {
@@ -69,17 +65,19 @@ test('2. opened, a card says what it asks: what a yes does, what it touches, who
   expect(await y(head)).toBeLessThan(await y(card.locator('.sealed-says')));
   expect(await y(head)).toBeLessThan(await y(card.locator('.sealed-releases')));
   await shot(page, '03-asking');
-  // the ask that points at it: its sheet says what its button does, who asked, and shows the card itself, waiting, to answer in place
-  const ask = page.locator('.sh-room-ask .sh-ask[data-id="ask-deploy"]');
-  await ask.scrollIntoViewIfNeeded();
-  await expect(ask.locator('[data-card-state="waiting"]')).toContainText(/Its card waits in its room · answer by \d/);
-  await ask.locator('.sh-ask-open').click();
-  const sheet = page.locator('.sh-ask-sheet');
-  await expect(sheet).toBeVisible();
-  await expect(sheet.locator('.sh-ask-does dd').first()).toHaveText('Closes it for you and tells #Riverbend Commons, which does any follow-up');
-  await expect(sheet.locator('.sh-ask-facts')).toContainText('Asked by#Riverbend Commons');
-  await expect(sheet.locator('[data-card-state="waiting"] .sealed-card')).toBeVisible();
-  await shot(page, '04-sheet');
+  // the ask that points at it (T-610) is that card (T-335 one ask): not drawn on its own; the one card carries its words and, opened in
+  // place, says who asked and why now, with the card itself, waiting, to answer in place
+  await expect(page.locator('[data-card="ask-deploy"]')).toHaveCount(0);
+  const one = page.locator(`.sh-room [data-card="${CARD.prod}"]`);
+  await expect(one).toHaveCount(1);
+  await expect(one).toHaveAttribute('data-source', 'card');
+  await expect(one.locator('.sh-ask-meta')).toContainText('T-610');
+  await one.locator('[data-card-open]').click();
+  await expect(one.locator('.sh-ask-facts')).toContainText('Asked by#Riverbend Commons');
+  await expect(one.locator('.sh-ask-facts')).toContainText('Why nowStaging passed; the archive window closes Friday.');
+  await expect(one.locator('.sealed-card')).toHaveCount(1);
+  await expect(one.locator('.sealed-card .sealed-approve')).toBeVisible();
+  await shot(page, '04-one-card');
 });
 
 test("3. a card that no longer waits says so and offers to ask the room for a fresh one", async ({ page }) => {
@@ -91,7 +89,7 @@ test("3. a card that no longer waits says so and offers to ask the room for a fr
   await expect(old).toContainText('Expired: it no longer waits, and nothing was sent.');
   await expect(old.getByRole('button', { name: 'Ask #Riverbend Commons to repost' })).toBeVisible();
   // the ask whose card the broker ended: it says so in the broker's words, and doesn't send him looking for it
-  const ask = page.locator('.sh-room-ask .sh-ask[data-id="ask-load"]');
+  const ask = page.locator('.sh-room-ask [data-card="ask-load"]');
   await ask.scrollIntoViewIfNeeded();
   const stale = ask.locator('[data-card-state="ended"]');
   await expect(stale).toContainText("Its card has ended: ✓ Approved 13:10 · Open Site (site.example) — PRODUCTION account · loads the history into the archive. Nothing to tap.");
@@ -108,10 +106,10 @@ test("3. a card that no longer waits says so and offers to ask the room for a fr
   // asked once: the line stays asked after the room is read again
   await page.getByRole('button', { name: 'Back to rooms' }).click();
   await openRiverbend(page);
-  await expect(page.locator('.sh-ask[data-id="ask-load"] [data-card-state="ended"]').getByRole('status')).toHaveText(/^Asked #Riverbend Commons for a fresh card/);
+  await expect(page.locator('[data-card="ask-load"] [data-card-state="ended"]').getByRole('status')).toHaveText(/^Asked #Riverbend Commons for a fresh card/);
 });
 
-test("review r1: an ask's words stay in its room; its card found waiting in another room says where; a card not on this device offers no repost", async ({ page }) => {
+test("review r1: an ask's words stay in its room; an ask whose card waits elsewhere is that card, not a line here; a card not on this device offers no repost", async ({ page }) => {
   await bootShape(page, { cards: true });
   await openRiverbend(page);
   // Riverbend's card names Riverbend's own ask, never the Studio ask that points at the same card
@@ -119,40 +117,34 @@ test("review r1: an ask's words stay in its room; its card found waiting in anot
   await card.scrollIntoViewIfNeeded();
   await card.getByRole('button', { name: 'Show all' }).click();
   await expect(card.locator('dl.cc-asking')).toContainText('for T-610');
-  await expect(card).not.toContainText('T-612');
-  await expect(card).not.toContainText('studio line');
+  await expect(msg(page, CARD.prod)).not.toContainText('T-612');
+  await expect(msg(page, CARD.prod)).not.toContainText('studio line');
   await page.getByRole('button', { name: 'Back to rooms' }).click();
   await page.locator(`.sh-row[data-room="${ROOM.studio}"] .sh-row-open`).click();
   await expect(page.locator('.sh-room')).toBeVisible();
-  // the Studio ask: its card waits in Riverbend (Needs you's list), and it says so
-  const elsewhere = page.locator('.sh-room-ask .sh-ask[data-id="ask-elsewhere"] [data-card-state="waiting"]');
-  await elsewhere.scrollIntoViewIfNeeded();
-  await expect(elsewhere).toContainText(/Its card waits in #Riverbend Commons · answer by \d/);
+  // the Studio ask whose card waits in Riverbend (T-335 one ask): while its card waits it is that card, so Studio draws no line for it
+  // (it was "Its card waits in #Riverbend Commons"); its words stay in Studio's task, not on Riverbend's card (above)
+  await expect(page.locator('.sh-room-ask [data-card]').first()).toBeVisible();   // (Studio's cards are drawn: the absence below is real)
+  await expect(page.locator('[data-card="ask-elsewhere"]')).toHaveCount(0);
   // an ask whose card this device doesn't hold: said plainly, nothing to tap or repost
-  const unknown = page.locator('.sh-room-ask .sh-ask[data-id="ask-unknown"] [data-card-state="missing"]');
+  const unknown = page.locator('.sh-room-ask [data-card="ask-unknown"] [data-card-state="missing"]');
   await unknown.scrollIntoViewIfNeeded();
   await expect(unknown).toHaveText("🔑 Its card isn't among this room's recent messages on this device.");
   await expect(unknown.getByRole('button')).toHaveCount(0);
-  // review r2: a card waiting in the private room is never named or drawn here, nor in the ask's sheet
-  const hushed = page.locator('.sh-room-ask .sh-ask[data-id="ask-hushed"]');
-  await hushed.scrollIntoViewIfNeeded();
-  await expect(hushed.locator('[data-card-state="missing"]')).toBeVisible();
-  await expect(hushed).not.toContainText('sanctum');
-  await hushed.locator('.sh-ask-open').click();
-  const sheet = page.locator('.sh-ask-sheet');
-  await expect(sheet).toBeVisible();
-  await expect(sheet.locator('[data-card-state="missing"]')).toBeVisible();
-  await expect(sheet.locator('.sealed-card')).toHaveCount(0);
-  await expect(sheet).not.toContainText('Private words');
-  await expect(sheet).not.toContainText('sanctum');
+  // review r2: a card waiting in the private room is never named or drawn here: the Studio ask pointing at it is folded into it (one ask, one
+  // card, in its private room), and nothing of that card is in Studio's page
+  await expect(page.locator('[data-card="ask-hushed"]')).toHaveCount(0);
+  await expect(page.locator(`[data-card="${CARD.secret}"]`)).toHaveCount(0);
+  const dom = await page.locator('.sh-room').evaluate((e) => e.outerHTML);
+  for (const words of ['Private words', 'sanctum', 'quiet-key']) expect(dom, words).not.toContain(words);
 });
 
 test("4. T-335 asks in tune: an ask folded into its live card is not a second 'waits on you', and the card still says which ask it is", async ({ page }) => {
   await bootShape(page, { cards: true, folded: true });
   await openRiverbend(page);
   // the card is the ask: no ask line for T-610 in the room (T-611, whose card ended, still waits on him)
-  await expect(page.locator('.sh-ask[data-id="ask-load"]')).toHaveCount(1);
-  await expect(page.locator('.sh-ask[data-id="ask-deploy"]')).toHaveCount(0);
+  await expect(page.locator('[data-card="ask-load"]')).toHaveCount(1);
+  await expect(page.locator('[data-card="ask-deploy"]')).toHaveCount(0);
   // and the card, opened, still names the ask it stands for, with its why-now
   const card = msg(page, CARD.prod).locator('.cc');
   await card.scrollIntoViewIfNeeded();

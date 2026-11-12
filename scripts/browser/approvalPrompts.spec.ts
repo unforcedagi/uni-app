@@ -1,13 +1,14 @@
 // T-161: a Hermes approval prompt posted in a room is told once, shows in its room as a prompt with a banner over the composer, and goes when Hermes says
-// it was approved, denied or timed out, or when its own window ends. T-335 the shape: a prompt ending within 15 minutes is also a pin on home (`.sh-pin`);
-// the retired "Needs you" list is gone: its row assertions in tests 1-3 are dropped, and 2 and 2b now check the pin. A message
+// it was approved, denied or timed out, or when its own window ends. T-335 one ask: removed the pin over home's rooms (and its 15-minute rule),
+// because a waiting prompt is now one card on its room's row, from the moment it lands (`[data-card][data-source="prompt"]`); 1-3 check that card.
+// The retired "Needs you" list is gone: its row assertions in tests 1-3 are dropped. A message
 // that only talks about approving is never one. The prompts are synthetic copies of the gateway's shapes (scripts/fixtures).
 // Run: PROMPTS_TEST_PORT=5741 npx playwright test --config playwright.prompts.config.ts
 import { readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
-import { homeHead, openRoom } from './shapeNav';
+import { homeHead, openRoom, roomRow } from './shapeNav';
 
 const fx = JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8'));
 const ROOM = 'ch-garden';
@@ -26,8 +27,8 @@ async function boot(page: Page) {
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, strayRoom: true });
   await expect(homeHead(page)).toBeVisible();
 }
-/** the pins on home: a prompt or card that ends within 15 minutes */
-const pins = (page: Page) => page.locator('.sh-pin');
+/** the prompts waiting on home: each a card on its room's row (T-335 one ask), however far off its end */
+const cards = (page: Page) => page.locator('.sh-home [data-card][data-source="prompt"]');
 /** the room, from home, then (when the prompt is in a thread) its thread */
 async function intoRoom(page: Page, thread: string | null = null) {
   await openRoom(page, ROOM);
@@ -44,10 +45,12 @@ test.describe('a Hermes approval prompt, loudly', () => {
   test.describe.configure({ timeout: 120_000 });
   test('1. a prompt in a room is told once; its room shows it marked, with the banner over the composer', async ({ page }) => {
     await boot(page);
-    await expect(pins(page)).toHaveCount(0);
+    await expect(cards(page)).toHaveCount(0);
     const ref = await arrive(page, fx.prompts.two_answers_30min);
-    // 30 minutes out: not pinned yet; it waits in its room
-    await expect(pins(page)).toHaveCount(0);
+    // 30 minutes out: a card on its room's row at once (T-335 one ask: no 15-minute wait), with the way to answer it there
+    await expect(roomRow(page, ROOM).locator(`[data-card="${ref}"]`)).toHaveAttribute('data-source', 'prompt');
+    await expect(cards(page)).toHaveCount(1);
+    await expect(cards(page).getByRole('button', { name: 'Answer in the room' })).toBeVisible();
     // one notification, on the desktop (Android has no notification path from the app yet)
     if (await android(page)) expect(await page.evaluate(() => (window as any).__notes.length)).toBe(0);
     else await expect.poll(() => page.evaluate(() => (window as any).__notes)).toEqual([{ title: 'Uni in #garden-club', body: 'Needs your OK to run: git branch -D feature/example-cleanup' }]);
@@ -56,6 +59,7 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await arrive(page, 'Unrelated chatter in another room.', ME, 'ch-unf');
     await settled(page, n);
     expect((await page.evaluate(() => (window as any).__notes.length))).toBeLessThanOrEqual(1);
+    await expect(cards(page)).toHaveCount(1);
     await shot(page, '01-home');
     // the room shows the prompt, marked, with the banner over the composer; nothing is sent for the user
     await intoRoom(page);
@@ -85,47 +89,47 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await shot(page, '03-room-answered');
   });
 
-  test('2. a prompt ending within 15 minutes is pinned on home with its room and command, and leaves when Hermes says approved, denied or timed out', async ({ page }) => {
+  test('2. a prompt is a card on its room\'s row on home with its command, and leaves when Hermes says approved, denied or timed out', async ({ page }) => {
     await boot(page);
     await arrive(page, fx.prompts.three_answers_5min);
-    await expect(pins(page)).toHaveCount(1);
-    await expect(pins(page).locator('.sh-pin-room')).toHaveText('garden-club');
-    await expect(pins(page).locator('h3')).toHaveText('OK to run rm -rf /tmp/example-build/cache?');
-    await shot(page, '01-pin');
+    await expect(cards(page)).toHaveCount(1);
+    await expect(roomRow(page, ROOM).locator('[data-source="prompt"]')).toHaveCount(1);
+    await expect(cards(page).locator('.sh-ask-what')).toContainText('OK to run rm -rf /tmp/example-build/cache?');
+    await shot(page, '01-card');
     for (const outcome of ['approved', 'denied'] as const) {
       if (outcome === 'denied') await arrive(page, fx.prompts.three_answers_5min);
-      await expect(pins(page)).toHaveCount(1);
+      await expect(cards(page)).toHaveCount(1);
       // the user's own reply is not the outcome: it waits until Hermes answers
       const n = await reads(page);
       await arrive(page, outcome === 'denied' ? '/deny' : '/approve', ME);
       await settled(page, n);
-      await expect(pins(page)).toHaveCount(1);
+      await expect(cards(page)).toHaveCount(1);
       await arrive(page, fx.outcomes[outcome]);
-      await expect(pins(page), outcome).toHaveCount(0);
+      await expect(cards(page), outcome).toHaveCount(0);
     }
     // the timeout notice comes when the window it stated is up (five minutes on), and settles that prompt
     await arrive(page, fx.prompts.three_answers_5min);
-    await expect(pins(page)).toHaveCount(1);
+    await expect(cards(page)).toHaveCount(1);
     await arrive(page, fx.outcomes.timed_out_5, 'Uni', ROOM, null, 299);
-    await expect(pins(page), 'timed out').toHaveCount(0);
+    await expect(cards(page), 'timed out').toHaveCount(0);
     // two at once: one approval settles the older, a plural one both
     await arrive(page, fx.prompts.three_answers_5min);
     await arrive(page, fx.prompts.multiline_why);
-    await expect(pins(page)).toHaveCount(2);
+    await expect(cards(page)).toHaveCount(2);
     await arrive(page, fx.outcomes.approved);
-    await expect(pins(page)).toHaveCount(1);
+    await expect(cards(page)).toHaveCount(1);
     await arrive(page, fx.outcomes.denied);
-    await expect(pins(page)).toHaveCount(0);
+    await expect(cards(page)).toHaveCount(0);
   });
 
-  test('2b. withdrawn with no message, a pinned prompt stays until the window it stated is up, then goes by itself', async ({ page }) => {
+  test('2b. withdrawn with no message, a prompt card stays until the window it stated is up, then goes by itself', async ({ page }) => {
     await boot(page);
     await arrive(page, fx.prompts.three_answers_5min);
-    await expect(pins(page)).toHaveCount(1);
+    await expect(cards(page)).toHaveCount(1);
     await page.clock.fastForward('04:00');
-    await expect(pins(page)).toHaveCount(1);
+    await expect(cards(page)).toHaveCount(1);
     await page.clock.fastForward('01:30');
-    await expect(pins(page)).toHaveCount(0);
+    await expect(cards(page)).toHaveCount(0);
   });
 
   test('3. a message that only mentions approving is not flagged; a real prompt still is', async ({ page }) => {
@@ -136,7 +140,7 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await arrive(page, fx.prompts.three_answers_5min, ME);
     await settled(page, n);
     await page.waitForTimeout(400);
-    await expect(pins(page)).toHaveCount(0);
+    await expect(cards(page)).toHaveCount(0);
     await intoRoom(page);
     await expect(page.locator('.approval-banner')).toHaveCount(0);
     await expect(page.locator('.message.approval-waiting')).toHaveCount(0);

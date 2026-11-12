@@ -565,7 +565,9 @@ test('a look ask Open button opens the Arcade on the pinned card, in the app', a
   }, PIN_URL);
   await boot(page);
   // the ask is on a home row with an Open button; it opens the card in the app (the Applets drawer is not the way in here)
-  const open = page.locator('.sh-ask').getByRole('button', { name: /^Open the link for .*Look at this card/ });
+  // (T-335 one ask: the ask is one card, `[data-card]` by its note's id; its Open says what it does in its title)
+  const open = page.locator('.sh-home [data-card="fy-pin"]').getByRole('button', { name: 'Open', exact: true });
+  await expect(open).toHaveAttribute('title', 'Open: Opens the link; Seen then ends it');
   await tap(page, open);
   // a device that hasn't allowed the Arcade sees its card first; the pinned card is still where it opens
   await tap(page, card(page).getByRole('button', { name: 'Allow' }));
