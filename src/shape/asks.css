@@ -36,7 +36,7 @@
 .sh-ask-msg .sh-ask-body { cursor: pointer; color: var(--g-ink); -webkit-user-select: text; user-select: text; -webkit-tap-highlight-color: transparent; }
 .sh-ask-msg .sh-ask-body > span { display: block; overflow-wrap: anywhere; }
 .sh-ask-msg .sh-ask-body > .sh-ask-why { margin-top: 2px; }
-.sh-ask-msg .sh-ask-chev { display: inline; padding: 0 4px; }
+.sh-ask-msg .sh-ask-chev { display: inline; padding: 0 4px; -webkit-user-select: none; user-select: none; }
 @media (hover: hover) { .sh-ask-open:hover .sh-ask-what, .sh-ask-msg .sh-ask-body:hover .sh-ask-what { text-decoration: underline; text-underline-offset: 3px; } }
 
 /* the ask's sheet (AskSheet.tsx, on the run story's sheet): its kind, its facts, its context, its buttons */

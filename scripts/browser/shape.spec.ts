@@ -156,6 +156,11 @@ test('T-335 copy: an ask in a room is words a long press selects (not a button\'
   await holdTouch(page, await wordPoint(words));
   expect((await page.evaluate(() => String(window.getSelection()))).trim()).not.toBe('');
   await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
+  // a mouse's double-click selects a word and opens nothing; a single click (or a tap) opens the sheet
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  await words.dblclick({ position: { x: 30, y: 8 } });
+  await page.waitForTimeout(500);
+  await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
   await page.evaluate(() => window.getSelection()?.removeAllRanges());
   await words.click({ position: { x: 12, y: 8 } });
   await expect(page.locator('.sh-ask-sheet')).toBeVisible();

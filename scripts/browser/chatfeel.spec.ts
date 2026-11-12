@@ -194,6 +194,9 @@ test('message actions: the latest reply has a quiet row (Copy and Save as note t
     else await expect(row.getByRole('button', { name: n, exact: true })).toBeVisible();
   }
   await expect(page.locator('.message-more-go')).toHaveCount(0);
+  // T-335 copy: on touch the row ends in More (the sheet); a pointer's row holds everything, so no More
+  if (touch()) await expect(row.getByRole('button', { name: 'More actions', exact: true })).toBeVisible();
+  else await expect(row.getByRole('button', { name: 'More actions', exact: true })).toBeHidden();
   if (touch()) for (const b of await row.getByRole('button').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await shot(page, '04-actions');
   // 👍 is a reaction, made from the app; a second tap takes it back
@@ -426,11 +429,13 @@ test('review: after your own stop, a late ping says nothing; someone else\'s wai
   await expect(status(page).locator('.uni-status-leave')).toHaveCount(0);
 });
 
-test('copy: a long press on a message\'s words selects them (the system\'s select and copy), not the sheet; the sheet is still a hold away and copies the whole message', async ({ page }) => {
+test('copy: a long press on a message\'s words selects them (the system\'s select and copy), not the sheet; its row shows under them, and More or a hold beside the words opens the sheet, whose Copy text copies the whole message', async ({ page }) => {
   test.skip(!touch(), 'a finger\'s long press');
   await boot(page);
   await openRoom(page, 'Kiln Studio');
   const older = list(page).locator('article.message[data-ref="k1"]');
+  const row = older.getByRole('group', { name: 'Message actions' });
+  await expect(row).toBeHidden();
   await holdTouch(page, await wordPoint(older.locator('.md p').first()));
   await page.waitForTimeout(300);
   const sheet = page.getByRole('dialog', { name: 'Message actions' });
@@ -438,15 +443,20 @@ test('copy: a long press on a message\'s words selects them (the system\'s selec
   const picked = await page.evaluate(() => window.getSelection()?.toString() ?? '');
   expect(picked.trim().length).toBeGreaterThan(0);
   expect('The bisque firing finished overnight. Twelve pots, one crack.').toContain(picked.trim());
+  // holding a message still leads to its actions: its row is under the selected words, and More opens the sheet
+  await expect(row).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
   await shot(page, '06-selected');
-  // the actions: a hold beside the words (the name and time line) opens the sheet, and selects nothing
-  await page.evaluate(() => window.getSelection()?.removeAllRanges());
-  await holdTouch(page, await besideWords(older));
+  await row.getByRole('button', { name: 'More actions', exact: true }).click();
   await expect(sheet).toBeVisible();
-  expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
   await page.waitForTimeout(450);
   await sheet.getByRole('button', { name: 'Copy text', exact: true }).click();
   await expect(sheet).toHaveCount(0);
   await expect.poll(async () => (await calls(page, 'plugin:clipboard-manager|write_text')).map((a: any) => a.text)).toEqual(['The bisque firing finished overnight. Twelve pots, one crack.']);
   await expect(page.locator('.toast')).toHaveText('Copied');
+  await expect(row).toBeHidden(); // the selection went with the sheet, and the row with it
+  // a hold beside the words (the name and time line) opens the sheet too, and selects nothing
+  await holdTouch(page, await besideWords(older));
+  await expect(sheet).toBeVisible();
+  expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
 });
