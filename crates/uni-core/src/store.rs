@@ -907,6 +907,8 @@ impl Store {
                         blurhash: r.get(6)?,
                         alt: r.get(7)?,
                         filename: r.get(8)?,
+                        // Only an upload's answer has one, for the message it goes in; nothing shown needs it.
+                        duration: None,
                     },
                 ))
             })?

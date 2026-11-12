@@ -73,6 +73,12 @@ pub fn outgoing_media(
             return Err(Error::Invalid("invalid attachment filename".into()));
         }
         tag.push(format!("filename {filename}"));
+        // The relay allows a length on video only, and checks it against the one it stored, which the upload returned.
+        if let Some(seconds) = m.duration {
+            if mime == "video/mp4" && seconds.is_finite() && seconds > 0.0 {
+                tag.push(format!("duration {seconds}"));
+            }
+        }
         if mime.starts_with("image/") {
             tag.push(format!("alt {filename}"));
         }

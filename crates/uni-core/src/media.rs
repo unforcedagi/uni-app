@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Error, Result};
 
 pub mod normalize;
+pub mod voice;
 
 pub use normalize::sanitize_image_for_upload;
 
@@ -95,7 +96,7 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
 const STREAM_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// One NIP-92 attachment on a message.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MediaRef {
     pub url: String,
     /// `m`: MIME type.
@@ -108,6 +109,9 @@ pub struct MediaRef {
     pub blurhash: Option<String>,
     pub alt: Option<String>,
     pub filename: Option<String>,
+    /// `duration`: seconds, for video (NIP-71); the relay checks it against what it stored, to 0.1 s.
+    #[serde(default)]
+    pub duration: Option<f64>,
 }
 
 fn is_sha256_hex(v: &str) -> bool {
@@ -430,6 +434,66 @@ fn watched_body(file: tokio::fs::File, progress: Arc<UploadProgress>) -> reqwest
     reqwest::Body::wrap_stream(pieces)
 }
 
+/// A recording in Opus (WebM), as the AAC parts stock Buzz takes, each named for the message: `(path, name)` in order.
+/// `None`: not a WebM, or this device has no codecs for it, so it goes as it is. The parts are raw M4A for
+/// [`upload_media_file`]'s normalizer; the caller removes them.
+pub fn voice_parts(input: &Path, filename: &str, work_dir: &Path, codecs: Option<&dyn voice::Codecs>) -> Result<Option<Vec<(PathBuf, String)>>> {
+    let Some(codecs) = codecs else { return Ok(None) };
+    if !voice::is_webm(input) {
+        return Ok(None);
+    }
+    let Some(converted) = voice::convert(input, work_dir, codecs, voice::MAX_PART_SECONDS)? else {
+        return Ok(None);
+    };
+    let stem = filename.rsplit_once('.').map_or(filename, |(s, _)| s);
+    let n = converted.parts.len();
+    Ok(Some(
+        converted
+            .parts
+            .into_iter()
+            .enumerate()
+            .map(|(k, p)| (p.path, if n == 1 { format!("{stem}.m4a") } else { format!("{stem} ({} of {n}).m4a", k + 1) }))
+            .collect(),
+    ))
+}
+
+/// Removes every file it holds, however the upload ends.
+struct RemoveAll(Vec<PathBuf>);
+impl Drop for RemoveAll {
+    fn drop(&mut self) {
+        for p in &self.0 {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
+/// Upload what the user attached or recorded, as one attachment or, for a long recording, several in order.
+///
+/// A recording in Opus is converted to AAC parts of at most 9:50, cut at pauses ([`voice`]), where this device has the
+/// codecs; each part then goes as any file does ([`upload_media_file`]). Anything else is one [`upload_media_file`].
+pub async fn upload_media(
+    relay_url: &str,
+    keys: &Keys,
+    input: &Path,
+    mime: &str,
+    filename: &str,
+    work_dir: &Path,
+) -> Result<Vec<MediaRef>> {
+    let (from, name, dir) = (input.to_path_buf(), upload_filename(filename), work_dir.to_path_buf());
+    let parts = tokio::task::spawn_blocking(move || voice_parts(&from, &name, &dir, voice::platform_codecs()))
+        .await
+        .map_err(|_| normalize::refuse("Couldn't prepare the file on this device. Attach it again."))??;
+    let Some(parts) = parts else {
+        return Ok(vec![upload_media_file(relay_url, keys, input, mime, filename, work_dir).await?]);
+    };
+    let _cleanup = RemoveAll(parts.iter().map(|(p, _)| p.clone()).collect());
+    let mut media = Vec::with_capacity(parts.len());
+    for (path, name) in &parts {
+        media.push(upload_media_file(relay_url, keys, path, "audio/mp4", name, work_dir).await?);
+    }
+    Ok(media)
+}
+
 /// Upload a picked, pasted, dropped, shared or recorded file: the one way media reaches the relay.
 ///
 /// The file is normalized first ([`normalize`]), so the relay's rules are met or the reason is known before any bytes
@@ -568,6 +632,8 @@ async fn upload_with_quiet_limit(
         mime: String,
         dim: Option<String>,
         blurhash: Option<String>,
+        /// Seconds, for video (which includes sound with a still frame): what the relay stored and checks imeta against.
+        duration: Option<f64>,
     }
     let inconsistent = || normalize::refuse("The relay answered with details that don't match the file, so it wasn't attached. Retry.");
     let d: BlobDescriptor = tokio::time::timeout(UPLOAD_ANSWER_BODY_LIMIT, response.json())
@@ -591,6 +657,7 @@ async fn upload_with_quiet_limit(
         blurhash: d.blurhash,
         alt: None,
         filename: Some(normalized.filename),
+        duration: d.duration.filter(|v| v.is_finite() && *v > 0.0),
     })
 }
 
@@ -1181,6 +1248,7 @@ mod tests {
                 blurhash: Some("LEHV6nWB2y".into()),
                 alt: Some("a cat on a mat".into()),
                 filename: Some("cat.png".into()),
+                duration: None,
             }]
         );
     }

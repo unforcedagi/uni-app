@@ -42,6 +42,10 @@ zip = { version = "4.6", default-features = false, features = ["deflate-flate2-z
 quick-xml = "0.42"
 crc32fast = "1"
 
+[target.'cfg(target_os = "android")'.dependencies]
+# Voice notes (T-335): the platform's Opus decoder and AAC encoder, through the NDK's AMediaCodec. Already in the lock (tao).
+ndk = { version = "0.9", default-features = false, features = ["media"] }
+
 [target.'cfg(unix)'.dependencies]
 # The attachment cache: folders and files created relative to an opened folder, never through a symlink.
 rustix = { version = "1", features = ["fs", "process"] }

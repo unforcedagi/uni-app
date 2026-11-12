@@ -22,6 +22,7 @@ mod iso;
 mod opus;
 
 pub use image::sanitize_image_for_upload;
+pub(crate) use opus::opus_head;
 
 /// The relay's defaults (`BUZZ_MAX_*_BYTES`; the deployed relay sets none of them).
 pub const MAX_VIDEO_BYTES: u64 = 500 * 1024 * 1024;
