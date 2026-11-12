@@ -66,8 +66,10 @@
 .msg-actions:not(.always) .act-label { display: none; }
 .msg-actions:not(.always) .act-up .act-label { display: inline; }
 @media (hover: none) {
-  /* touch: the latest reply's row is there; any message's sheet is a long press away */
+  /* touch: the latest reply's row is there; any message's sheet is a long press away, beside its words (on them the system selects
+     them, T-335 copy). The name and time line and the avatar are the handle: holding them opens the sheet, never selects the name. */
   .msg-actions:not(.always) { display: none; }
+  .message .message-meta, .message .message-avatar, .message .gutter-time { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   .msg-actions.always .act { min-width: 44px; height: 44px; }
   .msg-actions.always .act-label { display: none; }
   .msg-actions.always .act-up .act-label { display: inline; }

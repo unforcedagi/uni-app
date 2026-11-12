@@ -39,7 +39,6 @@ export const ICONS = {
   reply: ic(<><path d="M9.5 7.5 5 12l4.5 4.5" /><path d="M5.5 12H14a5 5 0 0 1 5 5v1.5" /></>),
   save: ic(<path d="M7 3.8h10a1 1 0 0 1 1 1V20l-6-3.7L6 20V4.8a1 1 0 0 1 1-1z" />),
   edit: ic(<path d="M15.5 5.5l3 3L9 18H6v-3z" />),
-  select: ic(<path d="M5 6h14M5 12h9M5 18h12" />),
   del: ic(<><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /></>),
   up: <span className="act-emoji" aria-hidden="true">👍</span>,
 };
@@ -103,8 +102,32 @@ export function QuickReplies({ answers, onPick }: { answers: string[]; onPick: (
 }
 
 /**
- * A long press on a message (touch only) opens its sheet: 500 ms held, moving less than 10 px. Attached once to the message list, so
- * the memoised rows don't change for it. A mouse's right-click stays the browser's own.
+ * Whether (x, y) is on a word a person could select: a character of a text node is under the point, and its element lets text be
+ * selected. Space beside the words (an avatar, the gap after a line's end, the margin) and the name and time line are not.
+ */
+export function onWords(x: number, y: number): boolean {
+  const doc = document as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null };
+  let node: Node | null = null, offset = 0;
+  if (doc.caretPositionFromPoint) { const p = doc.caretPositionFromPoint(x, y); if (p) { node = p.offsetNode; offset = p.offset; } }
+  else if (doc.caretRangeFromPoint) { const r = doc.caretRangeFromPoint(x, y); if (r) { node = r.startContainer; offset = r.startOffset; } }
+  if (!node || node.nodeType !== Node.TEXT_NODE || !node.parentElement) return false;
+  const style = getComputedStyle(node.parentElement);
+  if (style.userSelect === "none" || style.webkitUserSelect === "none") return false;
+  const text = node.textContent ?? "", r = document.createRange();
+  // the caret sits between two characters: the point is on the one before it or the one after it
+  for (const at of [offset - 1, offset]) {
+    if (at < 0 || at >= text.length || /\s/.test(text[at])) continue;
+    r.setStart(node, at); r.setEnd(node, at + 1);
+    for (const b of r.getClientRects()) if (x >= b.left - 2 && x <= b.right + 2 && y >= b.top - 2 && y <= b.bottom + 2) return true;
+  }
+  return false;
+}
+
+/**
+ * A long press on a message beside its words (touch only) opens its sheet: 500 ms held, moving less than 10 px. On the words it is the
+ * system's own: it selects them, with handles, to copy part of a message (T-335 copy). So the sheet's handle is the avatar, the name
+ * and time, and the space around the text. Attached once to the message list, so the memoised rows don't change for it. A mouse's
+ * right-click stays the browser's own.
  */
 export function useLongPress(list: HTMLElement | null, onPress: (ref: string) => void) {
   const press = useRef(onPress);
@@ -119,6 +142,7 @@ export function useLongPress(list: HTMLElement | null, onPress: (ref: string) =>
       if (e.target.closest("button, a, summary, input, textarea, .msg-actions")) return;
       const art = e.target.closest<HTMLElement>("article.message[data-ref]");
       if (!art || art.classList.contains("outgoing")) return;
+      if (onWords(e.clientX, e.clientY)) return; // the words: the system selects them
       x = e.clientX; y = e.clientY; top = list.scrollTop; fired = false;
       cancel();
       timer = window.setTimeout(() => { timer = 0; fired = true; press.current(art.dataset.ref!); }, 500);
@@ -127,7 +151,7 @@ export function useLongPress(list: HTMLElement | null, onPress: (ref: string) =>
     const up = () => cancel();
     // a scroll the finger made ends the press; layout settling under a still finger doesn't
     const scrolled = () => { if (timer && Math.abs(list.scrollTop - top) > 10) cancel(); };
-    // the press that opened the sheet doesn't also select text or open the system menu
+    // the press that opened the sheet doesn't also select text or open the system menu (a press on the words started no timer)
     const menu = (e: Event) => { if (fired || timer) { e.preventDefault(); } };
     list.addEventListener("pointerdown", down, { passive: true });
     list.addEventListener("pointermove", move, { passive: true });

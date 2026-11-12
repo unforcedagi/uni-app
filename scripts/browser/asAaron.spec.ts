@@ -5,6 +5,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { bootAreas, type BootOpts } from './areasFixture';
 import { homeHead, openApplet, openRoom, openSettings } from './shapeNav';
 import { installNotePaneFixture } from './notePaneFixture';
+import { besideWords } from './holdMessage';
 import * as mailMock from './mailMock';
 import * as calMock from './calMock';
 
@@ -28,9 +29,7 @@ async function kiln(page: Page, o: BootOpts = {}) {
 const focus = (page: Page) => page.locator('.sh-room');
 /** A long press on a message (a finger down until the sheet is up, then up): its actions sheet (as chatfeel.spec.ts does). */
 async function longPress(page: Page, msg: ReturnType<Page['locator']>) {
-  await msg.scrollIntoViewIfNeeded();
-  const b = (await msg.locator('p').first().boundingBox())!;
-  const at = { x: b.x + 20, y: b.y + 8 };
+  const at = await besideWords(msg); // on the words the system selects them (T-335 copy)
   await page.evaluate(({ x, y }) => { document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })); }, at);
   const sheet = page.getByRole('dialog', { name: 'Message actions' });
   await expect(sheet).toBeVisible();
@@ -80,7 +79,7 @@ test('a toast never sits on the composer', async ({ page }) => {
   await expect(latest.getByRole('group', { name: 'Message actions' }).getByRole('button', { name: 'Copy', exact: true })).toBeHidden();
   const sheet = await longPress(page, latest);
   await page.waitForTimeout(450); // the sheet takes no tap in its first 400 ms
-  await sheet.getByRole('button', { name: 'Copy', exact: true }).click();
+  await sheet.getByRole('button', { name: 'Copy text', exact: true }).click();
   await expect(page.locator('.toast')).toBeVisible();
   const toast = (await page.locator('.toast').boundingBox())!;
   const composer = (await focus(page).locator('.compose-row').boundingBox())!;

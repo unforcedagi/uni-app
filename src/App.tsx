@@ -2330,15 +2330,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     tail: m.author === identity ? <DeleteButton key={`del-${m.ref}`} label="your message" onDelete={() => actions.current.deleteOwn(m)} /> : undefined });
   useLongPress(listEl, (ref) => { if (messages.some((m) => m.ref === ref)) setSheetFor(ref); });
   /** A message's actions. Someone else's: Copy, Try again (the latest reply, where Uni is), 👍, Reply, Save as note; your own: Copy, Edit.
-   *  In the sheet also Select text (and Delete for your own). */
+   *  In the sheet Copy is "Copy text" (the whole message, first), and your own also has Delete. Part of a message: hold its words (T-335 copy). */
   function messageActions(m: Message, inSheet: boolean): Action[] {
     const mine = m.author === identity;
-    const copy: Action = { id: "copy", label: "Copy", icon: ICONS.copy, run: () => void copyText(m.body, "Copied text") };
-    const select: Action = { id: "select", label: "Select text", icon: ICONS.select, run: () => requestAnimationFrame(() => {
-      const el = listRef.current?.querySelector(`[data-ref="${CSS.escape(m.ref)}"] .md`);
-      if (el) window.getSelection()?.selectAllChildren(el);
-    }) };
-    if (mine) return [copy, ...(editing !== m.ref ? [{ id: "edit", label: "Edit", icon: ICONS.edit, run: () => setEditing(m.ref) }] : []), ...(inSheet ? [select,
+    const copy: Action = { id: "copy", label: inSheet ? "Copy text" : "Copy", icon: ICONS.copy, run: () => void copyText(m.body, "Copied") };
+    if (mine) return [copy, ...(editing !== m.ref ? [{ id: "edit", label: "Edit", icon: ICONS.edit, run: () => setEditing(m.ref) }] : []), ...(inSheet ? [
       // the sheet asks before it deletes: a second sheet, opened again, would be a second tap away; here the row confirms in place
       { id: "delete", label: confirmDelete === m.ref ? "Tap again to delete" : "Delete", aria: confirmDelete === m.ref ? "Tap again to delete your message" : "Delete your message", icon: ICONS.del,
         run: () => { if (confirmDelete === m.ref) { setConfirmDelete(null); void actions.current.deleteOwn(m); } else { setConfirmDelete(m.ref); setSheetFor(m.ref); } } }] : [])];
@@ -2347,13 +2343,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const byPerson = m.author !== uniPk && members.some((x) => x.pubkey === m.author);
     const latest = m.ref === latestReply && uniInRoom && !isThread && !byPerson;
     return [
-      ...(inSheet ? [] : [copy]),
+      copy,
       ...(latest ? [{ id: "retry", label: "Try again", aria: "Ask Uni to try again", icon: ICONS.retry, run: () => void postAs(RETRY) }] : []),
       ...(inSheet ? [] : [{ id: "up", label: "👍", aria: "Thumbs up", icon: null, pressed: !!up?.mine, run: () => void reactTo(m, "👍") }]),
       { id: "reply", label: "Reply", icon: ICONS.reply, run: () => openThread(m) },
-      ...(inSheet ? [copy] : []),
       { id: "save", label: "Save as note", icon: ICONS.save, run: () => void saveAsNote(m) },
-      ...(inSheet ? [select] : []),
     ];
   }
   /** T-212: the decisions a message names: its `uni:<id>` refs (a card only if the note is a decision), then a known open decision its

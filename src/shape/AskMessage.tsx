@@ -74,10 +74,12 @@ export function AskMessage({ ask, busy, error, onAct, onOpen, compact = false }:
   </div>;
   return <article className="sh-ask sh-ask-msg" data-id={ask.id} data-kind={ask.kind} aria-busy={busy || undefined} aria-label={`Uni asks: ${ask.what}`}>
     <div className="sh-ask-meta"><b>Uni</b><span className="sh-ask-mark" aria-hidden="true">◆</span> wants you{ask.tid ? <span className="sh-ask-tid"> · {ask.tid}</span> : null}</div>
-    <button type="button" className="sh-ask-body sh-ask-open" onClick={() => onOpen(ask)} aria-label={`${ask.what}. Open it`}>
-      <span className="sh-ask-what">{ask.what}<span className="sh-ask-chev" aria-hidden="true"> ›</span></span>
+    {/* T-335 copy: the words are text, not a button's label, so a long press selects them; a tap still opens the sheet (not the
+        click that ends a drag-selection), and the chevron is the button a keyboard and a screen reader use */}
+    <div className="sh-ask-body" onClick={() => { if (window.getSelection()?.isCollapsed !== false) onOpen(ask); }}>
+      <span className="sh-ask-what">{ask.what}<button type="button" className="sh-ask-open sh-ask-chev" onClick={(e) => { e.stopPropagation(); onOpen(ask); }} aria-label={`${ask.what}. Open it`}> ›</button></span>
       {(ask.next || ask.why) && <span className="sh-ask-why">{ask.next ?? ask.why}</span>}
-    </button>
+    </div>
     {cardLine}{buttons}{err}
   </article>;
 }
