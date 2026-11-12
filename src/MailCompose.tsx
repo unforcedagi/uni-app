@@ -264,7 +264,7 @@ export default function Composer({ composeKey, overview, start, snapshot, onSnap
   </div>;
 
   const uniDraft = start.kind === "draft" && start.uni;
-  const discardNote = discardAhead.length > 0 && <p className="mail-draft-note" role="note"><span className="mail-draft-tag">UNI'S EARLIER DRAFTS</span>
+  const discardNote = discardAhead.length > 0 && <p className="mail-draft-note mail-compose-line" role="note">
     <span>Sending this discards {plural(discardAhead.length, "Uni's 1 earlier draft", "Uni's # earlier drafts")} in this thread.</span></p>;
   const problemBox = problem && <div className="note-error mail-problem" role="alert"><p className="mail-problem-title">{problem.title}</p><p className="mail-problem-help">{problem.detail}</p></div>;
 
@@ -345,8 +345,8 @@ export default function Composer({ composeKey, overview, start, snapshot, onSnap
     <div className="mail-scroll">
       {fromBlock}
       {cantSend}
-      {uniDraft && <p className="mail-draft-note" role="note"><span className="mail-draft-tag">Draft by Uni · not sent</span>
-        <span>Uni wrote this in your Drafts. Uni can't send as you: nothing goes out unless you send it here.</span></p>}
+      {uniDraft && <p className="mail-draft-note mail-compose-line" role="note"><span className="mail-draft-tag">Draft by Uni · not sent</span>
+        <span>Nothing goes out until you send it.</span></p>}
       {discardNote}
       {asUni && <p className="mail-note">As Uni: it goes from Uni's address, through Uni's outbound rules.</p>}
       <div className="mail-compose-fields">

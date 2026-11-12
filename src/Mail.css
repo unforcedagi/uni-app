@@ -259,3 +259,4 @@ strong.mail-msg-name { cursor: default; }
   .mail-thread-tools > button { padding: 0 10px; }
   .mail-read-scroll { padding: 12px 12px 32px; }
 }
+.mail-compose-line { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }

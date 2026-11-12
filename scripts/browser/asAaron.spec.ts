@@ -277,6 +277,8 @@ test('Mail that can only read has no grey New or Reply; a phone\'s list has one 
   await mailMock.rows(page).first().click();
   await expect(mailMock.mail(page).getByRole('button', { name: /^Reply/ })).toHaveCount(0);
   await expect(mailMock.mail(page)).not.toContainText('Sending comes later');
+  // a phone's thread fills the screen (the tabs and Refresh give way to it): Refresh is back on the list
+  await mailMock.backToThreads(page);
   await expect(mailMock.mail(page).getByRole('button', { name: 'Refresh' }).locator('svg')).toBeVisible();
 });
 
