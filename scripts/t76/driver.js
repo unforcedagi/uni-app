@@ -33,7 +33,7 @@
   const w0 = console.warn.bind(console); console.warn = (...a) => { warns.push(a.map(String).join(' ')); w0(...a); };
 
   const openArea = async (name) => {
-    btn(/^Areas$/, $('nav[aria-label="Main navigation"]')).click();
+    btn(/^Areas$/, $('nav[aria-label="Places"]')).click();
     const card = await waitFor(() => [...document.querySelectorAll('.area-card')].find((c) => c.querySelector('strong')?.textContent.trim() === name), 10000, 'area card ' + name);
     card.click();
     await waitFor(() => $('.area-bar-title')?.textContent === name, 10000, 'area bar ' + name);
@@ -65,10 +65,10 @@
     diag.blobFrame = await new Promise((res) => { const f = document.createElement('iframe'); const h = (e) => { if (e.source === f.contentWindow) res('msg'); }; addEventListener('message', h); setTimeout(() => res('no message'), 2000); f.src = URL.createObjectURL(new Blob(['<script>parent.postMessage(1,"*")<\/script>'], { type: 'text/html' })); document.body.appendChild(f); });
     await out('diag.json', diag);
     // 1. the self-test, through the UI
-    await waitFor(() => $('nav[aria-label="Main navigation"]'), 30000, 'app rail');
+    await waitFor(() => $('nav[aria-label="Places"]'), 30000, 'app rail');
     const focusWait = performance.now(); await waitFor(() => document.hasFocus(), 3000, 'window focus').catch(() => {}); const focusBeforeKey = document.hasFocus(); if (MODE !== 'selftest') await keys([{ key: 'Shift_L' }]); await waitFor(() => document.hasFocus(), 5000, 'window focus after a key').catch(() => {});
     await out('env.json', { ...env, hasFocusAtStart: env.hasFocus, hasFocusAtRail: document.hasFocus(), hasFocusBeforeFirstKey: focusBeforeKey, focusWaitMs: Math.round(performance.now() - focusWait) });
-    btn(/^Settings$/, $('nav[aria-label="Main navigation"]')).click();
+    btn(/^Settings$/, $('nav[aria-label="Places"]')).click();
     const runBtn = await waitFor(() => btn(/^Run sandbox self-test$/), 20000, 'self-test button');
     note('self-test: click');
     runBtn.click();
@@ -217,6 +217,6 @@
     });
     await out('done', 'ok'); note('done');
   };
-  const go = () => run().catch((e) => out('error.txt', String(e && e.stack || e) + '\n--- body ---\n' + document.body.innerText.slice(0, 1500)));
+  const go = () => run().catch((e) => out('error.txt', String(e && e.message || e) + '\n' + String(e && e.stack || '') + '\n--- body ---\n' + document.body.innerText.slice(0, 1500)));
   if (document.readyState === 'loading') addEventListener('DOMContentLoaded', () => setTimeout(go, 1500)); else setTimeout(go, 1500);
 })();
