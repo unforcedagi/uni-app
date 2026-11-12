@@ -87,7 +87,8 @@ import NotePane, { usePaneShape } from "./NotePane";
 import { APPROVAL_WINDOW_S, useApprovals } from "./approvalsLive";
 import { ApprovalBanner } from "./shape/ApprovalBanner";
 import { drawCard, JUMP, ShapeSurface, type CardHost, type StoryOpen } from "./shape/ShapeSurface";
-import { answerable, BUTTON_GRACE, withoutAskBlocks, type Card } from "./shape/oneAsk";
+import { ASKS_STORED } from "./shape/useRoomAsks";
+import { answerable, withoutAskBlocks, type Card } from "./shape/oneAsk";
 import { useShape } from "./shape/useShape";
 import { forgetAsks } from "./shape/useAsks";
 import { Bar } from "./shape/Bar";
@@ -1602,6 +1603,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setOlder("loading");
     try {
       const n = await invoke<number>("load_older", { channel: ch });
+      // T-335 one ask: older messages may hold asks: the cards read the store again
+      if (n > 0) window.dispatchEvent(new Event(ASKS_STORED));
       // The room changed while loading: its own reset already ran.
       if (channelRef.current !== ch) return;
       if (n === 0) { setOlder("done"); return; }
@@ -2075,7 +2078,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
         recordingOrigin.current || recorder.isBusy() || (!draft.trim() && !pending.length)) return;
     const files = manualAttachments(pendingStore.current.get(keyFor(channel, root)) ?? []);
     // T-335 one ask: an answer is words; with a file attached, say so rather than send it as something else
-    if (answering && answering.room === channel && !root && files.length) { setError("An answer is words only: remove the attachment, or stop answering (×) to send it as a message."); return; }
+    const answeringCard = answering && answering.room === channel && !root ? shape.cards.find(answering.id) : null;
+    if (answeringCard && answerable(answeringCard, Date.now() / 1000) && files.length) { setError("An answer is words only: remove the attachment, or stop answering (×) to send it as a message."); return; }
     if ((!draft.trim() && !files.length) || files.some(attachmentBlocksSend)) {
       setError("Wait for uploads to finish or retry or remove failed files."); return;
     }
@@ -2448,7 +2452,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // on the list and the task each carries; the answers): the message list is drawn again when any of it changes
   const cardNow = shape.cards.now;
   const asksKey = [...shape.cards.list.asked.values(), ...shape.cards.list.approvals.values()]
-    .map((c) => `${c.id}${c.state}${c.what}${c.later ?? ""}${c.ended ?? ""}${c.until !== null && cardNow >= c.until - BUTTON_GRACE ? "!" : ""}${shape.cards.busy(c.id) ? "*" : ""}${shape.cards.error(c.id) ?? ""}`).join(" ") + `|${shape.cards.answers.size}`;
+    .map((c) => `${c.id}${c.state}${c.what}${c.later ?? ""}${c.ended ?? ""}${answerable(c, cardNow) ? "" : "!"}${shape.cards.busy(c.id) ? "*" : ""}${shape.cards.error(c.id) ?? ""}`).join(" ") + `|${shape.cards.answers.size}`;
   /**
    * T-335: a Hermes approval prompt drawn as its short card. Its state comes from the same store read as Needs you (every room and thread),
    * never from the loaded timeline alone (a room's list has no thread replies). An outcome once read stands. Older than that read: no

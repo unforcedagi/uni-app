@@ -3,7 +3,7 @@
 process.env.TZ = "UTC";
 import assert from "node:assert/strict";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { buildAnswer, buildAsk, parseAsk, pubkeyHex, signEvent, type NostrEvent } from "../src/ask/index.ts";
+import { buildAnswer, buildAsk, parseAsk, pubkeyHex, roomAsks, signEvent, type NostrEvent } from "../src/ask/index.ts";
 import { answersOf, cardButtons, nextChange, oneList, onList, roomAnswer, roomCards, type Card } from "../src/shape/oneAsk.ts";
 import type { VaultAsk } from "../src/shape/asksCore.ts";
 import type { Approval } from "../src/approvals.ts";
@@ -111,8 +111,12 @@ check("answers go in the main line: no e tag ever; only pick, words and did wake
   const words = signEvent(ME, roomAnswer(c, { act: "words", text: "Done it my way" }, T), T - 30);
   const after = roomCards([a, words], T, POLICY)[0];
   assert.equal(after.state, "answered");
-  assert.equal(answersOf([a, words], [a.id], POLICY).get(words.id), a.id);
+  const states = roomAsks([a, words], T, POLICY);
+  assert.equal(answersOf([a, words], states, POLICY).get(words.id), a.id);
   assert.equal(answersOf([a, words], [], POLICY).get(words.id), undefined, "only answers to asks the rule knows");
+  // an answer posted in another room quoting it is not its answer (the rule says other-room), so the chat doesn't quote it there
+  const elsewhere = signEvent(ME, { ...roomAnswer(c, { act: "words", text: "Wrong room" }, T), tags: [["h", "ch-other"], ["q", a.id, "", pubkeyHex(UNI)], ["p", pubkeyHex(UNI)]] }, T - 20);
+  assert.equal(answersOf([a, elsewhere], roomAsks([a, elsewhere], T, POLICY), POLICY).get(elsewhere.id), undefined);
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

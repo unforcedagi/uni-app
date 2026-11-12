@@ -151,8 +151,10 @@ test('5. a lapsed ask disappears at its time, with no sweep', async ({ page }) =
   const home = page.locator(`.sh-home [data-card="${w.kiln.id}"]`);
   await expect(home).toHaveCount(1);
   const before = Number(await bar(page).textContent());
+  // (the reads start-up asks for, debounced, are done before counting)
+  await page.clock.runFor(500);
   const reads = (await calls(page, 'ask_events')).length;
-  await page.clock.fastForward(32_000);
+  await page.clock.fastForward(31_500);
   await expect(home).toHaveCount(0);
   await expect(bar(page)).toHaveText(String(before - 1));
   // the clock alone: nothing written, nothing read again

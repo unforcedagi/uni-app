@@ -38,7 +38,9 @@ const at = (s: number, now: number) => whenLabel(new Date(s * 1000).toISOString(
 
 export function AskCard({ card, place, roomName, vault, busy, error, onAct, now }: AskCardProps) {
   // (it reopens only when it comes back with why its write failed; a card left behind any other way opens closed next time)
-  const [open, setOpen] = useState(() => OPENED.has(card.id) && !!error);
+  // (kept per place: home's card and the room's are two views; an entry is spent when the card next mounts)
+  const key = `${place}:${card.id}`;
+  const [open, setOpen] = useState(() => { const was = OPENED.has(key); OPENED.delete(key); return was && !!error; });
   const id = useId();
   const home = place === "home";
   const ended = card.state !== "open" && card.state !== "later";
@@ -47,7 +49,7 @@ export function AskCard({ card, place, roomName, vault, busy, error, onAct, now 
     <span className="sh-card-ended-line"> · {card.ended}{card.state === "lapsed" ? (roomName ? `, with #${roomName}` : ", with its room") : ""}</span>
   </article>;
   const buttons = cardButtons(card, { open, roomName, now });
-  const toggle = () => setOpen((o) => { if (o) OPENED.delete(card.id); else OPENED.add(card.id); return !o; });
+  const toggle = () => setOpen((o) => { if (o) OPENED.delete(key); else OPENED.add(key); return !o; });
   return <article className={`sh-ask sh-card ${home ? "sh-ask-wants" : "sh-ask-msg"}`} data-card={card.id} data-state={card.state} data-kind={card.kind} data-source={card.source}
     data-open={open || undefined} aria-busy={busy || undefined} aria-labelledby={id}>
     {!home && <div className="sh-ask-meta">{place === "tail" && <b>Uni</b>}<span className="sh-ask-mark" aria-hidden="true">◆</span> wants you · {KIND_WORD[card.kind]}

@@ -39,7 +39,7 @@ export function Home(p: HomeProps) {
     {error && <p className="sh-home-note sh-home-error" role="alert">{error}</p>}
     {(p.elsewhere?.length ?? 0) > 0 && <section className="sh-elsewhere" aria-label="Wants you, in a room not listed here" data-wants={p.elsewhere!.length}>
       {p.elsewhere!.filter((c) => !c.private).map((c) => <div key={c.id} className="sh-row-slot">{p.renderAsk(c, { id: c.room ?? "", name: "", last_message: null, last_ts: null })}</div>)}
-      {p.elsewhere!.some((c) => c.private) && <p className="sh-home-note"><span className="sh-mark-needs" aria-hidden="true">◆{"︎"}</span> Something waits in a private room that isn't listed here</p>}
+      {p.elsewhere!.some((c) => c.private) && <p className="sh-home-note"><span className="sh-mark-needs" aria-hidden="true">◆{"\uFE0E"}</span> Something waits in a private room that isn't listed here</p>}
     </section>}
     {(p.unseen ?? 0) > 0 && <p className="sh-home-note sh-home-unseen" role="status" data-unseen={p.unseen}><span className="sh-mark-needs" aria-hidden="true">◆{"\uFE0E"}</span> {p.unseen === 1 ? "1 more thing waits" : `${p.unseen} more things wait`} in a private place. This device doesn't show {p.unseen === 1 ? "it" : "them"}.</p>}
     {rows.length > 0

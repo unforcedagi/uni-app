@@ -78,18 +78,12 @@ export function cardsOf(states: readonly AskState[], priv?: (room: string) => bo
 
 /** Which room ask each answer message names (answer event id -> ask id), for drawing an answer as a quote of its ask in the main line.
  *  `asks`: the asks' ids (the states the rule worked out). */
-export function answersOf(events: unknown[], asks: Iterable<string> | readonly AskState[], policy: Pick<Policy, "owner">): Map<string, string> {
+export function answersOf(events: unknown[], asks: readonly AskState[], policy: Pick<Policy, "owner">): Map<string, string> {
   const out = new Map<string, string>();
   const owner = new Set(policy.owner);
-  const list = [...asks];
-  const ids = new Set(list.map((a) => (typeof a === "string" ? a : a.id)));
-  const room = (id: string) => (events as { id?: unknown; tags?: unknown }[]).find((e) => e?.id === id && Array.isArray(e.tags));
   const rooms = new Map<string, string>();
-  for (const a of list) {
-    if (typeof a !== "string") { if (a.ask) rooms.set(a.id, a.ask.room); continue; }
-    const h = (room(a)?.tags as string[][] | undefined)?.find((t) => Array.isArray(t) && t[0] === "h");
-    if (h) rooms.set(a, h[1]);
-  }
+  for (const a of asks) if (a.ask) rooms.set(a.id, a.ask.room);
+  const ids = rooms;
   for (const e of events as { id?: unknown; pubkey?: unknown; kind?: unknown; tags?: unknown }[]) {
     if (!e || e.kind !== 9 || typeof e.id !== "string" || !owner.has(String(e.pubkey)) || !Array.isArray(e.tags)) continue;
     const tags = e.tags as unknown[];
@@ -201,8 +195,7 @@ export function cardButtons(c: Card, o: { open?: boolean; roomName?: string; now
   const to = o.roomName ? `#${o.roomName}` : "its room";
   if (c.source === "card") return [];
   if (c.source === "prompt") return [{ label: "Answer in the room", act: "room", value: "", primary: true, does: `Opens ${to}, where you answer it` }];
-  const answerable = c.state === "open" || c.state === "later";
-  if (!answerable || (c.until !== null && o.now >= c.until - BUTTON_GRACE)) return [];
+  if (!answerable(c, o.now)) return [];
   const out: CardButton[] = [];
   const day = laterUntil(new Date(o.now * 1000));
   const [ly, lm, ld] = day.split("-").map(Number);
