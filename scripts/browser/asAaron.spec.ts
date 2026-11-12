@@ -145,7 +145,7 @@ test('a waiting approval is from Uni, not from a program\'s name', async ({ page
 });
 
 // ---------------------------------------------------------------- Settings
-test('Settings: the update first, nothing that can\'t be used, the dangerous one small and last', async ({ page }) => {
+test('Settings: Claude usage first, then the update; nothing that can\'t be used; the dangerous one small and last', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-10-26T18:00:00Z')); // the usage fixture's own Monday, so its reading is fresh
   await page.addInitScript((usage) => { (window as any).__extraInvoke = async (cmd: string, a: any) => cmd === 'plugin:app|version' ? '0.1.98' : cmd === 'vault_note' && a.noteRef === 'System/Claude accounts' ? { hub: 'https://hub.example.ts.net', vault: 'uni', note: usage } : undefined; }, USAGE);
   await glow(page);
@@ -158,11 +158,11 @@ test('Settings: the update first, nothing that can\'t be used, the dangerous one
   // pairing that this device can't do isn't offered as a grey button
   await expect(page.getByRole('button', { name: 'Pair a device' })).toHaveCount(0);
   await expect(settings).not.toContainText('requires native device unlock');
-  // order: updates above Claude accounts, Forget in This device, below approvals
+  // order: Claude usage first (T-335 fixes: Aaron opens Settings to see it), then updates; Forget in This device, below them
   const y = async (l: ReturnType<Page['locator']>) => (await l.boundingBox())!.y + await settings.evaluate((e) => e.scrollTop ?? 0);
   const update = settings.locator('.update-settings');
   await expect(settings.locator('.usage-card')).toBeVisible();
-  expect(await y(update)).toBeLessThan(await y(settings.locator('.usage-card')));
+  expect(await y(settings.locator('.usage-card'))).toBeLessThan(await y(update));
   const forget = settings.getByRole('button', { name: /Forget this device/ });
   expect(await y(update)).toBeLessThan(await y(forget));
   await expect(settings.getByRole('region', { name: 'This device' }).getByRole('button', { name: /Forget this device/ })).toBeVisible();

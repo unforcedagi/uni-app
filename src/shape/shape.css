@@ -98,6 +98,8 @@
 }
 .sh-shell .toast { bottom: calc(var(--sh-bar-h) + 12px + env(safe-area-inset-bottom)); }
 .sh-shell.sh-bar-aside .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+/* in a room the composer sits on the bar: a toast ("Copied") clears both */
+@media (max-width: 899.98px) { .sh-shell.sh-in-room:not(.sh-bar-aside) .toast { bottom: calc(var(--sh-bar-h) + 84px + env(safe-area-inset-bottom)); } }
 .sh-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .sh-room-chat .message-list { flex: 1; min-height: 0; }
 .sh-room-sub { font: 400 15px/1 var(--g-font-ui); color: var(--g-ink-3); }
