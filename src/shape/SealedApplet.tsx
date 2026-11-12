@@ -19,7 +19,7 @@ import GrantCard from "../interface/GrantCard";
 import SuggestionBar from "../interface/consent";
 import { deviceGrants } from "../interface/grants";
 import { grantKey, htmlHash } from "../interface/manifest";
-import { cleanText } from "../interface/contract";
+import { cleanText, WRITE_CAPS } from "../interface/contract";
 import { isStarted, markStarted, markStopped } from "../interface/appRun";
 import { createRouter } from "../interface/router";
 import { createSuggestionStore } from "../interface/suggestions";
@@ -184,6 +184,8 @@ export function SealedApplet({ id, entry, listed, vault, rooms, onOpenNote, onCo
   if (!keys) return <Calm head="Opening…" />;
 
   const framed = granted && running;
+  // it adds or changes notes: the card's closing line says what it still can't, and whether a room's words can reach its notes
+  const writes = host.needs.some((n) => (WRITE_CAPS as readonly string[]).includes(n.cap));
   const asking = !granted && !declined;
   return <div className={`sh-sa ${framed ? "framed" : ""}`}>
     {decision === "run-notice" && <p className="sh-sa-updated area-updated" role="status">This applet was updated since you allowed it. <button type="button" className="sh-ap-btn area-accept" onClick={trusted(accept)}>Accept</button></p>}
@@ -196,8 +198,7 @@ export function SealedApplet({ id, entry, listed, vault, rooms, onOpenNote, onCo
     <div className="sh-sa-stage">
       {framed && router ? <InterfaceFrame html={app.html} title={name} router={router} grant={grant} ready={ready} />
         : asking ? <GrantCard name={name} runs={mode === "approved-code" ? "approved-code" : "sealed"} state="ask" codeChanged={codeChanged && status === "updated"}
-          changes={host.needs.some((n) => n.cap === "vault.create" || n.cap === "vault.update")}
-          copies={host.needs.some((n) => n.cap === "vault.create" || n.cap === "vault.update") && host.needs.some((n) => n.cap === "chat.read")}
+          changes={writes} copies={writes && host.needs.some((n) => n.cap === "chat.read")}
           lines={grantLines(needsGrant(host.needs, vault, { id, name }), roomName, { ownFolder: ownFolder(app.path) })} fingerprint={fingerprint(keys.scope)} expires={grantExpiry(new Date())}
           onAllow={() => { grants.grant(app.id, keys.scope, keys.html, mode === "approved-code" ? "approved-code" : "sealed", grantExpiry); markStarted(app.id); bump(); }} onNotNow={() => setDeclined(true)} />
         : <Calm head={granted ? `${name} is stopped` : `${name} isn't allowed to run`}>
