@@ -462,6 +462,20 @@ impl Store {
             .optional()?)
     }
 
+    /// T-335 one ask: the signed events the ask rule reads, at or after `since` (Unix seconds): ask-shaped messages and every edit and
+    /// deletion kept (see `sync::ask_shaped`), newest first, at most `limit`. Unverified: the reader checks each id and signature.
+    pub fn ask_events(&self, since: i64, limit: i64) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT json FROM (
+                 SELECT s.json AS json, i.ts AS ts FROM signed_events s JOIN items i ON i.ref = s.ref WHERE i.ts >= ?1
+                 UNION ALL
+                 SELECT s.json, a.ts FROM signed_events s JOIN aux_events a ON a.id = s.ref WHERE a.ts >= ?1 AND a.kind IN (5, 40003)
+             ) ORDER BY ts DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![since, limit], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
     /// Record an edit / deletion event aimed at `target`. Idempotent; returns
     /// `true` if new. Unknown kinds are rejected so the view stays honest.
     pub fn upsert_aux(

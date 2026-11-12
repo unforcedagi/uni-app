@@ -71,6 +71,9 @@ pub fn ingest_message(
         // T-176: the secret path re-verifies this before it answers (see `secret::stored_request`); T-234: so do
         // the room's enrollment line (`sealed::stored_enrollment`) and Uni's approval cards (`sealed_card::stored_card`).
         store.put_signed_event(&item.r#ref, &ev.as_json())?;
+    } else if ask_shaped(ev) {
+        // T-335 one ask: the webview reads asks with the shared rule (src/ask), on the events as they were signed
+        store.put_signed_event(&item.r#ref, &ev.as_json())?;
     }
     store.set_message_mentions(&item.r#ref, &p_tags(ev))?;
     let media = crate::media::parse_imeta(ev.tags.iter().map(|t| t.as_slice()));
@@ -105,6 +108,21 @@ pub fn ingest_message(
     Ok((inserted, item))
 }
 
+/// T-335 one ask: a kind-9 the ask rule (uni-ask SPEC.md) may read: an ask or an answer (a fenced block), a reply that quotes a
+/// message (`q`), or a legacy thread reply (`e`), which the rule still counts as an answer's words. Over-keeping is harmless: the
+/// rule itself decides what is an ask and what answers one.
+pub fn ask_shaped(ev: &Event) -> bool {
+    let fenced = ev.content.split('\n').any(|l| {
+        let l = l.trim_end_matches('\r');
+        l == "```uni-ask" || l == "```uni-answer"
+    });
+    fenced
+        || ev
+            .tags
+            .iter()
+            .any(|t| matches!(t.as_slice().first().map(String::as_str), Some("q") | Some("e")))
+}
+
 /// What a channel-subscription event did to the store.
 #[derive(Debug, Clone)]
 pub enum Ingested {
@@ -130,6 +148,10 @@ pub fn ingest_aux(store: &Store, ev: &Event) -> Result<Ingested> {
         return Ok(Ingested::Ignored);
     };
     let ts = ev.created_at.as_secs() as i64;
+    if kind == 40003 || kind == 5 {
+        // T-335 one ask: an asker's close is an edit of its ask, and a deletion withdraws it; the rule reads them as signed
+        store.put_signed_event(&ev.id.to_hex(), &ev.as_json())?;
+    }
     let new = store.upsert_aux(
         &ev.id.to_hex(),
         kind as i64,
@@ -392,6 +414,40 @@ mod conversation_tests {
             .unwrap();
         assert_eq!(stored.root.as_deref(), Some(root.as_str()));
         assert_eq!(stored.parent.as_deref(), Some(parent.as_str()));
+    }
+
+    /// T-335 one ask: the events the ask rule reads are kept as signed (an ask, a quoted answer, a legacy thread reply, the asker's
+    /// close and a deletion); an ordinary message is not; `since` bounds the read.
+    #[test]
+    fn ask_events_keeps_what_the_ask_rule_reads_as_signed() {
+        let store = Store::open_in_memory().unwrap();
+        let (uni, me) = (Keys::generate(), Keys::generate());
+        let ch = uuid::Uuid::new_v4();
+        let h = || Tag::parse(vec!["h".to_string(), ch.to_string()]).unwrap();
+        let at = |t: u64| nostr::Timestamp::from(t);
+        let ask = EventBuilder::new(Kind::Custom(9), "Pick one\nWhy\n\n```uni-ask\n{\"v\":1}\n```")
+            .tags([h()]).custom_created_at(at(1_000)).sign_with_keys(&uni).unwrap();
+        let id = ask.id.to_hex();
+        let plain = EventBuilder::new(Kind::Custom(9), "just talk").tags([h()]).custom_created_at(at(1_001)).sign_with_keys(&me).unwrap();
+        let answer = EventBuilder::new(Kind::Custom(9), "my words")
+            .tags([h(), Tag::parse(vec!["q".to_string(), id.clone(), String::new(), uni.public_key().to_hex()]).unwrap()])
+            .custom_created_at(at(1_002)).sign_with_keys(&me).unwrap();
+        let legacy = EventBuilder::new(Kind::Custom(9), "under it")
+            .tags([h(), Tag::parse(vec!["e".to_string(), id.clone(), String::new(), "reply".to_string()]).unwrap()])
+            .custom_created_at(at(1_003)).sign_with_keys(&me).unwrap();
+        let close = EventBuilder::new(Kind::Custom(40003), "Closed (done): Pick one")
+            .tags([h(), Tag::parse(vec!["e".to_string(), id.clone()]).unwrap()]).custom_created_at(at(1_004)).sign_with_keys(&uni).unwrap();
+        let gone = EventBuilder::new(Kind::Custom(5), "")
+            .tags([Tag::parse(vec!["e".to_string(), id.clone()]).unwrap()]).custom_created_at(at(1_005)).sign_with_keys(&uni).unwrap();
+        for ev in [&ask, &plain, &answer, &legacy, &close, &gone] {
+            ingest_channel_event(&store, ev, &me.public_key(), ch).unwrap();
+        }
+        let got: Vec<Event> = store.ask_events(0, 100).unwrap().iter().map(|j| Event::from_json(j).unwrap()).collect();
+        let ids: Vec<String> = got.iter().map(|e| e.id.to_hex()).collect();
+        assert_eq!(ids, [&gone, &close, &legacy, &answer, &ask].map(|e| e.id.to_hex()));
+        assert!(got.iter().all(|e| e.verify().is_ok()), "kept exactly as signed");
+        assert_eq!(store.ask_events(1_003, 100).unwrap().len(), 3);
+        assert_eq!(store.ask_events(0, 2).unwrap().len(), 2);
     }
 
     #[test]

@@ -1310,6 +1310,59 @@ async fn unlock_grace(app: tauri::AppHandle) -> Option<u64> {
     unlock_grace::remaining(&app).await.map(|d| d.as_secs())
 }
 
+/// T-335 one ask: the signed events the ask rule reads (asks, answers, edits, deletions) from `since` (Unix seconds) on, newest first.
+/// Unverified here: the webview's rule (src/ask, the shared library) checks every id and signature itself.
+#[tauri::command]
+async fn ask_events(app: tauri::AppHandle, since: i64) -> Result<Vec<serde_json::Value>, String> {
+    let path = db_path(&app)?;
+    blocking(move || {
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        let rows = store.ask_events(since, 20_000).map_err(|e| e.to_string())?;
+        Ok(rows.iter().filter_map(|j| serde_json::from_str(j).ok()).collect())
+    })
+    .await
+}
+
+/// T-335 one ask: who may ask (the compiled-in Uni key, as for approval cards) and whose answers count (this identity).
+#[derive(Serialize)]
+struct AskPolicy {
+    askers: Vec<String>,
+    owner: Vec<String>,
+}
+#[tauri::command]
+async fn ask_policy(app: tauri::AppHandle) -> Result<AskPolicy, String> {
+    secure_store::ensure_loaded(&app).await?;
+    let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+    Ok(AskPolicy { askers: vec![trusted_uni().to_hex()], owner: vec![keys.public_key().to_hex()] })
+}
+
+/// T-335 one ask: an answer as the library built it (kind, tags, content): signed here as this identity and posted in the main line.
+#[derive(Deserialize)]
+struct AnswerTemplate {
+    kind: u16,
+    tags: Vec<Vec<String>>,
+    content: String,
+}
+#[tauri::command]
+async fn post_answer(app: tauri::AppHandle, channel: String, template: AnswerTemplate) -> Result<MessageView, serde_json::Value> {
+    relay_send_io(&app, move |url, keys, store| {
+        let ch = room_id(&channel)?;
+        let event = uni_core::compose::prepare_answer(keys, store, ch, template.kind, &template.tags, &template.content).map_err(|e| e.to_string())?;
+        let sent = tauri::async_runtime::block_on(uni_core::compose::publish_message(url, keys, None, store, ch, event)).map_err(|e| match e {
+            uni_core::Error::Accepted { event_id, message } => accepted_error(event_id, message),
+            other => other.to_string(),
+        })?;
+        (|| {
+            let message = store.message(&channel, &sent.r#ref).map_err(|e| e.to_string())?.ok_or_else(|| "answer accepted but not found locally; refresh to recover".to_string())?;
+            let v = view(store, message)?;
+            with_reactions(store, vec![v])?.pop().ok_or_else(|| "message view missing".to_string())
+        })()
+        .map_err(|e| accepted_error(sent.r#ref, e))
+    })
+    .await
+    .map_err(|e| serde_json::from_str(&e).unwrap_or(serde_json::Value::String(e)))
+}
+
 /// T-234: the cards from Uni waiting for a tap in any room (checked, unanswered, not expired), for Needs you.
 #[tauri::command]
 async fn sealed_waiting(app: tauri::AppHandle) -> Result<Vec<uni_core::sealed_card::Waiting>, String> {
@@ -3165,6 +3218,9 @@ pub fn run() {
             sealed_card,
             sealed_answer,
             sealed_waiting,
+            ask_events,
+            ask_policy,
+            post_answer,
             unlock_grace,
             prepare_voice_message,
             mark_read,

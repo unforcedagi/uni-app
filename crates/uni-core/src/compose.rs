@@ -232,6 +232,57 @@ pub fn prepare_message(
     Ok(event)
 }
 
+/// T-335 one ask: sign the owner's answer to an ask (uni-ask SPEC.md §2), as the webview's library built it. It sits in the main line
+/// and is never a thread: the only tags allowed are the room (`h`, first), one quote of the ask (`q`, id and asker) and, for an answer
+/// that wakes the room, the asker (`p`). The ask must be a message this device holds in that room.
+pub fn prepare_answer(
+    keys: &Keys,
+    store: &Store,
+    channel: Uuid,
+    kind: u16,
+    tags: &[Vec<String>],
+    content: &str,
+) -> Result<nostr::Event> {
+    let bad = |why: &str| Error::Invalid(format!("not an answer: {why}"));
+    let hex64 = |v: &str| v.len() == 64 && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    if kind != 9 {
+        return Err(bad("kind"));
+    }
+    if content.trim().is_empty() || content.chars().count() > 100_000 {
+        return Err(bad("text"));
+    }
+    let room = channel.to_string();
+    if tags.first().map(|t| t.as_slice()) != Some(&["h".to_string(), room.clone()][..]) {
+        return Err(bad("room"));
+    }
+    let mut quote: Option<(&str, &str)> = None;
+    let mut wake: Option<&str> = None;
+    for t in &tags[1..] {
+        match t.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+            ["q", id, "", asker] if quote.is_none() && hex64(id) && hex64(asker) => quote = Some((id, asker)),
+            ["p", who] if wake.is_none() && hex64(who) => wake = Some(who),
+            _ => return Err(bad("tags")),
+        }
+    }
+    let Some((ask, asker)) = quote else {
+        return Err(bad("no quote"));
+    };
+    if wake.is_some_and(|w| w != asker) {
+        return Err(bad("wakes someone else"));
+    }
+    if store.message(&room, ask)?.is_none() {
+        return Err(Error::Invalid("the ask is not cached in this room".into()));
+    }
+    let tags = tags
+        .iter()
+        .map(|t| Tag::parse(t.clone()).map_err(|e| Error::Invalid(e.to_string())))
+        .collect::<Result<Vec<_>>>()?;
+    nostr::EventBuilder::new(nostr::Kind::Custom(9), content)
+        .tags(tags)
+        .sign_with_keys(keys)
+        .map_err(|e| Error::Invalid(format!("cannot sign the answer: {e}")))
+}
+
 /// Publish an already signed event, preserving its id on ambiguous retries.
 pub async fn publish_message(
     relay_url: &str,
@@ -497,6 +548,67 @@ mod tests {
             .map(|_| Keys::generate().public_key().to_hex())
             .collect();
         assert!(mention_pubkeys(&me, None, &many).is_err());
+    }
+}
+
+#[cfg(test)]
+mod answer_tests {
+    use super::*;
+    use nostr::{EventBuilder, Kind};
+
+    /// An ask from `uni` held in room `ch`, and the library's answer tags for it (`wake`: with the asker's `p`).
+    fn world() -> (Store, Keys, Keys, Uuid, String) {
+        let store = Store::open_in_memory().unwrap();
+        let (uni, me) = (Keys::generate(), Keys::generate());
+        let ch = Uuid::new_v4();
+        let ask = EventBuilder::new(Kind::Custom(9), "Pick one")
+            .tags([Tag::parse(vec!["h".to_string(), ch.to_string()]).unwrap()])
+            .sign_with_keys(&uni)
+            .unwrap();
+        ingest_message(&store, &ask, &me.public_key(), ch).unwrap();
+        (store, uni, me, ch, ask.id.to_hex())
+    }
+    fn tags(ch: Uuid, ask: &str, asker: &str, wake: bool) -> Vec<Vec<String>> {
+        let mut t = vec![vec!["h".into(), ch.to_string()], vec!["q".into(), ask.into(), String::new(), asker.into()]];
+        if wake {
+            t.push(vec!["p".into(), asker.into()]);
+        }
+        t
+    }
+
+    #[test]
+    fn an_answer_is_signed_in_the_main_line() {
+        let (store, uni, me, ch, ask) = world();
+        let asker = uni.public_key().to_hex();
+        for wake in [true, false] {
+            let ev = prepare_answer(&me, &store, ch, 9, &tags(ch, &ask, &asker, wake), "Seen.").unwrap();
+            assert!(ev.verify().is_ok());
+            assert_eq!(ev.pubkey, me.public_key());
+            assert!(!ev.tags.iter().any(|t| t.as_slice()[0] == "e"), "never a thread");
+            assert_eq!(ev.tags.iter().any(|t| t.as_slice()[0] == "p"), wake);
+        }
+    }
+
+    #[test]
+    fn anything_but_an_answer_is_refused() {
+        let (store, uni, me, ch, ask) = world();
+        let asker = uni.public_key().to_hex();
+        let ok = tags(ch, &ask, &asker, true);
+        let with = |extra: Vec<String>| { let mut t = ok.clone(); t.push(extra); t };
+        let refused: Vec<(&str, u16, Vec<Vec<String>>, &str)> = vec![
+            ("a thread reply", 9, with(vec!["e".into(), ask.clone(), String::new(), "reply".into()]), "x"),
+            ("another room", 9, { let mut t = ok.clone(); t[0][1] = Uuid::new_v4().to_string(); t }, "x"),
+            ("no room first", 9, ok[1..].to_vec(), "x"),
+            ("no quote", 9, vec![ok[0].clone()], "x"),
+            ("two quotes", 9, with(ok[1].clone()), "x"),
+            ("wakes someone else", 9, { let mut t = ok.clone(); t[2][1] = me.public_key().to_hex(); t }, "x"),
+            ("an ask not held here", 9, tags(ch, &"f".repeat(64), &asker, false), "x"),
+            ("another kind", 1, ok.clone(), "x"),
+            ("no words", 9, ok.clone(), "  "),
+        ];
+        for (why, kind, t, text) in refused {
+            assert!(prepare_answer(&me, &store, ch, kind, &t, text).is_err(), "{why} must be refused");
+        }
     }
 }
 
