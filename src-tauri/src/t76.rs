@@ -1,4 +1,5 @@
-//! T-76 test harness: debug builds on Linux only, and only when `UNI_T76_DIR` is set.
+//! T-76 test harness: debug builds on Linux and macOS only, and only when `UNI_T76_DIR` is set. Neither is ever
+//! released as a debug build (the Mac release is `tauri build` in release mode, `.github/workflows/mac-build.yml`).
 //! It swaps the default window for one that runs a script file (`UNI_T76_INIT`) before the page's own scripts,
 //! and gives that script one command (`t76_write`) to put its results in files under `UNI_T76_DIR`.
 //! A release build contains none of this.

@@ -947,7 +947,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Creation and clipboard notices.
   const [toast, setToast] = useState<string | null>(null);
   useEffect(() => onCopied(setToast), []);
-  useEffect(() => (platformName(currentUserAgent()) === "linux" ? watchLostIpc(setToast) : undefined), []);
+  useEffect(() => (["linux", "mac"].includes(platformName(currentUserAgent())) ? watchLostIpc(setToast) : undefined), []);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 6000);

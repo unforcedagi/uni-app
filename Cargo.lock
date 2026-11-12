@@ -7571,6 +7571,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-local-authentication",
+ "objc2-web-kit",
  "qrcode",
  "reqwest",
  "semver",

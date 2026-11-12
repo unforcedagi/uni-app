@@ -1,5 +1,5 @@
-// T-77b P3-1: on Linux the app deletes webkit's `ipc` script message handler so sealed frames cannot post to it
-// (src-tauri `close_ipc_handler`). If one `ipc://` fetch ever fails, Tauri falls back to that handler and throws
+// T-77b P3-1, T-335: on Linux and macOS the app deletes webkit's `ipc` script message handler so sealed frames cannot post to it
+// (src-tauri `seal_webview`). If one `ipc://` fetch ever fails, Tauri falls back to that handler and throws
 // this TypeError, and invokes stay dead until restart. Say so instead of failing silently.
 export const IPC_LOST_MESSAGE = "Uni lost its connection to the app core. Restart Uni.";
 
@@ -8,7 +8,7 @@ export function isLostIpcError(e: unknown): boolean {
   return /messageHandlers/.test(text) && /\bipc\b/.test(text) && /\b(undefined|null)\b/.test(text);
 }
 
-/** Linux only. Calls `onLost` once on the first such unhandled error or rejection. Returns an unsubscribe. */
+/** Linux and macOS (the platforms without the handler). Calls `onLost` once on the first such unhandled error or rejection. Returns an unsubscribe. */
 export function watchLostIpc(onLost: (message: string) => void): () => void {
   let told = false;
   const tell = (e: unknown) => { if (!told && isLostIpcError(e)) { told = true; onLost(IPC_LOST_MESSAGE); } };
