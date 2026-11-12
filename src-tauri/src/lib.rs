@@ -3159,24 +3159,29 @@ fn seal_webview(window: &tauri::WebviewWindow) {
 /// The wry and Tauri versions in this build, part of the stored sandbox self-test pass key so a dependency bump
 /// (which could move the ipc handler) forces a re-run. wry's version comes from `Cargo.lock` in build.rs. On macOS it
 /// adds the system WebKit's version: WKWebView's user agent is frozen, so it would not change when a macOS or Safari
-/// update changes WebKit (and could drop the private preference `seal_webview` sets).
+/// update changes WebKit (and could drop the private preference `seal_webview` sets). When that version can't be read
+/// it returns "", which the frontend reads as no runtime, so the gate stays closed (`useWebviewRuntime`). The
+/// signature stays `-> String`: it is part of the shell API the OTA screens bundle is matched against.
 #[tauri::command]
 fn webview_runtime() -> String {
     let runtime = format!("wry {} tauri {}", env!("UNI_WRY_VERSION"), tauri::VERSION);
     #[cfg(target_os = "macos")]
-    let runtime = format!("{runtime} webkit {}", webkit_version());
+    let runtime = match webkit_version() {
+        Some(webkit) => format!("{runtime} webkit {webkit}"),
+        None => String::new(),
+    };
     runtime
 }
 
-/// The system WebKit framework's build version (`CFBundleVersion`), or `unknown`.
+/// The system WebKit framework's build version (`CFBundleVersion`).
 #[cfg(target_os = "macos")]
-fn webkit_version() -> String {
+fn webkit_version() -> Option<String> {
     use objc2_foundation::{ns_string, NSBundle, NSString};
     NSBundle::bundleWithIdentifier(ns_string!("com.apple.WebKit"))
         .and_then(|b| b.objectForInfoDictionaryKey(ns_string!("CFBundleVersion")))
         .and_then(|v| v.downcast::<NSString>().ok())
         .map(|v| v.to_string())
-        .unwrap_or_else(|| "unknown".into())
+        .filter(|v| !v.is_empty())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

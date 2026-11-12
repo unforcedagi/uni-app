@@ -2,8 +2,8 @@
 // platform's webview is proven by hand; until then a platform is allowed only
 // by a stored in-app sandbox self-test pass for this platform AND this app
 // version AND webview user agent (Settings → Developer → Applets → Run sandbox self-test).
-// A failed re-run clears the pass; a webview upgrade changes the user agent and
-// so forces a re-test.
+// A failed re-run clears the pass; a webview upgrade forces a re-test because the pass is also keyed on the
+// webview runtime (`webview_runtime`: wry/Tauri versions, and on macOS, where the user agent is frozen, WebKit's).
 export const LIVE_AREA_PLATFORMS: readonly string[] = [];
 export const SELFTEST_KEY = "uni.areaApps.selftest.v1";
 

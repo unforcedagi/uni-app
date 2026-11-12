@@ -49,8 +49,9 @@ const failures = [
   [!(r.checks.length > 0 && r.checks.every((c) => c.ok) && /pass/.test(r.status)), "a self-test check failed"],
   [has("frame-ipc.txt"), "a sandboxed frame wrote through the ipc handler"],
   [[exp.ipcFromFrame, exp.ipcFromFrameForgedKey].some((x) => !x || x.present !== false), "a sandboxed frame found webkit.messageHandlers.ipc"],
-  [![0, 1, 2].every((d) => levels.some((l) => l.depth === d)), "a nested frame level did not report"],
-  [levels.some((l) => l.rtc !== "undefined" || l.webkitRtc !== "undefined" || l.ipc !== false), "a nested frame has WebRTC or ipc"],
+  // Required: srcdoc at depths 0 and 1, about:blank at 1 and 2. A depth-2 srcdoc is checked when it loads (older WebKit refuses it).
+  [![[0, "srcdoc"], [1, "srcdoc"], [1, "about:blank"], [2, "about:blank"]].every(([d, how]) => levels.some((l) => l.depth === d && l.how === how)), "a nested frame level did not report"],
+  [levels.some((l) => !l.unreachable && (l.err || l.rtc !== "undefined" || l.webkitRtc !== "undefined" || l.ipc !== false)), "a nested frame has WebRTC or ipc"],
 ].filter(([bad]) => bad).map(([, why]) => why);
 for (const f of failures) console.log("FAIL:", f);
 process.exit(failures.length ? 1 : 0);

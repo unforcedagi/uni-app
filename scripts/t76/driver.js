@@ -89,14 +89,17 @@
       const ipcPost = (key) => `<script>var r = { t76: 1 }; try { var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc; r.present = !!h; if (h) { var m = { cmd: 't76_write', callback: 1, error: 2, payload: { name: 'frame-ipc.txt', contents: 'from a sandboxed frame' }, options: { headers: {} } }; ${key ? "m.__TAURI_INVOKE_KEY__ = 'forged-key-0000000000';" : ''} h.postMessage(JSON.stringify(m)); r.posted = true; } } catch (e) { r.err = String(e); } r.windowIpc = typeof window.ipc; parent.postMessage(r, '*');<\/script>`;
       const sb = (srcdoc, ms = 3500) => new Promise((res) => { const f = document.createElement('iframe'); f.setAttribute('sandbox', 'allow-scripts'); const h = (e) => { if (e.source === f.contentWindow && e.data && e.data.t76) { clearTimeout(t); removeEventListener('message', h); f.remove(); res(e.data); } }; addEventListener('message', h); const t = setTimeout(() => { removeEventListener('message', h); f.remove(); res('no report'); }, ms); f.srcdoc = srcdoc; document.body.appendChild(f); });
       const exp = { ipcFromFrame: await sb(ipcPost(false)), ipcFromFrameForgedKey: await sb(ipcPost(true)) };
-      // Fresh realms down to a grandchild (frame > child > grandchild), as an app would make them to get globals back.
-      // Every level reports what it sees and relays what its children report; the frame collects for 5 s, so a silent
-      // level shows as a missing depth rather than as no report at all.
+      // Fresh realms an app can make to get globals back: a srcdoc child (frame > child > grandchild), which runs its own
+      // script, and at every level an about:blank child, whose globals its creator would read directly if it could
+      // (in a sandboxed frame it gets its own opaque origin, so that read is a SecurityError: `unreachable`).
+      // Every level reports itself and relays what its children report; the frame collects for 5 s, so a silent level
+      // shows as missing. WebKit before e62c8b61b1 (2026-01) refuses a third nested srcdoc, so depth 2 srcdoc may be absent.
       const js = (v) => JSON.stringify(v).replace(/<\//g, '<\\/');
-      const level = (depth, max) => `<!doctype html><body><script>var me = { kid: 1, depth: ${depth}, rtc: typeof RTCPeerConnection, webkitRtc: typeof webkitRTCPeerConnection, ipc: !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) };`
+      const level = (depth, max) => `<!doctype html><body><script>function probe(w) { try { return { rtc: typeof w.RTCPeerConnection, webkitRtc: typeof w.webkitRTCPeerConnection, ipc: !!(w.webkit && w.webkit.messageHandlers && w.webkit.messageHandlers.ipc) }; } catch (e) { return e && e.name === 'SecurityError' ? { unreachable: true } : { err: String(e) }; } }`
+        + `var me = Object.assign({ kid: 1, depth: ${depth}, how: 'srcdoc' }, probe(window)); var b = document.createElement('iframe'); document.body.appendChild(b); var blank = Object.assign({ kid: 1, depth: ${depth + 1}, how: 'about:blank' }, probe(b.contentWindow));`
         + (depth === 0
-          ? `var got = [me]; addEventListener('message', function (e) { if (e.data && e.data.kid) got.push(e.data); }); setTimeout(function () { parent.postMessage({ t76: 1, levels: got }, '*'); }, 5000);`
-          : `parent.postMessage(me, '*'); addEventListener('message', function (e) { if (e.data && e.data.kid) parent.postMessage(e.data, '*'); });`)
+          ? `var got = [me, blank]; addEventListener('message', function (e) { if (e.data && e.data.kid) got.push(e.data); }); setTimeout(function () { parent.postMessage({ t76: 1, levels: got }, '*'); }, 5000);`
+          : `parent.postMessage(me, '*'); parent.postMessage(blank, '*'); addEventListener('message', function (e) { if (e.data && e.data.kid) parent.postMessage(e.data, '*'); });`)
         + (depth < max ? `var f = document.createElement('iframe'); f.srcdoc = ${js(level(depth + 1, max))}; document.body.appendChild(f);` : '')
         + `<\/script></body>`;
       exp.nested = await sb(level(0, 2), 9000);
