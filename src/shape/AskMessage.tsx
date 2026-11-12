@@ -69,8 +69,10 @@ export function CardLine({ ask, state, children }: { ask: Ask; state: CardState 
 function AskBody({ ask, onOpen }: { ask: Ask; onOpen: (ask: Ask) => void }) {
   const id = useId(), mouse = useRef(false), wait = useRef(0);
   useEffect(() => () => window.clearTimeout(wait.current), []);
-  const picked = () => window.getSelection()?.isCollapsed === false;
-  return <div className="sh-ask-body" onPointerDown={(e) => { mouse.current = e.pointerType === "mouse"; }} onClick={(e) => {
+  const body = useRef<HTMLDivElement>(null);
+  // words selected in this ask (a selection elsewhere doesn't stop a tap here)
+  const picked = () => { const sel = window.getSelection(); return !!sel && !sel.isCollapsed && !!body.current && sel.containsNode(body.current, true); };
+  return <div className="sh-ask-body" ref={body} onPointerDown={(e) => { mouse.current = e.pointerType === "mouse"; }} onClick={(e) => {
     window.clearTimeout(wait.current);
     if (e.detail > 1 || picked()) return;
     if (!mouse.current) { onOpen(ask); return; }

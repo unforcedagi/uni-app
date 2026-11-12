@@ -69,9 +69,9 @@
 .msg-actions:not(.always) .act-up .act-label { display: inline; }
 @media (hover: none) {
   /* touch: the latest reply's row is there, and a message's row shows under words a finger selected (T-335 copy); More in it opens the
-     sheet, as a long press beside the words does. The name and time line is that handle: holding it opens the sheet, never selects it. */
+     sheet, as a long press beside the words does. The name and time line (and the reactions) is that handle: holding it opens the sheet, never selects it. */
   .msg-actions:not(.always) { display: none; }
-  .message .message-meta, .message .message-avatar, .message .gutter-time { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .message .message-meta, .message .message-avatar, .message .gutter-time, .message .reactions { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   .msg-actions.always .act { min-width: 44px; height: 44px; }
   .msg-actions.always .act-label { display: none; }
   .msg-actions.always .act-up .act-label { display: inline; }

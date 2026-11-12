@@ -48,7 +48,8 @@ export const ICONS = {
 export type RowMaker<M> = { current: (m: M) => { actions: Action[]; tail?: ReactNode } };
 /**
  * A message's row, memoised: a live event or a key in a long room redraws none of them. It is drawn again only when what it shows changes:
- * the message itself (its reactions), whether it is the latest reply (always shown, with Try again), or whether it can be edited now.
+ * the message itself (its reactions), whether it is shown (`always`: the latest reply, or words a finger selected in it, so the room's
+ * timeline memo depends on the selected message too), whether it offers Try again, or whether it can be edited now.
  */
 export const MessageActions = memo(function MessageActions<M>({ m, make, always }: { m: M; make: RowMaker<M>; always: boolean; retry: boolean; editable: boolean }) {
   const { actions, tail } = make.current(m);
@@ -61,7 +62,7 @@ export const MessageActions = memo(function MessageActions<M>({ m, make, always 
 export function ActionRow({ actions, always, children }: { actions: Action[]; always: boolean; children?: ReactNode }) {
   // a press on the row doesn't clear a selection in the message (T-335 copy: the row shows under selected words, and its buttons
   // would otherwise take the selection, and the row with it, away before the tap lands)
-  return <div className={`msg-actions${always ? " always" : ""}`} role="group" aria-label="Message actions" onPointerDown={(e) => e.preventDefault()}>
+  return <div className={`msg-actions${always ? " always" : ""}`} role="group" aria-label="Message actions" onPointerDown={(e) => { if (e.pointerType !== "mouse") e.preventDefault(); }}>
     {actions.map((a) => <button key={a.id} type="button" className={`act act-${a.id}`} aria-label={a.aria ?? a.label} title={a.aria ?? a.label} aria-pressed={a.pressed} onClick={a.run}>
       {a.icon}<span className="act-label">{a.label}</span></button>)}
     {children}
@@ -122,7 +123,9 @@ export function onWords(x: number, y: number, slop = 2): boolean {
   // up and down, the gap between two lines belongs to them (the system's long press picks the nearest word there too)
   for (const at of [offset - 1, offset]) {
     if (at < 0 || at >= text.length || /\s/.test(text[at])) continue;
-    r.setStart(node, at); r.setEnd(node, at + 1);
+    // a whole character: an emoji is two code units
+    const lo = /[\uDC00-\uDFFF]/.test(text[at]) && at > 0 ? at - 1 : at, hi = /[\uD800-\uDBFF]/.test(text[lo]) ? lo + 2 : lo + 1;
+    r.setStart(node, lo); r.setEnd(node, Math.min(hi, text.length));
     for (const b of r.getClientRects()) {
       const dy = Math.max(slop, Number.isFinite(line) ? (line - b.height) / 2 + 1 : 0);
       if (x >= b.left - slop && x <= b.right + slop && y >= b.top - dy && y <= b.bottom + dy) return true;
@@ -138,18 +141,22 @@ export function onWords(x: number, y: number, slop = 2): boolean {
 export function useSelectedMessage(): string | null {
   const [ref, setRef] = useState<string | null>(null);
   useEffect(() => {
-    let touch = false, gone = 0;
+    let touch = false, gone = 0, cur: string | null = null;
+    const set = (v: string | null) => { cur = v; setRef(v); };
     const down = (e: PointerEvent) => { touch = e.pointerType === "touch" || e.pointerType === "pen"; };
     const art = (n: Node | null) => (n instanceof Element ? n : n?.parentElement)?.closest<HTMLElement>(".message-list article.message[data-ref]") ?? null;
     const changed = () => {
       const sel = window.getSelection();
       window.clearTimeout(gone);
       // the row goes a moment after the selection does: a tap on one of its buttons can end the selection before its click lands
-      if (!sel || sel.isCollapsed) { gone = window.setTimeout(() => { if (window.getSelection()?.isCollapsed !== false) setRef(null); }, 400); return; }
+      if (!sel || sel.isCollapsed) {
+        if (cur !== null) gone = window.setTimeout(() => { if (window.getSelection()?.isCollapsed !== false) set(null); }, 400);
+        return; // (a caret moving as someone types: nothing to do)
+      }
       if (!touch) return;
       // the message the selection began in: a handle dragged on into the next message keeps that row (no row going, no page jumping)
       const a = art(sel.anchorNode);
-      setRef(a && !a.classList.contains("outgoing") ? a.dataset.ref! : null);
+      set(a && !a.classList.contains("outgoing") ? a.dataset.ref! : null);
     };
     document.addEventListener("pointerdown", down, { capture: true, passive: true });
     document.addEventListener("selectionchange", changed);
