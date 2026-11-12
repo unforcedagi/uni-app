@@ -33,6 +33,9 @@ export type ShapeOpts = {
   /** T-335 cards expand: more cards in Riverbend (a production card an ask points at, a long plain one, an expired one, one the broker ended
    *  with an ask still pointing at it). */ cards?: boolean;
   /** T-335 asks in tune: T-610 as uni-tasks now writes it: folded into its live card (needs_aaron false, "on its card"), off his list. */ folded?: boolean;
+  /** T-335 one ask: room asks as real signed events (made by the vendored library in the spec, with made-up keys). `me` and `uni` replace
+   *  the world's identity and Uni's key so the signatures check; each event is a message in its room; the page's answers are signed by
+   *  `window.__signAsMe` (the spec exposes it) and kept across a reload. */ asks?: { me: string; uni: string; events: unknown[] };
 };
 
 /** T-335 cards expand: the extra cards' message ids (card event ids are hex; an ask names one by its first 12 or more). */
@@ -87,6 +90,11 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
         msg(CARD.prod, ROOM.river, 'Uni', 20 * min, fence('Uni asks to deploy the import tool.')));
       river[river.length - 5].edited = true;   // the broker's edit: one line in the card's place, no fence
     }
+    // T-335 one ask: each room ask (and any answer the spec signed ahead) is a message in its room
+    const kept = sessionStorage.getItem('__askEvents');
+    w.__askEvents = kept ? JSON.parse(kept) : (o.asks?.events ?? []);
+    const asMsg = (ev: any) => ({ ...msg(ev.id, ev.tags.find((t: string[]) => t[0] === 'h')[1], ev.pubkey === ME ? 'me' : 'Uni', nowS - ev.created_at, ev.content), ts: ev.created_at });
+    for (const ev of w.__askEvents) if (ev.kind === 9) { const m = asMsg(ev); (msgs[m.channel] ??= []).push(m); msgs[m.channel].sort((a: any, b: any) => a.ts - b.ts); }
     const NAMES: Record<string, string> = { [ROOM.uni]: 'Uni', [ROOM.river]: 'Riverbend Commons', [ROOM.garden]: 'Garden co-op site', [ROOM.studio]: 'Studio', [ROOM.teach]: 'Teaching: Design 2',
       [ROOM.post]: 'To Post', [ROOM.house]: 'House', [ROOM.arcade]: 'Arcade night', [ROOM.quiet]: 'sanctum', [ROOM.barn]: 'old-barn', [ROOM.family]: 'Family table' };
     const UNREAD: Record<string, number> = { [ROOM.river]: 2, [ROOM.teach]: 1 };
@@ -227,6 +235,17 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
           case 'secret_requesters': return [];
           case 'unlock_grace': return null;
           case 'sealed_waiting': return waiting();
+          case 'ask_events': return JSON.parse(JSON.stringify(w.__askEvents.filter((e: any) => e.created_at >= args.since)));
+          case 'ask_policy': return { askers: [UNI], owner: [ME] };
+          case 'post_answer': {
+            if (w.__postFails > 0) { w.__postFails--; throw 'relay unreachable: connection refused'; }
+            const ev = await w.__signAsMe(args.template);
+            w.__askEvents.push(ev);
+            sessionStorage.setItem('__askEvents', JSON.stringify(w.__askEvents));
+            const m = asMsg(ev);
+            (msgs[args.channel] ??= []).push(m);
+            return m;
+          }
           case 'sealed_card': return args.reference === 'rb-card' ? JSON.parse(JSON.stringify(card)) : o.cards && cards[args.reference] ? JSON.parse(JSON.stringify(cards[args.reference])) : null;
           case 'sealed_answer': {
             const t = Math.floor(Date.now() / 1000);
@@ -304,7 +323,7 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
     // the mail double (when booted) installs its own; this world keeps the page's Tauri and hands it only the mail commands
     Object.defineProperty(w, '__TAURI_INTERNALS__', { configurable: true, get: () => mine, set: (v: any) => { mailInvoke = v?.invoke ?? null; } });
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
-  }, { ME, UNI, ROOM, o, USAGE, PLOT_NOTE, CARD });
+  }, { ME: o.asks?.me ?? ME, UNI: o.asks?.uni ?? UNI, ROOM, o, USAGE, PLOT_NOTE, CARD });
   if (o.mail) await bootMail(page, 'ok', { held: true });
   else await page.goto('/');
 }
