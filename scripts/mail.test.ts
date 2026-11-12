@@ -71,7 +71,7 @@ assert.deepEqual(tabs({ ...one, accounts: [{ ...one.accounts[0], who: "uni" }] }
 // T-335: quoted history folds under what a reply says
 assert.deepEqual(splitQuoted("Monday.\n\nOn Sun, Oct 18, Mara Quill wrote:\n> Which day?\n> M"), { body: "Monday.", quoted: "On Sun, Oct 18, Mara Quill wrote:\n> Which day?\n> M" });
 assert.deepEqual(splitQuoted("Yes.\n\n> earlier\n>\n> more\n"), { body: "Yes.", quoted: "> earlier\n>\n> more" }, "a closing run of > lines");
-assert.equal(splitQuoted("> a quote\nthen my answer").quoted, null, "a quote with an answer under it stays whole");
+assert.equal(splitQuoted("Hi,\n> which day?\nMonday.\n> and the jars?\nYes.").quoted, null, "an answer written between quoted lines stays whole");
 assert.equal(splitQuoted("> only a quote").quoted, null, "nothing above the quote: nothing folds");
 assert.equal(splitQuoted("Plain text, no quote.").quoted, null);
 assert.equal(splitQuoted("Hi\n-----Original Message-----\nFrom: x").body, "Hi");
