@@ -264,3 +264,4 @@ strong.mail-msg-name { cursor: default; }
 .mail-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .mail-card.mail-card-draft { border: var(--g-hair) dashed var(--g-ink-3); background: var(--th-paper); }
 .mail-list-note { margin: 6px 12px 0; padding: 6px 10px; border: var(--g-hair) dashed var(--g-ink-3); border-radius: 12px; color: var(--text); }
+.mail-list-hint { padding: 6px 16px 2px; font-size: 12.5px; }

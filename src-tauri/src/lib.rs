@@ -2185,9 +2185,11 @@ async fn mail_overview(app: tauri::AppHandle) -> Result<uni_core::mail::Overview
 }
 
 /// A page of threads from one or more accounts, merged newest first; `text` searches.
+/// `limit`: fewer rows than a page (T-335: the Later tab's count asks for one row and reads the total).
 #[tauri::command]
-async fn mail_threads(app: tauri::AppHandle, sources: Vec<uni_core::mail::Source>, text: Option<String>) -> Result<uni_core::mail::ThreadPage, MailError> {
-    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.threads(&sources, text.as_deref(), uni_core::mail::PAGE_SIZE))).await
+async fn mail_threads(app: tauri::AppHandle, sources: Vec<uni_core::mail::Source>, text: Option<String>, limit: Option<u64>) -> Result<uni_core::mail::ThreadPage, MailError> {
+    let limit = limit.unwrap_or(uni_core::mail::PAGE_SIZE).min(uni_core::mail::PAGE_SIZE);
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.threads(&sources, text.as_deref(), limit))).await
 }
 
 /// A thread to read, oldest first: plain text, sanitized HTML, attachments. `Email/get` only: nothing is marked read.

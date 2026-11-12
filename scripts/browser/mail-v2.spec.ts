@@ -191,6 +191,42 @@ test('a thread another client flagged in part is in Later, not the Inbox, until 
   await page.evaluate(() => { const w = window as any; w.__msgs.push({ ...w.__msgs.find((m: any) => m.id === 'a3'), id: 'a12', flagged: false, unread: true, received_at: '2026-10-19T12:00:00Z', text: 'Also: bring gloves.' }); });
   await tab(page, 'Inbox').click();
   await expect(rows(page).filter({ hasText: 'garden week' })).toHaveAccessibleName(/^Unread\. Later\./);
+  // reading it takes it out of Later, so it stays in the Inbox once read
+  await rows(page).filter({ hasText: 'garden week' }).click();
+  await expect.poll(async () => (await calls(page, 'mail_flag')).at(-1)).toMatchObject({ accountId: 'A', flagged: false, emailIds: ['a1'] });
+  await back(page);
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await expect(rows(page).filter({ hasText: 'garden week' })).toHaveCount(1);
+  await expect(tab(page, 'Later')).toHaveAccessibleName('Later');
+});
+
+test('unread messages stay open once opening the thread marks them read', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await page.evaluate(() => { const w = window as any; w.__msgs.push({ ...w.__msgs.find((m: any) => m.id === 'a3'), id: 'a12', received_at: '2026-10-19T12:00:00Z', text: 'Also: bring gloves.' }); });
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await rows(page).filter({ hasText: 'garden week' }).click();
+  await expect.poll(async () => (await calls(page, 'mail_mark_seen')).length).toBe(1);
+  const t = thread(page, 'Planning the garden week');
+  await expect(t.locator('.mail-msg[data-folded="false"]')).toHaveCount(2);
+  await expect(t.getByText('which day should we start the beds')).toBeVisible();
+});
+
+test('Later from a search keeps the thread in the results; Later says what it holds and counts with one row', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  const box = mail(page).getByRole('searchbox', { name: 'Search mail' });
+  await box.fill('marmalade');
+  await expect(rows(page)).toHaveCount(1);
+  await rows(page).first().click();
+  await thread(page, 'Planning the garden week').getByRole('button', { name: 'Later' }).click();
+  await expect.poll(async () => (await calls(page, 'mail_flag')).length).toBe(1);
+  await back(page);
+  await expect(rows(page)).toHaveCount(1);
+  await box.fill('');
+  await tab(page, 'Later').click();
+  await expect(mail(page).getByText(/^Flagged mail: put off here, or flagged in another mail app/)).toBeVisible();
+  const counts = (await calls(page, 'mail_threads')).filter((c) => c.limit === 1);
+  expect(counts.length).toBeGreaterThan(0);
+  expect(counts[0].sources[0].flagged).toBe(true);
 });
 
 test('an archive that lands while taking it out of Later fails says so, and the archive stands', async ({ page }) => {

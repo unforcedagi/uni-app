@@ -12,7 +12,7 @@
 // sends and why it waits; Send it (bound to the fingerprint of what is shown) and Don't send each take one confirm,
 // never from Enter, and what happened stays shown.
 import { RefreshIcon } from "./Icons";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
 import Composer, { WhoTag, type ComposeStart, type ComposerSnapshot } from "./MailCompose";
 import { invoke } from "@tauri-apps/api/core";
 import { copyText } from "./clipboard";
@@ -113,7 +113,7 @@ function placeOf(m: MailMessage, acct: AccountBoxes): "junk" | "trash" | null {
 
 /** A plain body: what it says, then its quoted history folded behind one tap. */
 function PlainText({ text }: { text: string }) {
-  const { body, quoted } = splitQuoted(text);
+  const { body, quoted } = useMemo(() => splitQuoted(text), [text]);
   const [showQuoted, setShowQuoted] = useState(false);
   return <>{<PlainBody text={body} />}
     {quoted && <button type="button" className="note-quiet mail-quoted-toggle" aria-expanded={showQuoted} onClick={() => setShowQuoted(!showQuoted)}>{showQuoted ? "Hide quoted text" : "Show quoted text"}</button>}
@@ -236,8 +236,10 @@ function ThreadBody({ t, acct, overview, note, actions, composingHere }: { t: Ma
   const foot = footDrafts(t, acct);
   const last = conversation[conversation.length - 1];
   const [opened, setOpened] = useState<Set<string>>(() => new Set());
+  /** Unread when the thread was shown: open, and they stay open once it is marked read. */
+  const [unreadAtFirst] = useState<Set<string>>(() => new Set(conversation.filter((m) => m.unread && !m.draft).map((m) => m.id)));
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
-  const openByDefault = (m: MailMessage) => m.id === last?.id || (m.unread && !m.draft) || conversation.length <= 2;
+  const openByDefault = (m: MailMessage) => m.id === last?.id || unreadAtFirst.has(m.id) || (m.unread && !m.draft) || conversation.length <= 2;
   const isOpen = (m: MailMessage) => opened.has(m.id) || (openByDefault(m) && !closed.has(m.id));
   const toggle = (m: MailMessage) => () => {
     const now = isOpen(m);
@@ -414,6 +416,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   const [query, setQuery] = useState(remembered.query);
   /** The search the list reads now, for the typing pause's timer (set in an older render). */
   const queryRef = useRef(remembered.query);
+  const placeRef = useRef<Place>(remembered.place);
   const [typed, setTyped] = useState(remembered.query);
   const [files, setFiles] = useState(remembered.files);
   const [list, setList] = useState<List | null>(null);
@@ -454,6 +457,9 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   const composeSeq = useRef(remembered.compose?.key ?? 0);
   /** The thread just opened from the list: only that load marks it read (a Refresh or a reload doesn't undo Unread). */
   const markOnOpen = useRef<string | null>(null);
+  /** A Later thread that something new brought back to the Inbox, just opened from it: reading it takes it out of Later
+   *  (else, read, it would drop back out of the Inbox). */
+  const unlaterOnOpen = useRef<string | null>(null);
   /** The open thread and list now, for callbacks that finish later (an archive, a refresh). */
   const openRef = useRef<Open | null>(remembered.open);
   const listRef = useRef<List | null>(null);
@@ -507,7 +513,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     if (sources.length === 0) return;
     const seq = ++laterSeq.current;
     try {
-      const page = await invoke<ThreadPage>("mail_threads", { sources, text: null });
+      const page = await invoke<ThreadPage>("mail_threads", { sources, text: null, limit: 1 });
       if (seq === laterSeq.current && alive.current) setLaterCount(page.total ?? page.threads.length);
     } catch { /* the count is a nicety: a failure leaves the last one */ }
   }, []);
@@ -595,6 +601,18 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
           .then(() => { markShown(o, unreadIds, false); void loadOverview(); })
           .catch((e) => { if (seq === threadSeq.current) setActionProblem(`Couldn't mark it read: ${mailProblem(e).title}`); });
       }
+      const back = unlaterOnOpen.current === keyOf(o);
+      if (back) unlaterOnOpen.current = null;
+      const flaggedIds = t.messages.filter((m) => m.flagged).map((m) => m.id);
+      if (back && acct?.who === "owner" && can(acct, "flag") && flaggedIds.length > 0) {
+        void invoke("mail_flag", { accountId: t.account_id, emailIds: flaggedIds, flagged: false })
+          .then(() => {
+            setThread((cur) => (cur && cur.account_id === o.accountId && cur.thread_id === o.threadId ? { ...cur, messages: cur.messages.map((m) => (flaggedIds.includes(m.id) ? { ...m, flagged: false } : m)) } : cur));
+            setList((cur) => (cur ? { ...cur, threads: cur.threads.map((r) => (r.account_id === o.accountId && r.thread_id === o.threadId ? { ...r, flagged: false } : r)) } : cur));
+            setLaterCount((n) => Math.max(0, n - 1));
+          })
+          .catch((e) => { if (seq === threadSeq.current) setActionProblem(`Couldn't take it out of Later: ${mailProblem(e).title}`); });
+      }
       const got = await invoke<Record<string, string>>("mail_triage", { accountId: t.account_id, emailIds: t.messages.map((m) => m.id) }).catch(() => ({} as Record<string, string>));
       if (seq !== threadSeq.current) return;
       const latest = [...t.messages].reverse().find((m) => got[m.id]);
@@ -612,6 +630,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     // the overview's counts change on Refresh; the list reloads only when what it shows changes
   }, [listKey, loadList]);
   useEffect(() => { if (open) void loadThread(open); }, [open, loadThread]);
+  useEffect(() => { placeRef.current = place; }, [place]);
   useEffect(() => { remembered.place = place; remembered.query = query; remembered.files = files; remembered.open = open; openRef.current = open; }, [place, query, files, open]);
   useEffect(() => { listRef.current = list; }, [list]);
   // search as you type: a short pause after the last key, then the list reads it (Enter reads it at once)
@@ -642,11 +661,12 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   const pick = (p: Place) => { setListNote(null); closeThread(); setPlace(p); queryRef.current = ""; setQuery(""); setTyped(""); setFiles(false); setPane("list"); };
   const runSearch = (text: string) => { if (text !== queryRef.current) { closeThread(); queryRef.current = text; setQuery(text); setPane("list"); } };
   const toggleFiles = () => { closeThread(); setFiles(!files); setPane("list"); };
-  const openThread = (t: Pick<ThreadSummary, "account_id" | "thread_id">) => {
+  const openThread = (t: Pick<ThreadSummary, "account_id" | "thread_id"> & Partial<Pick<ThreadSummary, "flagged" | "fresh">>) => {
     // a message being written stays: it waits, with Resume (it comes back under its own thread)
     const c = composeRef.current;
     if (c && !c.hidden && c.thread !== `${t.account_id}/${t.thread_id}`) setCompose({ ...c, hidden: true });
     markOnOpen.current = `${t.account_id}/${t.thread_id}`;
+    unlaterOnOpen.current = placeRef.current === "inbox" && !queryRef.current && t.flagged && t.fresh ? `${t.account_id}/${t.thread_id}` : null;
     setOpenHeld(null);
     setOpen({ accountId: t.account_id, threadId: t.thread_id }); setPane("thread");
   };
@@ -749,7 +769,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     const reply = openDraft && footDraft ? () => openDraft(footDraft) : replyOwn;
     // Later is the flag on every message of the thread (so no older message keeps it in the Inbox); back clears it
     const laterIds = real.map((m) => m.id);
-    const leavesList = (on: boolean) => (on ? place === "inbox" : place === "later");
+    // the Inbox loses a thread put off, Later one brought back; a search's results keep it (it still matches)
+    const leavesList = (on: boolean) => !query && (on ? place === "inbox" : place === "later");
     return {
       busy,
       problem: actionProblem,
@@ -836,6 +857,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
             {senders.length > 0 && <button type="button" className="send mail-new" onClick={newMessage}>New</button>}
           </form>
           {!writesOffered(overview) && <p className="mail-note mail-readonly">{overview.login} · reading only</p>}
+          {place === "later" && !query && !files && <p className="mail-note mail-list-hint">Flagged mail: put off here, or flagged in another mail app. New mail on it brings it back to the Inbox.</p>}
           {(query || files) && <p className="mail-list-title" aria-live="polite"><strong>{title}</strong>{list?.total != null && <small> · {list.total} {list.total === 1 ? "thread" : "threads"}</small>}</p>}
           {compose?.hidden && <button type="button" className="mail-resume" onClick={resume}>✎ A message in progress · Resume</button>}
           {pending.length > 0 && !composing && <div className="mail-pending" role="status">

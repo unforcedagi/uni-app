@@ -87,8 +87,10 @@ export function ownAccount(o: Overview): AccountBoxes | undefined {
   return o.accounts.find((a) => a.who === "owner") ?? (o.accounts.length === 1 ? o.accounts[0] : undefined);
 }
 
+/** Uni's account, shared with yours (never your own: a one-account bridge's only account is yours). */
 export function uniAccount(o: Overview): AccountBoxes | undefined {
-  return o.accounts.find((a) => a.who === "uni");
+  const own = ownAccount(o);
+  return o.accounts.find((a) => a.who === "uni" && a !== own);
 }
 
 /** Whose mail a place reads: Uni's for Uni's tab and the held sends, yours for the rest. */
@@ -153,12 +155,27 @@ export function yourInboxUnread(o: Overview): number {
   return o.accounts.filter((a) => a.who === "owner").reduce((n, a) => n + (role(a, "inbox")?.unread ?? 0), 0);
 }
 
-/** A plain-text body and the quoted history under it ("On … wrote:" and the `>` lines after it, or a closing run of
- *  `>` lines), so a reply reads as what it says. Nothing is folded when there is nothing above the quote. */
+/** A plain-text body and the quoted history under it, so a reply reads as what it says: an "On … wrote:" line (or a
+ *  closing run of `>` lines) with nothing but quote after it, or an "Original/Forwarded Message" line and what follows.
+ *  An answer written between quoted lines keeps the whole body open, and nothing folds when nothing is above the quote.
+ *  One pass from the end: bodies can be a megabyte. */
 export function splitQuoted(text: string): { body: string; quoted: string | null } {
   const lines = text.split("\n");
-  let at = lines.findIndex((l, i) => /^\s*On\b.{0,200}\bwrote:\s*$/.test(l) || /^-{2,}\s*(Original|Forwarded) Message\s*-{2,}\s*$/i.test(l)
-    || (/^\s*>/.test(l) && lines.slice(i).every((x) => !x.trim() || /^\s*>/.test(x))));
+  const quote = (l: string) => /^\s*>/.test(l);
+  // the closing run of quoted (or blank) lines starts at `tail`
+  let tail = lines.length;
+  while (tail > 0 && (quote(lines[tail - 1]) || !lines[tail - 1].trim())) tail--;
+  let at = -1;
+  const marker = lines.findIndex((l) => /^-{2,}\s*(Original|Forwarded) Message\s*-{2,}\s*$/i.test(l));
+  if (marker > 0) at = marker;
+  else {
+    const wrote = tail - 1;
+    if (wrote > 0 && /^\s*On\b.{0,200}\bwrote:\s*$/.test(lines[wrote]) && lines.slice(wrote + 1).some(quote)) at = wrote;
+    else {
+      const first = lines.findIndex((l, i) => i >= tail && quote(l));
+      if (first > 0) at = first;
+    }
+  }
   if (at <= 0) return { body: text, quoted: null };
   const body = lines.slice(0, at).join("\n").replace(/\s+$/, "");
   if (!body.trim()) return { body: text, quoted: null };

@@ -66,7 +66,7 @@ assert.equal(placeTitle("drafts", two, "", true), "Drafts, with files");
 const one: Overview = { login: "test@example.com", multi: false, accounts: [two.accounts[0]] };
 assert.equal(placeValid("uni", one), false, "a place in an account that went is dropped");
 assert.equal(placeValid("inbox", one), true);
-assert.deepEqual(tabs({ ...one, accounts: [{ ...one.accounts[0], who: "uni" }] }).slice(0, 1), ["inbox:2"], "a one-account bridge's account is yours, whatever it is called");
+assert.deepEqual(tabs({ ...one, accounts: [{ ...one.accounts[0], who: "uni" }] }), ["inbox:2", "later:0", "drafts:0", "junk:4"], "a one-account bridge's account is yours, whatever it is called, and has no second tab");
 
 // T-335: quoted history folds under what a reply says
 assert.deepEqual(splitQuoted("Monday.\n\nOn Sun, Oct 18, Mara Quill wrote:\n> Which day?\n> M"), { body: "Monday.", quoted: "On Sun, Oct 18, Mara Quill wrote:\n> Which day?\n> M" });
@@ -75,6 +75,9 @@ assert.equal(splitQuoted("Hi,\n> which day?\nMonday.\n> and the jars?\nYes.").qu
 assert.equal(splitQuoted("> only a quote").quoted, null, "nothing above the quote: nothing folds");
 assert.equal(splitQuoted("Plain text, no quote.").quoted, null);
 assert.equal(splitQuoted("Hi\n-----Original Message-----\nFrom: x").body, "Hi");
+assert.equal(splitQuoted("Hi Robin,\n\nOn Sun, Oct 18, Robin wrote:\n> Which day?\nMonday.\n> And the jars?\nYes, two.").quoted, null, "answers between the quotes under an On … wrote: line stay open");
+assert.deepEqual(splitQuoted("Yes.\n\nOn Sun, Robin wrote:\n\n> a\n>\n> b\n"), { body: "Yes.", quoted: "On Sun, Robin wrote:\n\n> a\n>\n> b" }, "a blank line after On … wrote:");
+{ const big = "Short answer.\n\nOn Mon, X wrote:\n" + "> line of an old chain\n".repeat(40000); const t0 = Date.now(); assert.equal(splitQuoted(big).body, "Short answer."); assert.ok(Date.now() - t0 < 500, "a long chain splits in one pass"); }
 
 // T-335: one-line headers and the thread's people, from where you stand
 const me: Pick<Acct, "name" | "who"> = { name: "robin@example.com", who: "owner" };
