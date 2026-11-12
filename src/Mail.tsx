@@ -21,7 +21,7 @@ import { formatSize } from "./media";
 import { initials } from "./messages/messagesView";
 import {
   addressLine, can, canSendFrom, draftEditable, draftFields, readPending, sendOutcomeText, settled, withoutPending, writePending, mailDate, mailDateLong, mailProblem, mailSrcdoc, notVerified, replyFields,
-  senderLabel, subjectLabel, writesOffered, mailTabs, placeAccount, placeSources, placeTitle, placeValid, splitQuoted, threadPeople, toWords, footDrafts, replyDraft, uniAccount,
+  senderLabel, subjectLabel, writesOffered, mailTabs, placeAccount, placeSources, placeTitle, placeValid, splitQuoted, threadPeople, toWords, footDrafts, replyDraft, uniAccount, laterOffered,
   type AccountBoxes, type MailAttachment, type MailLink, type MailMessage, type MailProblem, type MailThread, type Overview, type Place,
   type PendingSend, type SendOutcome, type Source, type ThreadPage, type ThreadSummary,
   approvalOffered, approveOutcome, canApprove, declineOutcome, fileKind, heldFailure, heldShownWhole, type HeldOutcome, type Parked,
@@ -47,6 +47,11 @@ function openLink(url: string) {
 }
 
 const keyOf = (o: { accountId: string; threadId: string }) => `${o.accountId}/${o.threadId}`;
+
+/** A write on many messages, a hundred at a time: the bridge takes at most 100 ids a call (a long thread has more). */
+async function eachHundred(cmd: string, args: Record<string, unknown>, ids: string[]): Promise<void> {
+  for (let i = 0; i < ids.length; i += 100) await invoke(cmd, { ...args, emailIds: ids.slice(i, i + 100) });
+}
 
 /** A thread's subject as its heading says it: the first real message's, without "Re:". */
 function threadSubject(t: MailThread): string {
@@ -551,9 +556,14 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     try {
       const page = await invoke<ThreadPage>("mail_threads", { sources, text: text || null });
       if (seq !== listSeq.current) return;
-      setList(more
-        ? { key, total: page.total, next: page.next, more: page.more, threads: [...more.threads, ...page.threads.filter((t) => !more.threads.some((c) => c.account_id === t.account_id && c.thread_id === t.thread_id))] }
-        : { key, total: page.total, next: page.next, more: page.more, threads: page.threads });
+      setList((cur) => {
+        if (!more || !cur || cur.key !== key) return { key, total: page.total, next: page.next, more: page.more, threads: page.threads };
+        // merged into the list as it is now: a thread taken out while this page loaded stays out, and each account's
+        // next position moves by what was taken out meanwhile (the positions this page was asked with were older)
+        const moved = (acct: string) => (cur.next.find((x) => x.account_id === acct)?.position ?? 0) - (sources.find((x) => x.account_id === acct)?.position ?? 0);
+        const fresh = page.threads.filter((t) => !cur.threads.some((c) => c.account_id === t.account_id && c.thread_id === t.thread_id));
+        return { key, total: page.total, more: page.more, threads: [...cur.threads, ...fresh], next: page.next.map((x) => ({ ...x, position: Math.max(0, x.position + moved(x.account_id)) })) };
+      });
       setListProblem(null);
       void loadNotes(page.threads, key, gen);
     } catch (e) { if (seq === listSeq.current) setListProblem(mailProblem(e)); }
@@ -594,7 +604,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
       if (back) unlaterOnOpen.current = null;
       const markRead = () => {
         if (!(opened && acct?.who === "owner" && can(acct, "mark_seen") && unreadIds.length > 0)) return;
-        void invoke("mail_mark_seen", { accountId: t.account_id, emailIds: unreadIds, seen: true })
+        void eachHundred("mail_mark_seen", { accountId: t.account_id, seen: true }, unreadIds)
           .then(() => { markShown(o, unreadIds, false); void loadOverview(); })
           .catch((e) => { if (seq === threadSeq.current) setActionProblem(`Couldn't mark it read: ${mailProblem(e).title}`); });
       };
@@ -603,7 +613,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
       const flaggedIds = t.messages.filter((m) => m.flagged).map((m) => m.id);
       if (back && flaggedIds.length > 0) {
         if (acct?.who === "owner" && can(acct, "flag")) {
-          void invoke("mail_flag", { accountId: t.account_id, emailIds: flaggedIds, flagged: false })
+          void eachHundred("mail_flag", { accountId: t.account_id, flagged: false }, flaggedIds)
             .then(() => { showFlag(o, flaggedIds, false); moveLater(-1); markRead(); })
             .catch((e) => { if (seq === threadSeq.current) setActionProblem(`Couldn't take it out of Later: ${mailProblem(e).title}`); });
         }
@@ -664,7 +674,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     if (c && !c.hidden && c.thread !== `${t.account_id}/${t.thread_id}`) setCompose({ ...c, hidden: true });
     // opened because the one before it left the list: shown, not chosen, so it stays unread until you open it
     markOnOpen.current = auto ? null : `${t.account_id}/${t.thread_id}`;
-    unlaterOnOpen.current = !auto && placeRef.current === "inbox" && !queryRef.current && t.flagged && t.fresh ? `${t.account_id}/${t.thread_id}` : null;
+    unlaterOnOpen.current = !auto && placeRef.current === "inbox" && !queryRef.current && t.flagged && t.fresh && !!overviewRef.current && laterOffered(overviewRef.current)
+      ? `${t.account_id}/${t.thread_id}` : null;
     setOpenHeld(null);
     setOpen({ accountId: t.account_id, threadId: t.thread_id }); setPane("thread");
   };
@@ -718,14 +729,16 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   const senders = overview ? overview.accounts.filter(canSendFrom) : [];
   const newMessage = () => {
     // from the place's account, when it can send (yours, or Uni's on Uni's tab)
-    const here = overview ? placeAccount(place, overview) : undefined;
+    const here = overview && place !== "waiting" ? placeAccount(place, overview) : undefined;
     closeThread();
     startCompose({ kind: "new", from: here && canSendFrom(here) ? here.id : null }, null);
   };
 
   /** Take a thread out of the list it is in, and open the one below it (else the one above; else back to the list). */
-  const leaveThread = (o: Open) => {
+  const leaveThread = (o: Open, fromList: string) => {
     const same = (c: Open | null) => !!c && c.accountId === o.accountId && c.threadId === o.threadId;
+    // a write that lands after you moved to another list (a tab, a search) leaves that list alone
+    if (listRef.current?.key !== fromList) return;
     const rows = listRef.current?.threads ?? [];
     const at = rows.findIndex((r) => r.account_id === o.accountId && r.thread_id === o.threadId);
     const rest = rows.filter((_, i) => i !== at);
@@ -766,6 +779,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     const laterIds = real.map((m) => m.id);
     // the Inbox loses a thread put off, Later one brought back; a search's results keep it (it still matches)
     const leavesList = (on: boolean) => !query && (on ? place === "inbox" : place === "later");
+    /** The list these actions were offered in (a write that lands after you moved on leaves the new one alone). */
+    const fromList = listKey;
     return {
       busy,
       problem: actionProblem,
@@ -778,31 +793,32 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
         // drop out of the Inbox under you
         const unlater = flagged && own && place === "inbox" && !query && can(acct, "flag");
         void act("mark it read", async () => {
-          if (unlater) await invoke("mail_flag", { accountId: o.accountId, emailIds: flaggedIds, flagged: false });
-          await invoke("mail_mark_seen", { accountId: o.accountId, emailIds: ids, seen: true });
+          if (unlater) await eachHundred("mail_flag", { accountId: o.accountId, flagged: false }, flaggedIds);
+          await eachHundred("mail_mark_seen", { accountId: o.accountId, seen: true }, ids);
         }, () => { if (unlater) { showFlag(o, flaggedIds, false); moveLater(-1); } markShown(o, ids, false); void loadOverview(); });
       } : null,
       later: can(acct, "flag") && own && laterIds.length > 0 ? () => {
-        const on = !flagged, ids = on ? laterIds : flaggedIds;
+        // a Later thread new mail brought back to the Inbox: Later puts it off again (it is in the Inbox, so no "back")
+        const on = !flagged || (place === "inbox" && !query), ids = on ? laterIds : flaggedIds;
         // put off means seen: an unread thread out of the Inbox would leave a count with no row to clear it
         const unread = on && mark ? real.filter((m) => m.unread).map((m) => m.id) : [];
         void act(on ? "put it off for later" : "bring it back", async () => {
-          await invoke("mail_flag", { accountId: o.accountId, emailIds: ids, flagged: on });
-          if (unread.length > 0) await invoke("mail_mark_seen", { accountId: o.accountId, emailIds: unread, seen: true });
+          await eachHundred("mail_flag", { accountId: o.accountId, flagged: on }, ids);
+          if (unread.length > 0) await eachHundred("mail_mark_seen", { accountId: o.accountId, seen: true }, unread);
         }, () => {
-          showFlag(o, ids, on); moveLater(on ? 1 : -1);
+          showFlag(o, ids, on); if (on !== flagged) moveLater(on ? 1 : -1);
           if (unread.length > 0) { markShown(o, unread, false); void loadOverview(); }
-          if (leavesList(on)) leaveThread(o);
+          if (leavesList(on)) leaveThread(o, fromList);
         });
       } : null,
-      laterLabel: flagged ? (inInbox.length > 0 ? "Back to Inbox" : "Not later") : "Later",
-      archive: can(acct, "archive") && inInbox.length > 0 ? () => void act("archive it", () => invoke("mail_archive", { accountId: o.accountId, emailIds: inInbox }), () => {
+      laterLabel: flagged && !(place === "inbox" && !query) ? (inInbox.length > 0 ? "Back to Inbox" : "Not later") : "Later",
+      archive: can(acct, "archive") && inInbox.length > 0 ? () => void act("archive it", () => eachHundred("mail_archive", { accountId: o.accountId }, inInbox), () => {
         // it leaves the Inbox and Later (it is taken out of Later too); elsewhere (Sent, a search) it stays, filed
-        if (!query && (place === "inbox" || place === "later")) leaveThread(o);
+        if (!query && (place === "inbox" || place === "later")) leaveThread(o, fromList);
         else if (openRef.current && keyOf(openRef.current) === keyOf(o)) void loadThread(o);
         void loadOverview();
         // done with it: it leaves Later too (the archive stands if this fails, and the screen says so)
-        if (flagged && can(acct, "flag")) void invoke("mail_flag", { accountId: o.accountId, emailIds: flaggedIds, flagged: false })
+        if (flagged && can(acct, "flag")) void eachHundred("mail_flag", { accountId: o.accountId, flagged: false }, flaggedIds)
           .then(() => moveLater(-1))
           .catch((e) => { if (alive.current) setListNote(`Archived, but it is still in Later: ${mailProblem(e).title}`); });
       }) : null,

@@ -145,10 +145,14 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
               : { ...b, total: msgs.filter((m) => m.box === b.id).length, unread: msgs.filter((m) => m.box === b.id && m.unread && !m.draft).length }) }));
             return w.__mailMode === 'one_account' || w.__uniGone ? { login: 'robin@example.com', multi: w.__mailMode !== 'one_account', accounts: [live[0]] } : { login: 'robin@example.com', multi: true, accounts: live };
           }
-          case 'mail_threads': fail();
+          case 'mail_threads': {
+            fail();
+            // the server answers the query as it arrives; `__threadsDelay` holds the answer on its way back
+            const answer = threads(args.sources, args.text);
             if (w.__threadsDelay) await new Promise((r) => setTimeout(r, w.__threadsDelay));
             if (w.__uniGone && args.sources.some((s: any) => s.account_id === 'U')) throw { kind: 'server', message: 'accountNotFound' };
-            return threads(args.sources, args.text);
+            return answer;
+          }
           case 'mail_thread': {
             fail(); if (w.__threadFails) throw { kind: 'server', message: 'mail server: URLError' };
             const list = msgs.filter((m) => m.account === args.accountId && m.thread_id === args.threadId).sort((x, y) => x.received_at.localeCompare(y.received_at));

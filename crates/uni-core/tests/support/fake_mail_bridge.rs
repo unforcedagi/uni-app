@@ -429,7 +429,6 @@ fn pointer(v: &Value, parts: &[&str]) -> Option<Value> {
     pointer(next, rest)
 }
 
-/// Whether `e` contains `text` (case-insensitive) in its subject, addresses, preview, bodies or attachment names.
 /// Every `inMailbox` a filter names, at any depth (an unknown one is invalidArguments, as the server says).
 fn mailboxes_named(f: &Value, out: &mut Vec<String>) {
     if let Some(m) = f.get("inMailbox").and_then(Value::as_str) {
@@ -466,6 +465,7 @@ fn filter_matches(e: &Value, f: &Value, all: &[Value]) -> bool {
         && f.get("allInThreadHaveKeyword").and_then(Value::as_str).is_none_or(|k| thread.iter().all(|m| kw(m, k)))
 }
 
+/// Whether `e` contains `text` (case-insensitive) in its subject, addresses, preview, bodies or attachment names.
 fn matches_text(e: &Value, text: &str) -> bool {
     let t = text.to_lowercase();
     let mut hay = String::new();

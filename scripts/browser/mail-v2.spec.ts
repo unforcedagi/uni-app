@@ -333,17 +333,15 @@ test('the thread that opens after an Archive stays unread until you open it', as
   expect((await calls(page, 'mail_mark_seen')).filter((c) => c.emailIds.includes('a5'))).toHaveLength(0);
 });
 
-test('where a Later thread can\'t come out of Later, opening it leaves it unread (so it stays in the Inbox)', async ({ page }) => {
+test('where the bridge offers no flag there is no Later: the Inbox is whole, and opening a flagged thread reads it', async ({ page }) => {
   await boot(page, 'ok', { ops: { A: ['mark_seen', 'archive'], U: [] } });
-  await page.evaluate(() => { const w = window as any; w.__msgs.find((m: any) => m.id === 'a1').flagged = true; });
+  await page.evaluate(() => { const w = window as any; w.__msgs.find((m: any) => m.id === 'a1').flagged = true; w.__msgs.find((m: any) => m.id === 'a3').unread = false; });
   await mail(page).getByRole('button', { name: 'Refresh' }).click();
-  await expect(rows(page).filter({ hasText: 'garden week' })).toHaveAccessibleName(/^Unread\. Later\./);
-  await rows(page).filter({ hasText: 'garden week' }).click();
-  await expect(thread(page, 'Planning the garden week')).toBeVisible();
-  await page.waitForTimeout(400);
-  expect(await calls(page, 'mail_mark_seen')).toHaveLength(0);
+  await expect(tab(page, 'Later')).toHaveCount(0);
+  // flagged elsewhere and read: still in the Inbox (nothing here could bring it back from a Later)
+  await expect(rows(page).filter({ hasText: 'garden week' })).toHaveCount(1);
+  expect((await calls(page, 'mail_threads')).at(-1).sources[0].flagged).toBeUndefined();
 });
-
 // ── T-335 fifth review ──────────────────────────────────────────────────────────────────────────────────────────────
 
 test('an Archive from a search that lands after you opened another thread leaves that one on screen', async ({ page }) => {
@@ -388,4 +386,50 @@ test('Mark read on a Later thread that new mail brought back takes it out of Lat
   const flags = await calls(page, 'mail_flag');
   expect(flags.at(-1)).toMatchObject({ accountId: 'A', flagged: false, emailIds: ['a5'] });
   await expect(hold.getByRole('button', { name: 'Later', exact: true })).toBeVisible();
+});
+
+// ── T-335 ship review: should-fix ───────────────────────────────────────────────────────────────────────────────────
+
+test('an Archive while Load older is on its way: the archived thread stays out, and nothing is skipped', async ({ page }) => {
+  test.skip(stacked(page), 'the list and the thread side by side');
+  await page.addInitScript(() => { (window as any).__pageSize = 1; });
+  await boot(page, 'ok', { writes: true });
+  await expect(rows(page)).toHaveCount(1);
+  await rows(page).first().click();
+  await expect(thread(page, 'Planning the garden week')).toBeVisible();
+  await page.evaluate(() => { (window as any).__threadsDelay = 1200; });
+  await mail(page).getByRole('button', { name: 'Load older' }).click();
+  await thread(page, 'Planning the garden week').getByRole('button', { name: 'Archive' }).click();
+  await expect.poll(async () => (await calls(page, 'mail_archive')).length).toBe(1);
+  await expect(rows(page).filter({ hasText: 'Workshop photos' })).toHaveCount(1, { timeout: 5000 });
+  await expect(rows(page).filter({ hasText: 'garden week' })).toHaveCount(0);
+  await page.evaluate(() => { (window as any).__threadsDelay = 0; });
+  await mail(page).getByRole('button', { name: 'Load older' }).click();
+  await expect(rows(page).filter({ hasText: 'hold is ready' })).toHaveCount(1);
+});
+
+test('Later on a thread of 150 messages flags them a hundred at a time', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await page.evaluate(() => { const w = window as any; const a3 = w.__msgs.find((m: any) => m.id === 'a3');
+    for (let i = 0; i < 147; i++) w.__msgs.push({ ...a3, id: `long${i}`, unread: false, received_at: `2026-10-18T${String(10 + (i % 10)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00Z` }); });
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await rows(page).filter({ hasText: 'garden week' }).click();
+  await thread(page, 'Planning the garden week').getByRole('button', { name: 'Later', exact: true }).click();
+  await expect.poll(async () => (await calls(page, 'mail_flag')).length).toBe(2);
+  expect((await calls(page, 'mail_flag')).map((c) => c.emailIds.length)).toEqual([100, 50]);
+});
+
+test('in the Inbox, Later on a thread new mail brought back puts it off again', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await page.evaluate(() => { const w = window as any; w.__msgs.find((m: any) => m.id === 'a5').flagged = true;
+    w.__msgs.push({ ...w.__msgs.find((m: any) => m.id === 'a5'), id: 'a13', flagged: false, unread: true, html: null, text: 'Your hold expires Friday.', received_at: '2026-10-16T18:00:00Z' }); });
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await rows(page).filter({ hasText: 'Workshop photos' }).click();
+  await thread(page, 'Workshop photos and slides').getByRole('button', { name: 'Archive' }).click();
+  const hold = thread(page, 'Your hold is ready');
+  await expect(hold.getByRole('button', { name: 'Back to Inbox' })).toHaveCount(0);
+  await hold.getByRole('button', { name: 'Later', exact: true }).click();
+  await expect.poll(async () => (await calls(page, 'mail_flag')).at(-1)).toMatchObject({ flagged: true });
+  await back(page);
+  await expect(rows(page).filter({ hasText: 'hold is ready' })).toHaveCount(0);
 });

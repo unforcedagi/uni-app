@@ -97,9 +97,6 @@ export function placeAccount(p: Place, o: Overview): AccountBoxes | undefined {
 
 const BOX: Partial<Record<Place, string>> = { inbox: "inbox", drafts: "drafts", sent: "sent", archive: "archive", junk: "junk", uni: "inbox" };
 
-/** The tabs this overview has: a place shows when its account and mailbox exist (Waiting where you decide Uni's held
- *  sends). Counts: unread in Inbox and Junk, drafts in Drafts, `later` and `waiting` as given; Uni's mail has none
- *  (reading it is Uni's job). */
 const LABEL: Record<Place, string> = { inbox: "Inbox", later: "Later", waiting: "Waiting", drafts: "Drafts", sent: "Sent", archive: "Archive", junk: "Junk", uni: "Uni's mail" };
 
 /** Later is the flag, so it exists where the bridge lets you set the flag on your mail. Without it the Inbox is the
@@ -108,6 +105,9 @@ export function laterOffered(o: Overview): boolean {
   return can(ownAccount(o), "flag");
 }
 
+/** The tabs this overview has: a place shows when its account and mailbox exist (Waiting where you decide Uni's held
+ *  sends). Counts: unread in Inbox and Junk, drafts in Drafts, `later` and `waiting` as given; Uni's mail has none
+ *  (reading it is Uni's job). */
 export function mailTabs(o: Overview, counts: { later: number; waiting: number }): PlaceTab[] {
   const uni = uniAccount(o);
   const label = LABEL;
