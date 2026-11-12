@@ -41,7 +41,7 @@ import { DeleteButton, InlineEditor } from "./InlineEditor";
 import { lastOwnMessage } from "./ownMessages";
 import { workingOn } from "./working";
 import { CONTINUE, commandOf, firstUnread, isStopReply, livePing, openAsk, quickReplies, receiptLine, RETRY, STOP, workReceipt, type Receipt, type TurnPhase } from "./chatFeel";
-import { easeScroll, ICONS, MessageActions, MessageSheet, QuickReplies, shiftGlide, StatusLine, stopGlide, useLongPress, type Action } from "./ChatTurn";
+import { easeScroll, ICONS, MessageActions, MessageSheet, QuickReplies, shiftGlide, StatusLine, stopGlide, useLongPress, useSelectedMessage, type Action } from "./ChatTurn";
 
 import { decisionIn, useDecisionLinks } from "./decisionLinks";
 import { DecisionCard, forgetDecisions } from "./DecisionCard";
@@ -2329,16 +2329,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
   rowMaker.current = (m) => ({ actions: messageActions(m, false),
     tail: m.author === identity ? <DeleteButton key={`del-${m.ref}`} label="your message" onDelete={() => actions.current.deleteOwn(m)} /> : undefined });
   useLongPress(listEl, (ref) => { if (messages.some((m) => m.ref === ref)) setSheetFor(ref); });
+  const selectedRef = useSelectedMessage();
   /** A message's actions. Someone else's: Copy, Try again (the latest reply, where Uni is), 👍, Reply, Save as note; your own: Copy, Edit.
-   *  In the sheet also Select text (and Delete for your own). */
+   *  In the sheet Copy is "Copy text" (the whole message, first), and your own also has Delete. The row ends in More (the sheet), shown on
+   *  touch only. Part of a message: hold its words (T-335 copy). */
   function messageActions(m: Message, inSheet: boolean): Action[] {
+    const row = messageActionList(m, inSheet);
+    return inSheet ? row : [...row, { id: "more", label: "More", aria: "More actions", icon: ICONS.more, run: () => { window.getSelection()?.removeAllRanges(); setSheetFor(m.ref); } }];
+  }
+  function messageActionList(m: Message, inSheet: boolean): Action[] {
     const mine = m.author === identity;
-    const copy: Action = { id: "copy", label: "Copy", icon: ICONS.copy, run: () => void copyText(m.body, "Copied text") };
-    const select: Action = { id: "select", label: "Select text", icon: ICONS.select, run: () => requestAnimationFrame(() => {
-      const el = listRef.current?.querySelector(`[data-ref="${CSS.escape(m.ref)}"] .md`);
-      if (el) window.getSelection()?.selectAllChildren(el);
-    }) };
-    if (mine) return [copy, ...(editing !== m.ref ? [{ id: "edit", label: "Edit", icon: ICONS.edit, run: () => setEditing(m.ref) }] : []), ...(inSheet ? [select,
+    const copy: Action = { id: "copy", label: inSheet ? "Copy text" : "Copy", icon: ICONS.copy, run: () => void copyText(m.body, "Copied") };
+    if (mine) return [copy, ...(editing !== m.ref ? [{ id: "edit", label: "Edit", icon: ICONS.edit, run: () => setEditing(m.ref) }] : []), ...(inSheet ? [
       // the sheet asks before it deletes: a second sheet, opened again, would be a second tap away; here the row confirms in place
       { id: "delete", label: confirmDelete === m.ref ? "Tap again to delete" : "Delete", aria: confirmDelete === m.ref ? "Tap again to delete your message" : "Delete your message", icon: ICONS.del,
         run: () => { if (confirmDelete === m.ref) { setConfirmDelete(null); void actions.current.deleteOwn(m); } else { setConfirmDelete(m.ref); setSheetFor(m.ref); } } }] : [])];
@@ -2347,13 +2349,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const byPerson = m.author !== uniPk && members.some((x) => x.pubkey === m.author);
     const latest = m.ref === latestReply && uniInRoom && !isThread && !byPerson;
     return [
-      ...(inSheet ? [] : [copy]),
+      copy,
       ...(latest ? [{ id: "retry", label: "Try again", aria: "Ask Uni to try again", icon: ICONS.retry, run: () => void postAs(RETRY) }] : []),
       ...(inSheet ? [] : [{ id: "up", label: "👍", aria: "Thumbs up", icon: null, pressed: !!up?.mine, run: () => void reactTo(m, "👍") }]),
       { id: "reply", label: "Reply", icon: ICONS.reply, run: () => openThread(m) },
-      ...(inSheet ? [copy] : []),
       { id: "save", label: "Save as note", icon: ICONS.save, run: () => void saveAsNote(m) },
-      ...(inSheet ? [select] : []),
     ];
   }
   /** T-212: the decisions a message names: its `uni:<id>` refs (a card only if the note is a decision), then a known open decision its
@@ -2493,9 +2493,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
         {shownReactions(m).length > 0 && <div className="reactions" aria-label="Reactions">{shownReactions(m).map((r) => <span key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", including yours" : ""}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></span>)}</div>}
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
         {m.ref === sentRef && <span className="msg-receipt">Sent</span>}
-        {/* T-335 chat feel: a quiet row instead of a ⋯ on every message: always shown on the latest reply, on hover or focus elsewhere; a
-            long press opens the sheet on touch */}
-        {editing !== m.ref && <MessageActions m={m} make={rowMaker} always={!inThread && m.ref === latestReply}
+        {/* T-335 chat feel: a quiet row instead of a ⋯ on every message: always shown on the latest reply, on hover or focus elsewhere; on
+            touch, under words a finger selected (T-335 copy), and a long press beside the words opens the sheet */}
+        {editing !== m.ref && <MessageActions m={m} make={rowMaker} always={(!inThread && m.ref === latestReply) || m.ref === selectedRef}
           retry={!inThread && m.ref === latestReply && uniInRoom} editable={m.author === identity} />}
       </div>
     </article>;
@@ -2545,7 +2545,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {currentView && fetchedView === currentView && channel && roomDecisions(channel, messages)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts, waitingKey, endedKey, feel, sentRef, newLine, uniInRoom]);
+  [messages, identity, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts, waitingKey, endedKey, feel, sentRef, newLine, uniInRoom, selectedRef]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.

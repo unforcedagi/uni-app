@@ -31,7 +31,7 @@
 .identity-copy:hover { background: var(--g-sunk); }
 /* a journal entry's ⋯ reads in greyscale */
 .journal-list .message-more-go { opacity: 1 !important; color: var(--g-ink-2); }
-/* a room's latest reply on a touch screen: Try again, 👍 and Reply; Copy and Save as note are in the long-press sheet with the rest */
+/* a room's latest reply on a touch screen: Try again, 👍, Reply and More; Copy text and Save as note are in the sheet More opens */
 @media (hover: none) { .msg-actions.always .act-copy, .msg-actions.always .act-save { display: none; } }
 /* the Arcade's greyscale switch, held on by an ink screen, still reads */
 .arcade-place .ta-grey-switch:disabled { opacity: 1; color: var(--g-ink-2); }

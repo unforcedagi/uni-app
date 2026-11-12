@@ -2,7 +2,7 @@
 // otherwise in the room's chat, a message from Uni with the buttons under it. The buttons come from asksCore.askButtons, by the ask's kind
 // (T-335 asks in tune: do -> I did it, Seen, Later; choose -> its options, Seen, Later; look -> Open, Seen; tell -> Seen). Its line opens the ask's sheet
 // (AskSheet: its whole context, the same buttons, Reply in the room and Archive). It reads by shape and word, never colour alone: a filled ◆ and "wants you".
-import type { ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { askButtons, buttonDoes, seenHint, type AskButton } from "./asksCore.ts";
 import type { Ask } from "./types.ts";
 import { clockTime } from "../CompactCard";
@@ -61,6 +61,29 @@ export function CardLine({ ask, state, children }: { ask: Ask; state: CardState 
   </div>;
 }
 
+/**
+ * An ask's words in a room (T-335 copy): text, not a button's label, so a long press selects them. A tap opens the sheet; a mouse's click
+ * waits out a double-click (which selects a word) and the click that ends a drag-selection opens nothing. The chevron is the button a
+ * keyboard and a screen reader use.
+ */
+function AskBody({ ask, onOpen }: { ask: Ask; onOpen: (ask: Ask) => void }) {
+  const id = useId(), mouse = useRef(false), wait = useRef(0);
+  useEffect(() => () => window.clearTimeout(wait.current), []);
+  const body = useRef<HTMLDivElement>(null);
+  // words selected in this ask (a selection elsewhere doesn't stop a tap here)
+  const picked = () => { const sel = window.getSelection(); return !!sel && !sel.isCollapsed && !!body.current && sel.containsNode(body.current, true); };
+  return <div className="sh-ask-body" ref={body} onPointerDown={(e) => { mouse.current = e.pointerType === "mouse"; }} onClick={(e) => {
+    window.clearTimeout(wait.current);
+    if (e.detail > 1 || picked()) return;
+    if (!mouse.current) { onOpen(ask); return; }
+    wait.current = window.setTimeout(() => { if (!picked()) onOpen(ask); }, 260);
+  }}>
+    <span className="sh-ask-what"><span id={id}>{ask.what}</span><button type="button" className="sh-ask-open sh-ask-chev" aria-label="Open this ask" aria-describedby={id}
+      onClick={(e) => { e.stopPropagation(); onOpen(ask); }}> ›</button></span>
+    {(ask.next || ask.why) && <span className="sh-ask-why">{ask.next ?? ask.why}</span>}
+  </div>;
+}
+
 export function AskMessage({ ask, busy, error, onAct, onOpen, compact = false }: AskMessageProps) {
   const buttons = <AskButtons ask={ask} busy={busy} onAct={onAct} />;
   const err = error ? <p className="sh-ask-error" role="alert">{error}</p> : null;
@@ -74,10 +97,7 @@ export function AskMessage({ ask, busy, error, onAct, onOpen, compact = false }:
   </div>;
   return <article className="sh-ask sh-ask-msg" data-id={ask.id} data-kind={ask.kind} aria-busy={busy || undefined} aria-label={`Uni asks: ${ask.what}`}>
     <div className="sh-ask-meta"><b>Uni</b><span className="sh-ask-mark" aria-hidden="true">◆</span> wants you{ask.tid ? <span className="sh-ask-tid"> · {ask.tid}</span> : null}</div>
-    <button type="button" className="sh-ask-body sh-ask-open" onClick={() => onOpen(ask)} aria-label={`${ask.what}. Open it`}>
-      <span className="sh-ask-what">{ask.what}<span className="sh-ask-chev" aria-hidden="true"> ›</span></span>
-      {(ask.next || ask.why) && <span className="sh-ask-why">{ask.next ?? ask.why}</span>}
-    </button>
+    <AskBody ask={ask} onOpen={onOpen} />
     {cardLine}{buttons}{err}
   </article>;
 }

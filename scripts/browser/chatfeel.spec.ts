@@ -5,6 +5,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
 import { openRoom as openRoomById } from './shapeNav';
+import { besideWords, holdTouch, wordPoint } from './holdMessage';
 
 const SHOTS = process.env.CHATFEEL_SHOTS ?? 'test-results/chatfeel-shots';
 const shot = (page: Page, name: string) => page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` });
@@ -166,17 +167,17 @@ test('Stop: one tap asks Uni to stop, and the room says so, with Continue', asyn
   expect(after[0].body).toMatch(/^Continue/);
 });
 
-/** A long press on a message (a finger down until the sheet is up, then up): its actions sheet. */
+/** A long press on a message beside its words (a finger down until the sheet is up, then up): its actions sheet. On the words the
+ *  system selects them instead (T-335 copy). */
 async function longPress(page: Page, msg: ReturnType<Page['locator']>) {
-  await msg.scrollIntoViewIfNeeded();
-  const b = (await msg.locator('p').first().boundingBox())!;
+  const at = await besideWords(msg);
   await page.evaluate(({ x, y }) => {
     const el = document.elementFromPoint(x, y)!;
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true }));
-  }, { x: b.x + 20, y: b.y + 8 });
+  }, at);
   const sheet = page.getByRole('dialog', { name: 'Message actions' });
   await expect(sheet).toBeVisible();
-  await page.evaluate(({ x, y }) => { document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })); }, { x: b.x + 20, y: b.y + 8 });
+  await page.evaluate(({ x, y }) => { document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })); }, at);
   return sheet;
 }
 
@@ -193,6 +194,9 @@ test('message actions: the latest reply has a quiet row (Copy and Save as note t
     else await expect(row.getByRole('button', { name: n, exact: true })).toBeVisible();
   }
   await expect(page.locator('.message-more-go')).toHaveCount(0);
+  // T-335 copy: on touch the row ends in More (the sheet); a pointer's row holds everything, so no More
+  if (touch()) await expect(row.getByRole('button', { name: 'More actions', exact: true })).toBeVisible();
+  else await expect(row.getByRole('button', { name: 'More actions', exact: true })).toBeHidden();
   if (touch()) for (const b of await row.getByRole('button').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await shot(page, '04-actions');
   // 👍 is a reaction, made from the app; a second tap takes it back
@@ -233,7 +237,7 @@ test('message actions: the latest reply has a quiet row (Copy and Save as note t
     // the finger stays down until the sheet is up, as a person's does
     const sheet = await longPress(page, older);
     for (const e of ['👍', '❤️', '✓', '❓']) await expect(sheet.getByRole('button', { name: `React ${e}` })).toBeVisible();
-    for (const n of ['Reply', 'Copy', 'Save as note', 'Select text']) {
+    for (const n of ['Copy text', 'Reply', 'Save as note']) {
       const btn = sheet.getByRole('button', { name: n, exact: true });
       await expect(btn).toBeVisible();
       expect((await btn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -377,13 +381,12 @@ test('review: on touch, your own message can be deleted from its sheet (a second
   await boot(page);
   await openRoom(page, 'Kiln Studio');
   const own = list(page).locator('article.message[data-ref="k2"]');
-  await own.scrollIntoViewIfNeeded();
-  const b = (await own.locator('p').first().boundingBox())!;
-  await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })), { x: b.x + 10, y: b.y + 8 });
+  const at = await besideWords(own);
+  await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })), at);
   const sheet = page.getByRole('dialog', { name: 'Message actions' });
   await expect(sheet).toBeVisible();
   await expect(sheet).toHaveAttribute('aria-modal', 'true');
-  await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })), { x: b.x + 10, y: b.y + 8 });
+  await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })), at);
   await expect(sheet.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
   await page.waitForTimeout(450); // the sheet takes no tap in its first 400 ms (the lift of the finger that opened it)
   await sheet.getByRole('button', { name: 'Delete your message' }).click();
@@ -424,4 +427,45 @@ test('review: after your own stop, a late ping says nothing; someone else\'s wai
   await page.evaluate(() => { (window as any).__arrive('ch-kiln', 'Rowan', 'Uni, can you check the cones?'); (window as any).__arrive('ch-kiln', 'Uni', '⏳ Working — 3 min — iteration 4/90, read_file', 180, true); });
   await expect(status(page)).toContainText('Reading files');
   await expect(status(page).locator('.uni-status-leave')).toHaveCount(0);
+});
+
+test('copy: a long press on a message\'s words selects them (the system\'s select and copy), not the sheet; its row shows under them, and More or a hold beside the words opens the sheet, whose Copy text copies the whole message', async ({ page }) => {
+  test.skip(!touch(), 'a finger\'s long press');
+  await boot(page);
+  await openRoom(page, 'Kiln Studio');
+  const older = list(page).locator('article.message[data-ref="k1"]');
+  const row = older.getByRole('group', { name: 'Message actions' });
+  await expect(row).toBeHidden();
+  await holdTouch(page, await wordPoint(older.locator('.md p').first()));
+  await page.waitForTimeout(300);
+  const sheet = page.getByRole('dialog', { name: 'Message actions' });
+  await expect(sheet).toHaveCount(0);
+  const picked = await page.evaluate(() => window.getSelection()?.toString() ?? '');
+  expect(picked.trim().length).toBeGreaterThan(0);
+  expect('The bisque firing finished overnight. Twelve pots, one crack.').toContain(picked.trim());
+  // holding a message still leads to its actions: its row is under the selected words, and More opens the sheet
+  await expect(row).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
+  await shot(page, '06-selected');
+  await row.getByRole('button', { name: 'More actions', exact: true }).click();
+  await expect(sheet).toBeVisible();
+  await page.waitForTimeout(450);
+  await sheet.getByRole('button', { name: 'Copy text', exact: true }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect.poll(async () => (await calls(page, 'plugin:clipboard-manager|write_text')).map((a: any) => a.text)).toEqual(['The bisque firing finished overnight. Twelve pots, one crack.']);
+  await expect(page.locator('.toast')).toHaveText('Copied');
+  await expect(row).toBeHidden(); // the selection went with the sheet, and the row with it
+  // your own message: its row under selected words has Edit and More; Delete (with its confirm) is in the sheet
+  const own = list(page).locator('article.message[data-ref="k2"]');
+  await holdTouch(page, await wordPoint(own.locator('p').first()));
+  const ownRow = own.getByRole('group', { name: 'Message actions' });
+  await expect(ownRow.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+  await expect(ownRow.getByRole('button', { name: 'More actions', exact: true })).toBeVisible();
+  await expect(ownRow.getByRole('button', { name: /^Delete/ })).toBeHidden();
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  await expect(ownRow).toBeHidden();
+  // a hold beside the words (the name and time line) opens the sheet too, and selects nothing
+  await holdTouch(page, await besideWords(older));
+  await expect(sheet).toBeVisible();
+  expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
 });

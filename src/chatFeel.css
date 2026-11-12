@@ -64,13 +64,19 @@
 .message.mine .msg-actions:not(.always) { right: auto; left: 0; }
 .message:hover > .message-content > .msg-actions, .message:focus-within > .message-content > .msg-actions { opacity: 1; pointer-events: auto; }
 .msg-actions:not(.always) .act-label { display: none; }
+/* More opens the sheet: the touch screen's way to what the row doesn't hold (a pointer's row holds it all) */
+@media (hover: hover) { .msg-actions .act-more { display: none; } }
 .msg-actions:not(.always) .act-up .act-label { display: inline; }
 @media (hover: none) {
-  /* touch: the latest reply's row is there; any message's sheet is a long press away */
+  /* touch: the latest reply's row is there, and a message's row shows under words a finger selected (T-335 copy); More in it opens the
+     sheet, as a long press beside the words does. The name and time line (and the reactions) is that handle: holding it opens the sheet, never selects it. */
   .msg-actions:not(.always) { display: none; }
+  .message .message-meta, .message .message-avatar, .message .gutter-time, .message .reactions { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   .msg-actions.always .act { min-width: 44px; height: 44px; }
   .msg-actions.always .act-label { display: none; }
   .msg-actions.always .act-up .act-label { display: inline; }
+  /* your own message's row under selected words: Delete, with its confirm, is in the sheet More opens */
+  .msg-actions.always > button:not(.act) { display: none; }
 }
 
 /* the long-press sheet */

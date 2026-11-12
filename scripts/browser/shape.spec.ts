@@ -6,6 +6,7 @@
 // Run: pnpm test:shape
 import { test, expect, type Page } from '@playwright/test';
 import { bootShape, calls, live, PLOT_NOTE, ROOM, UNI } from './shapeFixture';
+import { holdTouch, wordPoint } from './holdMessage';
 
 const SHOTS = process.env.SHAPE_SHOTS ?? 'test-results/shape-shots';
 const shot = async (page: Page, name: string) => { await page.waitForTimeout(250); await page.screenshot({ path: `${SHOTS}/${name}.png` }); };
@@ -145,6 +146,24 @@ test('the expiring card is pinned with its clock, is approved in place, and leav
   await expect.poll(async () => (await calls(page, 'sealed_answer')).map((c) => c.args.decision)).toEqual(['approve']);
   await expect(page.locator('.sh-pin')).toHaveCount(0);
   await expect(bar(page).getByRole('button', { name: /^Rooms, 9 things want you$/ })).toBeVisible();
+});
+
+test('T-335 copy: an ask in a room is words a long press selects (not a button\'s label); a tap on them still opens its sheet', async ({ page }) => {
+  await bootShape(page);
+  await openRoomFromHome(page, ROOM.uni);
+  const ask = page.locator('.message-list .sh-ask-msg[data-id="ask-summary"]');
+  const words = ask.locator('.sh-ask-what');
+  await holdTouch(page, await wordPoint(words));
+  expect((await page.evaluate(() => String(window.getSelection()))).trim()).not.toBe('');
+  await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
+  // a mouse's double-click selects a word and opens nothing; a single click (or a tap) opens the sheet
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  await words.dblclick({ position: { x: 30, y: 8 } });
+  await page.waitForTimeout(500);
+  await expect(page.locator('.sh-ask-sheet')).toHaveCount(0);
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  await words.click({ position: { x: 12, y: 8 } });
+  await expect(page.locator('.sh-ask-sheet')).toBeVisible();
 });
 
 test("a room: its strip, its ask as a message, the run's story from the moving line, the jump to the ask, and Back to home", async ({ page }) => {

@@ -39,8 +39,8 @@ export const ICONS = {
   reply: ic(<><path d="M9.5 7.5 5 12l4.5 4.5" /><path d="M5.5 12H14a5 5 0 0 1 5 5v1.5" /></>),
   save: ic(<path d="M7 3.8h10a1 1 0 0 1 1 1V20l-6-3.7L6 20V4.8a1 1 0 0 1 1-1z" />),
   edit: ic(<path d="M15.5 5.5l3 3L9 18H6v-3z" />),
-  select: ic(<path d="M5 6h14M5 12h9M5 18h12" />),
   del: ic(<><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /></>),
+  more: ic(<><circle cx="6" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="18" cy="12" r="1.2" /></>),
   up: <span className="act-emoji" aria-hidden="true">👍</span>,
 };
 
@@ -48,7 +48,8 @@ export const ICONS = {
 export type RowMaker<M> = { current: (m: M) => { actions: Action[]; tail?: ReactNode } };
 /**
  * A message's row, memoised: a live event or a key in a long room redraws none of them. It is drawn again only when what it shows changes:
- * the message itself (its reactions), whether it is the latest reply (always shown, with Try again), or whether it can be edited now.
+ * the message itself (its reactions), whether it is shown (`always`: the latest reply, or words a finger selected in it, so the room's
+ * timeline memo depends on the selected message too), whether it offers Try again, or whether it can be edited now.
  */
 export const MessageActions = memo(function MessageActions<M>({ m, make, always }: { m: M; make: RowMaker<M>; always: boolean; retry: boolean; editable: boolean }) {
   const { actions, tail } = make.current(m);
@@ -59,7 +60,9 @@ export const MessageActions = memo(function MessageActions<M>({ m, make, always 
 
 /** A message's quiet row of actions. The latest reply's is always shown; an older message's on hover or focus (CSS). */
 export function ActionRow({ actions, always, children }: { actions: Action[]; always: boolean; children?: ReactNode }) {
-  return <div className={`msg-actions${always ? " always" : ""}`} role="group" aria-label="Message actions">
+  // a press on the row doesn't clear a selection in the message (T-335 copy: the row shows under selected words, and its buttons
+  // would otherwise take the selection, and the row with it, away before the tap lands)
+  return <div className={`msg-actions${always ? " always" : ""}`} role="group" aria-label="Message actions" onPointerDown={(e) => { if (e.pointerType !== "mouse") e.preventDefault(); }}>
     {actions.map((a) => <button key={a.id} type="button" className={`act act-${a.id}`} aria-label={a.aria ?? a.label} title={a.aria ?? a.label} aria-pressed={a.pressed} onClick={a.run}>
       {a.icon}<span className="act-label">{a.label}</span></button>)}
     {children}
@@ -103,8 +106,70 @@ export function QuickReplies({ answers, onPick }: { answers: string[]; onPick: (
 }
 
 /**
- * A long press on a message (touch only) opens its sheet: 500 ms held, moving less than 10 px. Attached once to the message list, so
- * the memoised rows don't change for it. A mouse's right-click stays the browser's own.
+ * Whether (x, y) is on a word a person could select: a character of a text node is under the point, and its element lets text be
+ * selected. Space beside the words (an avatar, the gap after a line's end, the margin) and the name and time line are not.
+ */
+export function onWords(x: number, y: number, slop = 2): boolean {
+  const doc = document as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null };
+  let node: Node | null = null, offset = 0;
+  if (doc.caretPositionFromPoint) { const p = doc.caretPositionFromPoint(x, y); if (p) { node = p.offsetNode; offset = p.offset; } }
+  else if (doc.caretRangeFromPoint) { const r = doc.caretRangeFromPoint(x, y); if (r) { node = r.startContainer; offset = r.startOffset; } }
+  if (!node || node.nodeType !== Node.TEXT_NODE || !node.parentElement) return false;
+  const style = getComputedStyle(node.parentElement);
+  if (style.userSelect === "none" || style.webkitUserSelect === "none") return false;
+  const text = node.textContent ?? "", r = document.createRange();
+  const line = parseFloat(style.lineHeight);
+  // the caret sits between two characters: the point is on the one before it or the one after it, give or take the finger's size;
+  // up and down, the gap between two lines belongs to them (the system's long press picks the nearest word there too)
+  for (const at of [offset - 1, offset]) {
+    if (at < 0 || at >= text.length || /\s/.test(text[at])) continue;
+    // a whole character: an emoji is two code units
+    const lo = /[\uDC00-\uDFFF]/.test(text[at]) && at > 0 ? at - 1 : at, hi = /[\uD800-\uDBFF]/.test(text[lo]) ? lo + 2 : lo + 1;
+    r.setStart(node, lo); r.setEnd(node, Math.min(hi, text.length));
+    for (const b of r.getClientRects()) {
+      const dy = Math.max(slop, Number.isFinite(line) ? (line - b.height) / 2 + 1 : 0);
+      if (x >= b.left - slop && x <= b.right + slop && y >= b.top - dy && y <= b.bottom + dy) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The message whose words a finger (or pen) has selected, or null: its action row shows under them, so holding a message still leads to
+ * its actions (T-335 copy). A mouse's selection changes nothing (its rows show on hover).
+ */
+export function useSelectedMessage(): string | null {
+  const [ref, setRef] = useState<string | null>(null);
+  useEffect(() => {
+    let touch = false, gone = 0, cur: string | null = null;
+    const set = (v: string | null) => { cur = v; setRef(v); };
+    const down = (e: PointerEvent) => { touch = e.pointerType === "touch" || e.pointerType === "pen"; };
+    const art = (n: Node | null) => (n instanceof Element ? n : n?.parentElement)?.closest<HTMLElement>(".message-list article.message[data-ref]") ?? null;
+    const changed = () => {
+      const sel = window.getSelection();
+      window.clearTimeout(gone);
+      // the row goes a moment after the selection does: a tap on one of its buttons can end the selection before its click lands
+      if (!sel || sel.isCollapsed) {
+        if (cur !== null) gone = window.setTimeout(() => { if (window.getSelection()?.isCollapsed !== false) set(null); }, 400);
+        return; // (a caret moving as someone types: nothing to do)
+      }
+      if (!touch) return;
+      // the message the selection began in: a handle dragged on into the next message keeps that row (no row going, no page jumping)
+      const a = art(sel.anchorNode);
+      set(a && !a.classList.contains("outgoing") ? a.dataset.ref! : null);
+    };
+    document.addEventListener("pointerdown", down, { capture: true, passive: true });
+    document.addEventListener("selectionchange", changed);
+    return () => { window.clearTimeout(gone); document.removeEventListener("pointerdown", down, { capture: true }); document.removeEventListener("selectionchange", changed); };
+  }, []);
+  return ref;
+}
+
+/**
+ * A long press on a message beside its words (touch or pen) opens its sheet: 500 ms held, moving less than 10 px. On the words it is
+ * the system's own: it selects them, with handles, to copy part of a message, and the message's row (with More, for the sheet) shows
+ * under them (T-335 copy). Beside the words is the name and time line and the space around the text. Attached once to the message
+ * list, so the memoised rows don't change for it. A mouse's right-click stays the browser's own.
  */
 export function useLongPress(list: HTMLElement | null, onPress: (ref: string) => void) {
   const press = useRef(onPress);
@@ -115,10 +180,12 @@ export function useLongPress(list: HTMLElement | null, onPress: (ref: string) =>
     const cancel = () => { window.clearTimeout(timer); timer = 0; };
     const down = (e: PointerEvent) => {
       fired = false; // a mouse's right-click after a long press is the browser's own again
-      if (e.pointerType !== "touch" || !(e.target instanceof Element)) return;
+      if ((e.pointerType !== "touch" && e.pointerType !== "pen") || !(e.target instanceof Element)) return;
       if (e.target.closest("button, a, summary, input, textarea, .msg-actions")) return;
       const art = e.target.closest<HTMLElement>("article.message[data-ref]");
       if (!art || art.classList.contains("outgoing")) return;
+      // the words: the system selects them (and the message's row shows under them: useSelectedMessage)
+      if (onWords(e.clientX, e.clientY, Math.min(12, Math.max(2, Math.min(e.width, e.height) / 2)))) return;
       x = e.clientX; y = e.clientY; top = list.scrollTop; fired = false;
       cancel();
       timer = window.setTimeout(() => { timer = 0; fired = true; press.current(art.dataset.ref!); }, 500);
@@ -127,7 +194,7 @@ export function useLongPress(list: HTMLElement | null, onPress: (ref: string) =>
     const up = () => cancel();
     // a scroll the finger made ends the press; layout settling under a still finger doesn't
     const scrolled = () => { if (timer && Math.abs(list.scrollTop - top) > 10) cancel(); };
-    // the press that opened the sheet doesn't also select text or open the system menu
+    // the press that opened the sheet doesn't also select text or open the system menu (a press on the words started no timer)
     const menu = (e: Event) => { if (fired || timer) { e.preventDefault(); } };
     list.addEventListener("pointerdown", down, { passive: true });
     list.addEventListener("pointermove", move, { passive: true });

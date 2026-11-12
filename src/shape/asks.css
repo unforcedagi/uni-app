@@ -32,10 +32,12 @@
 .sh-ask-open:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; border-radius: 8px; }
 .sh-ask-wants .sh-ask-line { display: flex; gap: 8px; align-items: baseline; width: 100%; min-height: 32px; margin: 0 0 8px; font-size: 14px; line-height: 1.4; color: var(--g-ink); }
 .sh-ask-chev { flex: none; margin-left: auto; color: var(--g-ink-3); }
-.sh-ask-msg .sh-ask-open { display: block; width: 100%; font: 400 16.5px/1.6 var(--g-font-uni); color: var(--g-ink); }
-.sh-ask-msg .sh-ask-open > span { display: block; overflow-wrap: anywhere; }
-.sh-ask-msg .sh-ask-open > .sh-ask-why { margin-top: 2px; }
-@media (hover: hover) { .sh-ask-open:hover .sh-ask-what { text-decoration: underline; text-underline-offset: 3px; } }
+/* in a room the ask's words are selectable text (a long press copies them); a tap on them opens the sheet, as the chevron does */
+.sh-ask-msg .sh-ask-body { cursor: pointer; color: var(--g-ink); -webkit-user-select: text; user-select: text; -webkit-tap-highlight-color: transparent; }
+.sh-ask-msg .sh-ask-body > span { display: block; overflow-wrap: anywhere; }
+.sh-ask-msg .sh-ask-body > .sh-ask-why { margin-top: 2px; }
+.sh-ask-msg .sh-ask-chev { display: inline; padding: 0 4px; -webkit-user-select: none; user-select: none; }
+@media (hover: hover) { .sh-ask-open:hover .sh-ask-what, .sh-ask-msg .sh-ask-body:hover .sh-ask-what { text-decoration: underline; text-underline-offset: 3px; } }
 
 /* the ask's sheet (AskSheet.tsx, on the run story's sheet): its kind, its facts, its context, its buttons */
 .sh-ask-sheet-kind { display: flex; align-items: baseline; gap: 6px; margin: 0 0 4px; font-size: 13px; color: var(--g-ink-2); }
