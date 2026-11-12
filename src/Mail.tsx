@@ -573,7 +573,9 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
         if (moved) void loadList(key, cur.next, text, merged);
         return;
       }
-      setList({ key, total: page.total, next: page.next, more: page.more, threads: page.threads });
+      const fresh: List = { key, total: page.total, next: page.next, more: page.more, threads: page.threads };
+      listRef.current = fresh;
+      setList(fresh);
       setListProblem(null);
       void loadNotes(page.threads, key, gen);
     } catch (e) { if (seq === listSeq.current) setListProblem(mailProblem(e)); }
