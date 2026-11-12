@@ -139,9 +139,11 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** One write, then (only once it is written) the room hears it. The ask leaves the list at once; a failed write brings it back with why. */
-  const act = useCallback(async (ask: Ask, d: AskDo) => {
+  /** True once the write landed (the room's post may still be owed); false when nothing was written (T-335 one ask: a Reply then keeps
+   *  his words in the composer). */
+  const act = useCallback(async (ask: Ask, d: AskDo): Promise<boolean> => {
     const a = full.current.get(ask.id);
-    if (!a || inFlight.current.has(a.id)) return;
+    if (!a || inFlight.current.has(a.id)) return false;
     inFlight.current.add(a.id);
     setBusy((b) => new Set(b).add(a.id));
     setErr(a.id, null);
@@ -167,7 +169,7 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
       setErr(a.id, r.kind === "conflict" ? "It changed elsewhere. Showing the latest." : `${what}: ${words(r.message)}`);
       reader.invalidate("task");
       void read();
-      return;
+      return false;
     }
     // an answer and I did it wake the room's Uni (addressed); Seen, Later and Archive are one quiet line; all in the main line
     const body = d.act === "answer" ? answerBody(a, d.text) : d.act === "done" ? doneBody(a) : d.act === "later" ? laterBody(a, d.until) : d.act === "archive" ? archiveBody(a) : seenBody(a);
@@ -175,9 +177,10 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
     // (T-335 one ask: never under its reply_root: an answer sits in the room's main line, never in a thread)
     await post({ id: a.id, what: a.what, channel: a.room, root: null, body, quiet, error: "", at: Date.now() });
     void read();
+    return true;
   }, [o.vault, post, read]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const answer = useCallback(async (ask: Ask, text: string) => { const said = text.trim(); if (said) await act(ask, { act: "answer", text: said }); }, [act]);
+  const answer = useCallback(async (ask: Ask, text: string) => { const said = text.trim(); return said ? act(ask, { act: "answer", text: said }) : false; }, [act]);
   const seen = useCallback(async (ask: Ask) => { await act(ask, { act: "seen" }); }, [act]);
   const later = useCallback(async (ask: Ask, until: string) => { await act(ask, { act: "later", until }); }, [act]);
   const done = useCallback(async (ask: Ask) => { await act(ask, { act: "done" }); }, [act]);

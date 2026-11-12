@@ -162,3 +162,23 @@ test('5. a lapsed ask disappears at its time, with no sweep', async ({ page }) =
   await expect(card(page, w.kiln.id)).toHaveAttribute('data-state', 'lapsed');
   await expect(card(page, w.kiln.id).getByRole('button', { name: 'Seen', exact: true })).toHaveCount(0);
 });
+
+test("6. a reply to a task's ask: a write that fails keeps his words; the next send answers it, in the main line", async ({ page }) => {
+  await boot(page, world(), { writeFails: 1 });
+  await openRoom(page, ROOM.house);
+  const key = card(page, 'ask-key');
+  await key.locator('[data-card-open]').click();
+  await key.getByRole('button', { name: 'Reply in the room' }).click();
+  await expect(page.locator('.composer-answering')).toContainText('Paste the boiler portal key');
+  const box = page.locator('.composer textarea');
+  await box.fill('Pasted it from the paper copy');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  // the vault refused the write: nothing was posted, his words are back in the composer, the card says why
+  await expect(box).toHaveValue('Pasted it from the paper copy');
+  await expect(key.locator('.sh-ask-error')).toContainText("Couldn't answer");
+  expect(await calls(page, 'post_message')).toEqual([]);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(key).toHaveCount(0);
+  await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body, c.args.replyTo])).toEqual([[ROOM.house, 'T-609: Pasted it from the paper copy', null]]);
+  expect((await calls(page, 'vault_transition')).filter((c) => c.args.id === 'ask-key').map((c) => c.args.metadata.answer)).toEqual(['Pasted it from the paper copy', 'Pasted it from the paper copy']);
+});

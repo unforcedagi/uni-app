@@ -2106,6 +2106,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     try {
       // T-335 one ask: answering a card (Reply in the room): his words are its answer, in the main line (never a thread)
       const ans = answering && answering.room === channel && !root && !files.length ? shape.cards.find(answering.id) : null;
+      // (the card it answered has gone from this device: his words go as a plain message, and the composer stops answering)
+      if (!ans && answering && answering.room === channel && !root && !files.length) setAnswering(null);
       const sent = ans ? await shape.cards.answerWith(ans, snapshot) : await invoke<Message | null>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
       if (ans) setAnswering(null);
       changePending(key, (items) => {

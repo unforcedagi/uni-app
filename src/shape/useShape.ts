@@ -223,8 +223,9 @@ export function useShape(o: {
   /** Reply in the room: his words, sent from the room's composer, are the card's answer (a room's ask: quoted, in the main line). */
   const answerWith = useCallback(async (c: Card, text: string): Promise<{ ref: string } | null> => {
     if (c.source === "room") return answerRoom(c, { act: "words", text });
-    if (c.source === "task" && c.task) { await asks.answer(c.task, text); return null; }
-    return null;
+    // (a write that didn't land keeps his words in the composer: the card says why)
+    if (c.source === "task" && c.task) { if (!(await asks.answer(c.task, text))) throw new Error("the answer wasn't written"); return null; }
+    throw new Error("nothing to answer");
   }, [answerRoom, asks]);
   const cards = {
     list, answers, act, answerWith, now,
