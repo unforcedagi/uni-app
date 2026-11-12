@@ -270,8 +270,11 @@ pub fn prepare_answer(
     if wake.is_some_and(|w| w != asker) {
         return Err(bad("wakes someone else"));
     }
-    if store.message(&room, ask)?.is_none() {
-        return Err(Error::Invalid("the ask is not cached in this room".into()));
+    // the quoted message is held here, in this room, and was written by the asker the answer names (so it can wake only that asker)
+    match store.message(&room, ask)? {
+        None => return Err(Error::Invalid("the ask is not cached in this room".into())),
+        Some(m) if m.item.author != asker => return Err(bad("names another asker")),
+        Some(_) => {}
     }
     let tags = tags
         .iter()
@@ -603,6 +606,7 @@ mod answer_tests {
             ("two quotes", 9, with(ok[1].clone()), "x"),
             ("wakes someone else", 9, { let mut t = ok.clone(); t[2][1] = me.public_key().to_hex(); t }, "x"),
             ("an ask not held here", 9, tags(ch, &"f".repeat(64), &asker, false), "x"),
+            ("another asker", 9, tags(ch, &ask, &me.public_key().to_hex(), true), "x"),
             ("another kind", 1, ok.clone(), "x"),
             ("no words", 9, ok.clone(), "  "),
         ];

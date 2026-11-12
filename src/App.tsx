@@ -87,7 +87,7 @@ import NotePane, { usePaneShape } from "./NotePane";
 import { APPROVAL_WINDOW_S, useApprovals } from "./approvalsLive";
 import { ApprovalBanner } from "./shape/ApprovalBanner";
 import { drawCard, JUMP, ShapeSurface, type CardHost, type StoryOpen } from "./shape/ShapeSurface";
-import { BUTTON_GRACE, withoutAskBlocks, type Card } from "./shape/oneAsk";
+import { answerable, BUTTON_GRACE, withoutAskBlocks, type Card } from "./shape/oneAsk";
 import { useShape } from "./shape/useShape";
 import { forgetAsks } from "./shape/useAsks";
 import { Bar } from "./shape/Bar";
@@ -2113,8 +2113,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setError(null);
     try {
       // T-335 one ask: answering a card (Reply in the room): his words are its answer, in the main line (never a thread)
-      const ans = answering && answering.room === channel && !root && !files.length ? shape.cards.find(answering.id) : null;
-      // (the card it answered has gone from this device: his words go as a plain message, and the composer stops answering)
+      const found = answering && answering.room === channel && !root && !files.length ? shape.cards.find(answering.id) : null;
+      const ans = found && answerable(found, Date.now() / 1000) ? found : null;
+      // (the card it answered has gone, ended or lapsed: his words go as a plain message, and the composer stops answering)
       if (!ans && answering && answering.room === channel && !root && !files.length) setAnswering(null);
       const sent = ans ? await shape.cards.answerWith(ans, snapshot) : await invoke<Message | null>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
       if (ans) setAnswering(null);
@@ -2284,7 +2285,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           </button>}
           {/* (T-335 one ask: Uni's approval card is a card in the chat; the banner speaks only for a Hermes prompt, answered here) */}
           <ApprovalBanner approvals={approvals.filter((a) => a.channel === currentRoom.id && a.kind !== "sealed")} onShow={openApproval} />
-          {answering && answering.room === currentRoom.id && !root && <div className="composer-answering" role="status">
+          {answering && answering.room === currentRoom.id && !root && (() => { const c = shape.cards.find(answering.id); return !!c && answerable(c, shape.cards.now); })() && <div className="composer-answering" role="status">
             <span><span aria-hidden="true">↳ </span>Answering <b>{answering.what}</b>: what you send goes to the main line as its answer.</span>
             <button type="button" className="composer-answering-x" aria-label="Stop answering" onClick={() => setAnswering(null)}>×</button>
           </div>}
@@ -2447,7 +2448,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // on the list and the task each carries; the answers): the message list is drawn again when any of it changes
   const cardNow = shape.cards.now;
   const asksKey = [...shape.cards.list.asked.values(), ...shape.cards.list.approvals.values()]
-    .map((c) => `${c.id}${c.state}${c.what}${c.until !== null && cardNow >= c.until - BUTTON_GRACE ? "!" : ""}${shape.cards.busy(c.id) ? "*" : ""}${shape.cards.error(c.id) ?? ""}`).join(" ") + `|${shape.cards.answers.size}`;
+    .map((c) => `${c.id}${c.state}${c.what}${c.later ?? ""}${c.ended ?? ""}${c.until !== null && cardNow >= c.until - BUTTON_GRACE ? "!" : ""}${shape.cards.busy(c.id) ? "*" : ""}${shape.cards.error(c.id) ?? ""}`).join(" ") + `|${shape.cards.answers.size}`;
   /**
    * T-335: a Hermes approval prompt drawn as its short card. Its state comes from the same store read as Needs you (every room and thread),
    * never from the loaded timeline alone (a room's list has no thread replies). An outcome once read stands. Older than that read: no

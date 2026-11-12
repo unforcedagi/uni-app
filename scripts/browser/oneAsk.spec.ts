@@ -145,13 +145,14 @@ test('4. Seen ends it for good', async ({ page }) => {
 test('5. a lapsed ask disappears at its time, with no sweep', async ({ page }) => {
   const start = Date.now();
   await page.clock.install({ time: start });
-  const w = world(Math.floor(start / 1000), 90);
+  // (it lapses 30 s on, inside the app's one-minute redraw: only the timer set for its lapse can take it off in time)
+  const w = world(Math.floor(start / 1000), 30);
   await boot(page, w);
   const home = page.locator(`.sh-home [data-card="${w.kiln.id}"]`);
   await expect(home).toHaveCount(1);
   const before = Number(await bar(page).textContent());
   const reads = (await calls(page, 'ask_events')).length;
-  await page.clock.fastForward(95_000);
+  await page.clock.fastForward(32_000);
   await expect(home).toHaveCount(0);
   await expect(bar(page)).toHaveText(String(before - 1));
   // the clock alone: nothing written, nothing read again
@@ -194,4 +195,16 @@ test('7. a card whose room has no row on home (a retired room) still shows there
   await expect(apart).toContainText('barn-key');
   await expect(bar(next)).toHaveText(String(before + 1));
   await expect(next.locator('.sh-row[data-room="ch-barn"]')).toHaveCount(0);
+});
+
+test("8. an ask in a room this device doesn't list (an archived room, say) never shows its words on home; it still counts", async ({ page }) => {
+  const now = Math.floor(Date.now() / 1000);
+  const gone = signEvent(UNI_SK, buildAsk('ch-archived', { kind: 'tell', what: 'Words from a room that was archived', why: 'They must stay out of sight', until: now + 86400 }, now - 60), now - 60);
+  const w = world();
+  await boot(page, { ...w, events: [...w.events, gone] });
+  const apart = page.locator('.sh-elsewhere');
+  await expect(apart).toHaveAttribute('data-wants', '1');
+  await expect(apart).toContainText('Something waits in a private room');
+  const dom = await page.evaluate(() => document.documentElement.outerHTML);
+  expect(dom).not.toContain('Words from a room that was archived');
 });

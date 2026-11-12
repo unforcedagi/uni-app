@@ -175,7 +175,9 @@ export function useShape(o: {
   const roomName = useCallback((id: string | null) => (id ? rooms.find((r) => r.id === id)?.name ?? null : null), [rooms]);
   // a private room's cards are drawn without their words on home; with the Uni glue on, every room's are, until the registry and the tree are read
   const privacyKnown = !o.on || (settled && tree !== null);
-  const isPrivate = useCallback((ch: string) => !privacyKnown || privStable.has(ch), [privacyKnown, privStable]);
+  // (a room this device doesn't list, an archived one say, can't be judged: its words stay off home)
+  const listedIds = useMemo(() => new Set(rooms.map((r) => r.id)), [roomsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const isPrivate = useCallback((ch: string) => !privacyKnown || privStable.has(ch) || !listedIds.has(ch), [privacyKnown, privStable, listedIds]);
   // the shared rule, once per read and clock tick: the cards and the answers both come from it
   const states = useMemo(() => (room.policy ? roomAsks(room.events, Math.floor(now), room.policy) : []), [room.events, room.policy, now]);
   const asked = useMemo(() => cardsOf(states, isPrivate), [states, isPrivate]);

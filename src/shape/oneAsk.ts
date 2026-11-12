@@ -81,11 +81,22 @@ export function cardsOf(states: readonly AskState[], priv?: (room: string) => bo
 export function answersOf(events: unknown[], asks: Iterable<string> | readonly AskState[], policy: Pick<Policy, "owner">): Map<string, string> {
   const out = new Map<string, string>();
   const owner = new Set(policy.owner);
-  const ids = new Set([...asks].map((a) => (typeof a === "string" ? a : a.id)));
+  const list = [...asks];
+  const ids = new Set(list.map((a) => (typeof a === "string" ? a : a.id)));
+  const room = (id: string) => (events as { id?: unknown; tags?: unknown }[]).find((e) => e?.id === id && Array.isArray(e.tags));
+  const rooms = new Map<string, string>();
+  for (const a of list) {
+    if (typeof a !== "string") { if (a.ask) rooms.set(a.id, a.ask.room); continue; }
+    const h = (room(a)?.tags as string[][] | undefined)?.find((t) => Array.isArray(t) && t[0] === "h");
+    if (h) rooms.set(a, h[1]);
+  }
   for (const e of events as { id?: unknown; pubkey?: unknown; kind?: unknown; tags?: unknown }[]) {
     if (!e || e.kind !== 9 || typeof e.id !== "string" || !owner.has(String(e.pubkey)) || !Array.isArray(e.tags)) continue;
-    const q = (e.tags as unknown[]).find((t): t is string[] => Array.isArray(t) && t[0] === "q" && typeof t[1] === "string" && ids.has(t[1]));
-    if (q) out.set(e.id, q[1]);
+    const tags = e.tags as unknown[];
+    const q = tags.find((t): t is string[] => Array.isArray(t) && t[0] === "q" && typeof t[1] === "string" && ids.has(t[1]));
+    // (in the ask's own room only, as the rule counts an answer)
+    const h = tags.find((t): t is string[] => Array.isArray(t) && t[0] === "h");
+    if (q && h && rooms.get(q[1]) === h[1]) out.set(e.id, q[1]);
   }
   return out;
 }
@@ -114,6 +125,9 @@ export function approvalCard(a: Approval, folded: VaultAsk | null, priv: (room: 
     ...(priv(a.channel) ? { private: true } : {}), approval: a, ...(folded ? { task: folded } : {}),
   };
 }
+
+/** Can it still be answered here at `now` (open or put off, and not in its last minute)? */
+export const answerable = (c: Pick<Card, "state" | "until">, now: number): boolean => (c.state === "open" || c.state === "later") && (c.until === null || now < c.until - BUTTON_GRACE_S);
 
 /** Is it on his list at `now`? Open and not lapsed, by the clock alone. */
 export const onList = (c: Pick<Card, "state" | "until">, now: number): boolean => c.state === "open" && (c.until === null || now < c.until);
