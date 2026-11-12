@@ -499,6 +499,8 @@ mod tests {
             size: Some(42),
             dim: Some("8x9".into()),
             filename: Some("pic.png".into()),
+            // Stock Buzz refuses a length on anything but video: it is never sent for an image.
+            duration: Some(3.0),
             ..Default::default()
         };
         let (body, tags) =

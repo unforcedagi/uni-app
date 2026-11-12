@@ -221,3 +221,200 @@ impl Writing {
         Ok(Part { path: self.path, seconds })
     }
 }
+
+/// Stand-ins for the platform's codecs (outside this code's control, and absent on the machines tests run on), and
+/// recordings shaped as a browser's MediaRecorder writes them.
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::*;
+
+    /// "Decodes" a packet `[0xfc, level_hi, level_lo]` (one 20 ms Opus frame by its TOC byte) into 960 samples swinging
+    /// to ±level; "encodes" every 1024 samples into a 6-byte frame, after two frames of priming, as an AAC encoder does.
+    pub struct FakeCodecs;
+    pub static FAKE: FakeCodecs = FakeCodecs;
+    struct FakeDecoder;
+    struct FakeEncoder {
+        held: usize,
+        started: bool,
+    }
+
+    impl Codecs for FakeCodecs {
+        fn opus_decoder(&self, head: &OpusHead) -> Result<Option<Box<dyn Decoder>>> {
+            assert!(head.bytes.starts_with(b"OpusHead"));
+            Ok(Some(Box::new(FakeDecoder)))
+        }
+        fn aac_encoder(&self, rate: u32, _bitrate: u32) -> Result<Option<Box<dyn Encoder>>> {
+            assert_eq!(rate, 48_000);
+            Ok(Some(Box::new(FakeEncoder { held: 0, started: false })))
+        }
+    }
+    impl Decoder for FakeDecoder {
+        fn decode(&mut self, packet: Option<(&[u8], i64)>, pcm: &mut Vec<i16>) -> Result<()> {
+            if let Some((p, _)) = packet {
+                let level = i16::from_be_bytes([p[1], p[2]]);
+                pcm.extend((0..960).map(|i| if i % 2 == 0 { level } else { -level }));
+            }
+            Ok(())
+        }
+        fn rate(&self) -> u32 {
+            48_000
+        }
+    }
+    impl Encoder for FakeEncoder {
+        fn encode(&mut self, pcm: Option<&[i16]>, out: &mut dyn FnMut(&[u8]) -> Result<()>) -> Result<()> {
+            const FRAME: [u8; 6] = [0x21, 0x10, 0x04, 0x60, 0x8c, 0x1c];
+            if !self.started {
+                self.started = true;
+                out(&FRAME)?;
+                out(&FRAME)?;
+            }
+            match pcm {
+                Some(p) => {
+                    self.held += p.len();
+                    while self.held >= 1024 {
+                        self.held -= 1024;
+                        out(&FRAME)?;
+                    }
+                }
+                None if self.held > 0 => {
+                    self.held = 0;
+                    out(&FRAME)?;
+                }
+                None => {}
+            }
+            Ok(())
+        }
+        fn config(&self) -> Option<Vec<u8>> {
+            Some(vec![0x11, 0x88]) // AAC-LC, 48 kHz, mono
+        }
+    }
+
+    fn put(out: &mut Vec<u8>, id: &[u8], body: &[u8]) {
+        out.extend_from_slice(id);
+        out.push(0x01);
+        out.extend_from_slice(&(body.len() as u64).to_be_bytes()[1..]);
+        out.extend_from_slice(body);
+    }
+    fn unknown(out: &mut Vec<u8>, id: &[u8]) {
+        out.extend_from_slice(id);
+        out.extend_from_slice(&[0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    }
+
+    /// A WebM with one Opus packet per 20 ms at each loudness in `levels`, its segment and clusters of unknown size.
+    pub fn webm(levels: &[i16]) -> Vec<u8> {
+        let mut f = Vec::new();
+        let mut ebml = Vec::new();
+        put(&mut ebml, &[0x42, 0x82], b"webm");
+        put(&mut f, &[0x1a, 0x45, 0xdf, 0xa3], &ebml);
+        unknown(&mut f, &[0x18, 0x53, 0x80, 0x67]);
+        let mut info = Vec::new();
+        put(&mut info, &[0x2a, 0xd7, 0xb1], &1_000_000u32.to_be_bytes());
+        put(&mut f, &[0x15, 0x49, 0xa9, 0x66], &info);
+        let mut entry = Vec::new();
+        put(&mut entry, &[0xd7], &[1]);
+        put(&mut entry, &[0x83], &[2]);
+        put(&mut entry, &[0x86], b"A_OPUS");
+        put(&mut entry, &[0x63, 0xa2], b"OpusHead\x01\x01\x38\x01\x80\xbb\0\0\0\0\0");
+        let mut tracks = Vec::new();
+        put(&mut tracks, &[0xae], &entry);
+        put(&mut f, &[0x16, 0x54, 0xae, 0x6b], &tracks);
+        for (c, levels) in levels.chunks(50).enumerate() {
+            unknown(&mut f, &[0x1f, 0x43, 0xb6, 0x75]);
+            put(&mut f, &[0xe7], &(c as u32 * 1000).to_be_bytes());
+            for (i, level) in levels.iter().enumerate() {
+                let mut block = vec![0x81];
+                block.extend_from_slice(&(i as i16 * 20).to_be_bytes());
+                block.push(0x80);
+                block.push(0xfc);
+                block.extend_from_slice(&level.to_be_bytes());
+                put(&mut f, &[0xa3], &block);
+            }
+        }
+        f
+    }
+
+    /// Talk (loud) and pauses (near silence), as (seconds, talking) runs: one level per 20 ms.
+    pub fn speech(runs: &[(f64, bool)]) -> Vec<i16> {
+        runs.iter().flat_map(|(s, talk)| std::iter::repeat_n(if *talk { 8000 } else { 30 }, (s / 0.02).round() as usize)).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::*;
+    use super::*;
+
+    /// Each part as the relay's parser reads it once normalized: (picture track's length, sound track's length).
+    fn normalized_lengths(path: &Path, name: &str, dir: &Path) -> (f64, f64) {
+        let n = super::super::normalize::normalize_file(path, name, dir).unwrap();
+        assert!(n.filename.ends_with(".m4a"), "{}", n.filename);
+        let bytes = std::fs::read(&n.path).unwrap();
+        let mp4 = mp4::Mp4Reader::read_header(std::io::Cursor::new(&bytes), bytes.len() as u64).unwrap();
+        let (mut video, mut audio) = (0.0, 0.0);
+        for t in mp4.tracks().values() {
+            let secs = t.duration().as_millis() as f64 / 1000.0;
+            match t.track_type().unwrap() {
+                mp4::TrackType::Video => video = secs,
+                mp4::TrackType::Audio => audio = secs,
+                _ => panic!("extra track"),
+            }
+        }
+        (video, audio)
+    }
+
+    #[test]
+    fn a_long_recording_is_cut_at_its_pauses_into_parts_the_relay_takes() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("rec.webm");
+        // 21 minutes: pauses at 8:20 and 17:30 (each a second), talk everywhere else, so two cuts, each in a pause and
+        // not at 9:50 mid-word.
+        let runs = [(500.0, true), (1.0, false), (549.0, true), (1.0, false), (209.0, true)];
+        std::fs::write(&input, webm(&speech(&runs))).unwrap();
+        let out = convert(&input, dir.path(), &FAKE, MAX_PART_SECONDS).unwrap().unwrap();
+        assert!((out.seconds - 1260.0).abs() < 0.01, "{}", out.seconds);
+        let ends: Vec<f64> = out.parts.iter().scan(0.0, |at, p| { *at += p.seconds; Some(*at) }).collect();
+        assert_eq!(out.parts.len(), 3, "{ends:?}");
+        // Each part also carries its encoder's priming (two frames here), so a cut is found within 0.1 s of its pause.
+        assert!((500.0..501.2).contains(&ends[0]), "first cut ends part 1 at {}", ends[0]);
+        assert!((1050.0..1051.3).contains(&ends[1]), "second cut ends part 2 at {}", ends[1]);
+        for (k, p) in out.parts.iter().enumerate() {
+            assert!(p.seconds <= MAX_PART_SECONDS, "part {k} is {} s", p.seconds);
+            let (video, audio) = normalized_lengths(&p.path, &format!("rec ({} of 3).m4a", k + 1), dir.path());
+            // Stock Buzz measures the still frame; it lasts as long as the sound.
+            assert!((video - p.seconds).abs() < 0.01 && (audio - p.seconds).abs() < 0.01, "{video} {audio} {}", p.seconds);
+            assert!(video <= 600.0);
+        }
+    }
+
+    #[test]
+    fn a_recording_without_pauses_still_fits_and_a_short_one_is_one_part() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("rec.webm");
+        std::fs::write(&input, webm(&speech(&[(1200.0, true)]))).unwrap();
+        let out = convert(&input, dir.path(), &FAKE, MAX_PART_SECONDS).unwrap().unwrap();
+        assert_eq!(out.parts.len(), 3);
+        assert!(out.parts.iter().all(|p| p.seconds <= MAX_PART_SECONDS));
+        std::fs::write(&input, webm(&speech(&[(3.0, true), (1.0, false), (3.0, true)]))).unwrap();
+        let out = convert(&input, dir.path(), &FAKE, MAX_PART_SECONDS).unwrap().unwrap();
+        assert_eq!(out.parts.len(), 1);
+    }
+
+    #[test]
+    fn a_damaged_recording_is_refused_and_leaves_nothing_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("rec.webm");
+        let whole = webm(&speech(&[(30.0, true)]));
+        let tracks_end = whole.windows(4).position(|w| w == [0x1f, 0x43, 0xb6, 0x75]).unwrap();
+        std::fs::write(&input, &whole[..tracks_end - 6]).unwrap(); // inside the track: no whole Opus head
+        assert!(convert(&input, dir.path(), &FAKE, MAX_PART_SECONDS).is_err());
+        // A recorder killed partway keeps what it wrote: half a block at the end is dropped, not the recording.
+        std::fs::write(&input, &whole[..whole.len() - 3]).unwrap();
+        let out = convert(&input, dir.path(), &FAKE, MAX_PART_SECONDS).unwrap().unwrap();
+        assert!((out.seconds - 29.98).abs() < 0.001, "{}", out.seconds);
+        for p in out.parts {
+            std::fs::remove_file(p.path).unwrap();
+        }
+        let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left, vec![std::ffi::OsString::from("rec.webm")]);
+    }
+}

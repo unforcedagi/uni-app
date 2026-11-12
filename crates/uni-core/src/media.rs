@@ -479,8 +479,20 @@ pub async fn upload_media(
     filename: &str,
     work_dir: &Path,
 ) -> Result<Vec<MediaRef>> {
+    upload_media_with(relay_url, keys, input, mime, filename, work_dir, voice::platform_codecs()).await
+}
+
+async fn upload_media_with(
+    relay_url: &str,
+    keys: &Keys,
+    input: &Path,
+    mime: &str,
+    filename: &str,
+    work_dir: &Path,
+    codecs: Option<&'static dyn voice::Codecs>,
+) -> Result<Vec<MediaRef>> {
     let (from, name, dir) = (input.to_path_buf(), upload_filename(filename), work_dir.to_path_buf());
-    let parts = tokio::task::spawn_blocking(move || voice_parts(&from, &name, &dir, voice::platform_codecs()))
+    let parts = tokio::task::spawn_blocking(move || voice_parts(&from, &name, &dir, codecs))
         .await
         .map_err(|_| normalize::refuse("Couldn't prepare the file on this device. Attach it again."))??;
     let Some(parts) = parts else {
@@ -1999,6 +2011,72 @@ mod tests {
             }
         });
         (port, rx)
+    }
+
+    /// A long recording goes up as its parts, in order, each normalized, and each carries the length the relay stored, which
+    /// the message's imeta must repeat (to 0.1 s) for stock Buzz to take it. The relay here answers as stock Buzz does: the
+    /// still frame's length, from its own MP4 parser.
+    #[tokio::test]
+    async fn a_long_recording_uploads_as_parts_with_the_relays_lengths_for_imeta() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        let input = dir.path().join("voice 09-12.webm");
+        let runs = [(500.0, true), (1.0, false), (549.0, true), (1.0, false), (209.0, true)];
+        std::fs::write(&input, voice::testing::webm(&voice::testing::speech(&runs))).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(String, f64)>();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let mut buf = Vec::new();
+                let mut chunk = vec![0u8; 1024 * 1024];
+                let end = loop {
+                    if let Some(p) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break p + 4;
+                    }
+                    let n = sock.read(&mut chunk).await.unwrap();
+                    buf.extend_from_slice(&chunk[..n]);
+                };
+                let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
+                let len: usize = head.lines().find_map(|l| l.strip_prefix("content-length:")).unwrap().trim().parse().unwrap();
+                while buf.len() - end < len {
+                    let n = sock.read(&mut chunk).await.unwrap();
+                    buf.extend_from_slice(&chunk[..n]);
+                }
+                let got = buf[end..].to_vec();
+                let mp4 = mp4::Mp4Reader::read_header(std::io::Cursor::new(&got), got.len() as u64).unwrap();
+                let video = mp4.tracks().values().find(|t| t.track_type().unwrap() == mp4::TrackType::Video).unwrap();
+                let duration = video.duration().as_millis() as f64 / 1000.0;
+                assert!(duration <= 600.0);
+                let sha = sha256_hex(&got);
+                let _ = tx.send((sha.clone(), duration));
+                let body = serde_json::json!({"url":format!("http://127.0.0.1:{port}/media/{sha}.mp4"),"sha256":sha,"size":got.len(),
+                    "type":"video/mp4","dim":"640x360","duration":duration}).to_string();
+                let reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                sock.write_all(reply.as_bytes()).await.unwrap();
+                let _ = sock.shutdown().await;
+            }
+        });
+        let relay = format!("ws://127.0.0.1:{port}");
+        let media = upload_media_with(&relay, &Keys::generate(), &input, "audio/webm", "voice 09-12.webm", &work, Some(&voice::testing::FAKE))
+            .await
+            .unwrap();
+        let names: Vec<_> = media.iter().map(|m| m.filename.clone().unwrap()).collect();
+        assert_eq!(names, ["voice 09-12 (1 of 3).m4a", "voice 09-12 (2 of 3).m4a", "voice 09-12 (3 of 3).m4a"]);
+        let stored: Vec<_> = (0..3).map(|_| rx.try_recv().unwrap()).collect();
+        for (m, (sha, duration)) in media.iter().zip(&stored) {
+            assert_eq!(m.sha256.as_deref(), Some(sha.as_str()), "uploaded in order");
+            assert_eq!(m.duration, Some(*duration));
+        }
+        // The message carries each length, as the relay checks it.
+        let (_, tags) = crate::compose::outgoing_media(&relay, "", &media).unwrap();
+        for (tag, (_, duration)) in tags.iter().zip(&stored) {
+            assert!(tag.contains(&format!("duration {duration}")), "{tag:?}");
+        }
+        // The parts and their normalized copies are gone; the recording itself is the caller's.
+        assert_eq!(std::fs::read_dir(&work).unwrap().count(), 0);
+        assert!(input.exists());
     }
 
     #[tokio::test]
