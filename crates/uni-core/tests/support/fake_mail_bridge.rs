@@ -13,7 +13,7 @@
 //! session holds its own account and the ones shared with it; `/mail/session`
 //! lists them; every call names its `accountId`, and one outside the session
 //! is refused; `/mail/raw` and `/mail/triage` take an `accountId`. The JMAP store
-//! also does `Thread/get`, `collapseThreads`, a `text` filter,
+//! also does `Thread/get`, `collapseThreads`, a `text` filter, `hasKeyword` / `notKeyword` / `hasAttachment`,
 //! `inMailboxOtherThan`, and `*` in back-reference paths. `/mail/session` adds a
 //! `roles` map (whose each account is). A v1 bridge
 //! ([`FakeBridge::start`]) reads its one account whatever is asked, as the live
@@ -481,12 +481,18 @@ fn jmap(mail: &mut Mail, name: &str, args: &Value, earlier: &[Value]) -> Result<
             }
             let other: Vec<&str> = filter.get("inMailboxOtherThan").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
             let text = filter.get("text").and_then(Value::as_str);
+            let has_kw = filter.get("hasKeyword").and_then(Value::as_str);
+            let not_kw = filter.get("notKeyword").and_then(Value::as_str);
+            let files = filter.get("hasAttachment").and_then(Value::as_bool);
             let mut found: Vec<&Value> = mail
                 .emails
                 .iter()
                 .filter(|e| inbox.is_none_or(|m| e["mailboxIds"].get(m).is_some()))
                 .filter(|e| !e["mailboxIds"].as_object().is_some_and(|ids| !ids.is_empty() && ids.keys().all(|k| other.contains(&k.as_str()))))
                 .filter(|e| text.is_none_or(|t| matches_text(e, t)))
+                .filter(|e| has_kw.is_none_or(|k| e["keywords"].get(k) == Some(&json!(true))))
+                .filter(|e| not_kw.is_none_or(|k| e["keywords"].get(k) != Some(&json!(true))))
+                .filter(|e| files.is_none_or(|f| e["hasAttachment"].as_bool().unwrap_or(false) == f))
                 .collect();
             found.sort_by(|a, b| b["receivedAt"].as_str().cmp(&a["receivedAt"].as_str()));
             if args.get("collapseThreads").and_then(Value::as_bool) == Some(true) {

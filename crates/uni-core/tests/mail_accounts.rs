@@ -18,12 +18,12 @@ async fn shared(keys: &Keys) -> FakeBridge {
 }
 
 fn inbox(account: &str) -> Source {
-    Source { account_id: account.into(), mailbox_id: Some(format!("{account}-inbox")), exclude: vec![], position: 0 }
+    Source { account_id: account.into(), mailbox_id: Some(format!("{account}-inbox")), ..Source::default() }
 }
 
 /// A whole account, less Junk and Trash: what a search reads.
 fn whole(account: &str) -> Source {
-    Source { account_id: account.into(), mailbox_id: None, exclude: vec![format!("{account}-junk"), format!("{account}-trash")], position: 0 }
+    Source { account_id: account.into(), exclude: vec![format!("{account}-junk"), format!("{account}-trash")], ..Source::default() }
 }
 
 fn ids(page: &uni_core::mail::ThreadPage) -> Vec<String> {
@@ -69,7 +69,7 @@ async fn a_v1_bridge_is_one_account_of_the_keys_own() {
     assert!(!o.multi);
     assert_eq!(o.accounts.len(), 1);
     assert_eq!((o.accounts[0].id.as_str(), o.accounts[0].name.as_str(), o.accounts[0].who), ("a", "owner@example.com", Who::Owner));
-    let page = mail.threads(&[Source { account_id: "a".into(), mailbox_id: Some("mb-inbox".into()), exclude: vec![], position: 0 }], None, 50).await.unwrap();
+    let page = mail.threads(&[Source { account_id: "a".into(), mailbox_id: Some("mb-inbox".into()), ..Source::default() }], None, 50).await.unwrap();
     assert_eq!(ids(&page), ["a/Tm1", "a/Tm2", "a/Tm4", "a/Tm5"]);
     assert!(mail.triage("a", &["m1".into()]).await.unwrap().is_empty(), "no triage on a v1 bridge: no notes, not an error");
 }
@@ -119,6 +119,31 @@ async fn search_reads_one_account_or_both_and_skips_junk() {
     assert_eq!(ids(&both), ["U/TU-read"], "case doesn't matter; one row per thread");
     // the text went to the server as a JMAP text filter
     assert!(mail.threads(&[whole("A")], Some(&"x".repeat(201)), 50).await.is_err(), "too long: never sent");
+}
+
+/// T-335 Mail v2: Later is the flag. The Inbox leaves Later mail out, the Later list is only flagged mail, and Files
+/// narrows any list to mail with attachments; each goes to the server as a JMAP filter, so paging stays the server's.
+#[tokio::test]
+async fn later_and_files_narrow_a_list_on_the_server() {
+    let keys = Keys::generate();
+    let fake = shared(&keys).await;
+    {
+        let mut st = fake.state.lock().unwrap();
+        let e = st.mail.emails.iter_mut().find(|e| e["id"] == "a5").expect("a5 in the fixture");
+        e["keywords"]["$flagged"] = serde_json::json!(true);
+    }
+    let mail = MailBridge::new(&fake.url, &keys).unwrap();
+    let all = ids(&mail.threads(&[inbox("A")], None, 50).await.unwrap());
+    assert!(all.contains(&"A/Ta5".to_string()));
+    let not_later = mail.threads(&[Source { flagged: Some(false), ..inbox("A") }], None, 50).await.unwrap();
+    assert!(!ids(&not_later).contains(&"A/Ta5".to_string()), "a Later thread leaves the Inbox");
+    assert_eq!(ids(&not_later).len(), all.len() - 1);
+    let later = mail.threads(&[Source { flagged: Some(true), ..whole("A") }], None, 50).await.unwrap();
+    assert_eq!(ids(&later), ["A/Ta5"], "Later is only flagged mail");
+    let files = mail.threads(&[Source { with_files: true, ..whole("A") }], None, 50).await.unwrap();
+    assert!(!files.threads.is_empty() && files.threads.iter().all(|t| t.has_attachment), "Files: only mail with attachments");
+    let next = &later.next[0];
+    assert_eq!((next.flagged, next.with_files), (Some(true), false), "the next page keeps the filter");
 }
 
 #[tokio::test]

@@ -84,7 +84,7 @@ pub struct Overview {
 
 /// One account's part of a list: a mailbox (or, for a search, the whole account less `exclude`), and where its next
 /// page starts.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Source {
     pub account_id: String,
     #[serde(default)]
@@ -94,6 +94,13 @@ pub struct Source {
     pub exclude: Vec<String>,
     #[serde(default)]
     pub position: u64,
+    /// T-335 Mail v2: Later is the `$flagged` keyword. `Some(true)`: only flagged mail (the Later list); `Some(false)`:
+    /// none of it (the Inbox without what was put off). Absent: either.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flagged: Option<bool>,
+    /// T-335 Mail v2: only mail with attachments (Files).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub with_files: bool,
 }
 
 /// A thread as a list shows it: its newest message in the list's mailbox, and the thread's size and state.
@@ -424,6 +431,14 @@ impl MailBridge<'_> {
             }
             if let Some(t) = text {
                 filter.insert("text".into(), json!(t));
+            }
+            match s.flagged {
+                Some(true) => drop(filter.insert("hasKeyword".into(), json!("$flagged"))),
+                Some(false) => drop(filter.insert("notKeyword".into(), json!("$flagged"))),
+                None => {}
+            }
+            if s.with_files {
+                filter.insert("hasAttachment".into(), json!(true));
             }
             let a = &s.account_id;
             calls.push(json!(["Email/query", {
