@@ -707,8 +707,9 @@ test("a write that fails keeps the ask's card, with why, and the next tap goes t
   const key = row(page, ROOM.house).locator('[data-card="ask-key"]');
   await key.locator('[data-card-open]').click();
   await key.getByRole('button', { name: 'I did it', exact: true }).click();
-  // (the card comes back with why; it comes back closed, since it left the list while the write was out: reported, not asserted)
+  // the card comes back with why, still open as he left it (it was off the list while the write was out)
   await expect(key.getByRole('alert')).toHaveText(/^Couldn't mark it done: vault unreachable/);
+  await expect(key).toHaveAttribute('data-open', 'true');
   expect(await calls(page, 'post_message')).toEqual([]);
   await key.getByRole('button', { name: 'I did it', exact: true }).click();
   await expect(key).toHaveCount(0);

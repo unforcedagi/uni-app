@@ -30,14 +30,15 @@ export type AskCardProps = {
   /** Seconds: what its times are read against. */ now: number;
 };
 
-/** Cards opened, by id: a card that leaves while its write is out and comes back (a write that failed) comes back as it was. */
+/** Cards opened, by id: a card that left for its own write and comes back with why it failed comes back as it was. */
 const OPENED = new Set<string>();
 
 const sAgo = (t: number, now: number) => { const a = ago(t, now); return a === "now" ? "just now" : /^\d/.test(a) ? `${a} ago` : a; };
 const at = (s: number, now: number) => whenLabel(new Date(s * 1000).toISOString(), now * 1000);
 
 export function AskCard({ card, place, roomName, vault, busy, error, onAct, now }: AskCardProps) {
-  const [open, setOpen] = useState(() => OPENED.has(card.id));
+  // (it reopens only when it comes back with why its write failed; a card left behind any other way opens closed next time)
+  const [open, setOpen] = useState(() => OPENED.has(card.id) && !!error);
   const id = useId();
   const home = place === "home";
   const ended = card.state !== "open" && card.state !== "later";
