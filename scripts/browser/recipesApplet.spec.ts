@@ -38,6 +38,7 @@ async function boot(page: Page) {
 test('the Recipes slot opens the applet; the card names exactly the recipes vault; it lists, opens, logs a making, edits and adds', async ({ page }) => {
   await boot(page);
   await expect(page.getByText("Recipes isn't built yet.")).toHaveCount(0);
+  await expect(page.locator('.sh-ap-kindline')).toHaveText('Vault applet · recipes vault');
   // the card: one row, the recipes vault, its one folder, marked because it changes notes; and nothing else
   await expect(card(page).locator('.grant-line dt')).toHaveText(['recipes vault']);
   await expect(card(page).locator('.grant-line dd')).toHaveText(['Read, add and change notes in Recipes/']);

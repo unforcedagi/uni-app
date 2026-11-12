@@ -16,7 +16,7 @@
 import { parseAppletManifest, type AppletManifest } from "./applets.ts";
 import { plain, stripExt, type Capability } from "./contract.ts";
 import { parseManifest, resolveNeeds, type HostContext, type Need, type Resolved } from "./manifest.ts";
-import type { ManifestV2 } from "./manifest2.ts";
+import { HERE, type ManifestV2 } from "./manifest2.ts";
 import type { Grant } from "./grant2.ts";
 
 /** An applet found in the vault: its manifest, the note that holds it, and the folders it declares it reads (where search looks when it is
@@ -48,7 +48,9 @@ export function discoverApplets(rows: readonly Row[], vault: string): Discovery 
     // contract 2: search looks where the manifest offers; contract 1: in every folder it reads
     const prefixes = v2 ? [...new Set(v2.search.flatMap((o) => (o.path ? [o.path] : [])))]
       : m?.ok ? [...new Set(m.manifest.needs.filter((n) => n.cap === "vault.read" && n.scope !== "area").map((n) => n.scope))] : [];
-    entries.push({ manifest: parsed.manifest, vault, noteId: r.id, path: r.path, prefixes });
+    // the shell knows which vault `here` is: its head and search name it ("recipes vault"), not "the vault it lives in"
+    const manifest = v2 && v2.vaults.some((x) => x.vault === HERE) && !v2.doors.length ? { ...parsed.manifest, where: `${vault} vault` } : parsed.manifest;
+    entries.push({ manifest, vault, noteId: r.id, path: r.path, prefixes });
   }
   return { entries, skipped };
 }

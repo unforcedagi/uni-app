@@ -52,7 +52,7 @@ await check("the grant's key changes with the writes it asks for and with the va
 await check("applets from several vaults: the first vault's id wins, the repeat is skipped and counted, each keeps its vault", () => {
   const n = (id: string, path: string) => ({ id, path, tags: ["applet"], metadata: { applet: book() } });
   const d = joinDiscoveries([discoverApplets([n("a1", "Soups/Book")], "uni"), discoverApplets([n("b1", "Soups/Book")], "kitchen")]);
-  assert.deepEqual(d.entries.map((e) => [e.noteId, e.vault]), [["a1", "uni"]]);
+  assert.deepEqual(d.entries.map((e) => [e.noteId, e.vault, e.manifest.where]), [["a1", "uni", "uni vault"]], "its head names the vault it is in");
   assert.equal(d.skipped, 1);
 });
 

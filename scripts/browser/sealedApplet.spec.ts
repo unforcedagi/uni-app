@@ -63,7 +63,7 @@ test.describe('the drawer hosts a sealed applet', () => {
     await bootSealed(page, { granted: false, applets: [v2] });
     await openFromDrawer(page, 'Seed list');
     // where it lives is the shell's sentence, made from its access (contract 1 showed the note's own claim)
-    await expect(page.locator('.sh-ap-kindline')).toHaveText('Vault applet · the vault it lives in');
+    await expect(page.locator('.sh-ap-kindline')).toHaveText('Vault applet · uni vault');
     await expect(prompt(page).locator('.grant-line dd')).toHaveText(['Read notes in Seeds/', 'Read recent messages']);
     await expect(prompt(page).locator('.grant-line dt').last()).toHaveText('#Garden co-op site');
     await expect(prompt(page)).toContainText(/Lasts until .*20\d\d/);
