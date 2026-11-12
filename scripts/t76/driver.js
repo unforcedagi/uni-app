@@ -2,6 +2,8 @@
 // Results go out through the debug-only `t76_write` command, using the real Tauri IPC captured before the mock replaced it.
 (() => {
   if (window.top !== window) return;
+  // `selftest` (T76_MODE=selftest, the macOS CI job): the self-test and the frame-IPC experiments only, no real key presses.
+  const MODE = '__MODE__';
   const real = window.__T76_REAL;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const files = {};
@@ -64,7 +66,7 @@
     await out('diag.json', diag);
     // 1. the self-test, through the UI
     await waitFor(() => $('nav[aria-label="Main navigation"]'), 30000, 'app rail');
-    const focusWait = performance.now(); await waitFor(() => document.hasFocus(), 3000, 'window focus').catch(() => {}); const focusBeforeKey = document.hasFocus(); await keys([{ key: 'Shift_L' }]); await waitFor(() => document.hasFocus(), 5000, 'window focus after a key').catch(() => {});
+    const focusWait = performance.now(); await waitFor(() => document.hasFocus(), 3000, 'window focus').catch(() => {}); const focusBeforeKey = document.hasFocus(); if (MODE !== 'selftest') await keys([{ key: 'Shift_L' }]); await waitFor(() => document.hasFocus(), 5000, 'window focus after a key').catch(() => {});
     await out('env.json', { ...env, hasFocusAtStart: env.hasFocus, hasFocusAtRail: document.hasFocus(), hasFocusBeforeFirstKey: focusBeforeKey, focusWaitMs: Math.round(performance.now() - focusWait) });
     btn(/^Settings$/, $('nav[aria-label="Main navigation"]')).click();
     const runBtn = await waitFor(() => btn(/^Run sandbox self-test$/), 20000, 'self-test button');
@@ -80,6 +82,22 @@
     };
     result.timeline = { clickAtMs: t0, doneAtMs: Math.round(performance.now()), stageFramesSeen: captured.map((c) => ({ t: c.t, bytes: c.srcdoc.length, navUrlInDoc: (c.srcdoc.match(/127\.0\.0\.1:\d+\/selftest-nav/) || [null])[0], vector: /http-equiv = 'refresh'/.test(c.srcdoc) ? 'meta' : /a\.click/.test(c.srcdoc) ? 'anchor' : /setTimeout\(function \(\) \{ location/.test(c.srcdoc) ? 'self' : /selftest-nav/.test(c.srcdoc) ? 'parse' : 'main' })), violationsDuringSelfTest: vt.filter((v) => v.t >= t0) };
     await out('selftest.json', result); note('self-test: ' + result.status);
+    if (MODE === 'selftest') {
+      // What a sandboxed frame can do with the ipc handler, beyond the self-test's "post does not throw": it posts a well-formed
+      // t76_write invoke without the invoke key (it cannot read it) and with a forged one. Tauri must refuse both: no file appears.
+      const ipcPost = (key) => `<script>var r = { t76: 1 }; try { var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc; r.present = !!h; if (h) { var m = { cmd: 't76_write', callback: 1, error: 2, payload: { name: 'frame-ipc.txt', contents: 'from a sandboxed frame' }, options: { headers: {} } }; ${key ? "m.__TAURI_INVOKE_KEY__ = 'forged-key-0000000000';" : ''} h.postMessage(JSON.stringify(m)); r.posted = true; } } catch (e) { r.err = String(e); } r.windowIpc = typeof window.ipc; parent.postMessage(r, '*');<\/script>`;
+      const sb = (srcdoc, ms = 3500) => new Promise((res) => { const f = document.createElement('iframe'); f.setAttribute('sandbox', 'allow-scripts'); const h = (e) => { if (e.source === f.contentWindow && e.data && e.data.t76) { clearTimeout(t); removeEventListener('message', h); f.remove(); res(e.data); } }; addEventListener('message', h); const t = setTimeout(() => { removeEventListener('message', h); f.remove(); res('no report'); }, ms); f.srcdoc = srcdoc; document.body.appendChild(f); });
+      const exp = { ipcFromFrame: await sb(ipcPost(false)), ipcFromFrameForgedKey: await sb(ipcPost(true)) };
+      // A fresh realm two levels down (frame > child > grandchild), as an app would make one to get globals back.
+      const js = (v) => JSON.stringify(v).replace(/<\//g, '<\\/');
+      const kid = (depth) => depth === 0 ? `<script>parent.postMessage({ kid: 1, rtc: typeof RTCPeerConnection, webkitRtc: typeof webkitRTCPeerConnection, ipc: !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) }, '*')<\/script>`
+        : `<script>addEventListener('message', function (e) { if (e.data && e.data.kid) parent.postMessage(e.data, '*'); }); var f = document.createElement('iframe'); f.srcdoc = ${js(kid(depth - 1))}; document.documentElement.appendChild(f);<\/script>`;
+      exp.grandchild = await sb(`<script>addEventListener('message', function (e) { if (e.data && e.data.kid) parent.postMessage(Object.assign({ t76: 1 }, e.data), '*'); }); var f = document.createElement('iframe'); f.srcdoc = ${js(kid(1))}; document.documentElement.appendChild(f);<\/script>`);
+      await sleep(1500);
+      exp.frameIpcWritten = (await real.invoke('t76_read', { name: 'frame-ipc.txt' })) !== null;
+      await out('experiments.json', exp); await out('done', 'ok'); note('done');
+      return;
+    }
 
     // 1b. what the failing checks really do on this engine: the frame tries each thing against a loopback listener / the IPC
     const exp = {};

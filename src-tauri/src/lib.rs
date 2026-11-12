@@ -3068,7 +3068,7 @@ async fn android_update_manifest() -> Result<AndroidUpdateManifest, String> {
 
 #[cfg(desktop)]
 mod desktop_log;
-#[cfg(all(debug_assertions, target_os = "linux"))]
+#[cfg(all(debug_assertions, any(target_os = "linux", target_os = "macos")))]
 mod t76;
 #[cfg(mobile)]
 mod mobile;
@@ -3169,7 +3169,7 @@ pub fn run() {
             mobile::setup(_app);
             #[cfg(feature = "messages")]
             messages::setup(_app)?;
-            #[cfg(all(debug_assertions, target_os = "linux"))]
+            #[cfg(all(debug_assertions, any(target_os = "linux", target_os = "macos")))]
             t76::replace_window(_app)?;
             #[cfg(target_os = "linux")]
             {
@@ -3186,9 +3186,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            #[cfg(all(debug_assertions, target_os = "linux"))]
+            #[cfg(all(debug_assertions, any(target_os = "linux", target_os = "macos")))]
             t76::t76_write,
-            #[cfg(all(debug_assertions, target_os = "linux"))]
+            #[cfg(all(debug_assertions, any(target_os = "linux", target_os = "macos")))]
             t76::t76_read,
             webview_runtime,
             get_rooms,
