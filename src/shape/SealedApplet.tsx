@@ -197,6 +197,7 @@ export function SealedApplet({ id, entry, listed, vault, rooms, onOpenNote, onCo
       {framed && router ? <InterfaceFrame html={app.html} title={name} router={router} grant={grant} ready={ready} />
         : asking ? <GrantCard name={name} runs={mode === "approved-code" ? "approved-code" : "sealed"} state="ask" codeChanged={codeChanged && status === "updated"}
           changes={host.needs.some((n) => n.cap === "vault.create" || n.cap === "vault.update")}
+          copies={host.needs.some((n) => n.cap === "vault.create" || n.cap === "vault.update") && host.needs.some((n) => n.cap === "chat.read")}
           lines={grantLines(needsGrant(host.needs, vault, { id, name }), roomName, { ownFolder: ownFolder(app.path) })} fingerprint={fingerprint(keys.scope)} expires={grantExpiry(new Date())}
           onAllow={() => { grants.grant(app.id, keys.scope, keys.html, mode === "approved-code" ? "approved-code" : "sealed", grantExpiry); markStarted(app.id); bump(); }} onNotNow={() => setDeclined(true)} />
         : <Calm head={granted ? `${name} is stopped` : `${name} isn't allowed to run`}>

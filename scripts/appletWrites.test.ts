@@ -66,6 +66,8 @@ function world() {
     { id: "x1", path: "Elsewhere/Secret", content: "SECRET", tags: [], updatedAt: "t1" },
     { id: "h1", path: "Soups/Soup book", extension: "html", content: "<p>code</p>", tags: ["applet"], updatedAt: "t1" },
     { id: "t1", path: "Soups/Tagged", content: "x", tags: ["applet"], updatedAt: "t1" },
+    // an HTML note with no tag (an applet's code whose tag was taken off, or any page): its extension alone keeps it unchanged
+    { id: "u1", path: "Soups/Page", extension: "html", content: "<p>page</p>", tags: [], updatedAt: "t1" },
   ];
   const mod = createVaultModule({
     listPaths: async () => notes.map((n) => ({ id: n.id, path: n.path ?? null, extension: n.extension ?? "md", updatedAt: n.updatedAt })),
@@ -124,6 +126,7 @@ await check("PATCH is refused for a note it only reads (403), one it can't read 
   const cases: [string, unknown, number][] = [
     ["p1", { content: "x", if_updated_at: "t1" }, 403], ["x1", { content: "x", if_updated_at: "t1" }, 404], ["nope", { content: "x", if_updated_at: "t1" }, 404],
     ["h1", { content: "<script>evil()</script>", if_updated_at: "t1" }, 403], ["t1", { content: "x", if_updated_at: "t1" }, 403],
+    ["u1", { content: "<script>evil()</script>", if_updated_at: "t1" }, 403],
     ["s1", { content: "x" }, 400], ["s1", { content: "x", if_updated_at: "" }, 400], ["s1", { content: "x", if_updated_at: "t1", force: "true" }, 400],
     ["s1", { content: "x", if_updated_at: "t1", path: "Elsewhere/moved" }, 400],
   ];

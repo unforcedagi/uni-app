@@ -97,6 +97,14 @@ test.describe('the drawer hosts a sealed applet', () => {
     await expect(page.locator('.sh-sa-refused')).toContainText('a contract 2 applet has one manifest');
     await expect(page.locator('iframe')).toHaveCount(0);
   });
+  test('contract 2: an applet that reads a room and writes notes says on the card that it can copy one into the other', async ({ page }) => {
+    await bootSealed(page, { granted: false, applets: [quiet('scribe', 'Scribe', { v2: {
+      access: [{ vault: 'here', allow: [{ path: 'Seeds/', verbs: ['read', 'create'] }] }], reach: [{ room: ROOM.garden, verbs: ['read'] }] } })] });
+    await openFromDrawer(page, 'Scribe');
+    await expect(prompt(page, 'Scribe').locator('.grant-line dd')).toHaveText(['Read and add notes in Seeds/', 'Read recent messages']);
+    await expect(prompt(page, 'Scribe').locator('.grant-copies')).toContainText('What it reads in a room it can write into those notes');
+    await expect(prompt(page, 'Scribe')).toContainText("It can't send messages, delete notes, change notes anywhere else or reach the internet.");
+  });
   test('Not now runs nothing and is not remembered; a restored applet never starts without a tap', async ({ page }) => {
     await bootSealed(page, { granted: false });
     await openFromDrawer(page, 'Seed list');

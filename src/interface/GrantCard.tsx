@@ -21,7 +21,7 @@ const dayOf = (iso: string | Date | null | undefined): string | null => {
   return d && !isNaN(d.getTime()) ? day.format(d) : null;
 };
 
-export default function GrantCard({ name, glyph, runs, lines, state, fingerprint, expires, grantedAt, codeChanged, changes, onAllow, onNotNow, onRevoke, onDone }: {
+export default function GrantCard({ name, glyph, runs, lines, state, fingerprint, expires, grantedAt, codeChanged, changes, copies, onAllow, onNotNow, onRevoke, onDone }: {
   name: string;
   glyph?: string;
   runs: Runs;
@@ -36,6 +36,8 @@ export default function GrantCard({ name, glyph, runs, lines, state, fingerprint
   codeChanged?: boolean;
   /** A sealed applet whose rows add or change notes: the closing line then says it changes nothing anywhere else. */
   changes?: boolean;
+  /** It also reads a room: what it reads there it can write into the notes it changes, and the card says so. */
+  copies?: boolean;
   onAllow?: () => void;
   onNotNow?: () => void;
   onRevoke?: () => void;
@@ -65,6 +67,7 @@ export default function GrantCard({ name, glyph, runs, lines, state, fingerprint
       : runs === "approved-code"
         ? <p className="grant-say grant-rest grant-network" role="status"><strong>{APPROVED_CODE_LINE}</strong> {changes ? "It can't send chat messages, delete notes, or change notes anywhere else." : "It can't send chat messages or change notes."} It runs inside Uni, so a faulty applet can freeze it; you can stop or revoke it from the bar above it.</p>
         : <p className="grant-say grant-rest"><strong>Nothing else.</strong> {changes ? "It can't send messages, delete notes, change notes anywhere else or reach the internet." : "It can't send messages, change notes or reach the internet."} It runs inside Uni, so a faulty applet can freeze it; you can stop or revoke it from the bar above it.</p>}
+    {copies && <p className="grant-say grant-copies"><strong>What it reads in a room it can write into those notes,</strong> where anyone who reads that vault can see it.</p>}
     <p className="grant-meta">
       {asking ? (until ? `Lasts until ${until}, or until you revoke it` : "Lasts until you revoke it") : [since ? `Allowed ${since}` : "Allowed", until ? `until ${until}` : "until you revoke it"].join(" · ")}
       {fingerprint ? <> · Grant <code>{fingerprint}</code></> : null}

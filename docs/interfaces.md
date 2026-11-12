@@ -131,7 +131,8 @@ read is `404` (no existence oracle) and one it reads but may not change is `403`
 has ended. The shell's writers are the app core's `vault_create` and `vault_save` on the applet's own vault; a write drops
 the path listings so the next list shows it. A vault fetch needs a read rule, so an applet that writes also reads.
 The card's row for a folder says every verb ("Read, add and change notes in Recipes/") and is marked, and its closing line
-says it can't delete or change notes anywhere else.
+says it can't delete or change notes anywhere else. An applet that also reads a room gets one more line: what it reads
+there it can write into those notes, where anyone who reads that vault can see it.
 
 **Not signed yet.** The grant is a record on this device (`localStorage`, `uni.interface.grants.v2`), as contract 1's
 was. `grantEvents(grant, expires)` builds the same grant in the shape Parachute 1.0 proposes for an owner-signed event
