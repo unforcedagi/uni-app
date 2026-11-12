@@ -482,7 +482,6 @@ impl Drop for StopOnDrop {
     }
 }
 
-
 /// Upload what the user attached or recorded, as one attachment or, for a long recording, several in order.
 ///
 /// A recording in Opus is converted to AAC parts of at most 9:50, cut at pauses ([`voice`]), where this device has the
@@ -512,13 +511,15 @@ async fn upload_media_with(
     }
     // One conversion at a time: each holds a decoder and an encoder, and a platform has only so many (one that can't
     // start one would send the recording as WebM).
-    let _converting = VOICE_GATE.acquire().await.map_err(|_| normalize::refuse("Couldn't start the upload. Attach it again."))?;
+    // Held by the conversion's own thread, so it's free once that ends, and not while the parts upload.
+    let converting = VOICE_GATE.acquire().await.map_err(|_| normalize::refuse("Couldn't start the upload. Attach it again."))?;
     let (from, name, dir) = (input.to_path_buf(), upload_filename(filename), work_dir.to_path_buf());
     let stop = StopOnDrop(Arc::new(std::sync::atomic::AtomicBool::new(false)));
     let flag = stop.0.clone();
     // The parts' remover is made on the conversion's own thread: if this upload is dropped before the answer is taken, the
     // answer is dropped there, and the parts with it.
     let parts = tokio::task::spawn_blocking(move || {
+        let _converting = converting;
         voice_parts(&from, &name, &dir, codecs, &flag).map(|o| o.map(|parts| (voice::Remove(parts.iter().map(|(p, _)| p.clone()).collect()), parts)))
     })
         .await
@@ -2123,12 +2124,12 @@ mod tests {
         let input = dir.path().join("in.webm");
         let runs = [(500.0, true), (1.0, false), (300.0, true)];
         std::fs::write(&input, voice::testing::webm(&voice::testing::speech(&runs))).unwrap();
-        let name = format!("{}.webm", "é".repeat(200));
+        let name = format!("a{}.webm", "é".repeat(200)); // odd bytes: the cut has to step back off a character
         let stop = std::sync::atomic::AtomicBool::new(false);
         let parts = voice_parts(&input, &upload_filename(&name), dir.path(), Some(&voice::testing::FAKE), &stop).unwrap().unwrap();
         assert_eq!(parts.len(), 2);
         for (path, n) in &parts {
-            assert!(n.len() <= 255 && n.ends_with(".m4a") && n.starts_with(&format!("{} of 2 · é", if path == &parts[0].0 { 1 } else { 2 })), "{n}");
+            assert!(n.len() <= 255 && n.ends_with(".m4a") && n.starts_with(&format!("{} of 2 · aé", if path == &parts[0].0 { 1 } else { 2 })), "{n}");
         }
     }
 
