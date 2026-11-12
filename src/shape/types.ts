@@ -1,5 +1,6 @@
 // T-335 the shape: home is rooms, a room is its chat plus a strip, the journal, the applets drawer, search where you are.
 // These are the few types the pieces share. Pure data; no React, no Tauri.
+import type { Card } from "./oneAsk.ts";
 
 /** A room as the host knows it (App.tsx `Room`). */
 export type ShapeRoom = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions?: boolean; unread?: number; dm?: boolean | null };
@@ -34,16 +35,13 @@ export type RoomRun = {
 };
 export type RoomRuns = { moving: RoomRun | null; waiting: RoomRun | null };
 
-/** An approval card about to expire, pinned over the rooms. */
-export type Pin = { ref: string; room: string; roomName: string; what: string; detail: string | null; /** Unix seconds. */ expires: number; sealed: boolean;
-  /** (added, T-335) From a private room: drawn on home without its words (no card, no command, no room name), opened in its room. */ private?: boolean };
 
 /** One row of home. */
 export type HomeRow = {
   room: ShapeRoom;
   /** Seconds; what the list is sorted by, newest first. */ at: number;
   runs: RoomRuns;
-  asks: Ask[];
+  /** (T-335 one ask) The room's cards on his list: its asks, tasks and approvals, one each, newest first. */ asks: Card[];
   /** (added, T-335) Asks waiting in this private room: counted, drawn on home only as a wordless mark (their words stay inside). */ hushed?: number;
   unread: number; mention: boolean;
 };

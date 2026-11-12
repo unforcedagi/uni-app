@@ -1,9 +1,9 @@
-// T-335 the shape: home's pure logic (unit-tested in scripts/home.test.ts). One row per room, newest first; the approvals about to
-// expire, pinned over the rooms; the clock words; the count on the bar; a room's last line and its glyph. No React, no Tauri.
-import { commandLine, type Approval } from "../approvals.ts";
+// T-335 the shape: home's pure logic (unit-tested in scripts/home.test.ts). One row per room, newest first, each with its asks (T-335 one
+// ask: the one list's cards, approvals among them); the clock words; the count on the bar; a room's last line and its glyph. No React, no Tauri.
 import { markdownToText } from "../markdown.ts";
-import { jobFingerprint, sealedFence, sealedProse, waitingTitle } from "../sealedCardCore.ts";
-import type { Ask, HomeRow, Pin, RoomRuns, ShapeRoom } from "./types.ts";
+import { sealedFence, sealedProse } from "../sealedCardCore.ts";
+import { withoutAskBlocks, type Card } from "./oneAsk.ts";
+import type { HomeRow, RoomRuns, ShapeRoom } from "./types.ts";
 
 const NO_RUNS: RoomRuns = { moving: null, waiting: null };
 
@@ -11,12 +11,12 @@ const NO_RUNS: RoomRuns = { moving: null, waiting: null };
  * One row per room (`hidden` ones left out), newest first by `at`: the room's last message, its newest ask, or the start of a run
  * that waits on you, whichever is latest (an ask lifts a quiet room). A room where nothing was ever said sorts last, by name. Stable.
  */
-export function homeRows(rooms: readonly ShapeRoom[], runs: ReadonlyMap<string, RoomRuns>, asks: ReadonlyMap<string, Ask[]>, opts: { hidden?: ReadonlySet<string> } = {}): HomeRow[] {
+export function homeRows(rooms: readonly ShapeRoom[], runs: ReadonlyMap<string, RoomRuns>, asks: ReadonlyMap<string, Card[]>, opts: { hidden?: ReadonlySet<string> } = {}): HomeRow[] {
   const rows = rooms.filter((r) => !opts.hidden?.has(r.id)).map((room): HomeRow => {
     const rr = runs.get(room.id) ?? NO_RUNS;
     const all = asks.get(room.id) ?? [];
     let at = room.last_ts ?? 0;
-    for (const a of all) at = Math.max(at, a.updatedAt);
+    for (const a of all) at = Math.max(at, a.at);
     if (rr.waiting?.startedAt) at = Math.max(at, rr.waiting.startedAt);
     // a private room's asks stay inside it: its row only knows how many (a wordless mark), never what they say
     const as = all.filter((a) => !a.private), hushed = all.length - as.length;
@@ -25,55 +25,13 @@ export function homeRows(rooms: readonly ShapeRoom[], runs: ReadonlyMap<string, 
   return rows.sort((a, b) => (a.at > 0 || b.at > 0 ? b.at - a.at : a.room.name.localeCompare(b.room.name)));
 }
 
-/** Approvals this close to their end are pinned over the rooms (seconds). */
-export const PIN_WINDOW_S = 15 * 60;
-
-/** What a pinned approval says: Uni's card by its reach or title and its class; a Hermes prompt by its command and why it was flagged. */
-function pinWords(a: Approval): { what: string; detail: string | null } {
-  if (a.kind === "sealed" && a.sealed) {
-    const w = a.sealed;
-    const what = waitingTitle(w);
-    if (w.kind === "morning") return { what, detail: "Answer on the card" };
-    return { what, detail: `${w.class === "powerful" ? "Powerful: hold to approve" : "Routine"} · job ${jobFingerprint(w.fingerprint)}` };
-  }
-  const cmd = commandLine(a);
-  if (a.kind === "sealed") return { what: cmd, detail: null };
-  const why = a.why?.trim() || null;
-  return a.kind === "smart-deny"
-    ? { what: `Override: OK to run ${cmd}?`, detail: why }
-    : { what: `OK to run ${cmd}?`, detail: why };
-}
-
-/** What a pin from a private room says on home: that one waits, never what it is or which room (its row shows that). */
-export const PRIVATE_PIN = "An approval waits in a private room";
 /**
- * The approvals that end within the window from `now` (and haven't ended), soonest first. `roomName` null: "a room". `isPrivate`: its room
- * keeps its words inside (the caller answers true while privacy can't be told yet): the pin is wordless, `private`, and still counted.
+ * The bar's count: what wants you, by the one list's rule (T-335 one ask): every card on a room's row, a private room's wordless ones too.
+ * The same cards home draws, so the count and the rows can't disagree. (A run that waits is not an ask: its room asks if it needs you.)
  */
-export function pinsFrom(approvals: readonly Approval[], roomName: (id: string) => string | null, now: number, isPrivate: (channel: string) => boolean = () => false): Pin[] {
-  return approvals
-    .filter((a) => a.deadline !== null && a.deadline > now && a.deadline - now <= PIN_WINDOW_S)
-    .sort((a, b) => a.deadline! - b.deadline!)
-    .map((a): Pin => isPrivate(a.channel)
-      ? { ref: a.ref, room: a.channel, roomName: "a private room", what: PRIVATE_PIN, detail: null, expires: a.deadline!, sealed: a.kind === "sealed", private: true }
-      : { ref: a.ref, room: a.channel, roomName: roomName(a.channel)?.replace(/^#/, "") || "a room", ...pinWords(a), expires: a.deadline!, sealed: a.kind === "sealed" });
-}
-
-/** "expires in 8:59", "expires in 0:05", or "expired" (seconds). */
-export function countdown(expires: number, now: number): string {
-  const s = Math.ceil(expires - now);
-  if (s <= 0) return "expired";
-  return `expires in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
-/**
- * The bar's count: what wants you. Each ask (a private room's too), each pinned approval, and a run that waits on you in a row with no asks (where there
- * are asks the row shows them instead of the run, so the run is one of them and isn't counted twice).
- */
-export function wantsCount(rows: readonly HomeRow[], pins: readonly Pin[]): number {
-  let n = pins.length;
-  // (a private room's asks want you too: counted, though home shows none of their words)
-  for (const r of rows) n += (r.asks.length + (r.hushed ?? 0)) || (r.runs.waiting ? 1 : 0);
+export function wantsCount(rows: readonly HomeRow[]): number {
+  let n = 0;
+  for (const r of rows) n += r.asks.length + (r.hushed ?? 0);
   return n;
 }
 
@@ -104,6 +62,8 @@ export function lastLine(room: Pick<ShapeRoom, "last_message"> & { last_author?:
   let body = room.last_message ?? "";
   let who = room.last_author?.trim() || null;
   if (sealedFence(body)) body = sealedProse(body) || "Uni asks for your OK on a card";
+  // an ask, an answer or a close says its words, never its data block (T-335 one ask)
+  body = withoutAskBlocks(body);
   const lead = LEAD_NAME.exec(body);
   if (lead) { who ??= (lead[1] ?? lead[2]).trim(); body = body.slice(lead[0].length); }
   let text = markdownToText(body);

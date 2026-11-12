@@ -47,7 +47,7 @@ use tauri::{Assets, Manager, Runtime};
 /// The shell's command API, as seen by the screens. Bump it with any change to the command set or a command's
 /// arguments or result. `src/ota.ts` holds the same number, and `src-tauri/shell-api.txt` the commands it stands for
 /// (both checked by `scripts/shellApi.test.ts`).
-pub const SHELL_API: u32 = 1;
+pub const SHELL_API: u32 = 2;
 
 /// The public half of the sealed screens bundle key (uni-ops `sealed/bundle.py` PUBKEY_HEX), raw Ed25519, hex.
 const RELEASE_PUBKEY_HEX: &str = "7eb47a945c28f019c78ea8691d19337f672261e10cff4e9abdfdbecbaec0330f";

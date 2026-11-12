@@ -86,7 +86,8 @@ import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, 
 import NotePane, { usePaneShape } from "./NotePane";
 import { APPROVAL_WINDOW_S, useApprovals } from "./approvalsLive";
 import { ApprovalBanner } from "./shape/ApprovalBanner";
-import { ShapeSurface, type StoryOpen } from "./shape/ShapeSurface";
+import { drawCard, ShapeSurface, type CardHost, type StoryOpen } from "./shape/ShapeSurface";
+import { withoutAskBlocks, type Card } from "./shape/oneAsk";
 import { useShape } from "./shape/useShape";
 import { forgetAsks } from "./shape/useAsks";
 import { Bar } from "./shape/Bar";
@@ -393,6 +394,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** T-335 the shape: the applets drawer, over whatever is behind it; and a run's story sheet. */
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [story, setStory] = useState<StoryOpen | null>(null);
+  /** T-335 one ask: Reply in the room: the card the composer answers (his words, sent from that room's main line, are its answer). */
+  const [answering, setAnswering] = useState<{ id: string; room: string; what: string } | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
   // T-335 fixes: a text field anywhere has focus, so a phone's keyboard is up: the bar steps aside for it (it shows otherwise)
   const [keyboardUp, setKeyboardUp] = useState(false);
@@ -2101,7 +2104,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     anchorNext(sendView);
     setError(null);
     try {
-      const sent = await invoke<Message | null>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
+      // T-335 one ask: answering a card (Reply in the room): his words are its answer, in the main line (never a thread)
+      const ans = answering && answering.room === channel && !root && !files.length ? shape.cards.find(answering.id) : null;
+      const sent = ans ? await shape.cards.answerWith(ans, snapshot) : await invoke<Message | null>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
+      if (ans) setAnswering(null);
       changePending(key, (items) => {
         for (const item of items) if (sentIds.includes(item.id) && item.preview) URL.revokeObjectURL(item.preview);
         return items.filter((item) => !sentIds.includes(item.id));
@@ -2266,7 +2272,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {away && !(anchor.current && anchor.current.view === currentView) && <button type="button" className={`jump-latest${newSince ? " has-new" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={jumpToLatest} aria-label={newSince ? `Jump to latest, ${newSince} new message${newSince === 1 ? "" : "s"}` : "Jump to latest"}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>{newSince ? <span>{newSince} new message{newSince === 1 ? "" : "s"}</span> : <span className="jump-latest-label">Latest</span>}
           </button>}
-          <ApprovalBanner approvals={approvals.filter((a) => a.channel === currentRoom.id)} onShow={openApproval} />
+          {/* (T-335 one ask: Uni's approval card is a card in the chat; the banner speaks only for a Hermes prompt, answered here) */}
+          <ApprovalBanner approvals={approvals.filter((a) => a.channel === currentRoom.id && a.kind !== "sealed")} onShow={openApproval} />
+          {answering && answering.room === currentRoom.id && !root && <div className="composer-answering" role="status">
+            <span><span aria-hidden="true">↳ </span>Answering <b>{answering.what}</b>: what you send goes to the main line as its answer.</span>
+            <button type="button" className="composer-answering-x" aria-label="Stop answering" onClick={() => setAnswering(null)}>×</button>
+          </div>}
           {above}
           <input ref={fileInput} className="file-picker" type="file" multiple aria-label="Choose files to attach" onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           {error && <p className="error" role="alert">{error}</p>}
@@ -2408,8 +2419,25 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return parseSecretReceipt(m.body) ? <Body body={withoutSecretBlock(m.body)} mentions={m.mentions} me={identity} edited={m.edited} /> : null;
   };
 
+  /** T-335 one ask: a room's ask is its card, where it was asked (open, or folded to how it ended); Uni's approval card waiting for a tap is
+   *  one too; an answer is his words with the ask it answers quoted above them, in the main line. Null: none of these. */
+  const askView = (m: Message, inThread: boolean) => {
+    const c: Card | undefined = shape.cards.list.asked.get(m.ref) ?? (inThread ? undefined : shape.cards.list.approvals.get(m.ref));
+    // (the host's moves are looked up when tapped: a room pane can be drawn before they are declared below)
+    const host: CardHost = { onOpenLink: (url) => void openLink(url).catch((e) => setError(`Couldn't open the link: ${e}`)), onOpenRoom: (id) => openRoom(id), onAnswerInRoom: (x) => answerInRoom(x) };
+    if (c && (c.source === "room" || c.source === "card")) return drawCard(shape, c, "chat", currentRoom?.name.replace(/^#/, "") ?? "", lifeVault, host);
+    const asked = shape.cards.answers.get(m.ref);
+    const q = asked ? shape.cards.list.asked.get(asked) : undefined;
+    if (!q) return null;
+    return <><p className="msg-quote"><span aria-hidden="true">↳ </span>{q.what}</p><Body body={withoutAskBlocks(m.body)} mentions={m.mentions} me={identity} edited={m.edited} /></>;
+  };
   const waitingRefs = new Set(approvals.map((a) => a.ref));
   const waitingKey = approvals.map((a) => a.ref).join(" ");
+  // T-335 one ask: what the chat's cards are drawn from (each card's state, its buttons' last minute, a write out, an error; the approvals
+  // on the list and the task each carries; the answers): the message list is drawn again when any of it changes
+  const cardNow = shape.cards.now;
+  const asksKey = [...shape.cards.list.asked.values(), ...shape.cards.list.approvals.values()]
+    .map((c) => `${c.id}${c.state}${c.what}${c.until !== null && cardNow >= c.until - 60 ? "!" : ""}${shape.cards.busy(c.id) ? "*" : ""}${shape.cards.error(c.id) ?? ""}`).join(" ") + `|${shape.cards.answers.size}`;
   /**
    * T-335: a Hermes approval prompt drawn as its short card. Its state comes from the same store read as Needs you (every room and thread),
    * never from the loaded timeline alone (a room's list has no thread replies). An outcome once read stands. Older than that read: no
@@ -2486,7 +2514,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${150 + (hue(m.author) % 120) - 60} 22% 44%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
       <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}
         {receipt && <details className="work-receipt"><summary>{receiptLine(receipt)}</summary>{receipt.steps.length > 0 && <ul>{receipt.steps.map((s) => <li key={s}>{s[0].toUpperCase() + s.slice(1)}</li>)}</ul>}</details>}
-        {editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : promptView(m) ?? secretView(m) ?? <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
+        {editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : askView(m, inThread) ?? promptView(m) ?? secretView(m) ?? <Body body={attachmentBody(withoutAskBlocks(m.body), m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
         <Attachments body={m.body} media={m.media} />
         {decisionCards(m, inThread)}
         {/* T-335 chat feel: Uni's 👀 on your message is said by the status line and the work receipt, not as a pill */}
@@ -2545,7 +2573,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {currentView && fetchedView === currentView && channel && roomDecisions(channel, messages)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts, waitingKey, endedKey, feel, sentRef, newLine, uniInRoom, selectedRef]);
+  [messages, identity, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts, waitingKey, endedKey, asksKey, feel, sentRef, newLine, uniInRoom, selectedRef]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.
@@ -2678,6 +2706,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
     requestAnimationFrame(() => input.current?.focus());
   };
   /** A sealed applet's draft (the user tapped Add to draft): into that room's composer, and the room comes up; never sends. */
+  /** T-335 one ask: Reply in the room on a card: its room opens with the composer answering it. Nothing is sent until he sends. */
+  const answerInRoom = (card: Card) => {
+    if (!card.room) return;
+    setAnswering({ id: card.id, room: card.room, what: card.what });
+    openRoom(card.room, { keys: true });
+    requestAnimationFrame(() => input.current?.focus());
+  };
   const composeInRoom = (room: string, text: string) => {
     const key = keyFor(room, null);
     const next = appendDraft(scopeDraft(key), text);
@@ -2800,6 +2835,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // (an ask folded into its card, T-335 asks in tune, is off his list but still the card's ask)
     askFor: (ch, ref) => { const a = [...(shape.asks.byRoom.get(ch) ?? []), ...(shape.asks.cardByRoom.get(ch) ?? [])].find((x) => cardIs(x.sealedCard, ref)); return a ? { tid: a.tid, what: a.what, why: a.why } : null; },
   }), [rooms, shape.asks.byRoom, shape.asks.cardByRoom, shape.isPrivate]);
+  // the messages the room's chat holds: a card asked by one of them is drawn there
+  const roomRefs = useMemo(() => new Set(messages.map((m) => m.ref)), [messages]);
   const roomChat = focus && homeOpen && channel === focus.room && (root ?? null) === focus.root && currentRoom
     ? (tail: ReactNode) => roomPane(currentRoom, null, `Message ${currentRoom.name.replace(/^#/, "")}`, currentRoom.name, tail) : null;
   return <VaultProfileProvider profile={profile}><NoteOpener.Provider value={openNote}><CardLinksContext.Provider value={cardLinks}><main className={`shell sh-shell in-room${barAside ? " sh-bar-aside" : ""}${roomShown ? " sh-in-room" : ""} ${topNote ? "note-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
@@ -2814,7 +2851,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       : applet ? <AppletFrame applet={active?.kind === "vault" && active.vault && active.vault !== VAULT_CHOOSER ? { ...applet, name: active.vault } : applet} onBack={backToDrawer} onSearch={() => openFind()}
           onAccess={applet.v2 && applet.host === "native" && accessHeld ? () => setAccessOpen((o) => !o) : undefined}>{appletBody()}</AppletFrame>
       : homeOpen ? <ShapeSurface shape={shape} rooms={rooms} loading={rooms.length === 0 && synced === 0} focus={focus} vault={lifeVault} chat={roomChat}
-          story={story} onStory={setStory} onOpenRoom={(id) => openRoom(id)} onReplyInRoom={composeInRoom} onBack={stepBackInFocus} onSearch={() => openFind()}
+          story={story} onStory={setStory} onOpenRoom={(id) => openRoom(id)} onAnswerInRoom={answerInRoom} drawnAt={roomRefs} onBack={stepBackInFocus} onSearch={() => openFind()}
           onOpenNote={(id) => openNote({ hub: null, vault: lifeVault, ref: id }, null)} onOpenLink={(url) => void openLink(url).catch((e) => setError(`Couldn't open the link: ${e}`))} />
       : null}
     </section>

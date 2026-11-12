@@ -1,9 +1,9 @@
 // T-335 the shape: home's rows, pins, clock words, the bar's count, the last line and the glyphs (src/shape/homeCore.ts).
 // Run: node --experimental-strip-types scripts/home.test.ts
 import assert from "node:assert/strict";
-import { ago, countdown, homeRows, lastLine, PIN_WINDOW_S, pinsFrom, roomGlyph, wantsCount } from "../src/shape/homeCore.ts";
-import type { Approval } from "../src/approvals.ts";
-import type { Ask, RoomRuns, ShapeRoom } from "../src/shape/types.ts";
+import { ago, homeRows, lastLine, roomGlyph, wantsCount } from "../src/shape/homeCore.ts";
+import type { Card } from "../src/shape/oneAsk.ts";
+import type { RoomRuns, ShapeRoom } from "../src/shape/types.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -12,7 +12,9 @@ function check(name: string, fn: () => void) {
 
 const NOW = 1_800_000_000;
 const room = (id: string, name: string, last_ts: number | null, extra: Partial<ShapeRoom> = {}): ShapeRoom => ({ id, name, last_message: "hi", last_ts, ...extra });
-const ask = (id: string, roomId: string, updatedAt: number): Ask => ({ id, tid: null, room: roomId, kind: "look", what: "Look at the plot map", why: null, options: [], fallback: null, action: "Seen", link: null, updatedAt });
+// (T-335 one ask: a row's asks are the one list's cards)
+const ask = (id: string, roomId: string, at: number): Card => ({ id, source: "task", tid: null, room: roomId, kind: "look", what: "Look at the plot map", why: null, next: null, context: null, options: [], fallback: null, link: null,
+  at, until: null, state: "open", later: null, ended: null });
 
 check("rows: newest first; an ask lifts a quiet room; a waiting run lifts too; never-said rooms last, by name", () => {
   const rooms = [room("house", "House", NOW - 9000), room("zeta", "Zeta", null), room("garden", "Garden co-op site", NOW - 600), room("studio", "Studio", NOW - 5000), room("alpha", "Alpha", null), room("teach", "Teaching", NOW - 7000)];
@@ -36,67 +38,15 @@ check("rows: ties keep the given order; hidden rooms are left out; unread and me
   assert.equal(rows[1].unread, 0); assert.equal(rows[1].mention, false);
 });
 
-const approval = (ref: string, deadline: number | null, extra: Partial<Approval> = {}): Approval => ({ ref, channel: "riverbend", author: "hermes", ts: NOW - 60, root: null, command: "send-invoice  --to billing@example.com", why: "Sends money", answers: ["/approve", "/deny"], deadline, kind: "command", ...extra });
-const names = (id: string) => (id === "riverbend" ? "Riverbend Commons" : null);
-
-check("pins: only within the window, not lapsed, soonest first (edges: expired, now, exactly at window, beyond)", () => {
-  const list = [
-    approval("beyond", NOW + PIN_WINDOW_S + 1), approval("late", NOW + 600), approval("edge", NOW + PIN_WINDOW_S),
-    approval("soon", NOW + 30), approval("now", NOW), approval("gone", NOW - 5), approval("open", null),
-  ];
-  assert.deepEqual(pinsFrom(list, names, NOW).map((p) => p.ref), ["soon", "late", "edge"]);
-});
-
-check("pins: a Hermes prompt says its command and why; an unknown room reads 'a room'", () => {
-  const [p] = pinsFrom([approval("x", NOW + 60)], names, NOW);
-  assert.deepEqual({ ...p }, { ref: "x", room: "riverbend", roomName: "Riverbend Commons", what: "OK to run send-invoice --to billing@example.com?", detail: "Sends money", expires: NOW + 60, sealed: false });
-  const [q] = pinsFrom([approval("y", NOW + 60, { channel: "elsewhere", why: "" })], names, NOW);
-  assert.equal(q.roomName, "a room"); assert.equal(q.detail, null);
-});
-
-check("pins: Uni's sealed card says its reach and class, not the prompt fields", () => {
-  const sealed = { ref: "s", channel: "riverbend", root: null, ts: NOW, kind: "single" as const, credential: "billing", action: "invoice.send", class: "powerful" as const, rows: 1, expires: NOW + 120, fingerprint: "9b13b2ae00", reach: "Sends one invoice for $2,400" };
-  const [p] = pinsFrom([approval("s", NOW + 120, { kind: "sealed", command: "ignored", why: "", sealed })], names, NOW);
-  assert.equal(p.what, "Sends one invoice for $2,400");
-  assert.equal(p.detail, "Powerful: hold to approve · job 9b13 b2ae");
-  assert.equal(p.sealed, true);
-  const [m] = pinsFrom([approval("m", NOW + 120, { kind: "sealed", sealed: { ...sealed, kind: "morning", reach: null, rows: 2 } })], names, NOW);
-  assert.equal(m.what, "Morning card · 2 routine credentials");
-});
-
-check("pins: one from a private room (or while privacy can't be told) is wordless: no command, no reach, no why, no room name; still counted", () => {
-  const sealed = { ref: "s", channel: "den", root: null, ts: NOW, kind: "single" as const, credential: "billing", action: "invoice.send", class: "powerful" as const, rows: 1, expires: NOW + 120, fingerprint: "9b13b2ae00", reach: "Sends one invoice for $2,400" };
-  const list = [approval("x", NOW + 60, { channel: "den" }), approval("s", NOW + 120, { kind: "sealed", channel: "den", sealed }), approval("o", NOW + 90)];
-  const pins = pinsFrom(list, (id) => (id === "den" ? "den" : names(id)), NOW, (ch) => ch === "den");
-  const hushed = pins.filter((p) => p.private);
-  assert.deepEqual(hushed.map((p) => p.ref), ["x", "s"]);
-  for (const p of hushed) {
-    assert.deepEqual({ what: p.what, detail: p.detail, roomName: p.roomName, room: p.room }, { what: "An approval waits in a private room", detail: null, roomName: "a private room", room: "den" });
-    assert.doesNotMatch(JSON.stringify(p), /invoice|Sends|billing|Powerful/i);
-  }
-  assert.equal(pins.find((p) => p.ref === "o")!.private, undefined);
-  assert.equal(wantsCount([], pins), 3);
-});
-
-check("countdown: m:ss, zero-padded seconds, expired at and after zero", () => {
-  assert.equal(countdown(NOW + 539, NOW), "expires in 8:59");
-  assert.equal(countdown(NOW + 5, NOW), "expires in 0:05");
-  assert.equal(countdown(NOW + 60, NOW), "expires in 1:00");
-  assert.equal(countdown(NOW + 0.4, NOW), "expires in 0:01");
-  assert.equal(countdown(NOW, NOW), "expired");
-  assert.equal(countdown(NOW - 3, NOW), "expired");
-});
-
-check("wantsCount: asks + pins + a waiting run only where the row has no asks", () => {
+check("wantsCount: every card on a row, the same cards home draws (a run that waits is not an ask; approvals are cards now, not pins)", () => {
   const waiting = { id: "w", state: "waiting" as const, title: "t", line: "l", startedAt: NOW };
   const rows = homeRows(
     [room("a", "A", NOW), room("b", "B", NOW), room("c", "C", NOW), room("d", "D", NOW)],
     new Map<string, RoomRuns>([["b", { moving: null, waiting }], ["c", { moving: null, waiting }]]),
     new Map([["a", [ask("1", "a", NOW), ask("2", "a", NOW)]], ["c", [ask("3", "c", NOW)]]]),
   );
-  const pins = pinsFrom([approval("p", NOW + 60)], names, NOW);
-  assert.equal(wantsCount(rows, pins), 2 + 1 + 1 + 1);
-  assert.equal(wantsCount([], []), 0);
+  assert.equal(wantsCount(rows), 2 + 1);
+  assert.equal(wantsCount([]), 0);
 });
 
 check("a private room's asks: on home its row carries none of them, only how many (counted on the bar, lifting the row); inside, they are its own", () => {
@@ -109,7 +59,7 @@ check("a private room's asks: on home its row carries none of them, only how man
   assert.equal(rows.find((r) => r.room.id === "a")!.hushed ?? 0, 0);
   assert.equal(JSON.stringify(den).includes("Words that stay inside"), false);
   assert.equal(rows[0].room.id, "den", "an ask lifts a private room too");
-  assert.equal(wantsCount(rows, []), 1 + 2);
+  assert.equal(wantsCount(rows), 1 + 2);
 });
 
 check("ago: now / minutes / hours / Yesterday / weekday / date", () => {
@@ -135,6 +85,9 @@ check("lastLine: one plain line; markdown stripped; a bold lead name becomes the
   const long = lastLine({ last_message: "x".repeat(400) }).text;
   assert.equal([...long].length, 160); assert.ok(long.endsWith("…"));
   assert.equal(lastLine({ last_message: "Your OK, please.\n```uni-sealed-approval\n{\"v\":1}\n```" }).text, "Your OK, please.");
+  // T-335 one ask: an ask, an answer or a close shows its words, never its data block
+  assert.equal(lastLine({ last_message: "Pick the slot\nMira asked\n\n```uni-ask\n{\"v\":1,\"kind\":\"tell\"}\n```" }).text, "Pick the slot Mira asked");
+  assert.equal(lastLine({ last_message: "Seen.\n\n```uni-answer\n{\"v\":1,\"a\":\"seen\"}\n```" }).text, "Seen.");
 });
 
 check("roomGlyph: Uni's ring; others stable, from the set, always text style", () => {

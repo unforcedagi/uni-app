@@ -104,7 +104,7 @@ export function approvalCard(a: Approval, folded: VaultAsk | null, priv: (room: 
   const what = a.kind === "sealed" ? (a.sealed ? waitingTitle(a.sealed) : commandLine(a)) : `${a.kind === "smart-deny" ? "Override: " : ""}OK to run ${commandLine(a)}?`;
   return {
     id: a.ref, source: a.kind === "sealed" ? "card" : "prompt", room: a.channel, kind: "approve",
-    what: folded?.what ?? what, why: folded?.why ?? (a.kind === "sealed" ? null : a.why?.trim() || null), next: folded ? what : null, context: null,
+    what: folded?.what ?? what, why: folded?.why ?? (a.kind === "sealed" ? null : a.why?.trim() || null), next: null, context: null,
     tid: folded?.tid ?? null, options: [], fallback: null, link: null, at: a.ts, until, state: "open", later: null, ended: null,
     ...(priv(a.channel) ? { private: true } : {}), approval: a, ...(folded ? { task: folded } : {}),
   };
@@ -217,3 +217,9 @@ export function roomAnswer(c: Card, b: Pick<CardButton, "act" | "value"> | { act
   throw new Error(`no answer for ${b.act}`);
 }
 export { wakes };
+
+/** A message's words without an ask's, an answer's or a close's data block (the chat and home's last line show the words, never the JSON). */
+export function withoutAskBlocks(body: string): string {
+  if (!body.includes("```uni-")) return body;
+  return body.replace(/(^|\n)```uni-(?:ask|answer|ask-close)\r?\n[\s\S]*?\n```[ \t]*(?=\r?\n|$)/g, "").replace(/\s+$/, "");
+}

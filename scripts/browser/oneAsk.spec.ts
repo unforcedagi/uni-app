@@ -31,6 +31,8 @@ function world(now = Math.floor(Date.now() / 1000), lapseIn = 3 * 86400) {
 }
 
 async function boot(page: Page, w: ReturnType<typeof world>, o: ShapeOpts = {}) {
+  page.on('pageerror', (e) => console.log('pageerror:', e.message));
+  page.on('console', (m) => { if (m.type() === 'error') console.log('console error:', m.text().slice(0, 400)); });
   await page.exposeFunction('__signAsMe', (t: { kind: number; tags: string[][]; content: string }) => signEvent(ME_SK, t, Math.floor(Date.now() / 1000)));
   await bootShape(page, { cards: true, ...o, asks: { me: ME, uni: UNI, events: w.events } });
   await expect(page.locator('.sh-home')).toBeVisible();
@@ -98,7 +100,7 @@ test('3. a reply to an ask posts flat (no thread) and ends it', async ({ page })
   await expect(page.locator('.composer-answering')).toContainText('Pick the walkthrough slot');
   await shot(page, '04-replying');
   await page.locator('.composer textarea').fill('Thursday works, but make it 2:30');
-  await page.locator('.composer textarea').press('Enter');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect.poll(async () => (await calls(page, 'post_answer')).length).toBe(1);
   const [sent] = await calls(page, 'post_answer');
   expect(sent.args.channel).toBe(ROOM.river);

@@ -80,3 +80,26 @@
 :root[data-screen="ink"] .sh-ask-context { border-top: 1.5px solid #000; }
 :root[data-screen="ink"] .sh-ask-btn:active:not(:disabled) { transform: none; }
 @media (prefers-reduced-motion: reduce) { .sh-ask-btn { transition: none; } .sh-ask-btn:active:not(:disabled) { transform: none; } }
+
+/* T-335 one ask: the one card. Over (answered, closed, lapsed): one quiet line where it was asked. Opened: its details in place. */
+.sh-card-ended { display: flex; align-items: baseline; gap: 6px; padding: 6px 10px; border: var(--g-hair) solid var(--g-line); border-radius: 10px; color: var(--g-ink-2); font-size: 14px; line-height: 1.4; background: none; }
+.sh-card-ended .sh-ask-what { color: var(--g-ink-2); font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-card-ended-line { flex: none; color: var(--g-ink-3); }
+.sh-card-mark { color: var(--g-ink-3); }
+.sh-card-until { color: var(--g-ink-3); }
+.sh-card-note { margin: 4px 0 0; font-size: 13px; color: var(--g-ink-2); }
+.sh-card-details { margin-top: 6px; }
+.sh-card .cc { margin-top: 8px; }
+.sh-card[data-open] .sh-ask-btn[data-act="archive"] { margin-left: auto; }
+/* Reply in the room: the composer says which ask it answers */
+.composer-answering { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 6px 10px; border-left: 3px solid var(--g-needs); border-radius: 6px; background: var(--g-paper-2, rgba(0,0,0,.03)); font-size: 13.5px; line-height: 1.35; color: var(--g-ink-2); }
+.composer-answering b { color: var(--g-ink); font-weight: 600; }
+.composer-answering > span { flex: 1; min-width: 0; }
+.composer-answering-x { flex: none; width: 32px; height: 32px; border: 0; border-radius: 8px; background: none; color: var(--g-ink-2); font-size: 18px; cursor: pointer; }
+/* an answer in the main line, with the ask it answers quoted above it */
+.msg-quote { margin: 0 0 2px; padding-left: 8px; border-left: 2px solid var(--g-line); color: var(--g-ink-3); font-size: 13px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* on home: one line (what), its why only once opened */
+.sh-ask-wants .sh-ask-body { display: block; cursor: pointer; }
+.sh-ask-wants .sh-ask-body .sh-ask-what { display: inline; font-weight: 500; }
+.sh-ask-wants:not([data-open]) .sh-ask-why { display: none; }
+.sh-ask-wants .cc { margin-top: 8px; }
