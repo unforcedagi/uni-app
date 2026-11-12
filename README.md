@@ -50,6 +50,6 @@ Driver: `crates/uni-core/src/pairing.rs`. Tests: `pairing_e2e` in `crates/uni-co
 
 Before using a personal account, check relay membership. Never put an nsec in the JavaScript or in an APK environment variable. The old debug-only plaintext `dev-nsec` fallback has been removed.
 
-Raw microphone audio is not a supported Buzz voice note: native MP4 packaging, signed media upload, permission and device tests are deferred. Android keyboard speech-to-text can fill the text composer now. History is bounded (500 fetched per channel per sync, 300 displayed per room/thread); older-page backfill is not implemented. No real-relay publish or Pixel/tablet smoke test is claimed by this branch.
+Voice notes are recorded as WebM with Opus (journals keep that). On Android the upload converts them to AAC with the phone's own codecs, in parts of at most 9:50 cut at pauses, sent together in one message: the shape stock Buzz takes (`crates/uni-core/src/media/voice.rs`). Mac and Linux builds have no converter yet and send the WebM, which only our patched relay takes. Android keyboard speech-to-text can fill the text composer now. History is bounded (500 fetched per channel per sync, 300 displayed per room/thread); older-page backfill is not implemented. No real-relay publish or Pixel/tablet smoke test is claimed by this branch.
 
 The previous core exploration and relay findings remain in [`UNI-APP-HANDOFF.md`](UNI-APP-HANDOFF.md). The `android` worktree/build effort is separate from the `talk-to-uni` branch.

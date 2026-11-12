@@ -1417,7 +1417,7 @@ pub(super) fn rewrite(input: &Path, size: u64, out: &Path) -> Result<Option<Rewr
         let longest = secs.iter().copied().fold(0.0, f64::max);
         let is_audio = sound.is_some() && picture.is_none_or(|p| p.tables.samples == 1);
         if is_audio && longest > MAX_AUDIO_SECONDS {
-            return Err(audio_too_long(longest));
+            return Err(audio_too_long(longest, MAX_AUDIO_SECONDS));
         }
         if !is_audio && longest > MAX_VIDEO_SECONDS {
             return Err(video_too_long(longest));
@@ -1518,7 +1518,7 @@ pub(super) fn rewrite(input: &Path, size: u64, out: &Path) -> Result<Option<Rewr
         && u128::from(movie_duration) * 1000 / u128::from(movie_timescale)
             > MAX_AUDIO_SECONDS as u128 * 1000
     {
-        return Err(audio_too_long(movie_duration as f64 / f64::from(movie_timescale)));
+        return Err(audio_too_long(movie_duration as f64 / f64::from(movie_timescale), MAX_AUDIO_SECONDS));
     }
     let still = audio_only.then(|| {
         let id = used_ids.iter().max().copied().unwrap_or(0) + 1;

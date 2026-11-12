@@ -14,6 +14,8 @@ export type MediaRef = {
   blurhash: string | null;
   alt: string | null;
   filename: string | null;
+  /** Seconds, for video (sound with a still frame included): from the upload's answer, for the message's imeta. */
+  duration?: number | null;
 };
 
 export type AttachmentKind = "image" | "video" | "audio" | "file";

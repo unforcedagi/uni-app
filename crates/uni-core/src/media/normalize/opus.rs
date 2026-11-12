@@ -245,6 +245,17 @@ fn clean_tracks(b: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// The `OpusHead` of a WebM's single Opus track and the track's number, checked as [`normalize_webm`] checks it, for
+/// the voice converter (`media/voice`), which reads the blocks itself.
+pub(crate) fn opus_head(tracks: &[u8]) -> Result<(Vec<u8>, Option<u64>)> {
+    clean_tracks(tracks)?;
+    let entry = elements(tracks).into_iter().find(|e| e.id == 0xae).ok_or_else(damaged)?;
+    let fields = elements(entry.body);
+    let head = fields.iter().find(|f| f.id == 0x63a2).ok_or_else(damaged)?.body.to_vec();
+    let number = fields.iter().find(|f| f.id == 0xd7 && (1..=8).contains(&f.body.len())).map(|f| number(f.body));
+    Ok((head, number))
+}
+
 /// Blocks must say track 1 and carry no lacing. Rewrites the track number when it's one byte, as Opus's always is.
 fn clean_block(b: &[u8]) -> Result<Vec<u8>> {
     let first = *b.first().ok_or_else(damaged)?;

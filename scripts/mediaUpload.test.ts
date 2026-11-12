@@ -17,7 +17,7 @@ function fakeRust(fail?: (cmd: string, n: number) => string | null) {
       for (const b of args as Uint8Array) staged.push(b);
       return null;
     }
-    if (cmd === "media_upload") return media;
+    if (cmd === "media_upload") return [media];
     return null;
   };
   return { call, staged, calls };
@@ -28,7 +28,7 @@ function fakeRust(fail?: (cmd: string, n: number) => string | null) {
   const bytes = new Uint8Array(UPLOAD_CHUNK_BYTES * 2 + 17).map((_, i) => i % 251);
   const rust = fakeRust();
   const got = await uploadMedia(new Blob([bytes]), "v.mov", "video/quicktime", rust.call);
-  assert.deepEqual(got, media);
+  assert.deepEqual(got, [media]);
   assert.deepEqual(Uint8Array.from(rust.staged), bytes);
   const pieces = rust.calls.filter((c) => c.cmd === "media_upload_chunk");
   assert.equal(pieces.length, 3);
@@ -137,7 +137,7 @@ function fakeRust(fail?: (cmd: string, n: number) => string | null) {
     busy--;
     return new Blob([new Uint8Array(3)], { type: "image/jpeg" });
   };
-  const call = async (cmd: string) => cmd === "media_upload_begin" ? "id" : cmd === "media_upload" ? media : null;
+  const call = async (cmd: string) => cmd === "media_upload_begin" ? "id" : cmd === "media_upload" ? [media] : null;
   await Promise.all(Array.from({ length: 20 }, (_, i) => uploadMedia(new Blob([new Uint8Array(9)]), `p${i}.heic`, "image/heic", call, undefined, toJpeg)));
   assert.ok(most <= 2, `${most} at once`);
 }

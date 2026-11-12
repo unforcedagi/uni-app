@@ -1709,8 +1709,9 @@ static UPLOAD_CANCELS: std::sync::LazyLock<std::sync::Mutex<std::collections::Ha
     std::sync::LazyLock::new(Default::default);
 
 /// Clean up the staged file for the relay and upload it. The staged file goes either way: a retry sends the file again.
+/// Usually one attachment; a recording converted to AAC is one per part, in order (`uni_core::media::upload_media`).
 #[tauri::command]
-async fn media_upload(app: tauri::AppHandle, id: String, filename: String, mime: String) -> Result<uni_core::MediaRef, String> {
+async fn media_upload(app: tauri::AppHandle, id: String, filename: String, mime: String) -> Result<Vec<uni_core::MediaRef>, String> {
     let path = staged_path(&app, &id)?;
     let cancel = std::sync::Arc::new(tokio::sync::Notify::new());
     if let Ok(mut uploads) = UPLOAD_CANCELS.lock() {
@@ -1726,7 +1727,7 @@ async fn media_upload(app: tauri::AppHandle, id: String, filename: String, mime:
             tauri::async_runtime::block_on(async {
                 // Dropping the upload stops it: the request hangs up, and its rewritten copy is removed.
                 tokio::select! {
-                    result = uni_core::media::upload_media_file(&relay, &keys, &path, &mime, &filename, &work_dir) => result.map_err(|e| e.to_string()),
+                    result = uni_core::media::upload_media(&relay, &keys, &path, &mime, &filename, &work_dir) => result.map_err(|e| e.to_string()),
                     () = cancel.notified() => Err("Upload stopped.".to_string()),
                 }
             })

@@ -3,7 +3,7 @@ import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho }
 import { keepSame } from "./keepSame";
 import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
-import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
+import { VoiceOutbox, relayAccepted, voiceMedia } from "./voiceOutbox";
 import Mail from "./Mail";
 import Calendar from "./calendar/Calendar";
 import { calShown, forgetCalendar, onCalShown, probeCalendar } from "./calendar/calDoor";
@@ -127,7 +127,7 @@ type IdentityStatus = { paired: boolean; pubkey: string | null };
 type RoomFocus = { room: string; root: string | null };
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
 
-type PendingFile = { owner?: string; relay?: string; created?: number; signedEvent?: string; id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string; voice?: { channel: string; replyTo: string | null; notifyUni: boolean } };
+type PendingFile = { owner?: string; relay?: string; created?: number; signedEvent?: string; id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef[]; error?: string; voice?: { channel: string; replyTo: string | null; notifyUni: boolean } };
 /** A voice message's limit, the same as the recorder's join limit and the transcriber's. */
 const MAX_VOICE_BYTES = 25 * 1024 * 1024;
 const invokeIpc = invoke as (cmd: string, args?: unknown, options?: { headers: Record<string, string> }) => Promise<unknown>;
@@ -502,7 +502,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const clips = records.filter(clip => clip.owner === owner && clip.relay === relay && clip.state !== "delivered");
       for (const clip of clips) {
         voiceCreated.current = Math.max(voiceCreated.current, clip.created);
-        const item: PendingFile = { ...clip, error: clip.error, file: new File([clip.file], clip.filename, { type: clip.mime }), state: clip.state === "error" ? "error" : "uploading", preview: null };
+        const item: PendingFile = { ...clip, media: voiceMedia(clip.media), error: clip.error, file: new File([clip.file], clip.filename, { type: clip.mime }), state: clip.state === "error" ? "error" : "uploading", preview: null };
         changePending(clip.key, items => items.some(x => x.id === clip.id) ? items : [...items, item]);
       }
       for (const clip of clips) if (voiceMounted.current && (clip.state !== "error" || isNetworkError(clip.error))) queueVoice(clip.key, clip.id);
@@ -1811,7 +1811,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
         const roomMembers = await invoke<Member[]>("get_members", { channel: destination.channel });
         const uni = findUniMember(roomMembers);
         if (!voiceMounted.current || !pendingStore.current.get(key)?.some((x) => x.id === id)) return;
-        const args = { channel: destination.channel, body: "", replyTo: destination.replyTo, recipients: destination.notifyUni && uni ? [uni.pubkey] : [], media: [media] };
+        // A long recording is several parts: one message, its voice notes in order.
+        const args = { channel: destination.channel, body: "", replyTo: destination.replyTo, recipients: destination.notifyUni && uni ? [uni.pubkey] : [], media };
         const signedEvent = clip.signedEvent ?? await invoke<string>("prepare_voice_message", args);
         changePending(key, items => items.map(x => x.id === id ? { ...x, signedEvent } : x));
         await persistVoice(key, id);
@@ -2086,6 +2087,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if ((!draft.trim() && !files.length) || files.some(attachmentBlocksSend)) {
       setError("Wait for uploads to finish or retry or remove failed files."); return;
     }
+    // A long recording attached as a file arrives as several parts, each an attachment.
+    const media = files.flatMap((f) => f.media!);
+    if (media.length > MAX_ATTACHMENTS) { setError(`Up to ${MAX_ATTACHMENTS} attachments per message, and these make ${media.length}: a long recording is one per part. Remove some.`); return; }
     const sentIds = files.map((f) => f.id);
     const snapshot = draft;
     const key = keyFor(channel, root);
@@ -2122,7 +2126,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       // T-335 one ask: answering a card (Reply in the room): his words are its answer, in the main line (never a thread)
       // (the card it answered has gone, ended or lapsed: his words go as a plain message, and the composer stops answering)
       if (!ans && answeringHere) setAnswering(null);
-      const sent = ans ? await shape.cards.answerWith(ans, snapshot) : await invoke<Message | null>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
+      const sent = ans ? await shape.cards.answerWith(ans, snapshot) : await invoke<Message | null>("post_message", { channel, body: snapshot, replyTo: target, recipients, media });
       if (ans) setAnswering(null);
       changePending(key, (items) => {
         for (const item of items) if (sentIds.includes(item.id) && item.preview) URL.revokeObjectURL(item.preview);
