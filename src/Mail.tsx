@@ -563,7 +563,9 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
         // change, so the page is asked again from where the list is now; the merge drops what it already has.
         const moved = sources.some((src) => (cur.next.find((x) => x.account_id === src.account_id)?.position ?? src.position) !== src.position);
         const fresh = page.threads.filter((t) => !cur.threads.some((c) => c.account_id === t.account_id && c.thread_id === t.thread_id));
-        const merged: List = { key, total: page.total, more: moved || page.more, threads: [...cur.threads, ...fresh], next: moved ? cur.next : page.next };
+        // newest first, as the server merges accounts: a thread recovered by asking again lands in its place
+        const threads = [...cur.threads, ...fresh].sort((x, y) => y.received_at.localeCompare(x.received_at));
+        const merged: List = { key, total: page.total, more: moved || page.more, threads, next: moved ? cur.next : page.next };
         listRef.current = merged;
         setList(merged);
         setListProblem(null);
@@ -751,9 +753,15 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     const at = rows.findIndex((r) => r.account_id === o.accountId && r.thread_id === o.threadId);
     const rest = rows.filter((_, i) => i !== at);
     const next = at < 0 ? undefined : rest[at] ?? rest[at - 1];
-    // it left the server's list too, so that account's next page starts one earlier (else Load older skips a thread)
-    setList((cur) => (cur ? { ...cur, threads: cur.threads.filter((r) => !(r.account_id === o.accountId && r.thread_id === o.threadId)), total: cur.total != null ? Math.max(0, cur.total - 1) : cur.total,
-      next: at < 0 ? cur.next : cur.next.map((x) => (x.account_id === o.accountId ? { ...x, position: Math.max(0, x.position - 1) } : x)) } : cur));
+    // it left the server's list too, so that account's next page starts one earlier (else Load older skips a thread).
+    // The ref moves at once: a page answer landing before the next render merges into this list, not the one before.
+    const cur = listRef.current;
+    if (cur) {
+      const left: List = { ...cur, threads: cur.threads.filter((r) => !(r.account_id === o.accountId && r.thread_id === o.threadId)), total: cur.total != null ? Math.max(0, cur.total - 1) : cur.total,
+        next: at < 0 ? cur.next : cur.next.map((x) => (x.account_id === o.accountId ? { ...x, position: Math.max(0, x.position - 1) } : x)) };
+      listRef.current = left;
+      setList(left);
+    }
     if (!same(openRef.current)) return;
     const c = composeRef.current;
     if (c && !c.hidden && c.thread === keyOf(o)) return; // a reply being written keeps its thread

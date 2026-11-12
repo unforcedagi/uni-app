@@ -406,6 +406,9 @@ for (const late of [false, true]) test(`an Archive while Load older is on its wa
   await page.evaluate(() => { (window as any).__threadsDelay = 0; (window as any).__threadsLate = false; });
   await mail(page).getByRole('button', { name: 'Load older' }).click();
   await expect(rows(page).filter({ hasText: 'hold is ready' })).toHaveCount(1);
+  // newest first, wherever a thread came back from
+  const order = await rows(page).locator('.mail-row-subject').allInnerTexts();
+  expect(order).toEqual(['Workshop photos and slides', 'Your hold is ready']);
 });
 
 test('Later on a thread of 150 messages flags them a hundred at a time', async ({ page }) => {
