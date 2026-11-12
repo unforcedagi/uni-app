@@ -1146,7 +1146,8 @@ mod tests {
 
     #[test]
     fn unsafe_paths_links_and_missing_metadata_are_refused() {
-        let meta = br#"{"version":"0.3.8","api":1}"#;
+        let meta_owned = format!(r#"{{"version":"0.3.8","api":{SHELL_API}}}"#).into_bytes();
+        let meta: &[u8] = &meta_owned;
         let a = archive(&[("uni-bundle.json", meta), ("index.html", b"x"), ("../evil", b"x")]);
         assert!(unpack(&a).unwrap_err().contains("unsafe path"));
         let a = archive(&[("index.html", b"x")]);
@@ -1166,7 +1167,7 @@ mod tests {
         // scripts/ota-bundle.sh packs POSIX ustar: a path over 100 bytes goes in the header's prefix field.
         let long = format!("assets/{}/chunk.js", "d".repeat(110));
         let mut b = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
-        for (path, data) in [("uni-bundle.json", &br#"{"version":"0.3.8","api":1}"#[..]), ("index.html", b"x"), (long.as_str(), b"1")] {
+        for (path, data) in [("uni-bundle.json", &format!(r#"{{"version":"0.3.8","api":{SHELL_API}}}"#).into_bytes()[..]), ("index.html", b"x"), (long.as_str(), b"1")] {
             let mut h = tar::Header::new_ustar();
             h.set_path(path).unwrap();
             h.set_size(data.len() as u64);

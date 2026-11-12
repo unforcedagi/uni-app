@@ -76,7 +76,7 @@ async fn reading_state_flags_and_archive_go_through_the_operations_offered() {
     assert!(keywords(&fake, "A", "a3").get("$seen").is_none());
     mail.flag("U", &["u1".into()], true).await.unwrap();
     assert_eq!(keywords(&fake, "U", "u1")["$flagged"], true, "the owner flags Uni's mail");
-    let list = mail.threads(&[uni_core::mail::Source { account_id: "U".into(), mailbox_id: Some("U-inbox".into()), exclude: vec![], position: 0 }], None, 50).await.unwrap();
+    let list = mail.threads(&[uni_core::mail::Source { account_id: "U".into(), mailbox_id: Some("U-inbox".into()), ..Default::default() }], None, 50).await.unwrap();
     assert!(list.threads.iter().find(|t| t.email_id == "u1").unwrap().flagged);
     mail.archive("A", &["a4".into()]).await.unwrap();
     // Uni's account: no archive for the owner; the device refuses it before the bridge sees it

@@ -9,6 +9,8 @@ import { applyLink, mergeLinks, applyOpened, applyTimeline, asMessagesErr, initi
 import LinkAccounts from "./LinkAccounts.tsx";
 import { Attachment, Lightbox, MessageText, Quote, Reactions } from "./MessageParts.tsx";
 import { enterInsertsNewline } from "../composerCore";
+import { useDoorTabs } from "../doorTabs";
+import "../doors.css";
 import "./Messages.css";
 
 const touchKeyboard = () => typeof navigator !== "undefined" && enterInsertsNewline(navigator.maxTouchPoints ?? 0, matchMedia("(pointer: coarse)").matches);
@@ -51,16 +53,16 @@ function SignIn({ onDone }: { onDone: (s: Status) => void }) {
 
 function RoomItem({ r, selected, now, mark, onOpen }: { r: RoomRow; selected: boolean; now: number; mark: boolean; onOpen: () => void }) {
   const net = networkInfo(networkOf(r));
-  return <li><button type="button" className={`msgs-row ${selected ? "selected" : ""} ${r.unread > 0 ? "unread" : ""} ${r.invited ? "invite" : ""}`} aria-current={selected ? "page" : undefined} onClick={onOpen}>
-    <span className="msgs-avatar" aria-hidden="true">{initials(r.name)}</span>
-    <span className="msgs-row-text">
-      <span className="msgs-row-top"><strong className="msgs-row-name">{r.name}</strong>
+  return <li><button type="button" className={`msgs-row door-row ${selected ? "selected" : ""} ${r.unread > 0 ? "unread" : ""} ${r.invited ? "invite" : ""}`} aria-current={selected ? "page" : undefined} onClick={onOpen}>
+    <span className="msgs-avatar door-avatar" aria-hidden="true">{initials(r.name)}</span>
+    <span className="msgs-row-text door-row-text">
+      <span className="msgs-row-top door-row-top"><strong className="msgs-row-name door-row-name">{r.name}</strong>
         {mark && net.mark && <><span className="msgs-net" aria-hidden="true">{net.mark}</span><span className="msgs-sr">on {net.label}</span></>}
         <time>{rowTime(r.ts, now)}</time></span>
-      <span className="msgs-row-bottom">
+      <span className="msgs-row-bottom door-row-bottom">
         {r.invited && <span className="msgs-tag">Invite</span>}
-        <span className="msgs-row-preview">{previewLine(r)}</span>
-        {r.unread > 0 && <span className="msgs-count" aria-label={`${r.unread} unread`}>{r.unread}</span>}
+        <span className="msgs-row-preview door-row-preview">{previewLine(r)}</span>
+        {r.unread > 0 && <span className="msgs-count door-count" aria-label={`${r.unread} unread`}>{r.unread}</span>}
       </span>
     </span>
   </button></li>;
@@ -69,30 +71,13 @@ function RoomItem({ r, selected, now, mark, onOpen }: { r: RoomRow; selected: bo
 /** T-310: All, then one tab per network; "Link another network" quietly at the end. Arrow keys move along the tabs. */
 function TabStrip({ tabs, tab, onPick, onLink }: { tabs: Tab[]; tab: TabId; onPick: (t: TabId) => void; onLink: () => void }) {
   const strip = useRef<HTMLDivElement | null>(null);
-  // the tab you're on stays in sight on a phone's sideways strip
-  useLayoutEffect(() => {
-    const el = strip.current, on = el?.querySelector<HTMLElement>('[aria-selected="true"]');
-    if (!el || !on) return;
-    // the strip alone scrolls: nothing around it moves
-    const left = on.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft, right = left + on.offsetWidth;
-    if (left < el.scrollLeft) el.scrollLeft = left;
-    else if (right > el.scrollLeft + el.clientWidth) el.scrollLeft = right - el.clientWidth;
-  }, [tab]);
-  const key = (e: KeyboardEvent<HTMLDivElement>) => {
-    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    if (!step) return;
-    e.preventDefault();
-    const at = tabs.findIndex((t) => t.id === tab);
-    const next = tabs[(at + step + tabs.length) % tabs.length];
-    onPick(next.id);
-    strip.current?.querySelector<HTMLElement>(`[data-tab="${next.id}"]`)?.focus();
-  };
-  return <div className="msgs-tabs" ref={strip}>
-    <div className="msgs-tablist" role="tablist" aria-label="Networks" onKeyDown={key}>
+  const key = useDoorTabs(strip, tabs.map((t) => t.id), tab, onPick);
+  return <div className="msgs-tabs door-tabs" ref={strip}>
+    <div className="msgs-tablist door-tablist" role="tablist" aria-label="Networks" onKeyDown={key}>
       {tabs.map((t) => <button key={t.id} type="button" role="tab" data-tab={t.id} aria-selected={t.id === tab} aria-controls="msgs-list" tabIndex={t.id === tab ? 0 : -1}
-        aria-label={tabName(t)} className={`msgs-tab ${t.attention ? "attention" : ""}`} onClick={() => onPick(t.id)}>
+        aria-label={tabName(t)} className={`msgs-tab door-tab ${t.attention ? "attention" : ""}`} onClick={() => onPick(t.id)}>
         <span>{t.label}</span>
-        {t.waiting > 0 && <span className="msgs-tab-count" aria-hidden="true">{t.waiting}</span>}
+        {t.waiting > 0 && <span className="msgs-tab-count door-tab-count" aria-hidden="true">{t.waiting}</span>}
         {t.attention && <span className="msgs-tab-alert" aria-hidden="true">!</span>}
       </button>)}
     </div>

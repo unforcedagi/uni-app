@@ -254,9 +254,15 @@ test('Search: nothing found is one line and a next step; a found note\'s folder 
 // ---------------------------------------------------------------- the home
 // ---------------------------------------------------------------- Mail, Calendar, Messages
 test('Mail\'s account tags speak in words, not capitals', async ({ page }) => {
-  await mailMock.boot(page, 'ok');
+  // T-335 v2: rows carry no account tag (the tab says whose mail it is); the tag stays where the account matters
+  await mailMock.boot(page, 'ok', { writes: true, held: true });
   await mailMock.rows(page).first().waitFor();
-  for (const t of await mailMock.rows(page).locator('.mail-who').allTextContents()) expect(t, t).not.toMatch(/^(YOU|UNI)\b/);
+  await expect(mailMock.rows(page).locator('.mail-who')).toHaveCount(0);
+  await mailMock.tab(page, 'Waiting').click();
+  await page.locator('.mail-held-row').first().waitFor();
+  const tags = await page.locator('.mail-held-row .mail-who').allTextContents();
+  expect(tags.length).toBeGreaterThan(0);
+  for (const t of tags) expect(t, t).not.toMatch(/^(YOU|UNI)\b/);
 });
 
 test('Mail that can only read has no grey New or Reply; a phone\'s list has one search field', async ({ page }) => {
@@ -266,10 +272,12 @@ test('Mail that can only read has no grey New or Reply; a phone\'s list has one 
   await expect(mailMock.mail(page)).not.toContainText('Sending comes later');
   await expect(mailMock.mail(page).getByRole('button', { name: /^New/ })).toHaveCount(0);
   await expect(mailMock.mail(page)).toContainText('reading only');
-  if (phone()) await expect(page.getByRole('navigation', { name: 'Mail actions' }).getByRole('button', { name: 'Search' })).toHaveCount(0);
+  await expect(mailMock.mail(page).getByRole('searchbox')).toHaveCount(1);
   await mailMock.rows(page).first().click();
   await expect(mailMock.mail(page).getByRole('button', { name: /^Reply/ })).toHaveCount(0);
   await expect(mailMock.mail(page)).not.toContainText('Sending comes later');
+  // a phone's thread fills the screen (the tabs and Refresh give way to it): Refresh is back on the list
+  await mailMock.backToThreads(page);
   await expect(mailMock.mail(page).getByRole('button', { name: 'Refresh' }).locator('svg')).toBeVisible();
 });
 
@@ -277,12 +285,13 @@ test('a many-pane place\'s header runs the width of its panes on a wide screen',
   test.skip(phone(), 'desktop');
   await mailMock.boot(page, 'ok');
   await expect(mailMock.mail(page)).toBeVisible();
-  const bar = (await page.locator('.mail-bar').boundingBox())!;
+  // T-335 v2: Mail's head is its strip of place tabs; a rail place has no Back of its own, and the first tab sits at
+  // the panes' left edge
+  const bar = (await page.locator('.mail-tabs').boundingBox())!;
   const panes = (await page.locator('.mail-panes').boundingBox())!;
-  // 0.2: a rail place has no Back of its own; the head starts with the place's name, at the panes' left edge
-  await expect(page.locator('.mail-bar').getByRole('button', { name: /^←/ })).toHaveCount(0);
-  const title = (await page.locator('.mail-bar .mail-title').boundingBox())!;
-  expect(title.x - bar.x).toBeLessThanOrEqual(20);
+  await expect(page.locator('.mail-tabs').getByRole('button', { name: /^←/ })).toHaveCount(0);
+  const first = (await page.locator('.mail-tabs [role=tab]').first().boundingBox())!;
+  expect(first.x - bar.x).toBeLessThanOrEqual(20);
   expect(Math.abs(bar.x - panes.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(bar.x + bar.width - (panes.x + panes.width))).toBeLessThanOrEqual(1);
 });

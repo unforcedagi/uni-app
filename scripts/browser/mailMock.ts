@@ -42,7 +42,7 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
     const msgs = [
       msg('a1', 'A', 'TA-plan', 'A-inbox', mara, robin, 'Planning the garden week', '2026-10-18T09:00:00Z', { text: 'Hi Robin,\n\nShall we plan the garden week? I can bring the marmalade jars on Saturday.\n\nMara' }),
       msg('a2', 'A', 'TA-plan', 'A-sent', robin, mara, 'Re: Planning the garden week', '2026-10-18T11:00:00Z', { text: 'Saturday works. Bring the jars.\n\nRobin' }),
-      msg('a3', 'A', 'TA-plan', 'A-inbox', mara, robin, 'Re: Planning the garden week', '2026-10-19T08:30:00Z', { unread: true, text: 'Great. One question: which day should we start the beds, Monday or Tuesday?\n\nMara' }),
+      msg('a3', 'A', 'TA-plan', 'A-inbox', mara, robin, 'Re: Planning the garden week', '2026-10-19T08:30:00Z', { unread: true, text: 'Great. One question: which day should we start the beds, Monday or Tuesday?\n\nMara\n\nOn Sun, Oct 18, Robin Vale wrote:\n> Saturday works. Bring the jars.' }),
       msg('a6', 'A', 'TA-plan', 'A-drafts', robin, mara, 'Re: Planning the garden week', '2026-10-19T09:00:00Z', { draft: true, uni_drafted: true, text: 'Monday suits me. See you then.\n\nRobin' }),
       msg('a4', 'A', 'Ta4', 'A-inbox', theo, robin, 'Workshop photos and slides', '2026-10-17T15:00:00Z', { unread: true, text: 'Here are the notes from the workshop, a proof of the poster, and the installer I mentioned.\n\nTheo',
         attachments: [att('Bnotes-pdf', 'workshop-notes.pdf', 'application/pdf', 13401), att('Bproof-svg', 'poster-proof.png', 'image/png', 160),
@@ -91,10 +91,14 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
     const hay = (m: any) => [m.subject, m.text, m.html, ...m.from.map((x: any) => `${x.name} ${x.email}`), ...m.attachments.map((x: any) => x.name)].join(' ').toLowerCase();
     // Email/query with collapseThreads, per source, merged by time (what uni_core::mail::accounts::merge does)
     // __pageSize: pages of that many, each account from its own position (as Email/query does), for Load older
+    const later = (m: any) => msgs.some((x) => x.account === m.account && x.thread_id === m.thread_id && x.flagged);
     const threads = (sources: any[], text: string | null) => {
       let total = 0;
       const rows = sources.flatMap((s) => {
-        const hits = msgs.filter((m) => m.account === s.account_id && (s.mailbox_id ? m.box === s.mailbox_id : !s.exclude.includes(m.box)) && (!text || hay(m).includes(text.toLowerCase())))
+        const hits = msgs.filter((m) => m.account === s.account_id && (s.mailbox_id ? m.box === s.mailbox_id : !s.exclude.includes(m.box)) && (!text || hay(m).includes(text.toLowerCase()))
+          // T-335 Mail v2, as Rust asks the server: Later is the thread's flag (someInThreadHaveKeyword); the Inbox leaves a
+          // Later thread out unless something new (unread, not flagged) is on it; Files is hasAttachment
+          && (s.flagged == null || (s.flagged ? later(m) : !later(m) || (m.unread && !m.flagged))) && (!s.with_files || m.attachments.length > 0 || (m.files?.length ?? 0) > 0))
           .sort((x, y) => y.received_at.localeCompare(x.received_at));
         const seen = new Set<string>();
         const heads = hits.filter((m) => !seen.has(m.thread_id) && seen.add(m.thread_id));
@@ -103,7 +107,8 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
           const all = msgs.filter((x) => x.account === m.account && x.thread_id === m.thread_id);
           return { account_id: m.account, thread_id: m.thread_id, email_id: m.id, from: m.from, to: m.to, subject: m.subject, preview: (m.text ?? m.subject).replace(/\s+/g, ' ').slice(0, 120),
             received_at: m.received_at, count: all.length, unread: all.some((x) => x.unread && !x.draft && (!/-(junk|trash)$/.test(x.box) || x.box === s.mailbox_id)), has_attachment: all.some((x) => x.attachments.length > 0), draft: m.draft, uni_drafted: m.uni_drafted,
-            flagged: all.some((x) => x.flagged) };
+            flagged: all.some((x) => x.flagged), uni_draft: all.some((x) => x.draft && x.uni_drafted),
+            fresh: all.some((x) => x.unread && !x.draft && !x.flagged && !/-(junk|trash)$/.test(x.box)) };
         });
       }).sort((x, y) => y.received_at.localeCompare(x.received_at));
       const shown = rows.slice(0, w.__pageSize ?? rows.length);
@@ -140,10 +145,16 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
               : { ...b, total: msgs.filter((m) => m.box === b.id).length, unread: msgs.filter((m) => m.box === b.id && m.unread && !m.draft).length }) }));
             return w.__mailMode === 'one_account' || w.__uniGone ? { login: 'robin@example.com', multi: w.__mailMode !== 'one_account', accounts: [live[0]] } : { login: 'robin@example.com', multi: true, accounts: live };
           }
-          case 'mail_threads': fail();
+          case 'mail_threads': {
+            fail();
+            // `__threadsDelay` holds the answer on its way back (the server read the query as it arrived); with
+            // `__threadsLate` the query itself reaches the server late (after writes sent after it)
+            const early = w.__threadsLate ? null : threads(args.sources, args.text);
             if (w.__threadsDelay) await new Promise((r) => setTimeout(r, w.__threadsDelay));
+            const answer = early ?? threads(args.sources, args.text);
             if (w.__uniGone && args.sources.some((s: any) => s.account_id === 'U')) throw { kind: 'server', message: 'accountNotFound' };
-            return threads(args.sources, args.text);
+            return answer;
+          }
           case 'mail_thread': {
             fail(); if (w.__threadFails) throw { kind: 'server', message: 'mail server: URLError' };
             const list = msgs.filter((m) => m.account === args.accountId && m.thread_id === args.threadId).sort((x, y) => x.received_at.localeCompare(y.received_at));
@@ -171,6 +182,8 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
             const op = cmd === 'mail_mark_seen' ? 'mark_seen' : cmd === 'mail_flag' ? 'flag' : 'archive';
             offered(op, args.accountId);
             if (op === 'archive' && w.__archiveDelay) await new Promise((r) => setTimeout(r, w.__archiveDelay));
+            // T-335: `__flagFails` makes the next flag call fail as an unreachable bridge would
+            if (op === 'flag' && w.__flagFails) { w.__flagFails--; throw { kind: 'unreachable', message: 'the mail bridge did not answer in time' }; }
             const these = msgs.filter((m) => m.account === args.accountId && args.emailIds.includes(m.id));
             if (these.length !== args.emailIds.length) throw { kind: 'refused', status: 409, message: "a message isn't in this account" };
             for (const m of these) {
@@ -308,19 +321,22 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
 export const width = (page: Page) => page.viewportSize()?.width ?? 1440;
 /** One pane at a time (a phone). */
 export const stacked = (page: Page) => width(page) < 700;
-/** The mailboxes sit behind ☰ (a phone, or the Daylight upright). */
-export const boxesHidden = (page: Page) => width(page) < 1100;
-export const mail = (page: Page) => page.getByRole('region', { name: 'Mail' }).last();
+/** T-335 v2: Mail's places are tabs (Inbox, Later, Waiting, Drafts, Sent, Archive, Junk, Uni's mail). */
+export const mail = (page: Page) => page.getByRole('region', { name: 'Mail', exact: true }).last();
 export const rows = (page: Page) => page.locator('.mail-row');
+export const tab = (page: Page, name: string) => mail(page).getByRole('tab', { name: new RegExp(`^${name.replace(/[.?()]/g, '\\$&')}`) });
 
-export async function pickBox(page: Page, group: "Your mailboxes" | "Uni's mailboxes" | null, name: string) {
-  if (boxesHidden(page)) await page.getByRole('button', { name: '☰ Mailboxes' }).click();
-  const nav = page.getByRole('navigation', { name: 'Mailboxes' });
-  await (group ? nav.getByRole('group', { name: group }) : nav).getByRole('button', { name: new RegExp(`^${name}`) }).click();
+/** Open a place's tab (on a phone, back from a thread first: the tabs give way to it). */
+export async function pickTab(page: Page, name: string) {
+  await backToThreads(page);
+  await tab(page, name).click();
 }
 
+/** On a phone, back from a thread (or a held send) to the list, when one is showing. */
 export async function backToThreads(page: Page) {
-  if (stacked(page)) await page.getByRole('button', { name: '← Threads' }).first().click();
+  if (!stacked(page)) return;
+  const b = mail(page).locator('.mail-thread-back:visible');
+  if (await b.count()) await b.first().click();
 }
 
 /** MAIL_SHOTS=<dir>: keep a screenshot of each step, for looking at (never committed). */

@@ -18,12 +18,12 @@ async fn shared(keys: &Keys) -> FakeBridge {
 }
 
 fn inbox(account: &str) -> Source {
-    Source { account_id: account.into(), mailbox_id: Some(format!("{account}-inbox")), exclude: vec![], position: 0 }
+    Source { account_id: account.into(), mailbox_id: Some(format!("{account}-inbox")), ..Source::default() }
 }
 
 /// A whole account, less Junk and Trash: what a search reads.
 fn whole(account: &str) -> Source {
-    Source { account_id: account.into(), mailbox_id: None, exclude: vec![format!("{account}-junk"), format!("{account}-trash")], position: 0 }
+    Source { account_id: account.into(), exclude: vec![format!("{account}-junk"), format!("{account}-trash")], ..Source::default() }
 }
 
 fn ids(page: &uni_core::mail::ThreadPage) -> Vec<String> {
@@ -69,7 +69,7 @@ async fn a_v1_bridge_is_one_account_of_the_keys_own() {
     assert!(!o.multi);
     assert_eq!(o.accounts.len(), 1);
     assert_eq!((o.accounts[0].id.as_str(), o.accounts[0].name.as_str(), o.accounts[0].who), ("a", "owner@example.com", Who::Owner));
-    let page = mail.threads(&[Source { account_id: "a".into(), mailbox_id: Some("mb-inbox".into()), exclude: vec![], position: 0 }], None, 50).await.unwrap();
+    let page = mail.threads(&[Source { account_id: "a".into(), mailbox_id: Some("mb-inbox".into()), ..Source::default() }], None, 50).await.unwrap();
     assert_eq!(ids(&page), ["a/Tm1", "a/Tm2", "a/Tm4", "a/Tm5"]);
     assert!(mail.triage("a", &["m1".into()]).await.unwrap().is_empty(), "no triage on a v1 bridge: no notes, not an error");
 }
@@ -119,6 +119,71 @@ async fn search_reads_one_account_or_both_and_skips_junk() {
     assert_eq!(ids(&both), ["U/TU-read"], "case doesn't matter; one row per thread");
     // the text went to the server as a JMAP text filter
     assert!(mail.threads(&[whole("A")], Some(&"x".repeat(201)), 50).await.is_err(), "too long: never sent");
+}
+
+/// T-335 Mail v2: Later is the flag. The Inbox leaves Later mail out, the Later list is only flagged mail, and Files
+/// narrows any list to mail with attachments; each goes to the server as a JMAP filter, so paging stays the server's.
+#[tokio::test]
+async fn later_and_files_narrow_a_list_on_the_server() {
+    let keys = Keys::generate();
+    let fake = shared(&keys).await;
+    {
+        let mut st = fake.state.lock().unwrap();
+        let e = st.mail.emails.iter_mut().find(|e| e["id"] == "a5").expect("a5 in the fixture");
+        e["keywords"]["$flagged"] = serde_json::json!(true);
+    }
+    let mail = MailBridge::new(&fake.url, &keys).unwrap();
+    let all = ids(&mail.threads(&[inbox("A")], None, 50).await.unwrap());
+    assert!(all.contains(&"A/Ta5".to_string()));
+    let not_later = mail.threads(&[Source { flagged: Some(false), ..inbox("A") }], None, 50).await.unwrap();
+    assert!(!ids(&not_later).contains(&"A/Ta5".to_string()), "a Later thread leaves the Inbox");
+    assert_eq!(ids(&not_later).len(), all.len() - 1);
+    let later = mail.threads(&[Source { flagged: Some(true), ..whole("A") }], None, 50).await.unwrap();
+    assert_eq!(ids(&later), ["A/Ta5"], "Later is only flagged mail");
+    let files = mail.threads(&[Source { with_files: true, ..whole("A") }], None, 50).await.unwrap();
+    assert!(!files.threads.is_empty() && files.threads.iter().all(|t| t.has_attachment), "Files: only mail with attachments");
+    // Later is the thread's, and the server decides it (paging and totals stay its own): a thread with any message
+    // flagged (here only the oldest, as another client may do) is in Later and out of the Inbox, until something new
+    // (unread, not flagged) arrives on it
+    let set = |id: &str, k: &str, on: bool| {
+        let mut st = fake.state.lock().unwrap();
+        let e = st.mail.emails.iter_mut().find(|e| e["id"] == id).expect("in the fixture");
+        if on { e["keywords"][k] = serde_json::json!(true); } else { e["keywords"].as_object_mut().unwrap().remove(k); }
+    };
+    let inbox_src = [Source { flagged: Some(false), ..inbox("A") }];
+    let later_src = [Source { flagged: Some(true), ..whole("A") }];
+    let inbox_now = || mail.threads(&inbox_src, None, 50);
+    let later_now = || mail.threads(&later_src, None, 50);
+    set("a1", "$flagged", true);
+    set("a3", "$seen", true);
+    let page = inbox_now().await.unwrap();
+    assert!(!ids(&page).contains(&"A/TA-plan".to_string()), "flagged in part, nothing new: out of the Inbox");
+    assert_eq!(page.total, Some(page.threads.len() as u64), "the server's total counts what the Inbox shows");
+    assert!(ids(&later_now().await.unwrap()).contains(&"A/TA-plan".to_string()), "and in Later");
+    let plan = mail.threads(&[inbox("A")], None, 50).await.unwrap().threads.into_iter().find(|t| t.thread_id == "TA-plan").unwrap();
+    assert!(plan.flagged && !plan.fresh);
+    set("a3", "$seen", false);
+    let page = inbox_now().await.unwrap();
+    let plan = page.threads.iter().find(|t| t.thread_id == "TA-plan").expect("something new: back in the Inbox");
+    assert_eq!(plan.email_id, "a3", "shown by its new message");
+    assert!(plan.flagged && plan.fresh);
+    set("a1", "$flagged", false);
+    // the Inbox row of a thread Uni drafted a reply in says so, though the draft itself lives in Drafts
+    let page = mail.threads(&[inbox("A")], None, 50).await.unwrap();
+    let row = |id: &str| page.threads.iter().find(|t| t.thread_id == id).cloned().expect("in the Inbox");
+    assert!(row("TA-plan").uni_draft && !row("TA-plan").draft, "the Inbox row knows the thread holds Uni's draft");
+    assert!(!row("Ta4").uni_draft);
+    // a draft of Uni's thrown away (in Trash, still a draft) is no draft waiting for you
+    {
+        let mut st = fake.state.lock().unwrap();
+        for e in st.mail.emails.iter_mut().filter(|e| e["id"] == "a6" || e["id"] == "a8") {
+            e["mailboxIds"] = serde_json::json!({ "A-trash": true });
+        }
+    }
+    let page = mail.threads(&[inbox("A")], None, 50).await.unwrap();
+    assert!(!page.threads.iter().find(|t| t.thread_id == "TA-plan").unwrap().uni_draft, "Uni's draft in Trash isn't waiting");
+    let next = &later.next[0];
+    assert_eq!((next.flagged, next.with_files), (Some(true), false), "the next page keeps the filter");
 }
 
 #[tokio::test]

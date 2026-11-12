@@ -24,23 +24,48 @@ export type Who = "owner" | "uni";
 export type AccountBoxes = { id: string; name: string; who: Who; mailboxes: Mailbox[]; operations?: string[] };
 /** `multi`: the bridge reads by account; false is a v1 bridge with one account. */
 export type Overview = { login: string; multi: boolean; accounts: AccountBoxes[] };
-/** One account's part of a list, and where its next page starts. A search reads the whole account less `exclude`. */
-export type Source = { account_id: string; mailbox_id: string | null; exclude: string[]; position: number };
+/** One account's part of a list, and where its next page starts. A search reads the whole account less `exclude`.
+ *  T-335 Mail v2: `flagged` true lists only Later mail (the `$flagged` keyword), false leaves it out; `with_files` lists
+ *  only mail with attachments. The server filters, so paging stays its own. */
+export type Source = { account_id: string; mailbox_id: string | null; exclude: string[]; position: number; flagged?: boolean | null; with_files?: boolean };
 export type ThreadSummary = {
   account_id: string; thread_id: string; email_id: string; from: Address[]; to: Address[]; subject: string; preview: string;
   received_at: string; count: number; unread: boolean; has_attachment: boolean; draft: boolean; uni_drafted: boolean; flagged?: boolean;
+  /** T-335: the thread holds a draft Uni wrote (it lives in Drafts, so it isn't the row's own message in the Inbox). */
+  uni_draft?: boolean;
+  /** T-335: something new on the thread: an unread message that isn't put off for Later (what brings a Later thread
+   *  back to the Inbox; the server's Inbox list decides that, and Mail reads it when you open one). */
+  fresh?: boolean;
 };
+
+/** The drafts at the foot of a thread of yours: Uni's (the reply Uni prepared) and your own, each oldest first. Uni's
+ *  account's own drafts stay in its conversation, so it has none here. */
+export function footDrafts(t: MailThread, acct: Pick<AccountBoxes, "who"> & Partial<Pick<AccountBoxes, "mailboxes">>): { uni: MailMessage[]; own: MailMessage[] } {
+  if (acct.who !== "owner") return { uni: [], own: [] };
+  // a draft thrown away (only in Junk or Trash) isn't waiting for you
+  const binned = new Set((acct.mailboxes ?? []).filter((b) => b.role === "junk" || b.role === "trash").map((b) => b.id));
+  const drafts = t.messages.filter((m) => m.draft && !(m.mailbox_ids.length > 0 && m.mailbox_ids.every((id) => binned.has(id))));
+  return { uni: drafts.filter((m) => m.uni_drafted), own: drafts.filter((m) => !m.uni_drafted) };
+}
+
+/** The draft Reply opens: Uni's newest when this app can show it whole, else your own newest, else none (a blank reply). */
+export function replyDraft(t: MailThread, acct: Pick<AccountBoxes, "who"> & Partial<Pick<AccountBoxes, "mailboxes">>): MailMessage | null {
+  const { uni, own } = footDrafts(t, acct);
+  for (const list of [uni, own]) { const d = list[list.length - 1]; if (d && draftEditable(d)) return d; }
+  return null;
+}
 export type ThreadPage = { threads: ThreadSummary[]; next: Source[]; more: boolean; total: number | null };
 export type MailThread = { account_id: string; thread_id: string; messages: MailMessage[] };
 
-/** What a list shows: every account's Inbox at once, one mailbox, or (T-213) the sends held for you in Uni's account. */
-export type Scope = { kind: "all-inboxes" } | { kind: "mailbox"; accountId: string; mailboxId: string } | { kind: "waiting"; accountId: string };
+// ── T-335 Mail v2: places, not folder trees ─────────────────────────────────────────────────────────────────────────
 
-export function scopeKey(s: Scope): string {
-  return s.kind === "all-inboxes" ? "all" : s.kind === "waiting" ? `${s.accountId}/waiting` : `${s.accountId}/${s.mailboxId}`;
-}
+/** Where Mail looks, as tabs like Messages': your Inbox, what you put off (Later), Uni's sends held for you (Waiting),
+ *  your Drafts, Sent, Archive and Junk, and Uni's own Inbox, one tab away. */
+export type Place = "inbox" | "later" | "waiting" | "drafts" | "sent" | "archive" | "junk" | "uni";
+export const PLACES: Place[] = ["inbox", "later", "waiting", "drafts", "sent", "archive", "junk", "uni"];
+export type PlaceTab = { id: Place; label: string; count: number; name: string };
 
-/** The tag on every row, group and header: a word, not a colour. */
+/** The tag on the few places an account matters (the composer, held sends): a word, not a colour. */
 export function whoTag(who: Who): string {
   return who === "uni" ? "Uni" : "You";
 }
@@ -50,25 +75,84 @@ export function whoMail(who: Who): string {
   return who === "uni" ? "Uni's mail" : "Your mail";
 }
 
-function role(a: AccountBoxes, r: string): Mailbox | undefined {
-  return a.mailboxes.find((b) => b.role === r);
+function role(a: AccountBoxes | undefined, r: string): Mailbox | undefined {
+  return a?.mailboxes.find((b) => b.role === r);
 }
 
-/** The accounts and mailboxes a list reads. A search reads the scope's accounts whole, less Junk and Trash. */
-export function sourcesFor(scope: Scope, o: Overview, searching: boolean): Source[] {
-  // the held sends aren't threads; a search from there searches Uni's mail
-  if (scope.kind === "waiting" && !searching) return [];
-  const accounts = scope.kind === "all-inboxes" ? o.accounts : o.accounts.filter((a) => a.id === scope.accountId);
-  return accounts.flatMap((a): Source[] => {
-    if (searching) return [{ account_id: a.id, mailbox_id: null, exclude: ["junk", "trash"].flatMap((r) => role(a, r)?.id ?? []), position: 0 }];
-    const box = scope.kind === "mailbox" ? scope.mailboxId : role(a, "inbox")?.id;
-    return box ? [{ account_id: a.id, mailbox_id: box, exclude: [], position: 0 }] : [];
+/** Your account: the key's own (a one-account bridge's only one). */
+export function ownAccount(o: Overview): AccountBoxes | undefined {
+  return o.accounts.find((a) => a.who === "owner") ?? (o.accounts.length === 1 ? o.accounts[0] : undefined);
+}
+
+/** Uni's account, shared with yours (never your own: a one-account bridge's only account is yours). */
+export function uniAccount(o: Overview): AccountBoxes | undefined {
+  const own = ownAccount(o);
+  return o.accounts.find((a) => a.who === "uni" && a !== own);
+}
+
+/** Whose mail a place reads: Uni's for Uni's tab and the held sends, yours for the rest. */
+export function placeAccount(p: Place, o: Overview): AccountBoxes | undefined {
+  return p === "uni" || p === "waiting" ? uniAccount(o) : ownAccount(o);
+}
+
+const BOX: Partial<Record<Place, string>> = { inbox: "inbox", drafts: "drafts", sent: "sent", archive: "archive", junk: "junk", uni: "inbox" };
+
+const LABEL: Record<Place, string> = { inbox: "Inbox", later: "Later", waiting: "Waiting", drafts: "Drafts", sent: "Sent", archive: "Archive", junk: "Junk", uni: "Uni's mail" };
+
+/** Later is the flag, so it exists where the bridge lets you set the flag on your mail. Without it the Inbox is the
+ *  whole Inbox (nothing could bring a flagged thread back). */
+export function laterOffered(o: Overview): boolean {
+  return can(ownAccount(o), "flag");
+}
+
+/** The tabs this overview has: a place shows when its account and mailbox exist (Waiting where you decide Uni's held
+ *  sends). Counts: unread in Inbox and Junk, drafts in Drafts, `later` and `waiting` as given; Uni's mail has none
+ *  (reading it is Uni's job). */
+export function mailTabs(o: Overview, counts: { later: number; waiting: number }): PlaceTab[] {
+  const uni = uniAccount(o);
+  const label = LABEL;
+  return PLACES.flatMap((id): PlaceTab[] => {
+    if (id === "waiting" && !approvalOffered(uni)) return [];
+    if (id === "later" && !laterOffered(o)) return [];
+    const r = BOX[id];
+    const box = r ? role(placeAccount(id, o), r) : undefined;
+    if (r && !box) return [];
+    const count = id === "later" ? counts.later : id === "waiting" ? counts.waiting : id === "drafts" ? box?.total ?? 0 : id === "inbox" || id === "junk" ? box?.unread ?? 0 : 0;
+    const what = id === "waiting" ? "waiting" : id === "drafts" ? (count === 1 ? "draft" : "drafts") : id === "later" ? "put off" : "unread";
+    return [{ id, label: label[id], count, name: count > 0 ? `${label[id]} (${count} ${what})` : label[id] }];
   });
 }
 
-/** Unread mail across every account's Inbox. */
-export function allInboxesUnread(o: Overview): number {
-  return o.accounts.reduce((n, a) => n + (role(a, "inbox")?.unread ?? 0), 0);
+/** What a place's list reads. `text`: a search, which reads the place's account whole, less Junk and Trash (Later's
+ *  search stays in Later). `files`: only mail with attachments. Waiting lists held sends, not threads (but a search
+ *  from there searches Uni's mail). */
+export function placeSources(p: Place, o: Overview, opts: { text?: string; files?: boolean } = {}): Source[] {
+  const a = placeAccount(p, o);
+  if (!a) return [];
+  if (p === "waiting" && !opts.text) return [];
+  const files = opts.files ? { with_files: true } : {};
+  if (opts.text || p === "later") {
+    // a search from Junk searches Junk too; Later lists mail, not your unsent drafts (they sit at its threads' foot)
+    const exclude = (p === "junk" ? ["trash"] : p === "later" ? ["junk", "trash", "drafts"] : ["junk", "trash"]).flatMap((r) => role(a, r)?.id ?? []);
+    return [{ account_id: a.id, mailbox_id: null, exclude, position: 0, ...(p === "later" ? { flagged: true } : {}), ...files }];
+  }
+  const box = role(a, BOX[p]!);
+  if (!box) return [];
+  // the Inbox leaves out what you put off: it is in Later until you bring it back (or new mail arrives on it)
+  return [{ account_id: a.id, mailbox_id: box.id, exclude: [], position: 0, ...(p === "inbox" && laterOffered(o) ? { flagged: false } : {}), ...files }];
+}
+
+/** The list's name, read aloud and shown when a search or Files narrows it. */
+export function placeTitle(p: Place, o: Overview, text: string, files: boolean): string {
+  const tab = LABEL[p];
+  const whose = placeAccount(p, o)?.who === "uni" ? "Uni's mail" : "your mail";
+  if (text) return `Search in ${p === "later" ? "Later" : whose}${files ? ", with files" : ""}`;
+  return files ? `${tab}, with files` : tab;
+}
+
+/** The place still exists in this overview (an account or mailbox can go). */
+export function placeValid(p: Place, o: Overview): boolean {
+  return mailTabs(o, { later: 0, waiting: 0 }).some((t) => t.id === p);
 }
 
 /** Unread mail in your own Inbox (T-208): what the rail's badge shows. Uni's mail is Uni's to read; Junk and Trash
@@ -77,20 +161,55 @@ export function yourInboxUnread(o: Overview): number {
   return o.accounts.filter((a) => a.who === "owner").reduce((n, a) => n + (role(a, "inbox")?.unread ?? 0), 0);
 }
 
-/** The list's heading. */
-export function scopeTitle(scope: Scope, o: Overview, query: string): string {
-  const acct = scope.kind !== "all-inboxes" ? o.accounts.find((a) => a.id === scope.accountId) : undefined;
-  if (scope.kind === "waiting" && !query) return "Waiting for you";
-  if (query) return scope.kind === "all-inboxes" ? (o.accounts.length > 1 ? "Search: both mailboxes" : "Search: your mail") : `Search: ${acct?.who === "uni" ? "Uni's mail" : "your mail"}`;
-  if (scope.kind !== "mailbox") return o.accounts.length > 1 ? "All inboxes" : "Inbox";
-  const box = acct?.mailboxes.find((b) => b.id === scope.mailboxId);
-  return `${acct?.who === "uni" ? "Uni" : "Your"} · ${box ? mailboxLabel(box) : "mailbox"}`;
+/** A plain-text body and the quoted history under it, so a reply reads as what it says: an "On … wrote:" line (or a
+ *  closing run of `>` lines) with nothing but quote after it, or an "Original Message" line and what follows. A
+ *  forward's content is what it says, so a "Forwarded message" line folds nothing.
+ *  An answer written between quoted lines keeps the whole body open, and nothing folds when nothing is above the quote.
+ *  One pass from the end: bodies can be a megabyte. */
+export function splitQuoted(text: string): { body: string; quoted: string | null } {
+  const lines = text.split("\n");
+  const quote = (l: string) => /^\s*>/.test(l);
+  // the closing run of quoted (or blank) lines starts at `tail`
+  let tail = lines.length;
+  while (tail > 0 && (quote(lines[tail - 1]) || !lines[tail - 1].trim())) tail--;
+  // quoted lines with answers between them (an inline reply) stay whole, whatever they end on
+  if (lines.slice(0, tail).some(quote)) return { body: text, quoted: null };
+  let at = -1;
+  const marker = lines.findIndex((l) => /^-{2,}\s*Original Message\s*-{2,}\s*$/i.test(l));
+  if (marker > 0) at = marker;
+  else {
+    const wrote = tail - 1;
+    if (wrote > 0 && /^\s*On\b.{0,200}\bwrote:\s*$/.test(lines[wrote]) && lines.slice(wrote + 1).some(quote)) at = wrote;
+    else {
+      const first = lines.findIndex((l, i) => i >= tail && quote(l));
+      if (first > 0) at = first;
+    }
+  }
+  if (at <= 0) return { body: text, quoted: null };
+  const body = lines.slice(0, at).join("\n").replace(/\s+$/, "");
+  if (!body.trim()) return { body: text, quoted: null };
+  return { body, quoted: lines.slice(at).join("\n").replace(/\s+$/, "") };
 }
 
-/** The scope still exists in this overview (an account or mailbox can go). */
-export function scopeValid(scope: Scope, o: Overview): boolean {
-  if (scope.kind === "waiting") return approvalOffered(o.accounts.find((a) => a.id === scope.accountId));
-  return scope.kind === "all-inboxes" || o.accounts.some((a) => a.id === scope.accountId && a.mailboxes.some((b) => b.id === scope.mailboxId));
+/** Who a message went to, from where you stand: "you", or the first names. */
+export function toWords(m: Pick<MailMessage, "to" | "cc">, acct: Pick<AccountBoxes, "name" | "who">): string {
+  const mine = (a: Address) => a.email.toLowerCase() === acct.name.toLowerCase();
+  const all = [...m.to, ...m.cc];
+  const others = all.filter((a) => !mine(a)).map((a) => a.name?.trim() || a.email);
+  const you = all.some(mine) ? [acct.who === "uni" ? "Uni" : "you"] : [];
+  const names = [...you, ...others];
+  if (names.length === 0) return "";
+  return names.length > 3 ? `${names.slice(0, 2).join(", ")} and ${names.length - 2} more` : names.join(", ");
+}
+
+/** The people in a thread, for the line under its subject: senders in order of first appearance, "you" for you. */
+export function threadPeople(t: MailThread, acct: Pick<AccountBoxes, "name" | "who">): string {
+  const seen: string[] = [];
+  for (const m of t.messages) for (const a of m.from) {
+    const w = a.email.toLowerCase() === acct.name.toLowerCase() ? (acct.who === "uni" ? "Uni" : "you") : a.name?.trim() || a.email;
+    if (!seen.includes(w)) seen.push(w);
+  }
+  return seen.length > 3 ? `${seen.slice(0, 3).join(", ")} and ${seen.length - 3} more` : seen.join(", ");
 }
 
 /** `uni_core::mail::MailError` as it arrives over IPC. */
@@ -168,11 +287,6 @@ export function addressLine(list: Address[]): string {
 
 export function subjectLabel(subject: string): string {
   return subject.trim() || "(no subject)";
-}
-
-/** Mailbox name; the Inbox is called Inbox whatever the server names it. */
-export function mailboxLabel(b: Mailbox): string {
-  return b.role === "inbox" ? "Inbox" : b.name || "(unnamed)";
 }
 
 /**

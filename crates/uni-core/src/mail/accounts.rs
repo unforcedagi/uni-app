@@ -84,7 +84,7 @@ pub struct Overview {
 
 /// One account's part of a list: a mailbox (or, for a search, the whole account less `exclude`), and where its next
 /// page starts.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Source {
     pub account_id: String,
     #[serde(default)]
@@ -94,6 +94,14 @@ pub struct Source {
     pub exclude: Vec<String>,
     #[serde(default)]
     pub position: u64,
+    /// T-335 Mail v2: Later is the `$flagged` keyword, on any message of a thread. `Some(true)`: only Later threads (the
+    /// Later list); `Some(false)`: no Later thread unless something new (unread, not flagged) arrived on it (the Inbox).
+    /// Absent: either.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flagged: Option<bool>,
+    /// T-335 Mail v2: only mail with attachments (Files).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub with_files: bool,
 }
 
 /// A thread as a list shows it: its newest message in the list's mailbox, and the thread's size and state.
@@ -118,6 +126,13 @@ pub struct ThreadSummary {
     /// A message in the thread is flagged.
     #[serde(default)]
     pub flagged: bool,
+    /// T-335 Mail v2: the thread holds a draft Uni wrote (in Drafts, so not the row's own message in an Inbox list).
+    #[serde(default)]
+    pub uni_draft: bool,
+    /// T-335 Mail v2: something new on the thread: an unread message (not a draft, not only in Junk or Trash) that isn't
+    /// put off for Later. A Later thread stays out of the Inbox until this is true.
+    #[serde(default)]
+    pub fresh: bool,
 }
 
 /// A page of threads from one or more accounts, newest first.
@@ -326,6 +341,9 @@ fn thread_summary(account: &str, e: &Value, thread: Option<&Vec<String>>, states
     let unread_any = if members.is_empty() { counts(e) } else { members.iter().any(|m| counts(m)) };
     let attach = e.get("hasAttachment").and_then(Value::as_bool).unwrap_or(false) || members.iter().any(|m| m.get("hasAttachment").and_then(Value::as_bool) == Some(true));
     let flagged = keyword(e, "$flagged") || members.iter().any(|m| keyword(m, "$flagged"));
+    // a draft of Uni's thrown away (only in Junk or Trash) isn't one waiting for you
+    let uni_draft = members.iter().chain(std::iter::once(&e)).any(|m| keyword(m, "$draft") && keyword(m, "$uni-drafted") && !only_hidden(m));
+    let fresh = if members.is_empty() { counts(e) && !keyword(e, "$flagged") } else { members.iter().any(|m| counts(m) && !keyword(m, "$flagged")) };
     ThreadSummary {
         account_id: account.to_string(),
         thread_id,
@@ -341,6 +359,8 @@ fn thread_summary(account: &str, e: &Value, thread: Option<&Vec<String>>, states
         draft: keyword(e, "$draft"),
         uni_drafted: keyword(e, "$uni-drafted"),
         flagged,
+        uni_draft,
+        fresh,
     }
 }
 
@@ -425,6 +445,23 @@ impl MailBridge<'_> {
             if let Some(t) = text {
                 filter.insert("text".into(), json!(t));
             }
+            if s.with_files {
+                filter.insert("hasAttachment".into(), json!(true));
+            }
+            // T-335: Later is the thread's (any message flagged; other clients may flag only one), and the server
+            // filters it, so paging and totals stay its own. The Inbox leaves a Later thread out until something new
+            // arrives on it: a message that is unread and not flagged.
+            let filter = match s.flagged {
+                Some(true) => {
+                    filter.insert("someInThreadHaveKeyword".into(), json!("$flagged"));
+                    Value::Object(filter)
+                }
+                Some(false) => json!({ "operator": "AND", "conditions": [filter, { "operator": "OR", "conditions": [
+                    { "noneInThreadHaveKeyword": "$flagged" },
+                    { "operator": "AND", "conditions": [{ "notKeyword": "$seen" }, { "notKeyword": "$flagged" }] },
+                ] }] }),
+                None => Value::Object(filter),
+            };
             let a = &s.account_id;
             calls.push(json!(["Email/query", {
                 "accountId": a, "filter": filter, "sort": [{ "property": "receivedAt", "isAscending": false }],
@@ -571,12 +608,12 @@ mod tests {
     fn row(account: &str, id: &str, at: &str) -> ThreadSummary {
         ThreadSummary {
             account_id: account.into(), thread_id: format!("T{id}"), email_id: id.into(), from: vec![], to: vec![], subject: id.into(), preview: String::new(),
-            received_at: at.into(), count: 1, unread: false, has_attachment: false, draft: false, uni_drafted: false, flagged: false,
+            received_at: at.into(), count: 1, unread: false, has_attachment: false, draft: false, uni_drafted: false, flagged: false, uni_draft: false, fresh: false,
         }
     }
 
     fn src(account: &str, position: u64) -> Source {
-        Source { account_id: account.into(), mailbox_id: Some(format!("{account}-inbox")), exclude: vec![], position }
+        Source { account_id: account.into(), mailbox_id: Some(format!("{account}-inbox")), position, ..Source::default() }
     }
 
     fn session(roles: Value, extra: Value) -> Value {

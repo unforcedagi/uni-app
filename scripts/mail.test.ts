@@ -6,8 +6,8 @@ import {
   type AccountBoxes, type MailMessage, type MailThread, type SendOutcome,
 } from "../src/mailCore.ts";
 import {
-  addressLine, allInboxesUnread, mailboxLabel, mailDate, MAIL_FRAME_CSP, mailProblem, mailSrcdoc, scopeTitle, scopeValid, senderLabel, sourcesFor, subjectLabel, whoTag,
-  type Overview,
+  addressLine, footDrafts, mailDate, mailTabs, replyDraft, MAIL_FRAME_CSP, mailProblem, mailSrcdoc, placeSources, placeTitle, placeValid, senderLabel, splitQuoted, subjectLabel, threadPeople, toWords, whoTag,
+  type AccountBoxes as Acct, type Overview,
 } from "../src/mailCore.ts";
 import { restoreTabs, sameTarget, serializeTabs } from "../src/tabs.ts";
 
@@ -37,34 +37,57 @@ assert.equal(senderLabel([{ name: null, email: "a@x" }, { name: "B", email: "b@x
 assert.equal(senderLabel([]), "(no sender)");
 assert.equal(addressLine([{ name: "Ada", email: "ada@x" }, { name: null, email: "b@x" }]), "Ada <ada@x>, b@x");
 assert.equal(subjectLabel("  "), "(no subject)");
-assert.equal(mailboxLabel({ id: "1", name: "INBOX", role: "inbox", parent_id: null, total: 0, unread: 0 }), "Inbox");
-assert.equal(mailboxLabel({ id: "2", name: "Junk Mail", role: "junk", parent_id: null, total: 0, unread: 0 }), "Junk Mail");
 
 // T-45 v2: which accounts and mailboxes a list reads
 const box = (id: string, role: string, unread = 0) => ({ id, name: role, role, parent_id: null, total: unread, unread });
 const two: Overview = { login: "robin@example.com", multi: true, accounts: [
-  { id: "A", name: "robin@example.com", who: "owner", mailboxes: [box("A-in", "inbox", 2), box("A-dr", "drafts"), box("A-junk", "junk", 4), box("A-trash", "trash")] },
+  { id: "A", name: "robin@example.com", who: "owner", mailboxes: [box("A-in", "inbox", 2), box("A-dr", "drafts"), box("A-junk", "junk", 4), box("A-trash", "trash")], operations: ["flag"] },
   { id: "U", name: "uni@example.com", who: "uni", mailboxes: [box("U-in", "inbox", 1), box("U-sent", "sent")] },
 ] };
-assert.deepEqual(sourcesFor({ kind: "all-inboxes" }, two, false), [
-  { account_id: "A", mailbox_id: "A-in", exclude: [], position: 0 },
-  { account_id: "U", mailbox_id: "U-in", exclude: [], position: 0 },
-], "the combined view: each account's Inbox");
-assert.deepEqual(sourcesFor({ kind: "mailbox", accountId: "U", mailboxId: "U-sent" }, two, false), [{ account_id: "U", mailbox_id: "U-sent", exclude: [], position: 0 }]);
-assert.deepEqual(sourcesFor({ kind: "all-inboxes" }, two, true), [
-  { account_id: "A", mailbox_id: null, exclude: ["A-junk", "A-trash"], position: 0 },
-  { account_id: "U", mailbox_id: null, exclude: [], position: 0 },
-], "a search reads each account whole, less Junk and Trash");
-assert.deepEqual(sourcesFor({ kind: "mailbox", accountId: "A", mailboxId: "A-dr" }, two, true).map((s) => s.account_id), ["A"], "searching from a mailbox reads its account");
-assert.equal(allInboxesUnread(two), 3, "Junk's unread doesn't count");
-assert.equal(scopeTitle({ kind: "all-inboxes" }, two, ""), "All inboxes");
-assert.equal(scopeTitle({ kind: "all-inboxes" }, two, "jars"), "Search: both mailboxes");
-assert.equal(scopeTitle({ kind: "mailbox", accountId: "U", mailboxId: "U-sent" }, two, ""), "Uni · sent");
-assert.equal(scopeTitle({ kind: "mailbox", accountId: "U", mailboxId: "U-sent" }, two, "x"), "Search: Uni's mail");
+// T-335 Mail v2: places as tabs. Your Inbox first; Uni's own mail one tab away; Waiting only where you decide Uni's sends
+const tabs = (o: Overview, later = 0, waiting = 0) => mailTabs(o, { later, waiting }).map((t) => `${t.id}:${t.count}`);
+assert.deepEqual(tabs(two, 2), ["inbox:2", "later:2", "drafts:0", "junk:4", "uni:0"], "a tab per place that exists; Junk counts unread; Uni's mail has no count");
+const deciding: Overview = { ...two, accounts: [two.accounts[0], { ...two.accounts[1], operations: ["send.parked", "send.approve", "send.decline"] }] };
+assert.deepEqual(tabs(deciding, 0, 3).slice(0, 3), ["inbox:2", "later:0", "waiting:3"], "Waiting shows where you decide Uni's held sends");
+assert.equal(mailTabs(deciding, { later: 1, waiting: 3 }).find((t) => t.id === "waiting")?.name, "Waiting (3 waiting)");
+assert.deepEqual(placeSources("inbox", two), [{ account_id: "A", mailbox_id: "A-in", exclude: [], position: 0, flagged: false }], "the Inbox leaves Later mail out");
+assert.deepEqual(placeSources("later", two), [{ account_id: "A", mailbox_id: null, exclude: ["A-junk", "A-trash", "A-dr"], position: 0, flagged: true }], "Later: threads put off, shown by their mail (not Junk, Trash or an unsent draft)");
+assert.deepEqual(placeSources("later", two, { text: "x" })[0].exclude, ["A-junk", "A-trash", "A-dr"], "Later's search reads what Later lists");
+const noFlag: Overview = { ...two, accounts: [{ ...two.accounts[0], operations: [] }, two.accounts[1]] };
+assert.deepEqual(tabs(noFlag), ["inbox:2", "drafts:0", "junk:4", "uni:0"], "no flag on this bridge: no Later");
+assert.deepEqual(placeSources("inbox", noFlag), [{ account_id: "A", mailbox_id: "A-in", exclude: [], position: 0 }], "and the Inbox is the whole Inbox: nothing could bring a flagged thread back");
+assert.deepEqual(placeSources("uni", two), [{ account_id: "U", mailbox_id: "U-in", exclude: [], position: 0 }], "Uni's mail is Uni's Inbox");
+assert.deepEqual(placeSources("inbox", two, { text: "jars" }), [{ account_id: "A", mailbox_id: null, exclude: ["A-junk", "A-trash"], position: 0 }], "a search reads your whole account, less Junk and Trash");
+assert.deepEqual(placeSources("uni", two, { text: "x" }).map((s) => s.account_id), ["U"], "searching from Uni's tab reads Uni's mail");
+assert.equal(placeSources("drafts", two, { files: true })[0].with_files, true, "Files narrows any list");
+assert.deepEqual(placeSources("waiting", deciding), [], "held sends aren't threads");
+assert.deepEqual(placeSources("sent", two), [], "no Sent mailbox: nothing to read");
+assert.equal(placeTitle("inbox", two, "jars", false), "Search in your mail");
+assert.equal(placeTitle("uni", two, "x", true), "Search in Uni's mail, with files");
+assert.equal(placeTitle("drafts", two, "", true), "Drafts, with files");
 const one: Overview = { login: "test@example.com", multi: false, accounts: [two.accounts[0]] };
-assert.equal(scopeTitle({ kind: "all-inboxes" }, one, ""), "Inbox", "one account: no 'All inboxes'");
-assert.equal(scopeValid({ kind: "mailbox", accountId: "U", mailboxId: "U-in" }, one), false, "a scope in an account that went is dropped");
-assert.equal(scopeValid({ kind: "mailbox", accountId: "A", mailboxId: "A-in" }, one), true);
+assert.equal(placeValid("uni", one), false, "a place in an account that went is dropped");
+assert.equal(placeValid("inbox", one), true);
+assert.deepEqual(tabs({ ...one, accounts: [{ ...one.accounts[0], who: "uni" }] }), ["inbox:2", "later:0", "drafts:0", "junk:4"], "a one-account bridge's account is yours, whatever it is called, and has no second tab");
+
+// T-335: quoted history folds under what a reply says
+assert.deepEqual(splitQuoted("Monday.\n\nOn Sun, Oct 18, Mara Quill wrote:\n> Which day?\n> M"), { body: "Monday.", quoted: "On Sun, Oct 18, Mara Quill wrote:\n> Which day?\n> M" });
+assert.deepEqual(splitQuoted("Yes.\n\n> earlier\n>\n> more\n"), { body: "Yes.", quoted: "> earlier\n>\n> more" }, "a closing run of > lines");
+assert.equal(splitQuoted("Hi,\n> which day?\nMonday.\n> and the jars?\nYes.").quoted, null, "an answer written between quoted lines stays whole");
+assert.equal(splitQuoted("> only a quote").quoted, null, "nothing above the quote: nothing folds");
+assert.equal(splitQuoted("Plain text, no quote.").quoted, null);
+assert.equal(splitQuoted("Hi\n-----Original Message-----\nFrom: x").body, "Hi");
+assert.equal(splitQuoted("Hi Robin,\n\nOn Sun, Oct 18, Robin wrote:\n> Which day?\nMonday.\n> And the jars?\nYes, two.").quoted, null, "answers between the quotes under an On … wrote: line stay open");
+assert.deepEqual(splitQuoted("Yes.\n\nOn Sun, Robin wrote:\n\n> a\n>\n> b\n"), { body: "Yes.", quoted: "On Sun, Robin wrote:\n\n> a\n>\n> b" }, "a blank line after On … wrote:");
+{ const big = "Short answer.\n\nOn Mon, X wrote:\n" + "> line of an old chain\n".repeat(40000); const t0 = Date.now(); assert.equal(splitQuoted(big).body, "Short answer."); assert.ok(Date.now() - t0 < 500, "a long chain splits in one pass"); }
+
+// T-335: one-line headers and the thread's people, from where you stand
+const me: Pick<Acct, "name" | "who"> = { name: "robin@example.com", who: "owner" };
+assert.equal(toWords({ to: [{ name: "Robin Vale", email: "Robin@example.com" }], cc: [] }, me), "you");
+assert.equal(toWords({ to: [{ name: "Mara Quill", email: "mara@example.org" }], cc: [{ name: null, email: "robin@example.com" }] }, me), "you, Mara Quill");
+assert.equal(toWords({ to: ["a", "b", "c", "d"].map((x) => ({ name: x.toUpperCase(), email: `${x}@example.org` })), cc: [] }, me), "A, B and 2 more");
+const sender = (from: string, name: string | null) => ({ from: [{ name, email: from }] }) as never;
+assert.equal(threadPeople({ account_id: "A", thread_id: "T", messages: [sender("mara@example.org", "Mara Quill"), sender("robin@example.com", "Robin"), sender("mara@example.org", "Mara Quill")] }, me), "Mara Quill, you");
 assert.equal(whoTag("owner"), "You");
 assert.equal(whoTag("uni"), "Uni");
 
@@ -186,3 +209,19 @@ assert.deepEqual(readPending(fake), [], "a broken list reads as empty, not an er
 mem.set("uni.mail.pending.v1", JSON.stringify([{ op_id: 7 }, { ...p1, who: "someone" }, p1]));
 assert.deepEqual(readPending(fake), [p1]);
 console.log("ok   mail (T-210): what is offered, addresses, replies, not verified, send outcomes, pending sends");
+
+// T-335 review: Later is per thread, and both your draft and Uni's sit at the foot
+const dm = (id: string, o: Partial<MailMessage> = {}): MailMessage => ({ id, thread_id: "t", from: [], to: [], cc: [], reply_to: [], subject: "s", received_at: "", sent_at: null, unread: false, draft: false, uni_drafted: false, mailbox_ids: [], text: "x", html: null, remote_images: 0, links: [], truncated: false, attachments: [], ...o });
+const both: MailThread = { account_id: "A", thread_id: "t", messages: [dm("m1"), dm("own", { draft: true }), dm("u1", { draft: true, uni_drafted: true }), dm("u2", { draft: true, uni_drafted: true })] };
+assert.deepEqual(footDrafts(both, { who: "owner" }), { uni: [both.messages[2], both.messages[3]], own: [both.messages[1]] }, "your draft isn't lost beside Uni's");
+assert.deepEqual(footDrafts(both, { who: "uni" }), { uni: [], own: [] }, "Uni's mail keeps its drafts in the conversation");
+assert.equal(replyDraft(both, { who: "owner" })?.id, "u2", "Reply opens Uni's newest draft");
+assert.equal(replyDraft({ ...both, messages: [dm("m1"), dm("own", { draft: true }), dm("u1", { draft: true, uni_drafted: true, html: "<b>x</b>" })] }, { who: "owner" })?.id, "own", "Uni's can't be shown whole: your own");
+assert.equal(replyDraft({ ...both, messages: [dm("m1")] }, { who: "owner" }), null, "no draft: a blank reply");
+assert.equal(splitQuoted("See below.\n\n---------- Forwarded message ---------\nFrom: Billing\nInvoice 2291").quoted, null, "a forward's content is not quoted history");
+assert.deepEqual(placeSources("junk", two, { text: "acme" })[0].exclude, ["A-trash"], "a search from Junk searches Junk");
+assert.equal(splitQuoted("Hi Robin,\n\nOn Sun, Robin wrote:\n> Which day?\nMonday.\n> And the jars?").quoted, null, "an inline reply that ends on a quote stays whole");
+const binned: MailThread = { account_id: "A", thread_id: "t", messages: [dm("m1"), dm("u1", { draft: true, uni_drafted: true, mailbox_ids: ["A-trash"] })] };
+assert.deepEqual(footDrafts(binned, { who: "owner", mailboxes: two.accounts[0].mailboxes }), { uni: [], own: [] }, "a draft thrown in the Trash isn't waiting");
+assert.equal(replyDraft(binned, { who: "owner", mailboxes: two.accounts[0].mailboxes }), null);
+console.log("ok   mail (T-335 review): the drafts at the foot, forwards, Junk's search, inline replies");

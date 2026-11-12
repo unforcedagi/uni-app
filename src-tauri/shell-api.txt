@@ -192,6 +192,8 @@ plugin tauri_plugin_process::init()
 plugin tauri_plugin_updater::Builder::new().build()
 protocol unimedia
 
+# api 2 (T-335 0.5.0): one ask adds ask_events, ask_policy and post_answer; Mail v2: mail_threads takes `limit`, its sources
+# carry `flagged` / `with_files` and its rows `uni_draft` / `fresh`.
 api 2
 capability android-pairing.json 7420ca03049f768b
 capability default.json ac09845dda70ef59
@@ -248,7 +250,7 @@ command async mail_send_as_uni(app: tauri::AppHandle, account_id: String, op_id:
 command async mail_send_check(app: tauri::AppHandle, account_id: String, op_id: String) -> Result<SendOutcome, MailError>
 command async mail_send_decline(app: tauri::AppHandle, account_id: String, op_id: String) -> Result<SendOutcome, MailError>
 command async mail_thread(app: tauri::AppHandle, account_id: String, thread_id: String) -> Result<uni_core::mail::Thread, MailError>
-command async mail_threads(app: tauri::AppHandle, sources: Vec<uni_core::mail::Source>, text: Option<String>) -> Result<uni_core::mail::ThreadPage, MailError>
+command async mail_threads(app: tauri::AppHandle, sources: Vec<uni_core::mail::Source>, text: Option<String>, limit: Option<u64>) -> Result<uni_core::mail::ThreadPage, MailError>
 command async mail_triage(app: tauri::AppHandle, account_id: String, email_ids: Vec<String>) -> Result<std::collections::HashMap<String, String>, MailError>
 command async mark_read(app: tauri::AppHandle, channel: String) -> Result<(), String>
 command async media_bytes(app: tauri::AppHandle, url: String, sha: Option<String>) -> Result<tauri::ipc::Response, String>

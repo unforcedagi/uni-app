@@ -13,7 +13,8 @@
 //! session holds its own account and the ones shared with it; `/mail/session`
 //! lists them; every call names its `accountId`, and one outside the session
 //! is refused; `/mail/raw` and `/mail/triage` take an `accountId`. The JMAP store
-//! also does `Thread/get`, `collapseThreads`, a `text` filter,
+//! also does `Thread/get`, `collapseThreads`, AND/OR/NOT filters over `text`, `hasKeyword` / `notKeyword` /
+//! `hasAttachment` and the thread-level `someInThreadHaveKeyword` / `noneInThreadHaveKeyword`,
 //! `inMailboxOtherThan`, and `*` in back-reference paths. `/mail/session` adds a
 //! `roles` map (whose each account is). A v1 bridge
 //! ([`FakeBridge::start`]) reads its one account whatever is asked, as the live
@@ -428,6 +429,42 @@ fn pointer(v: &Value, parts: &[&str]) -> Option<Value> {
     pointer(next, rest)
 }
 
+/// Every `inMailbox` a filter names, at any depth (an unknown one is invalidArguments, as the server says).
+fn mailboxes_named(f: &Value, out: &mut Vec<String>) {
+    if let Some(m) = f.get("inMailbox").and_then(Value::as_str) {
+        out.push(m.to_string());
+    }
+    for c in f.get("conditions").and_then(Value::as_array).into_iter().flatten() {
+        mailboxes_named(c, out);
+    }
+}
+
+/// RFC 8621's Email/query filter: a FilterOperator (AND, OR, NOT over `conditions`) or a FilterCondition, of which
+/// this double knows inMailbox, inMailboxOtherThan, text, hasKeyword, notKeyword, hasAttachment and the thread-level
+/// someInThreadHaveKeyword / noneInThreadHaveKeyword / allInThreadHaveKeyword (T-335 Mail v2's Later).
+fn filter_matches(e: &Value, f: &Value, all: &[Value]) -> bool {
+    if let Some(op) = f.get("operator").and_then(Value::as_str) {
+        let mut cs = f.get("conditions").and_then(Value::as_array).into_iter().flatten().map(|c| filter_matches(e, c, all));
+        return match op {
+            "AND" => cs.all(|x| x),
+            "OR" => cs.any(|x| x),
+            _ => !cs.any(|x| x), // NOT: none of them
+        };
+    }
+    let kw = |m: &Value, k: &str| m["keywords"].get(k) == Some(&json!(true));
+    let thread: Vec<&Value> = all.iter().filter(|m| m["threadId"] == e["threadId"]).collect();
+    let other: Vec<&str> = f.get("inMailboxOtherThan").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
+    f.get("inMailbox").and_then(Value::as_str).is_none_or(|m| e["mailboxIds"].get(m).is_some())
+        && !e["mailboxIds"].as_object().is_some_and(|ids| !ids.is_empty() && ids.keys().all(|k| other.contains(&k.as_str())))
+        && f.get("text").and_then(Value::as_str).is_none_or(|t| matches_text(e, t))
+        && f.get("hasKeyword").and_then(Value::as_str).is_none_or(|k| kw(e, k))
+        && f.get("notKeyword").and_then(Value::as_str).is_none_or(|k| !kw(e, k))
+        && f.get("hasAttachment").and_then(Value::as_bool).is_none_or(|x| e["hasAttachment"].as_bool().unwrap_or(false) == x)
+        && f.get("someInThreadHaveKeyword").and_then(Value::as_str).is_none_or(|k| thread.iter().any(|m| kw(m, k)))
+        && f.get("noneInThreadHaveKeyword").and_then(Value::as_str).is_none_or(|k| !thread.iter().any(|m| kw(m, k)))
+        && f.get("allInThreadHaveKeyword").and_then(Value::as_str).is_none_or(|k| thread.iter().all(|m| kw(m, k)))
+}
+
 /// Whether `e` contains `text` (case-insensitive) in its subject, addresses, preview, bodies or attachment names.
 fn matches_text(e: &Value, text: &str) -> bool {
     let t = text.to_lowercase();
@@ -475,19 +512,12 @@ fn jmap(mail: &mut Mail, name: &str, args: &Value, earlier: &[Value]) -> Result<
         }
         "Email/query" => {
             let filter = args.get("filter").cloned().unwrap_or(json!({}));
-            let inbox = filter.get("inMailbox").and_then(Value::as_str);
-            if inbox.is_some_and(|m| !mail.mailboxes.iter().any(|b| b["id"] == m)) {
+            let mut boxes = Vec::new();
+            mailboxes_named(&filter, &mut boxes);
+            if boxes.iter().any(|m| !mail.mailboxes.iter().any(|b| b["id"] == *m)) {
                 return Err("invalidArguments");
             }
-            let other: Vec<&str> = filter.get("inMailboxOtherThan").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
-            let text = filter.get("text").and_then(Value::as_str);
-            let mut found: Vec<&Value> = mail
-                .emails
-                .iter()
-                .filter(|e| inbox.is_none_or(|m| e["mailboxIds"].get(m).is_some()))
-                .filter(|e| !e["mailboxIds"].as_object().is_some_and(|ids| !ids.is_empty() && ids.keys().all(|k| other.contains(&k.as_str()))))
-                .filter(|e| text.is_none_or(|t| matches_text(e, t)))
-                .collect();
+            let mut found: Vec<&Value> = mail.emails.iter().filter(|e| filter_matches(e, &filter, &mail.emails)).collect();
             found.sort_by(|a, b| b["receivedAt"].as_str().cmp(&a["receivedAt"].as_str()));
             if args.get("collapseThreads").and_then(Value::as_bool) == Some(true) {
                 let mut seen = HashSet::new();
