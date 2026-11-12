@@ -3,9 +3,15 @@ import type { MediaRef } from "./Attachments";
 export type VoiceClip = {
   id: string; key: string; file: Blob; filename: string; mime: string;
   owner: string; relay: string; created: number; state: "uploading" | "error" | "delivered"; error?: string;
-  media?: MediaRef; signedEvent?: string;
+  /** The uploaded parts, in order. A clip saved before recordings were cut holds one MediaRef: see [voiceMedia]. */
+  media?: MediaRef[] | MediaRef; signedEvent?: string;
   voice: { channel: string; replyTo: string | null; notifyUni: boolean };
 };
+
+/** A saved clip's uploaded parts, as a list whichever way it was saved. */
+export function voiceMedia(media: MediaRef[] | MediaRef | undefined): MediaRef[] | undefined {
+  return media === undefined ? undefined : Array.isArray(media) ? media : [media];
+}
 
 // Serialize transactions, including deletion, so a late write cannot resurrect a clip.
 export class VoiceOutbox {

@@ -451,8 +451,9 @@ fn relay_accepts(path: &Path) -> Result<(), String> {
     if videos != 1 || audios > 1 {
         return Err(format!("{videos} video and {audios} audio tracks"));
     }
-    // One frame over sound is audio (3 hours); more is video (60 minutes). The longer track decides.
-    let limit = if audios == 1 && frames == 1 { 10_800.0 } else { 3_600.0 };
+    // One frame over sound is audio (10 minutes, as stock Buzz measures the frame); more is video (60 minutes). The longer
+    // track decides.
+    let limit = if audios == 1 && frames == 1 { 600.0 } else { 3_600.0 };
     if longest > limit {
         return Err(format!("duration {longest} over {limit}"));
     }
@@ -621,7 +622,7 @@ fn m4a_keeps_its_sound_and_gains_a_still_frame_the_relay_requires() {
     );
 }
 
-// ── Length limits per kind: audio 3 hours, video 60 minutes ─────────────
+// ── Length limits per kind: audio 10 minutes, video 60 minutes ─────────────
 /// `t` with each sample lasting `delta` seconds.
 fn timed(mut t: T, delta: u32) -> T {
     t.timescale = 1;
@@ -629,27 +630,30 @@ fn timed(mut t: T, delta: u32) -> T {
     t
 }
 #[test]
-fn m4a_up_to_3_hours_is_sent_and_one_second_more_is_refused() {
+fn m4a_up_to_10_minutes_is_sent_and_one_second_more_is_refused() {
+    // Stock Buzz measures the still frame beside the sound, which lasts as long as the sound, against its 600 s for video.
+    // Longer recordings are cut into parts before they get here (media/voice).
     let d = tempfile::tempdir().unwrap();
     let head = ftyp(b"M4A ", &[b"M4A ", b"mp42", b"isom"]);
-    // 35:05, the recording that was refused at 10 minutes.
-    let f = write_file(d.path(), "talk.m4a", &head, &[timed(audio(1, samples(0xB2, 5, 100)), 421)], &[], &[1]);
+    let f = write_file(d.path(), "talk.m4a", &head, &[timed(audio(1, samples(0xB2, 5, 100)), 59)], &[], &[1]);
     let n = run(d.path(), &f.path, "talk.m4a");
     assert_clean(&n);
     assert_eq!(n.filename, "talk.m4a");
-    // Exactly three hours. The builder's track header runs 1 ms past the media; make it exact.
-    let f = write_file(d.path(), "three.m4a", &head, &[timed(audio(1, samples(0xB2, 8, 100)), 1350)], &[], &[1]);
+    // Exactly ten minutes. The builder's track header runs 1 ms past the media; make it exact.
+    let f = write_file(d.path(), "ten.m4a", &head, &[timed(audio(1, samples(0xB2, 6, 100)), 100)], &[], &[1]);
     let mut bytes = std::fs::read(&f.path).unwrap();
     let tk = bytes.windows(4).position(|w| w == b"tkhd").unwrap() + 4;
-    bytes[tk + 20..tk + 24].copy_from_slice(&10_800_000u32.to_be_bytes());
+    bytes[tk + 20..tk + 24].copy_from_slice(&600_000u32.to_be_bytes());
     std::fs::write(&f.path, bytes).unwrap();
-    assert_clean(&run(d.path(), &f.path, "three.m4a"));
-    // One second over.
-    let f = write_file(d.path(), "over.m4a", &head, &[timed(audio(1, samples(0xB2, 7, 100)), 1543)], &[], &[]);
+    assert_clean(&run(d.path(), &f.path, "ten.m4a"));
+    // One second over, and the 35:05 that our relay's patch let through.
+    let f = write_file(d.path(), "over.m4a", &head, &[timed(audio(1, samples(0xB2, 1, 100)), 601)], &[], &[]);
     assert_eq!(
         refused(d.path(), &f.path, "over.m4a"),
-        "This audio is 3:00:01 long; Buzz takes audio up to 3 hours. Trim it, then attach it again."
+        "This audio is 10:01 long; Buzz takes audio up to 10 minutes. Trim it, then attach it again."
     );
+    let f = write_file(d.path(), "long.m4a", &head, &[timed(audio(1, samples(0xB2, 5, 100)), 421)], &[], &[]);
+    assert!(refused(d.path(), &f.path, "long.m4a").starts_with("This audio is 35:05 long"));
 }
 #[test]
 fn video_up_to_60_minutes_is_sent_and_61_is_refused() {
@@ -673,12 +677,15 @@ fn video_up_to_60_minutes_is_sent_and_61_is_refused() {
 }
 #[test]
 fn a_one_frame_picture_over_sound_is_audio() {
-    // Sound with a cover picture already in a track: the relay counts it as audio, so it may run past an hour.
+    // Sound with a cover picture already in a track counts as audio: ten minutes, however long the picture says it is.
     let d = tempfile::tempdir().unwrap();
     let head = ftyp(b"isom", &[b"isom"]);
-    let covered = [timed(video(1, 640, 360, samples(0xA1, 1, 100)), 7200), timed(audio(2, samples(0xB2, 4, 100)), 1800)];
+    let covered = [timed(video(1, 640, 360, samples(0xA1, 1, 100)), 600), timed(audio(2, samples(0xB2, 4, 100)), 150)];
     let f = write_file(d.path(), "cover.mp4", &head, &covered, &[], &[1, 2]);
     assert_clean(&run(d.path(), &f.path, "cover.mp4"));
+    let long = [timed(video(1, 640, 360, samples(0xA1, 1, 100)), 1800), timed(audio(2, samples(0xB2, 4, 100)), 450)];
+    let f = write_file(d.path(), "long.mp4", &head, &long, &[], &[]);
+    assert!(refused(d.path(), &f.path, "long.mp4").contains("up to 10 minutes"));
 }
 
 /// Ogg Opus whose last page ends `secs` after its pre-skip.
@@ -1051,19 +1058,19 @@ fn what_cant_be_fixed_is_refused_in_one_plain_line() {
     // Sound just under the limit with a late start: its picture has to last until the sound ends, which is over it.
     let mut late = audio(1, samples(0xB2, 4, 100));
     late.timescale = 1;
-    late.delta = 2700; // three hours of sound
+    late.delta = 150; // ten minutes of sound
     let mut f = write_file(d.path(), "n.m4a", &head, &[late], &[], &[]);
     {
         // The track header says longer than its media: a lead-in before the sound.
         let mut bytes = std::fs::read(&f.path).unwrap();
         let tk = bytes.windows(4).position(|w| w == b"tkhd").unwrap() + 4;
-        bytes[tk + 20..tk + 24].copy_from_slice(&10_801_000u32.to_be_bytes());
+        bytes[tk + 20..tk + 24].copy_from_slice(&601_000u32.to_be_bytes());
         std::fs::write(&f.path, bytes).unwrap();
         f.keep.clear();
     }
     assert_eq!(
         refused(d.path(), &f.path, "n.m4a"),
-        "This audio is 3:00:01 long; Buzz takes audio up to 3 hours. Trim it, then attach it again."
+        "This audio is 10:01 long; Buzz takes audio up to 10 minutes. Trim it, then attach it again."
     );
 
     // Cut short: the samples moov promises aren't in the file.

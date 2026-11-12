@@ -772,7 +772,7 @@ Two proposals wait on a scope decision.
             t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedBy = 'app-writer';
             return JSON.parse(JSON.stringify(t));
           }
-          case 'media_upload': return { url: 'https://example.invalid/voice.webm', mime: 'audio/webm', name: 'voice.webm', size: 4 };
+          case 'media_upload': return [{ url: 'https://example.invalid/voice.webm', mime: 'audio/webm', name: 'voice.webm', size: 4 }];
           case 'prepare_voice_message': return JSON.stringify({ id: 'voice:' + args.channel + ':' + crypto.randomUUID() });
           case 'post_message': { if (w.__postDelay) await new Promise((r) => setTimeout(r, w.__postDelay)); const ref = 'sent-' + w.__calls.length; const list = (msgs[args.channel] ??= []); const at = args.replyTo ? list.findIndex((x: any) => x.ref === args.replyTo && !x.root) : -1; const top = at >= 0 ? list[at] : null; if (args.body) { const m = msg(ref, args.channel, 'Aaron', 0, args.body); if (top) { m.root = top.ref; m.parent = top.ref; (threads[top.ref] ??= [top]).push(m); const now = { ...top, reply_count: top.reply_count + 1 }; list[at] = now; threads[top.ref] = threads[top.ref].map((x: any) => (x.ref === top.ref ? now : x)); } list.push(m); } return { ref, channel: args.channel }; }
           case 'relay_origin': return 'wss://relay.test';

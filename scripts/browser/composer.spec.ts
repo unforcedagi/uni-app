@@ -63,7 +63,7 @@ test.beforeEach(async ({ page }) => {
             }
             if (w.holdUpload) await new Promise<void>(resolve => { w.finishUpload = resolve; });
             if (w.failUpload) throw new Error(w.uploadError ?? 'upload rejected');
-            return { url: 'https://example.invalid/test.txt', mime: 'text/plain', name: 'test.txt', size: 4 };
+            return w.uploadParts ?? [{ url: 'https://example.invalid/test.txt', mime: 'text/plain', name: 'test.txt', size: 4 }];
           case 'voice_transcribe': throw new Error('Chat must not transcribe');
           case 'prepare_voice_message': return JSON.stringify({ id: args.channel + ':' + args.replyTo + ':' + crypto.randomUUID() });
           case 'post_message':
@@ -378,6 +378,20 @@ test('Stop automatically sends only audio, preserves draft and never transcribes
   await expect(page.locator('.compose-file')).toHaveCount(0);
   await expect(page.locator('.voice-status')).toHaveText('Voice message sent');
   expect(await page.evaluate(() => (window as any).calls.some((c: any) => c.cmd === 'voice_transcribe'))).toBe(false);
+});
+
+test('A long recording goes as its parts, in order, in one voice message', async ({ page }) => {
+  // Rust converts a long recording to AAC parts of at most 9:50 and uploads each; the message carries them all, with the
+  // length each upload's answer gave (the relay checks imeta duration against it).
+  const parts = [1, 2, 3].map((k) => ({ url: `https://example.invalid/media/${String(k).repeat(64)}.mp4`, mime: 'video/mp4', sha256: String(k).repeat(64),
+    size: 1000 * k, dim: '640x360', blurhash: null, alt: null, filename: `voice (${k} of 3).m4a`, duration: k === 3 ? 61.44 : 589.995 }));
+  await page.evaluate((p) => { (window as any).uploadParts = p; }, parts);
+  await recordClip(page);
+  await expect.poll(async () => (await voicePosts(page)).length).toBe(1);
+  const [post] = await voicePosts(page);
+  expect(post.args.media).toEqual(parts);
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'media_upload').length)).toBe(1);
+  await expect(page.locator('.voice-status')).toHaveText('Voice message sent');
 });
 
 test('Voice upload leaves Send and a second recording usable and delivers in order', async ({ page }) => {

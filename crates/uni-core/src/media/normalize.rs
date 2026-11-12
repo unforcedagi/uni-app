@@ -5,10 +5,12 @@
 //!
 //! - Anything starting with `ftyp` is treated as video, and must be MP4-branded, `moov` before `mdat`, boxes from a short
 //!   list only, exactly one H.264 track and at most one AAC track, up to 3840x2160, up to 500 MB: [`iso`].
-//!   An audio-only MP4 is refused outright, so sound gets a one-frame H.264 track beside it. One frame over an AAC
-//!   track is audio, up to 3 hours; more frames is video, up to 60 minutes. The longer track decides.
+//!   An audio-only MP4 is refused outright, so sound gets a one-frame H.264 track beside it, lasting as long as the
+//!   sound. Stock Buzz measures that frame as video, up to 10 minutes, so that's the limit for sound (a long recording is
+//!   cut into parts before it gets here: `media/voice`). More frames is video, up to 60 minutes. The longer track decides.
 //! - JPEG, PNG, GIF and WebP with no metadata chunks, up to 25 MP, 50 MB (GIF 10 MB): [`image`].
 //! - Other audio and video are refused, except single-track Opus in WebM or Ogg with no tags, up to 3 hours: [`opus`].
+//!   Only our patched relay takes those; a device with codecs sends AAC instead, and this goes with the patches.
 //! - Everything else is a download, up to 100 MB, unless it's a page or a program: [`classify`].
 //!
 //! What can't be made acceptable is a [`refuse`]: one plain line, ready to show as it is.
@@ -30,9 +32,13 @@ pub const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 pub const MAX_GIF_BYTES: u64 = 10 * 1024 * 1024;
 pub const MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
 pub const MAX_PIXELS: u64 = 25_000_000;
-/// The relay's per-kind lengths (validation.rs `MAX_VIDEO_DURATION_SECS`, `MAX_AUDIO_DURATION_SECS`).
+/// Moving pictures (our relay's patch; stock Buzz takes 600 s; left until video is decided).
 pub const MAX_VIDEO_SECONDS: f64 = 3_600.0;
-pub const MAX_AUDIO_SECONDS: f64 = 10_800.0;
+/// Sound beside a still frame, as stock Buzz measures it: the frame's length, against its video limit
+/// (validation.rs `validate_video_file`, 600 s).
+pub const MAX_AUDIO_SECONDS: f64 = 600.0;
+/// Opus in WebM or Ogg, which only our patched relay takes (its audio limit). Goes with the patches, target 2026-11-30.
+pub const MAX_OPUS_SECONDS: f64 = 10_800.0;
 pub const MAX_VIDEO_WIDTH: u32 = 3840;
 pub const MAX_VIDEO_HEIGHT: u32 = 2160;
 
@@ -90,12 +96,12 @@ pub(crate) fn clock(seconds: f64) -> String {
     }
 }
 
-/// Sound past the relay's limit for audio, in one line.
-pub(crate) fn audio_too_long(seconds: f64) -> Error {
+/// Sound past the relay's limit for it, in one line.
+pub(crate) fn audio_too_long(seconds: f64, limit: f64) -> Error {
     refuse(format!(
         "This audio is {} long; Buzz takes audio up to {}. Trim it, then attach it again.",
         clock(seconds),
-        limit_words(MAX_AUDIO_SECONDS)
+        limit_words(limit)
     ))
 }
 
@@ -203,8 +209,8 @@ fn within_file_limit(size: u64) -> Result<()> {
 
 /// The relay measures Opus by where its last block or page ends, and so does this.
 fn within_audio_limit(seconds: f64) -> Result<()> {
-    if seconds > MAX_AUDIO_SECONDS {
-        return Err(audio_too_long(seconds));
+    if seconds > MAX_OPUS_SECONDS {
+        return Err(audio_too_long(seconds, MAX_OPUS_SECONDS));
     }
     Ok(())
 }

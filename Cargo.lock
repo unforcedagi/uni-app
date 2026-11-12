@@ -7615,6 +7615,7 @@ dependencies = [
  "keyring",
  "memchr",
  "mp4",
+ "ndk",
  "nostr",
  "quick-xml 0.42.0",
  "reqwest",

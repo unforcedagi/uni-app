@@ -63,8 +63,9 @@ export function tooLargeLine(size: number): string | null {
 
 const STOPPED = "Upload stopped.";
 
-/** Send a file to the relay. Throws one plain line. */
-export async function uploadMedia(file: Blob, name: string, mime: string, call: Call, signal?: AbortSignal, toJpeg: (f: Blob) => Promise<Blob | null> = photoAsJpeg): Promise<MediaRef> {
+/** Send a file to the relay: one attachment, or, for a long recording Rust converts and cuts, one per part in order.
+ *  Throws one plain line. */
+export async function uploadMedia(file: Blob, name: string, mime: string, call: Call, signal?: AbortSignal, toJpeg: (f: Blob) => Promise<Blob | null> = photoAsJpeg): Promise<MediaRef[]> {
   const large = tooLargeLine(file.size);
   if (large) throw large; // a plain string, as Rust's refusals are: shown as it is, with no "Error:" in front
   if (signal?.aborted) throw STOPPED;
@@ -101,7 +102,7 @@ export async function uploadMedia(file: Blob, name: string, mime: string, call: 
   }
   if (signal?.aborted) throw STOPPED;
   try {
-    return await call("media_upload", { id, filename: sendName, mime: sendMime }) as MediaRef;
+    return await call("media_upload", { id, filename: sendName, mime: sendMime }) as MediaRef[];
   } finally {
     signal?.removeEventListener("abort", abort);
   }

@@ -49,7 +49,7 @@ const MEDIA_UPLOAD_AUTH_EXPIRY_SECS: u64 = 3600;
 /// Whole-transfer limit for an MP4 (video, and M4A audio: the relay takes both on its streamed path), inside that hour.
 const VIDEO_UPLOAD_TIMEOUT: Duration = Duration::from_secs(55 * 60);
 /// The relay's buffered path (images, files, WebM and Ogg audio) checks the upload token ten minutes after it was signed, after the
-/// last byte, however fast the start was. Audio may run 3 hours (11-06), but the length is not the size: 3 h of Opus at 32 kbit/s
+/// last byte, however fast the start was. Opus may run 3 hours (11-06), but the length is not the size: 3 h of Opus at 32 kbit/s
 /// is about 43 MB, inside ten minutes on any link faster than about 0.6 Mbit/s; a longer or larger M4A goes on the hour's path above.
 /// A longer window for WebM/Ogg is the relay's to give (buzz-media upload.rs, the buffered path's 600 s).
 const OTHER_UPLOAD_TIMEOUT: Duration = Duration::from_secs(590);
@@ -326,7 +326,7 @@ fn relay_refusal(status: u16, body: &str) -> String {
     } else if has("media codec") {
         "Buzz only takes H.264 video with AAC sound, and this file uses something else.".into()
     } else if has("too long") {
-        // "audio too long: duration exceeds 10800 seconds". Older relays said only video, at 600.
+        // "audio too long: duration exceeds 10800 seconds": only our patched relay says audio, about Opus. Stock Buzz says video, at 600.
         let audio = has("audio too long");
         // Only a whole number of seconds is a limit; anything else gets ours.
         let limit = said
@@ -335,7 +335,7 @@ fn relay_refusal(status: u16, body: &str) -> String {
             .and_then(|r| r.split(' ').next())
             .and_then(|n| n.parse::<u32>().ok())
             .filter(|n| *n > 0)
-            .map_or(if audio { normalize::MAX_AUDIO_SECONDS } else { normalize::MAX_VIDEO_SECONDS }, f64::from);
+            .map_or(if audio { normalize::MAX_OPUS_SECONDS } else { normalize::MAX_VIDEO_SECONDS }, f64::from);
         let what = if audio { "audio" } else { "video" };
         format!("Buzz takes {what} up to {}, and this one is longer.", normalize::limit_words(limit))
     } else if has("resolution") {
