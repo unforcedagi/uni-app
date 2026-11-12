@@ -6,7 +6,7 @@ import {
   type AccountBoxes, type MailMessage, type MailThread, type SendOutcome,
 } from "../src/mailCore.ts";
 import {
-  addressLine, mailboxLabel, mailDate, mailTabs, MAIL_FRAME_CSP, mailProblem, mailSrcdoc, placeSources, placeTitle, placeValid, senderLabel, splitQuoted, subjectLabel, threadPeople, toWords, whoTag,
+  addressLine, footDrafts, laterNotNew, mailboxLabel, mailDate, mailTabs, replyDraft, MAIL_FRAME_CSP, mailProblem, mailSrcdoc, placeSources, placeTitle, placeValid, senderLabel, splitQuoted, subjectLabel, threadPeople, toWords, whoTag,
   type AccountBoxes as Acct, type Overview,
 } from "../src/mailCore.ts";
 import { restoreTabs, sameTarget, serializeTabs } from "../src/tabs.ts";
@@ -204,3 +204,17 @@ assert.deepEqual(readPending(fake), [], "a broken list reads as empty, not an er
 mem.set("uni.mail.pending.v1", JSON.stringify([{ op_id: 7 }, { ...p1, who: "someone" }, p1]));
 assert.deepEqual(readPending(fake), [p1]);
 console.log("ok   mail (T-210): what is offered, addresses, replies, not verified, send outcomes, pending sends");
+
+// T-335 review: Later is per thread, and both your draft and Uni's sit at the foot
+assert.equal(laterNotNew({ flagged: true, fresh: false }), true, "put off, nothing new: out of the Inbox");
+assert.equal(laterNotNew({ flagged: true, fresh: true }), false, "something new arrived: back in the Inbox");
+assert.equal(laterNotNew({ flagged: false, fresh: false }), false);
+assert.equal(laterNotNew({ flagged: true }), false, "a core that doesn't say: shown");
+const dm = (id: string, o: Partial<MailMessage> = {}): MailMessage => ({ id, thread_id: "t", from: [], to: [], cc: [], reply_to: [], subject: "s", received_at: "", sent_at: null, unread: false, draft: false, uni_drafted: false, mailbox_ids: [], text: "x", html: null, remote_images: 0, links: [], truncated: false, attachments: [], ...o });
+const both: MailThread = { account_id: "A", thread_id: "t", messages: [dm("m1"), dm("own", { draft: true }), dm("u1", { draft: true, uni_drafted: true }), dm("u2", { draft: true, uni_drafted: true })] };
+assert.deepEqual(footDrafts(both, { who: "owner" }), { uni: [both.messages[2], both.messages[3]], own: [both.messages[1]] }, "your draft isn't lost beside Uni's");
+assert.deepEqual(footDrafts(both, { who: "uni" }), { uni: [], own: [] }, "Uni's mail keeps its drafts in the conversation");
+assert.equal(replyDraft(both, { who: "owner" })?.id, "u2", "Reply opens Uni's newest draft");
+assert.equal(replyDraft({ ...both, messages: [dm("m1"), dm("own", { draft: true }), dm("u1", { draft: true, uni_drafted: true, html: "<b>x</b>" })] }, { who: "owner" })?.id, "own", "Uni's can't be shown whole: your own");
+assert.equal(replyDraft({ ...both, messages: [dm("m1")] }, { who: "owner" }), null, "no draft: a blank reply");
+console.log("ok   mail (T-335 review): Later per thread, the drafts at the foot");

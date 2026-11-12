@@ -105,7 +105,8 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
           const all = msgs.filter((x) => x.account === m.account && x.thread_id === m.thread_id);
           return { account_id: m.account, thread_id: m.thread_id, email_id: m.id, from: m.from, to: m.to, subject: m.subject, preview: (m.text ?? m.subject).replace(/\s+/g, ' ').slice(0, 120),
             received_at: m.received_at, count: all.length, unread: all.some((x) => x.unread && !x.draft && (!/-(junk|trash)$/.test(x.box) || x.box === s.mailbox_id)), has_attachment: all.some((x) => x.attachments.length > 0), draft: m.draft, uni_drafted: m.uni_drafted,
-            flagged: all.some((x) => x.flagged), uni_draft: all.some((x) => x.draft && x.uni_drafted) };
+            flagged: all.some((x) => x.flagged), uni_draft: all.some((x) => x.draft && x.uni_drafted),
+            fresh: all.some((x) => x.unread && !x.draft && !x.flagged && !/-(junk|trash)$/.test(x.box)) };
         });
       }).sort((x, y) => y.received_at.localeCompare(x.received_at));
       const shown = rows.slice(0, w.__pageSize ?? rows.length);
@@ -173,6 +174,8 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
             const op = cmd === 'mail_mark_seen' ? 'mark_seen' : cmd === 'mail_flag' ? 'flag' : 'archive';
             offered(op, args.accountId);
             if (op === 'archive' && w.__archiveDelay) await new Promise((r) => setTimeout(r, w.__archiveDelay));
+            // T-335: `__flagFails` makes the next flag call fail as an unreachable bridge would
+            if (op === 'flag' && w.__flagFails) { w.__flagFails--; throw { kind: 'unreachable', message: 'the mail bridge did not answer in time' }; }
             const these = msgs.filter((m) => m.account === args.accountId && args.emailIds.includes(m.id));
             if (these.length !== args.emailIds.length) throw { kind: 'refused', status: 409, message: "a message isn't in this account" };
             for (const m of these) {

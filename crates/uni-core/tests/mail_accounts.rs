@@ -148,6 +148,26 @@ async fn later_and_files_narrow_a_list_on_the_server() {
     assert_eq!(ids(&later), ["A/Ta5"], "Later is only flagged mail");
     let files = mail.threads(&[Source { with_files: true, ..whole("A") }], None, 50).await.unwrap();
     assert!(!files.threads.is_empty() && files.threads.iter().all(|t| t.has_attachment), "Files: only mail with attachments");
+    // Later is per thread: a thread with only its newest message flagged (another client's Flag) is put off and has
+    // nothing new; one with an unread message that isn't flagged has something new on it
+    {
+        let mut st = fake.state.lock().unwrap();
+        let e = st.mail.emails.iter_mut().find(|e| e["id"] == "a3").expect("a3");
+        e["keywords"]["$flagged"] = serde_json::json!(true);
+    }
+    let page = mail.threads(&[inbox("A")], None, 50).await.unwrap();
+    let plan = page.threads.iter().find(|t| t.thread_id == "TA-plan").expect("the plan thread");
+    assert!(plan.flagged && !plan.fresh, "its only unread message is the flagged one: nothing new");
+    {
+        let mut st = fake.state.lock().unwrap();
+        let e = st.mail.emails.iter_mut().find(|e| e["id"] == "a3").expect("a3");
+        e["keywords"].as_object_mut().unwrap().remove("$flagged");
+        let e = st.mail.emails.iter_mut().find(|e| e["id"] == "a1").expect("a1");
+        e["keywords"]["$flagged"] = serde_json::json!(true);
+    }
+    let page = mail.threads(&[inbox("A")], None, 50).await.unwrap();
+    let plan = page.threads.iter().find(|t| t.thread_id == "TA-plan").expect("the plan thread");
+    assert!(plan.flagged && plan.fresh, "an unread message that isn't put off is something new");
     // the Inbox row of a thread Uni drafted a reply in says so, though the draft itself lives in Drafts
     let plan = all_rows_with(&mail).await;
     assert!(plan, "the Inbox row knows the thread holds Uni's draft");

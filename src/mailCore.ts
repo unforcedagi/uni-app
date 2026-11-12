@@ -33,7 +33,30 @@ export type ThreadSummary = {
   received_at: string; count: number; unread: boolean; has_attachment: boolean; draft: boolean; uni_drafted: boolean; flagged?: boolean;
   /** T-335: the thread holds a draft Uni wrote (it lives in Drafts, so it isn't the row's own message in the Inbox). */
   uni_draft?: boolean;
+  /** T-335: something new on the thread: an unread message that isn't put off for Later. */
+  fresh?: boolean;
 };
+
+/** T-335: a thread put off for Later stays out of the Inbox until something new arrives on it. Later is the thread's
+ *  (any message flagged, as other mail clients may flag only one), so the server's per-message filter isn't enough. */
+export function laterNotNew(t: Pick<ThreadSummary, "flagged" | "fresh">): boolean {
+  return !!t.flagged && t.fresh === false;
+}
+
+/** The drafts at the foot of a thread of yours: Uni's (the reply Uni prepared) and your own, each oldest first. Uni's
+ *  account's own drafts stay in its conversation, so it has none here. */
+export function footDrafts(t: MailThread, acct: Pick<AccountBoxes, "who">): { uni: MailMessage[]; own: MailMessage[] } {
+  if (acct.who !== "owner") return { uni: [], own: [] };
+  const drafts = t.messages.filter((m) => m.draft);
+  return { uni: drafts.filter((m) => m.uni_drafted), own: drafts.filter((m) => !m.uni_drafted) };
+}
+
+/** The draft Reply opens: Uni's newest when this app can show it whole, else your own newest, else none (a blank reply). */
+export function replyDraft(t: MailThread, acct: Pick<AccountBoxes, "who">): MailMessage | null {
+  const { uni, own } = footDrafts(t, acct);
+  for (const list of [uni, own]) { const d = list[list.length - 1]; if (d && draftEditable(d)) return d; }
+  return null;
+}
 export type ThreadPage = { threads: ThreadSummary[]; next: Source[]; more: boolean; total: number | null };
 export type MailThread = { account_id: string; thread_id: string; messages: MailMessage[] };
 

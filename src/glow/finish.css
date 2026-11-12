@@ -47,7 +47,6 @@
 .search-nothing button { margin-top: 8px; }
 
 /* ── Mail: no empty thumb bar when there is nothing to put in it ── */
-.mail-thumb[data-empty="true"] { display: none !important; }
 
 /* ── Vault: a folder's own two small marks at the end of its row ── */
 .vault-folder { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

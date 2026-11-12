@@ -149,3 +149,70 @@ test('Waiting holds Uni\'s held sends, one tab away', async ({ page }) => {
   await expect(page.getByRole('region', { name: /^Held send: / })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Send it/ })).toBeVisible();
 });
+
+// ── T-335 review: each a bug the fresh review found, reproduced ─────────────────────────────────────────────────────
+
+test('a reply being written waits with Resume when a tab, a search or Files takes its thread away', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await rows(page).filter({ hasText: 'garden week' }).click();
+  await thread(page, 'Planning the garden week').getByRole('button', { name: 'Write my own' }).click();
+  await page.getByRole('region', { name: 'Reply' }).getByRole('textbox', { name: 'Message' }).fill('Tuesday, then.');
+  await back(page);
+  await tab(page, 'Later').click();
+  const resume = mail(page).getByRole('button', { name: /A message in progress · Resume/ });
+  await expect(resume).toBeVisible();
+  await resume.click();
+  // it comes back under its own thread, with what was typed
+  await expect(thread(page, 'Planning the garden week')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Reply' }).getByRole('textbox', { name: 'Message' })).toHaveValue('Tuesday, then.');
+});
+
+test('your own draft stays in sight beside Uni\'s at the foot of the thread', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__msgs.push({ ...w.__msgs.find((m: any) => m.id === 'a6'), id: 'a11', uni_drafted: false, received_at: '2026-10-19T09:10:00Z', text: 'Half a thought about the beds.' });
+  });
+  await rows(page).filter({ hasText: 'garden week' }).click();
+  const t = thread(page, 'Planning the garden week');
+  await expect(t.getByRole('region', { name: 'Your draft' })).toContainText('Half a thought about the beds.');
+  await expect(t.getByRole('region', { name: "Uni's draft reply" })).toContainText('Monday suits me.');
+});
+
+test('a thread another client flagged in part is in Later, not the Inbox, until something new arrives', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  // only the oldest message of the garden thread is flagged, and its newest is read: put off, nothing new
+  await page.evaluate(() => { const w = window as any; for (const m of w.__msgs) { if (m.id === 'a1') m.flagged = true; if (m.id === 'a3') m.unread = false; } });
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await expect(rows(page).filter({ hasText: 'garden week' })).toHaveCount(0);
+  await tab(page, 'Later').click();
+  await expect(rows(page).filter({ hasText: 'garden week' })).toHaveCount(1);
+  // a new message arrives on it: back in the Inbox, marked Later
+  await page.evaluate(() => { const w = window as any; w.__msgs.push({ ...w.__msgs.find((m: any) => m.id === 'a3'), id: 'a12', flagged: false, unread: true, received_at: '2026-10-19T12:00:00Z', text: 'Also: bring gloves.' }); });
+  await tab(page, 'Inbox').click();
+  await expect(rows(page).filter({ hasText: 'garden week' })).toHaveAccessibleName(/^Unread\. Later\./);
+});
+
+test('an archive that lands while taking it out of Later fails says so, and the archive stands', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await rows(page).filter({ hasText: 'Workshop photos' }).click();
+  await thread(page, 'Workshop photos and slides').getByRole('button', { name: 'Later' }).click();
+  await back(page);
+  await tab(page, 'Later').click();
+  await rows(page).filter({ hasText: 'Workshop photos' }).click();
+  await page.evaluate(() => { (window as any).__flagFails = 1; });
+  await thread(page, 'Workshop photos and slides').getByRole('button', { name: 'Archive' }).click();
+  await expect(mail(page).getByRole('alert')).toContainText('Archived, but it is still in Later');
+  expect((await calls(page, 'mail_archive')).length).toBe(1);
+});
+
+test('Enter searches at once, and the pause after typing doesn\'t close the thread opened from the results', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  const box = mail(page).getByRole('searchbox', { name: 'Search mail' });
+  await box.fill('marmalade');
+  await box.press('Enter');
+  await rows(page).first().click();
+  await expect(thread(page, 'Planning the garden week')).toBeVisible();
+  await page.waitForTimeout(700);
+  await expect(thread(page, 'Planning the garden week')).toBeVisible();
+});

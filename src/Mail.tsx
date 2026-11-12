@@ -21,7 +21,7 @@ import { formatSize } from "./media";
 import { initials } from "./messages/messagesView";
 import {
   addressLine, can, canSendFrom, draftEditable, draftFields, readPending, sendOutcomeText, settled, withoutPending, writePending, mailDate, mailDateLong, mailProblem, mailSrcdoc, notVerified, replyFields,
-  senderLabel, subjectLabel, writesOffered, mailTabs, placeAccount, placeSources, placeTitle, placeValid, splitQuoted, threadPeople, toWords,
+  senderLabel, subjectLabel, writesOffered, mailTabs, placeAccount, placeSources, placeTitle, placeValid, splitQuoted, threadPeople, toWords, footDrafts, laterNotNew, replyDraft,
   type AccountBoxes, type MailAttachment, type MailLink, type MailMessage, type MailProblem, type MailThread, type Overview, type Place,
   type PendingSend, type SendOutcome, type Source, type ThreadPage, type ThreadSummary,
   approvalOffered, approveOutcome, canApprove, declineOutcome, fileKind, heldFailure, heldShownWhole, type HeldOutcome, type Parked,
@@ -233,9 +233,7 @@ function ThreadBody({ t, acct, overview, note, actions, composingHere }: { t: Ma
   // your Drafts in this thread go to its foot; Uni's own drafts (in Uni's mail) stay in the conversation, labelled
   const conversation = t.messages.filter((m) => !(own && m.draft));
   const real = t.messages.filter((m) => !m.draft);
-  const drafts = own ? t.messages.filter((m) => m.draft) : [];
-  const uniDrafts = drafts.filter((m) => m.uni_drafted);
-  const footDrafts = uniDrafts.length > 0 ? uniDrafts : drafts;
+  const foot = footDrafts(t, acct);
   const last = conversation[conversation.length - 1];
   const [opened, setOpened] = useState<Set<string>>(() => new Set());
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
@@ -251,8 +249,8 @@ function ThreadBody({ t, acct, overview, note, actions, composingHere }: { t: Ma
     <p className="mail-thread-where">{!own && <WhoTag who={acct.who} address={acct.name} />}<span>{!own && "In Uni's mail · "}{real.length} {real.length === 1 ? "message" : "messages"} · {threadPeople({ ...t, messages: real }, acct)}</span></p>
     {note && <p className="mail-triage" role="note"><span className="eyebrow">Uni's note</span><span>{note}</span></p>}
     {conversation.map((m) => <MessageCard key={m.id} m={m} acct={acct} accountId={t.account_id} overview={overview} folded={!isOpen(m)} onToggle={m.id === last?.id ? null : toggle(m)} />)}
-    {footDrafts.length > 0 && !composingHere && <DraftFoot drafts={footDrafts} uni={uniDrafts.length > 0}
-      onEdit={actions.openDraft && (() => actions.openDraft!(footDrafts[footDrafts.length - 1]))} onOwn={actions.replyOwn} />}
+    {!composingHere && foot.own.length > 0 && <DraftFoot drafts={foot.own} uni={false} onEdit={actions.openDraft && (() => actions.openDraft!(foot.own[foot.own.length - 1]))} onOwn={null} />}
+    {!composingHere && foot.uni.length > 0 && <DraftFoot drafts={foot.uni} uni onEdit={actions.openDraft && (() => actions.openDraft!(foot.uni[foot.uni.length - 1]))} onOwn={foot.own.length > 0 ? null : actions.replyOwn} />}
   </>;
 }
 
@@ -414,6 +412,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   const [boxesProblem, setBoxesProblem] = useState<MailProblem | null>(null);
   const [place, setPlace] = useState<Place>(remembered.place);
   const [query, setQuery] = useState(remembered.query);
+  /** The search the list reads now, for the typing pause's timer (set in an older render). */
+  const queryRef = useRef(remembered.query);
   const [typed, setTyped] = useState(remembered.query);
   const [files, setFiles] = useState(remembered.files);
   const [list, setList] = useState<List | null>(null);
@@ -432,6 +432,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   const [pendingNote, setPendingNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionProblem, setActionProblem] = useState<string | null>(null);
+  /** What a write said after its thread left the screen (it is shown on the list). */
+  const [listNote, setListNote] = useState<string | null>(null);
   /** T-213: Uni's sends held for you, per account (kept in mailHeld.ts, so outcomes outlive this view). */
   const held = useSyncExternalStore(onHeld, heldEntries);
   const [heldProblem, setHeldProblem] = useState<MailProblem | null>(null);
@@ -553,8 +555,13 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     setListLoading(true);
     if (!more) setListProblem(null);
     try {
-      const page = await invoke<ThreadPage>("mail_threads", { sources, text: text || null });
+      const got = await invoke<ThreadPage>("mail_threads", { sources, text: text || null });
       if (seq !== listSeq.current) return;
+      // the Inbox (the list that leaves Later out) also drops a thread put off for Later with nothing new on it: Later
+      // is the whole thread's, and the server filters message by message
+      const inbox = sources.some((x) => x.flagged === false);
+      const kept = inbox ? got.threads.filter((t) => !laterNotNew(t)) : got.threads;
+      const page = { ...got, threads: kept, total: got.total != null ? got.total - (got.threads.length - kept.length) : null };
       setList(more
         ? { key, total: page.total, next: page.next, more: page.more, threads: [...more.threads, ...page.threads.filter((t) => !more.threads.some((c) => c.account_id === t.account_id && c.thread_id === t.thread_id))] }
         : { key, total: page.total, next: page.next, more: page.more, threads: page.threads });
@@ -611,6 +618,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   useEffect(() => {
     const want = typed.trim();
     if (want === query) return;
+    if (want === queryRef.current) return;
     const t = setTimeout(() => runSearch(want), want ? SEARCH_PAUSE_MS : 0);
     return () => clearTimeout(t);
   }, [typed]);
@@ -625,9 +633,14 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     if (o && now && o.accounts.some((a) => a.id === now.accountId)) void loadThread(now);
   };
   /** Close the open thread (a new list doesn't keep showing a thread from the old one). */
-  const closeThread = () => { threadSeq.current++; openRef.current = null; setOpenHeld(null); setOpen(null); setThread(null); setThreadProblem(null); };
-  const pick = (p: Place) => { closeThread(); setPlace(p); setQuery(""); setTyped(""); setFiles(false); setPane("list"); };
-  const runSearch = (text: string) => { if (text !== query) { closeThread(); setQuery(text); setPane("list"); } };
+  const closeThread = () => {
+    // a reply being written under the thread waits behind it, with Resume (never lost out of sight)
+    const c = composeRef.current;
+    if (c && !c.hidden && c.thread) setCompose({ ...c, hidden: true });
+    threadSeq.current++; openRef.current = null; setOpenHeld(null); setOpen(null); setThread(null); setThreadProblem(null);
+  };
+  const pick = (p: Place) => { setListNote(null); closeThread(); setPlace(p); queryRef.current = ""; setQuery(""); setTyped(""); setFiles(false); setPane("list"); };
+  const runSearch = (text: string) => { if (text !== queryRef.current) { closeThread(); queryRef.current = text; setQuery(text); setPane("list"); } };
   const toggleFiles = () => { closeThread(); setFiles(!files); setPane("list"); };
   const openThread = (t: Pick<ThreadSummary, "account_id" | "thread_id">) => {
     // a message being written stays: it waits, with Resume (it comes back under its own thread)
@@ -728,14 +741,12 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     };
     const mark = can(acct, "mark_seen");
     const own = acct.who === "owner";
-    const drafts = own ? t.messages.filter((m) => m.draft) : [];
-    const uniDrafts = drafts.filter((m) => m.uni_drafted);
-    const footList = uniDrafts.length > 0 ? uniDrafts : drafts, footDraft = footList[footList.length - 1];
+    const footDraft = replyDraft(t, acct);
     const sendable = canSendFrom(acct);
     const openDraft = own && sendable ? (m: MailMessage) => startCompose({ kind: "draft", accountId: acct.id, draftId: m.id, fields: draftFields(m), uni: m.uni_drafted }, keyOf(o)) : null;
     const replyOwn = sendable ? () => startCompose({ kind: "reply", accountId: acct.id, fields: replyFields(t, acct) }, keyOf(o)) : null;
     // Reply starts from the draft at the foot when there is one this app can show whole (Uni's prepared reply)
-    const reply = openDraft && footDraft && draftEditable(footDraft) ? () => openDraft(footDraft) : replyOwn;
+    const reply = openDraft && footDraft ? () => openDraft(footDraft) : replyOwn;
     // Later is the flag on every message of the thread (so no older message keeps it in the Inbox); back clears it
     const laterIds = real.map((m) => m.id);
     const leavesList = (on: boolean) => (on ? place === "inbox" : place === "later");
@@ -751,18 +762,16 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
         void act(on ? "put it off for later" : "bring it back", () => invoke("mail_flag", { accountId: o.accountId, emailIds: ids, flagged: on }), () => {
           setFlag(ids, on); setLaterCount((n) => Math.max(0, n + (on ? 1 : -1)));
           if (leavesList(on)) leaveThread(o);
-          if (overviewRef.current) void loadLater(overviewRef.current);
         });
       } : null,
       laterLabel: flagged ? (inInbox.length > 0 ? "Back to Inbox" : "Not later") : "Later",
-      archive: can(acct, "archive") && inInbox.length > 0 ? () => void act("archive it", async () => {
-        await invoke("mail_archive", { accountId: o.accountId, emailIds: inInbox });
-        // done with it: it leaves Later too
-        if (flagged && can(acct, "flag")) await invoke("mail_flag", { accountId: o.accountId, emailIds: flaggedIds, flagged: false });
-      }, () => {
+      archive: can(acct, "archive") && inInbox.length > 0 ? () => void act("archive it", () => invoke("mail_archive", { accountId: o.accountId, emailIds: inInbox }), () => {
         leaveThread(o);
-        if (flagged) setLaterCount((n) => Math.max(0, n - 1));
-        void loadOverview().then((ov) => { if (ov) void loadLater(ov); });
+        void loadOverview();
+        // done with it: it leaves Later too (the archive stands if this fails, and the screen says so)
+        if (flagged && can(acct, "flag")) void invoke("mail_flag", { accountId: o.accountId, emailIds: flaggedIds, flagged: false })
+          .then(() => setLaterCount((n) => Math.max(0, n - 1)))
+          .catch((e) => { if (alive.current) setListNote(`Archived, but it is still in Later: ${mailProblem(e).title}`); });
       }) : null,
       openDraft,
     };
@@ -836,6 +845,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
               : <><button type="button" className="note-action" disabled>Check</button><small className="mail-note">The mail bridge doesn't offer checking sends now; they stay listed.</small></>}
           </div>}
           {pendingNote && <p className="mail-note mail-pending-note" role="status">{pendingNote}</p>}
+          {listNote && <p className="mail-note mail-list-note" role="alert">{listNote} <button type="button" className="note-quiet" onClick={() => setListNote(null)}>OK</button></p>}
           {waitingPlace ? <div className="mail-scroll">
             {heldProblem && <Problem p={heldProblem} onRetry={() => overview && void loadHeld(overview)} />}
             {waitingAcct && !can(waitingAcct, "send.parked") && <p className="mail-note mail-held-unlisted" role="note">This mail bridge can't list Uni's held sends yet. Each one is also a task for you; ask #systems.</p>}
