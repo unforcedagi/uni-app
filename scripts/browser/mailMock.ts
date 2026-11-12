@@ -147,9 +147,11 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
           }
           case 'mail_threads': {
             fail();
-            // the server answers the query as it arrives; `__threadsDelay` holds the answer on its way back
-            const answer = threads(args.sources, args.text);
+            // `__threadsDelay` holds the answer on its way back (the server read the query as it arrived); with
+            // `__threadsLate` the query itself reaches the server late (after writes sent after it)
+            const early = w.__threadsLate ? null : threads(args.sources, args.text);
             if (w.__threadsDelay) await new Promise((r) => setTimeout(r, w.__threadsDelay));
+            const answer = early ?? threads(args.sources, args.text);
             if (w.__uniGone && args.sources.some((s: any) => s.account_id === 'U')) throw { kind: 'server', message: 'accountNotFound' };
             return answer;
           }

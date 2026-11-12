@@ -390,20 +390,20 @@ test('Mark read on a Later thread that new mail brought back takes it out of Lat
 
 // ── T-335 ship review: should-fix ───────────────────────────────────────────────────────────────────────────────────
 
-test('an Archive while Load older is on its way: the archived thread stays out, and nothing is skipped', async ({ page }) => {
+for (const late of [false, true]) test(`an Archive while Load older is on its way (${late ? 'the archive reaches the server first' : 'the page is read first'}): the archived thread stays out, and nothing is skipped`, async ({ page }) => {
   test.skip(stacked(page), 'the list and the thread side by side');
   await page.addInitScript(() => { (window as any).__pageSize = 1; });
   await boot(page, 'ok', { writes: true });
   await expect(rows(page)).toHaveCount(1);
   await rows(page).first().click();
   await expect(thread(page, 'Planning the garden week')).toBeVisible();
-  await page.evaluate(() => { (window as any).__threadsDelay = 1200; });
+  await page.evaluate((late) => { (window as any).__threadsDelay = 1200; (window as any).__threadsLate = late; }, late);
   await mail(page).getByRole('button', { name: 'Load older' }).click();
   await thread(page, 'Planning the garden week').getByRole('button', { name: 'Archive' }).click();
   await expect.poll(async () => (await calls(page, 'mail_archive')).length).toBe(1);
   await expect(rows(page).filter({ hasText: 'Workshop photos' })).toHaveCount(1, { timeout: 5000 });
   await expect(rows(page).filter({ hasText: 'garden week' })).toHaveCount(0);
-  await page.evaluate(() => { (window as any).__threadsDelay = 0; });
+  await page.evaluate(() => { (window as any).__threadsDelay = 0; (window as any).__threadsLate = false; });
   await mail(page).getByRole('button', { name: 'Load older' }).click();
   await expect(rows(page).filter({ hasText: 'hold is ready' })).toHaveCount(1);
 });

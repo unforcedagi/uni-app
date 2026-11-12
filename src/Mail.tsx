@@ -545,7 +545,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     }
   }, []);
 
-  const loadList = useCallback(async (key: string, sources: Source[], text: string, more: List | null) => {
+  const loadList = useCallback(async (key: string, sources: Source[], text: string, more: List | null): Promise<void> => {
     if (sources.length === 0) { setList({ key, threads: [], next: [], more: false, total: 0 }); return; }
     const seq = ++listSeq.current;
     const gen = more ? notesGen.current : ++notesGen.current;
@@ -556,14 +556,22 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
     try {
       const page = await invoke<ThreadPage>("mail_threads", { sources, text: text || null });
       if (seq !== listSeq.current) return;
-      setList((cur) => {
-        if (!more || !cur || cur.key !== key) return { key, total: page.total, next: page.next, more: page.more, threads: page.threads };
-        // merged into the list as it is now: a thread taken out while this page loaded stays out, and each account's
-        // next position moves by what was taken out meanwhile (the positions this page was asked with were older)
-        const moved = (acct: string) => (cur.next.find((x) => x.account_id === acct)?.position ?? 0) - (sources.find((x) => x.account_id === acct)?.position ?? 0);
+      const cur = listRef.current;
+      if (more && cur && cur.key === key) {
+        // merged into the list as it is now: a thread taken out while this page loaded stays out. If one was (its
+        // account's position moved since this page was asked), the server may have read the page before or after that
+        // change, so the page is asked again from where the list is now; the merge drops what it already has.
+        const moved = sources.some((src) => (cur.next.find((x) => x.account_id === src.account_id)?.position ?? src.position) !== src.position);
         const fresh = page.threads.filter((t) => !cur.threads.some((c) => c.account_id === t.account_id && c.thread_id === t.thread_id));
-        return { key, total: page.total, more: page.more, threads: [...cur.threads, ...fresh], next: page.next.map((x) => ({ ...x, position: Math.max(0, x.position + moved(x.account_id)) })) };
-      });
+        const merged: List = { key, total: page.total, more: moved || page.more, threads: [...cur.threads, ...fresh], next: moved ? cur.next : page.next };
+        listRef.current = merged;
+        setList(merged);
+        setListProblem(null);
+        void loadNotes(page.threads, key, gen);
+        if (moved) void loadList(key, cur.next, text, merged);
+        return;
+      }
+      setList({ key, total: page.total, next: page.next, more: page.more, threads: page.threads });
       setListProblem(null);
       void loadNotes(page.threads, key, gen);
     } catch (e) { if (seq === listSeq.current) setListProblem(mailProblem(e)); }
