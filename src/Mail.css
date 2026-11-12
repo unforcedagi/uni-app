@@ -155,7 +155,6 @@
   .mail-thread-back { display: inline-flex; align-items: center; }
   .mail-read-scroll { padding: 12px 14px 32px; }
   .mail-subject { font-size: 21px; }
-  .mail-tabs { padding: 6px 10px; }
   .mail-list-search { padding: 6px 10px; }
   .mail-compose > .mail-scroll { padding: 12px 14px 32px; }
   .mail-compose-fields label { flex-direction: column; gap: 2px; }
@@ -166,21 +165,23 @@
 
 /* T-335 v2 ─────────────────────────────────────────────────────────────────────────────────────────────────────── */
 /* the strip: the places, then refresh at its end */
-.mail-tabs { flex: none; padding: 6px 12px; gap: 8px; overflow: hidden; }
+.mail-tabs { flex: none; padding: 4px 12px; gap: 8px; overflow: hidden; }
+/* the Daylight is a touch screen: every target is at least 44 px */
+.mail-tab { min-height: 44px; }
 .mail-tablist { flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
 .mail-tablist::-webkit-scrollbar { display: none; }
 .mail-tab-uni { border-style: dashed; border-color: var(--g-ink-3); }
 .mail-tab-uni[aria-selected="true"] { border-style: solid; }
-.mail-refresh { flex: none; margin-left: auto; min-height: 40px; min-width: 40px; height: 40px; padding: 0; }
+.mail-refresh { flex: none; margin-left: auto; min-height: 44px; min-width: 44px; height: 44px; padding: 0; }
 .mail-strip-note { padding: 4px 14px; }
 .mail-thread-back { display: none; }
 
 /* the list: search, Files and New in one row, then the rows */
-.mail-list-search { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
-.mail-search input { min-height: 40px; border-radius: 999px; }
-.mail-list-search .mail-files { flex: none; min-height: 40px; padding: 0 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 999px; }
+.mail-list-search { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-bottom: 1px solid var(--line); }
+.mail-search input { min-height: 44px; border-radius: 999px; }
+.mail-list-search .mail-files { flex: none; min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 999px; }
 .mail-list-search .mail-files.on { background: var(--th-ink); border-color: var(--th-ink); color: var(--th-card); }
-.mail-new { flex: none; min-height: 40px; padding: 0 16px; }
+.mail-new { flex: none; min-height: 44px; padding: 0 16px; }
 .mail-readonly { padding: 4px 14px; }
 .mail-list-title { margin: 0; padding: 8px 16px 2px; font-size: 13px; color: var(--muted); }
 .mail-list-title strong { color: var(--text); font-weight: 600; }

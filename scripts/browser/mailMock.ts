@@ -311,7 +311,7 @@ export const width = (page: Page) => page.viewportSize()?.width ?? 1440;
 /** One pane at a time (a phone). */
 export const stacked = (page: Page) => width(page) < 700;
 /** T-335 v2: Mail's places are tabs (Inbox, Later, Waiting, Drafts, Sent, Archive, Junk, Uni's mail). */
-export const mail = (page: Page) => page.getByRole('region', { name: 'Mail' }).last();
+export const mail = (page: Page) => page.getByRole('region', { name: 'Mail', exact: true }).last();
 export const rows = (page: Page) => page.locator('.mail-row');
 export const tab = (page: Page, name: string) => mail(page).getByRole('tab', { name: new RegExp(`^${name.replace(/[.?()]/g, '\\$&')}`) });
 

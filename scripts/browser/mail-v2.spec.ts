@@ -4,17 +4,10 @@
 // Against the mocked command layer (mailMock.ts: Robin Vale's account A and Uni's account U, made up), on the desktop,
 // a phone and the Daylight both ways. Run: npx playwright test --config playwright.mail.config.ts mail-v2
 import { expect, test, type Page } from '@playwright/test';
-import { boot, mail, rows, shot, stacked } from './mailMock';
+import { backToThreads as back, boot, mail, rows, shot, tab } from './mailMock';
 
-const tab = (page: Page, name: string) => mail(page).getByRole('tab', { name: new RegExp(`^${name}`) });
 const thread = (page: Page, subject: string) => page.getByRole('region', { name: `Thread: ${subject}` });
 const calls = (page: Page, cmd: string): Promise<any[]> => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
-/** On a phone, back from a thread to the list (when a thread is showing). */
-const back = async (page: Page) => {
-  if (!stacked(page)) return;
-  const b = mail(page).locator('.mail-thread-back:visible');
-  if (await b.count()) await b.first().click();
-};
 
 test('the morning: your Inbox first, as tabs, in two-line rows, with Uni\'s own mail left out', async ({ page }) => {
   await boot(page, 'ok', { writes: true, held: true });

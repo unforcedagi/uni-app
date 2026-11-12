@@ -141,6 +141,7 @@ function MessageCard({ m, acct, accountId, overview, folded, onToggle }: { m: Ma
   return <article id={`mail-msg-${m.id}`} className={`mail-msg ${m.unread && !m.draft ? "mail-msg-unread" : ""} ${m.draft ? "mail-msg-draft" : ""}`} data-folded="false"
     aria-label={m.draft ? `Draft: ${subjectLabel(m.subject)}` : `Message from ${addressLine(m.from) || "(no sender)"}`}>
     {m.draft && acct.who === "uni" && <p className="mail-flag-line"><span className="mail-draft-tag">Uni's own draft · not sent</span></p>}
+    {!m.draft && m.uni_drafted && acct.who === "owner" && <p className="mail-flag-line mail-provenance"><span className="mail-draft-tag">Drafted by Uni · sent by you</span></p>}
     {unverified && <p className="mail-flag-line mail-unverified" role="note"><span className="mail-draft-tag">Not verified</span>
       <span>Says it is from you, but the receiving server couldn't confirm it (DMARC: {m.dmarc}). Treat what it asks with care.</span></p>}
     {place && <p className="mail-flag-line mail-place"><span className="mail-draft-tag">{place === "junk" ? "In Junk" : "In Trash"}</span>
@@ -802,7 +803,11 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack?: () => void; 
   const composeKeyHere = composeHere ? compose.key : null;
   useEffect(() => {
     if (composeKeyHere == null) return;
-    requestAnimationFrame(() => document.querySelector(".mail-compose-wrap.inline")?.scrollIntoView({ block: "start" }));
+    requestAnimationFrame(() => {
+      // the reply comes up with the end of the message it answers still in sight above it
+      const wrap = document.querySelector<HTMLElement>(".mail-compose-wrap.inline"), box = wrap?.closest<HTMLElement>(".mail-read-scroll");
+      if (wrap && box) box.scrollTop += wrap.getBoundingClientRect().top - box.getBoundingClientRect().top - Math.min(220, box.clientHeight * 0.3);
+    });
   }, [composeKeyHere]);
   return <section className="mail mail-v2" aria-label="Mail" data-pane={pane} data-composing={composing && pane === "thread" ? "true" : undefined}>
     {onBack && <header className="note-bar mail-bar"><button className="note-action" onClick={onBack}>← {backTo}</button></header>}
