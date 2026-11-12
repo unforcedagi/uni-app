@@ -2797,8 +2797,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const cardLinks = useMemo<CardLinks>(() => ({
     roomName: (ch) => rooms.find((r) => r.id === ch)?.name.replace(/^#/, "") ?? null,
     privateRoom: (ch) => shape.isPrivate(ch) || !rooms.some((r) => r.id === ch),
-    askFor: (ch, ref) => { const a = (shape.asks.byRoom.get(ch) ?? []).find((x) => cardIs(x.sealedCard, ref)); return a ? { tid: a.tid, what: a.what, why: a.why } : null; },
-  }), [rooms, shape.asks.byRoom, shape.isPrivate]);
+    // (an ask folded into its card, T-335 asks in tune, is off his list but still the card's ask)
+    askFor: (ch, ref) => { const a = [...(shape.asks.byRoom.get(ch) ?? []), ...(shape.asks.cardByRoom.get(ch) ?? [])].find((x) => cardIs(x.sealedCard, ref)); return a ? { tid: a.tid, what: a.what, why: a.why } : null; },
+  }), [rooms, shape.asks.byRoom, shape.asks.cardByRoom, shape.isPrivate]);
   const roomChat = focus && homeOpen && channel === focus.room && (root ?? null) === focus.root && currentRoom
     ? (tail: ReactNode) => roomPane(currentRoom, null, `Message ${currentRoom.name.replace(/^#/, "")}`, currentRoom.name, tail) : null;
   return <VaultProfileProvider profile={profile}><NoteOpener.Provider value={openNote}><CardLinksContext.Provider value={cardLinks}><main className={`shell sh-shell in-room${barAside ? " sh-bar-aside" : ""}${roomShown ? " sh-in-room" : ""} ${topNote ? "note-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
@@ -2813,7 +2814,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       : applet ? <AppletFrame applet={active?.kind === "vault" && active.vault && active.vault !== VAULT_CHOOSER ? { ...applet, name: active.vault } : applet} onBack={backToDrawer} onSearch={() => openFind()}
           onAccess={applet.v2 && applet.host === "native" && accessHeld ? () => setAccessOpen((o) => !o) : undefined}>{appletBody()}</AppletFrame>
       : homeOpen ? <ShapeSurface shape={shape} rooms={rooms} loading={rooms.length === 0 && synced === 0} focus={focus} vault={lifeVault} chat={roomChat}
-          story={story} onStory={setStory} onOpenRoom={(id) => openRoom(id)} onBack={stepBackInFocus} onSearch={() => openFind()}
+          story={story} onStory={setStory} onOpenRoom={(id) => openRoom(id)} onReplyInRoom={composeInRoom} onBack={stepBackInFocus} onSearch={() => openFind()}
           onOpenNote={(id) => openNote({ hub: null, vault: lifeVault, ref: id }, null)} onOpenLink={(url) => void openLink(url).catch((e) => setError(`Couldn't open the link: ${e}`))} />
       : null}
     </section>

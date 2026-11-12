@@ -76,8 +76,7 @@ test('2. opened, a card says what it asks: what a yes does, what it touches, who
   await ask.locator('.sh-ask-open').click();
   const sheet = page.locator('.sh-ask-sheet');
   await expect(sheet).toBeVisible();
-  await expect(sheet.locator('.sh-ask-facts dt').first()).toHaveText('If you tap Done');
-  await expect(sheet.locator('.sh-ask-yes')).toHaveText('Tells #Riverbend Commons you did it; the ask goes back to the room for any follow-up');
+  await expect(sheet.locator('.sh-ask-does dd').first()).toHaveText('Closes it for you and tells #Riverbend Commons, which does any follow-up');
   await expect(sheet.locator('.sh-ask-facts')).toContainText('Asked by#Riverbend Commons');
   await expect(sheet.locator('[data-card-state="waiting"] .sealed-card')).toBeVisible();
   await shot(page, '04-sheet');
@@ -146,4 +145,19 @@ test("review r1: an ask's words stay in its room; its card found waiting in anot
   await expect(sheet.locator('.sealed-card')).toHaveCount(0);
   await expect(sheet).not.toContainText('Private words');
   await expect(sheet).not.toContainText('sanctum');
+});
+
+test("4. T-335 asks in tune: an ask folded into its live card is not a second 'waits on you', and the card still says which ask it is", async ({ page }) => {
+  await bootShape(page, { cards: true, folded: true });
+  await openRiverbend(page);
+  // the card is the ask: no ask line for T-610 in the room (T-611, whose card ended, still waits on him)
+  await expect(page.locator('.sh-ask[data-id="ask-load"]')).toHaveCount(1);
+  await expect(page.locator('.sh-ask[data-id="ask-deploy"]')).toHaveCount(0);
+  // and the card, opened, still names the ask it stands for, with its why-now
+  const card = msg(page, CARD.prod).locator('.cc');
+  await card.scrollIntoViewIfNeeded();
+  await card.getByRole('button', { name: 'Show all' }).click();
+  await expect(card.locator('dl.cc-asking dd').nth(2)).toHaveText(/ · for T-610: Deploy the import tool to the site$/);
+  await expect(card.locator('dl.cc-asking dd').nth(3)).toHaveText('Staging passed; the archive window closes Friday.');
+  await shot(page, '07-folded');
 });

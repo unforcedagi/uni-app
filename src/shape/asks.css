@@ -60,7 +60,12 @@
 .sh-ask-card-line { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--g-ink-2); overflow-wrap: anywhere; }
 .sh-ask-card-stale .sh-ask-card-line { color: var(--g-ink); font-weight: 600; }
 .sh-ask-card .cc { margin-top: 6px; }
-.sh-ask-sheet .sh-ask-yes { font-weight: 600; }
+/* T-335 asks in tune: what each button does, under the buttons; and that none of them starts a new chat */
+.sh-ask-does { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 10px 0 0; font-size: 13px; line-height: 1.4; color: var(--g-ink-2, var(--g-ink)); }
+.sh-ask-does > div { display: contents; }
+.sh-ask-does dt { font-weight: 600; color: var(--g-ink); white-space: nowrap; }
+.sh-ask-does dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.sh-ask-nochat { margin: 8px 0 0; font-size: 13px; color: var(--g-ink-3); }
 
 /* Daylight ink screen: no tint to lean on, borders 1.5px, no motion */
 :root[data-screen="ink"] .sh-ask-wants { background: none; border: 1.5px solid #000; }

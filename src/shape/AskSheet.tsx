@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { openDialog } from "../areas/focusTrap";
 import { Body } from "../MessageBody";
 import { NoteOpener, useNoteOpener } from "../noteLinks";
-import { askBody, askButtons, askFault, KIND_WORD, seenHint, type AskButton } from "./asksCore.ts";
+import { askBody, askButtons, askFault, buttonDoes, KIND_WORD, type AskButton } from "./asksCore.ts";
 import { AskButtons, CardLine } from "./AskMessage";
 import { useAskCard } from "./useAskCard";
 import { SealedCard } from "../SealedCard";
@@ -19,19 +19,6 @@ import "./runs.css";
 import "./asks.css";
 
 type Read = { body: string | null; error: string | null; loading: boolean };
-
-/** T-335 cards expand: what the first button does, in plain words (the sheet's head says it before anything else). */
-function yesLine(ask: Ask, room: string): { label: string; does: string } {
-  const b = askButtons(ask)[0];
-  const to = room ? `#${room}` : "its room";
-  // a choose ask's yes is any of its options, not only the first
-  if (b.act === "answer") return { label: "an option", does: `Your pick goes to ${to} and closes the ask` };
-  const does = b.act === "done" ? `Tells ${to} you did it; the ask goes back to the room for any follow-up`
-    : b.act === "open" ? "Opens the link; Seen then ends it"
-    : b.act === "seen" ? `Seen: ${seenHint(ask.kind)}`
-    : b.label;
-  return { label: b.label, does };
-}
 
 export function AskSheet({ vault, ask, roomName, busy, error, onAct, onClose }: {
   vault: string; ask: Ask; roomName: string; busy: boolean; error: string | null | undefined;
@@ -60,7 +47,9 @@ export function AskSheet({ vault, ask, roomName, busy, error, onAct, onClose }: 
   const openNote = useCallback<NonNullable<typeof outer>>((ref, href) => { onClose(); outer?.(ref, href); }, [onClose, outer]);
   const fault = !read.loading && !read.error && askFault(ask, read.body);
   const card = useAskCard(ask);
-  const yes = yesLine(ask, roomName);
+  // T-335 asks in tune: every button says what it does, beside it (a choose ask's options share one line)
+  const legend = askButtons(ask, { archive: true }).filter((b, i, all) => b.act !== "answer" || all.findIndex((x) => x.act === "answer") === i)
+    .map((b) => ({ act: b.act, label: b.act === "answer" ? (ask.options.length + (ask.fallback ? 1 : 0) > 1 ? "An option" : b.label) : b.label, does: buttonDoes(ask, b, roomName) }));
   const fallback = ask.fallback ? `If you do nothing: ${ask.fallback.label}` : ask.kind === "choose" || ask.kind === "do" ? "No default: it waits for you" : null;
 
   return <div className="sh-story-layer sh-ask-layer" ref={layer}>
@@ -70,7 +59,6 @@ export function AskSheet({ vault, ask, roomName, busy, error, onAct, onClose }: 
       <p className="sh-ask-sheet-kind"><i className="sh-run-needs" aria-hidden="true">◆</i><b>Waits on you</b><span> · {KIND_WORD[ask.kind]}{ask.tid ? ` · ${ask.tid}` : ""}{roomName ? ` · in ${roomName}` : ""}</span></p>
       <h2 id="sh-ask-title">{ask.what}</h2>
       <dl className="sh-ask-facts">
-        <dt>If you tap {yes.label}</dt><dd className="sh-ask-yes">{yes.does}</dd>
         <dt>Asked by</dt><dd>{roomName ? `#${roomName}` : "Uni"}{ask.updatedAt ? ` · ${((a) => (a === "now" ? "just now" : /^\d/.test(a) ? `${a} ago` : a))(ago(ask.updatedAt, Date.now() / 1000))}` : ""}</dd>
         {ask.next && <><dt>Next</dt><dd className="sh-ask-next">{ask.next}</dd></>}
         {ask.why && <><dt>Why now</dt><dd>{ask.why}</dd></>}
@@ -82,7 +70,11 @@ export function AskSheet({ vault, ask, roomName, busy, error, onAct, onClose }: 
       {read.error && <p className="sh-story-error" role="alert">Couldn't read its context just now. <button type="button" className="sh-story-retry" onClick={load}>Retry</button></p>}
       {read.body && <div className="sh-ask-context"><NoteOpener.Provider value={openNote}><Body body={read.body} mentions={[]} me={null} /></NoteOpener.Provider></div>}
       {fault && <p className="sh-story-quiet sh-ask-fault" role="note">This ask came without its context. You can still answer it or archive it.</p>}
-      <AskButtons ask={ask} busy={busy} onAct={onAct} archive />
+      <AskButtons ask={ask} busy={busy} onAct={onAct} archive room={roomName} />
+      <dl className="sh-ask-does" aria-label="What each button does">
+        {legend.map((l) => <div key={l.act} data-act={l.act}><dt>{l.label}</dt><dd>{l.does}</dd></div>)}
+      </dl>
+      <p className="sh-ask-nochat">No button here starts a new chat. {roomName ? `Your words go to #${roomName}'s own chat.` : "Your words go to its room's own chat."}</p>
       {error && <p className="sh-ask-error" role="alert">{error}</p>}
       <div className="sh-story-acts"><button type="button" className="sh-story-btn" onClick={onClose}>Close</button></div>
     </div>

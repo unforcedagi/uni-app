@@ -32,6 +32,7 @@ export type ShapeOpts = {
   /** A run in a public room (the garden's) that waits on you for the private room's ask T-605: its words must never leave that room. */ leakRun?: boolean;
   /** T-335 cards expand: more cards in Riverbend (a production card an ask points at, a long plain one, an expired one, one the broker ended
    *  with an ask still pointing at it). */ cards?: boolean;
+  /** T-335 asks in tune: T-610 as uni-tasks now writes it: folded into its live card (needs_aaron false, "on its card"), off his list. */ folded?: boolean;
 };
 
 /** T-335 cards expand: the extra cards' message ids (card event ids are hex; an ask names one by its first 12 or more). */
@@ -119,7 +120,8 @@ export async function bootShape(page: Page, o: ShapeOpts = {}) {
     if (o.cards) w.__tasks.push(
       // the ask whose card waits: "Tap the PRODUCTION card" names it (sealed_card: the card's first 12 hex)
       task('ask-deploy', 'T-610 Deploy the import tool to the site', 15 * min, { kind: 'do', no_default: true, reply_room: 'Riverbend Commons', why_now: 'Staging passed; the archive window closes Friday.',
-        next: 'Tap the PRODUCTION card in Riverbend that deploys the import tool', sealed_card: CARD.prod.slice(0, 12) }),
+        next: 'Tap the PRODUCTION card in Riverbend that deploys the import tool', sealed_card: CARD.prod.slice(0, 12),
+        ...(o.folded ? { needs_aaron: false, needs_aaron_why: 'on its card' } : {}) }),
       // the ask whose card the broker already ended: it must say so, not send him looking for it
       task('ask-load', 'T-611 Load the history into the archive', 14 * min, { kind: 'do', no_default: true, reply_room: 'Riverbend Commons', why_now: 'The import tool is live.',
         next: 'Tap the second card in Riverbend that loads the history', sealed_card: CARD.ended }),

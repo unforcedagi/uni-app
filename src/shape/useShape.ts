@@ -155,6 +155,7 @@ export function useShape(o: {
   // an ask naming a private room by a name the device has no room for (an old name, a retired private room) stays out too; a private
   // room's own asks stay in it (drawn in full inside, without words on home)
   const byRoom: ReadonlyMap<string, Ask[]> = useMemo(() => (settled ? keepAsks(asks.byRoom, reg) : NO_ASKS), [asks.byRoom, reg, settled]);
+  const cardByRoom: ReadonlyMap<string, Ask[]> = useMemo(() => (settled ? keepAsks(asks.cardByRoom, reg) : NO_ASKS), [asks.cardByRoom, reg, settled]);
   useDecisionsFeed({ vault: o.vault, on: o.on && !!o.identity && settled, tree, rooms, priv: privStable, hidden, reg, uniRoom, openNote: o.openNote });
   // pins leave the moment they lapse: the clock that reads them is bumped when one reaches zero (and once a minute besides)
   const [tick, setTick] = useState(0);
@@ -174,6 +175,6 @@ export function useShape(o: {
   const looks = useMemo(() => studioLooks(shown, roomName), [shown, roomName]);
   // (only by room: the flat list holds asks the registry hasn't vetted yet, and private ones; nothing outside a room should read them)
   const { asks: _unvetted, ...answering } = asks;
-  return { rows, pins, wants, now, onPinLapsed: lapsed, runs, asks: { ...answering, byRoom }, /* (only once the rooms, the registry and the tree are read: an ask about to be drawn in its room is not "out of sight") */ unseen: privacyKnown && o.on && rooms.length > 0 ? asks.unseen : 0, hidden, priv: privStable, uniRoom, looks, roomName,
+  return { rows, pins, wants, now, onPinLapsed: lapsed, runs, asks: { ...answering, byRoom, cardByRoom }, /* (only once the rooms, the registry and the tree are read: an ask about to be drawn in its room is not "out of sight") */ unseen: privacyKnown && o.on && rooms.length > 0 ? asks.unseen : 0, hidden, priv: privStable, uniRoom, looks, roomName,
     /* (T-335 cards expand) a room whose words stay inside it: private, or not yet known not to be */ isPrivate: pinPrivate };
 }

@@ -12,7 +12,7 @@ import { failureKind } from "../vault/rawNote.ts";
 import { activeProfile } from "../areas/profile.ts";
 import { findUniMember } from "../uniActions.ts";
 import { relayAccepted } from "../voiceOutbox.ts";
-import { answerBody, answerMeta, archiveBody, asksByRoom, asksPlaced, doneBody, notNowBody, seenBody, seenCloses, seenMeta, visibleAsks, type Gone, type VaultAsk } from "./asksCore.ts";
+import { answerBody, answerMeta, archiveBody, asksByRoom, asksPlaced, doneBody, onCardRows, laterBody, laterMeta, seenBody, seenCloses, seenMeta, visibleAsks, type Gone, type VaultAsk } from "./asksCore.ts";
 import type { Ask, ShapeRoom } from "./types.ts";
 import type { Tree } from "../areas/treeCore.ts";
 import type { RoomsRegistry } from "../areas/roomsRegistry.ts";
@@ -64,9 +64,10 @@ async function write(vault: string, ask: VaultAsk, metadata: Record<string, unkn
   } catch (e) { const message = String(e); return { ok: false, kind: failureKind(message), message }; }
 }
 
-/** What a tap does to an ask (T-335 fixes): answer it (a choice), mark it seen (tell, look), not now (do, choose: Seen's write, it stays open
- *  with its room), done (a do ask he did: Seen's write, and the room is told, addressed, to take it back), or archive it (out of his view). */
-export type AskDo = { act: "answer"; text: string } | { act: "seen" } | { act: "notnow" } | { act: "done" } | { act: "archive" };
+/** What a tap does to an ask (T-335 fixes, asks in tune): answer it (a choice), mark it seen (tell, look: it ends; do, choose: Seen's write,
+ *  it stays open with its room), later (the snooze: back on his list on `until`), done (I did it: Seen's write, and the room is told,
+ *  addressed, to take it back), or archive it (out of his view). */
+export type AskDo = { act: "answer"; text: string } | { act: "seen" } | { act: "later"; until: string } | { act: "done" } | { act: "archive" };
 
 /** Forget this device (Settings, "Forget this device key"): every owed post kept here, for every identity and vault. */
 export function forgetAsks(): void {
@@ -120,6 +121,10 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
     setGone((g) => { const live = new Set(all.map((a) => a.id)); const next = new Map([...g].filter(([id]) => live.has(id))); return next.size === g.size ? g : next; });
   }, [all]);
   const asks = useMemo(() => visibleAsks(all, gone), [all, gone]);
+  // T-335 asks in tune: the asks folded into their cards, placed the same way, for the card's join only (never drawn)
+  const onCard = useMemo(() => asksPlaced(onCardRows(rows), o.rooms, { uniRoom: o.uniRoom, privateRooms: o.privateRooms, tree: o.tree, reg: o.reg, hidden: o.hidden }).asks,
+    [rows, o.rooms, o.uniRoom, o.privateRooms, o.tree, o.reg, o.hidden]);
+  const cardByRoom = useMemo(() => asksByRoom(onCard), [onCard]);
   const byRoom = useMemo(() => asksByRoom(asks), [asks]);
   const full = useRef(new Map<string, VaultAsk>());
   full.current = new Map(all.map((a) => [a.id, a]));
@@ -140,15 +145,17 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
     inFlight.current.add(a.id);
     setBusy((b) => new Set(b).add(a.id));
     setErr(a.id, null);
-    // seen, not now and done: his again when its room asks again; an answer or an archive: gone
-    const again = d.act === "seen" || d.act === "notnow" || d.act === "done";
+    // seen, later and done: his again when its room asks again (later: on its day); an answer or an archive: gone
+    const again = d.act === "seen" || d.act === "later" || d.act === "done";
     setGone((g) => new Map(g).set(a.id, { at: Date.now(), seen: again }));
     const me = activeProfile().me, at = new Date().toISOString();
     let r: Result;
     try {
       r = d.act === "answer" ? await write(o.vault, a, answerMeta(a, d.text, me, at), true)
         : d.act === "archive" ? await write(o.vault, a, null, true, "archived")
-        // Seen closes a tell or look ask; on a do or choose ask (Seen, Not now, Done) it is a patch: the ask stays open with its room
+        // Later is the snooze patch alone; the ask stays open with its room
+        : d.act === "later" ? await write(o.vault, a, laterMeta(d.until), false)
+        // Seen closes a tell or look ask; on a do or choose ask (Seen, I did it) it is a patch: the ask stays open with its room
         : await write(o.vault, a, seenMeta(me, at), d.act === "seen" && seenCloses(a.kind));
     } finally {
       setBusy((b) => { const n = new Set(b); n.delete(a.id); return n; });
@@ -156,14 +163,14 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
     }
     if (!r.ok) {
       setGone((g) => { const n = new Map(g); n.delete(a.id); return n; });
-      const what = { answer: "Couldn't answer", seen: "Couldn't mark it seen", notnow: "Couldn't put it off", done: "Couldn't mark it done", archive: "Couldn't archive it" }[d.act];
+      const what = { answer: "Couldn't answer", seen: "Couldn't mark it seen", later: "Couldn't put it off", done: "Couldn't mark it done", archive: "Couldn't archive it" }[d.act];
       setErr(a.id, r.kind === "conflict" ? "It changed elsewhere. Showing the latest." : `${what}: ${words(r.message)}`);
       reader.invalidate("task");
       void read();
       return;
     }
-    // an answer and Done wake the room's Uni (addressed, under its reply_root); Seen, Not now and Archive are one quiet line
-    const body = d.act === "answer" ? answerBody(a, d.text) : d.act === "done" ? doneBody(a) : d.act === "notnow" ? notNowBody(a) : d.act === "archive" ? archiveBody(a) : seenBody(a);
+    // an answer and I did it wake the room's Uni (addressed, under its reply_root); Seen, Later and Archive are one quiet line
+    const body = d.act === "answer" ? answerBody(a, d.text) : d.act === "done" ? doneBody(a) : d.act === "later" ? laterBody(a, d.until) : d.act === "archive" ? archiveBody(a) : seenBody(a);
     const quiet = d.act !== "answer" && d.act !== "done";
     await post({ id: a.id, what: a.what, channel: a.room, root: a.replyRoot, body, quiet, error: "", at: Date.now() });
     void read();
@@ -171,7 +178,7 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
 
   const answer = useCallback(async (ask: Ask, text: string) => { const said = text.trim(); if (said) await act(ask, { act: "answer", text: said }); }, [act]);
   const seen = useCallback(async (ask: Ask) => { await act(ask, { act: "seen" }); }, [act]);
-  const notNow = useCallback(async (ask: Ask) => { await act(ask, { act: "notnow" }); }, [act]);
+  const later = useCallback(async (ask: Ask, until: string) => { await act(ask, { act: "later", until }); }, [act]);
   const done = useCallback(async (ask: Ask) => { await act(ask, { act: "done" }); }, [act]);
   const archive = useCallback(async (ask: Ask) => { await act(ask, { act: "archive" }); }, [act]);
   /** Send an owed post again. */
@@ -184,5 +191,5 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
     try { await post(p); } finally { resending.current.delete(id); }
   }, [owed, post]);
 
-  return { asks, byRoom, busy, errors, answer, seen, notNow, done, archive, ready, owed, retry, /** Asks kept out of sight: private, with no private room of their own here. */ unseen: placed.unseen };
+  return { asks, byRoom, cardByRoom, busy, errors, answer, seen, later, done, archive, ready, owed, retry, /** Asks kept out of sight: private, with no private room of their own here. */ unseen: placed.unseen };
 }

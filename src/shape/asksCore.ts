@@ -67,6 +67,19 @@ export function whenLabel(v: string | null, now: number): string | null {
 /** A room's name as privacy.ts roomByName matches it: case, a leading `#`, spaces and punctuation aside, each `a/b` segment on its own. */
 const loose = (name: string): string => name.toLowerCase().replace(/^#/, "").trim().split("/").map((p) => p.replace(/[^a-z0-9]+/g, "")).join("/");
 
+/** T-335 asks in tune: a task folded into its approval card (uni-tasks needs.py "on its card": it asks him to tap a card that is live) is
+ *  not on his list, but the card still names it (its expanded head says which ask and why). These are those tasks, as the placing reads
+ *  an ask (needs_aaron true), so they are placed and judged for privacy the one way; they are for the card's join only, never drawn. */
+export function onCardRows(notes: readonly Note<"task">[]): Note<"task">[] {
+  const out: Note<"task">[] = [];
+  for (const n of notes) {
+    const m = (n.metadata ?? {}) as Record<string, unknown>;
+    if (m.needs_aaron_why !== "on its card" || !sealedRef(m.sealed_card) || !LIVE.has(String(m.state ?? ""))) continue;
+    out.push({ ...n, metadata: { ...m, needs_aaron: true } });
+  }
+  return out;
+}
+
 /** A room's name as the rooms list is matched by it: case-insensitive, a leading `#` ignored. */
 export const roomKey = (name: string): string => name.trim().replace(/^#/, "").trim().toLowerCase();
 
@@ -146,6 +159,8 @@ export function asksPlaced(notes: readonly Note<"task">[], rooms: readonly Shape
     const m = metaOf(n, "task");
     // whether it needs him is the task's needs_aaron, as uni-tasks wrote it (the one rule)
     if (m.needs_aaron !== true) continue;
+    // Later, written on this device or another, holds at once (the sweep writes needs_aaron within 5 minutes)
+    if (snoozed(m.snoozed_until, ymd(new Date()))) continue;
     const state = s(m.state) ?? "";
     if (!LIVE.has(state)) continue;
     seen.add(id);
@@ -277,17 +292,47 @@ export function seenBody(ask: Pick<Ask, "tid" | "what" | "kind">): string {
 
 // ------------------------------------------------------------------ T-335 fixes (11-11): every ask opens to its context and an action
 
-/** "Not now" on a do or choose ask: the same write as Seen (it stays open with its room, out of his view until it is asked again). */
-export function notNowBody(ask: Pick<Ask, "tid" | "what">): string {
-  return `${ask.tid ?? ask.what}: not now. It stays open here; ask again when it needs my steer.`;
-}
-/** "Done" on a do ask: he did it. Like tasks.py handback, the ask goes back to its room (addressed to its Uni, so it wakes) for any
+/** "I did it" on a do ask: he did it. Like tasks.py handback, the ask goes back to its room (addressed to its Uni, so it wakes) for any
  *  follow-up, and the room closes it; the app's write takes it out of his view (Seen's write: the room's handback moves the owner). */
 export function doneBody(ask: Pick<Ask, "tid" | "what">): string {
   return ask.tid
     ? `${ask.tid}: I did this. Hand it back to this room for any follow-up (tasks.py handback ${ask.tid}), then post [done ${ask.tid}].`
     : `${ask.what}: I did this. Do any follow-up it needs, then close it.`;
 }
+
+// ------------------------------------------------------------------ T-335 asks in tune (11-11): buttons that say what they do
+// Aaron: "I have to say like done or not now and it's a little confusing because I'm not sure if it's like starting up a new little chat".
+
+/** How long Later puts an ask off: it is back on his list on the day this many days on (uni-tasks needs.py reads `snoozed_until`). */
+export const LATER_DAYS = 3;
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** The day Later brings an ask back: YYYY-MM-DD, local, LATER_DAYS on from `now`. */
+export function laterUntil(now: Date): string {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + LATER_DAYS);
+  return ymd(d);
+}
+/** That day in words: "Sat 11-14". */
+export function dayWords(until: string): string {
+  const [y, m, d] = until.split("-").map(Number);
+  const day = new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short" });
+  return `${day} ${until.slice(5)}`;
+}
+/** What Later writes: the snooze alone (the app's one snooze patch); the 5-minute sweep then says why (needs_aaron_why "snoozed"). */
+export const laterMeta = (until: string): { snoozed_until: string } => ({ snoozed_until: until });
+/** The one quiet line its room is told. */
+export function laterBody(ask: Pick<Ask, "tid" | "what">, until: string): string {
+  return `${ask.tid ?? ask.what}: later. It's back on my list ${dayWords(until)}.`;
+}
+/** Is it put off? A snooze written here holds at once, before the sweep writes needs_aaron (a day as YYYY-MM-DD, local). */
+export const snoozed = (until: unknown, today: string): boolean => typeof until === "string" && /^\d{4}-\d\d-\d\d/.test(until) && until.slice(0, 10) > today;
+/** Reply in the room: the ask, quoted, for the top of his reply in its room's own chat (never a new chat). Its T-number rides along,
+ *  so the room (and tasks.py chat-answers) knows which ask he answered. */
+export function replyQuote(ask: Pick<Ask, "tid" | "what" | "next">): string {
+  const head = `> ${ask.tid ? `${ask.tid} · ` : ""}${ask.what}`;
+  const next = ask.next?.trim() ? `\n> ${ask.next.trim()}` : "";
+  return `${head}${next}\n\n`;
+}
+
 /** "Archive": out of his view for good (state archived); one quiet line in its room, so the room sees it. */
 export function archiveBody(ask: Pick<Ask, "tid" | "what">): string {
   return `${ask.tid ?? ask.what}: archived. It's out of my view; open a new ask if it still needs me.`;
@@ -318,33 +363,54 @@ export function askBody(content: string | null | undefined): string {
 
 // ------------------------------------------------------------------ the buttons
 
-export type AskAct = "answer" | "done" | "notnow" | "seen" | "open" | "archive";
+export type AskAct = "answer" | "done" | "seen" | "later" | "reply" | "open" | "archive";
 export type AskButton = { label: string; value: string; primary: boolean; act: AskAct };
 /**
- * An ask's buttons, by its kind (Aaron, 11-11: "I should really be able to just mark it as seen or archive it"):
- * - do: Done (he did it: back to its room) and Not now;
- * - choose: one button per option (the default first, with its date), and Not now;
+ * An ask's buttons, by its kind (Aaron, 11-11: "I should really be able to just mark it as seen or archive it"; T-335 asks in tune: each
+ * button's word says what happens, and none starts a new chat):
+ * - do: I did it (back to its room, which closes it), Seen (it stays with its room) and Later (back on his list on a day it names);
+ * - choose: one button per option (the default first, with its date), Seen and Later;
  * - look: Open (its link) and Seen;
  * - tell: Seen.
- * `archive`: Archive last (the sheet; every ask has it there). The first is the primary one.
+ * `archive` (the sheet): Reply in the room (its own chat, the ask quoted) and Archive, last. `today`: for Later's day. The first is primary.
  */
-export function askButtons(ask: Pick<Ask, "kind" | "options" | "fallback" | "action" | "link">, o: { archive?: boolean } = {}): AskButton[] {
+export function askButtons(ask: Pick<Ask, "kind" | "options" | "fallback" | "action" | "link" | "room">, o: { archive?: boolean; now?: Date } = {}): AskButton[] {
   const out: AskButton[] = [];
   const kind = ask.kind === "decision" ? "choose" : ask.kind;
+  const until = laterUntil(o.now ?? new Date());
+  const later: AskButton = { label: `Later · ${dayWords(until).split(" ")[0]}`, value: until, primary: false, act: "later" };
   if (kind === "do") {
-    out.push({ label: "Done", value: "Done", primary: false, act: "done" });
-    out.push({ label: "Not now", value: "Not now", primary: false, act: "notnow" });
+    out.push({ label: "I did it", value: "Done", primary: false, act: "done" });
+    out.push({ label: "Seen", value: "Seen", primary: false, act: "seen" });
+    out.push(later);
   } else if (kind === "choose") {
     if (ask.fallback) out.push({ label: ask.fallback.label, value: ask.fallback.value, primary: false, act: "answer" });
     for (const opt of ask.options) out.push({ label: opt, value: opt, primary: false, act: "answer" });
-    out.push({ label: "Not now", value: "Not now", primary: false, act: "notnow" });
+    out.push({ label: "Seen", value: "Seen", primary: false, act: "seen" });
+    out.push(later);
   } else {
     if (kind === "look" && ask.link) out.push({ label: "Open", value: ask.link, primary: false, act: "open" });
     out.push({ label: "Seen", value: "Seen", primary: false, act: "seen" });
   }
-  if (o.archive) out.push({ label: "Archive", value: "Archive", primary: false, act: "archive" });
+  if (o.archive) {
+    if (ask.room) out.push({ label: "Reply in the room", value: "Reply", primary: false, act: "reply" });
+    out.push({ label: "Archive", value: "Archive", primary: false, act: "archive" });
+  }
   out[0].primary = true;
   return out;
+}
+/** What a button does, in one plain line (the sheet says it beside each button; a button's title says it too). `room`: its room's name. */
+export function buttonDoes(ask: Pick<Ask, "kind">, b: AskButton, room: string): string {
+  const to = room ? `#${room}` : "its room";
+  switch (b.act) {
+    case "answer": return `Your pick goes to ${to} and closes it`;
+    case "done": return `Closes it for you and tells ${to}, which does any follow-up`;
+    case "seen": return seenCloses(ask.kind) ? `Ends it; ${to} is told` : `Off your list; it stays with ${to} until it needs you again`;
+    case "later": return `Off your list until ${dayWords(b.value)}, then back`;
+    case "reply": return `Opens ${to}'s own chat with this ask quoted`;
+    case "open": return "Opens the link; Seen then ends it";
+    case "archive": return `Out of your view for good; ${to} is told`;
+  }
 }
 /** Seen's words for a screen reader and a title: what it does to this ask. */
 export const seenHint = (kind: Kind): string => (seenCloses(kind) ? "ends it; its room is told" : "it stays with its room until it needs you");

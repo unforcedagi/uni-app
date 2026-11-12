@@ -9,7 +9,7 @@ import { RunLine } from "./RunLine";
 import { RunStory } from "./RunStory";
 import { AskMessage } from "./AskMessage";
 import { AskSheet } from "./AskSheet";
-import { askForRun, type AskButton } from "./asksCore";
+import { askForRun, replyQuote, type AskButton } from "./asksCore";
 import type { Ask, Pin, RoomRun, ShapeRoom } from "./types";
 import type { ShapeData } from "./useShape";
 import { Clock } from "./Home";
@@ -44,6 +44,8 @@ export function ShapeSurface(p: {
   story: StoryOpen | null;
   onStory: (s: StoryOpen | null) => void;
   onOpenRoom: (id: string) => void;
+  /** (T-335 asks in tune) Reply in the room: open the room's own chat with this text in its composer (never sent, never a new chat). */
+  onReplyInRoom: (room: string, text: string) => void;
   /** Back from the room: out of a thread first, then home. */ onBack: () => void;
   onSearch: () => void;
   onOpenNote: (id: string) => void;
@@ -67,10 +69,11 @@ export function ShapeSurface(p: {
     if (b.act === "open") { p.onOpenLink(b.value); return; }
     if (b.act === "answer") void asks.answer(a, b.value);
     else if (b.act === "seen") void asks.seen(a);
-    else if (b.act === "notnow") void asks.notNow(a);
+    else if (b.act === "later") void asks.later(a, b.value);
+    else if (b.act === "reply") { if (a.room) { onStory(null); p.onReplyInRoom(a.room, replyQuote(a)); } }
     else if (b.act === "done") void asks.done(a);
     else if (b.act === "archive") void asks.archive(a);
-  }, [asks, p.onOpenLink]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [asks, p.onOpenLink, p.onReplyInRoom, onStory]); // eslint-disable-line react-hooks/exhaustive-deps
   const ask = (a: Ask, compact: boolean) => <AskMessage ask={a} compact={compact} busy={asks.busy.has(a.id)} error={asks.errors.get(a.id)}
     onAct={act} onOpen={openAsk} />;
 

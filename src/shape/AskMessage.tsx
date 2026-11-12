@@ -3,7 +3,7 @@
 // (T-335 fixes: do -> Done, Not now; choose -> its options, Not now; look -> Open, Seen; tell -> Seen). Its line opens the ask's sheet
 // (AskSheet: its whole context, the same buttons and Archive). It reads by shape and word, never colour alone: a filled ◆ and "wants you".
 import type { ReactNode } from "react";
-import { askButtons, seenHint, type AskButton } from "./asksCore.ts";
+import { askButtons, buttonDoes, seenHint, type AskButton } from "./asksCore.ts";
 import type { Ask } from "./types.ts";
 import { clockTime } from "../CompactCard";
 import { RepostButton, useCardLinks } from "../cardLinks";
@@ -23,12 +23,12 @@ export type AskMessageProps = {
 };
 
 /** The ask's buttons, in a row. `archive`: Archive last (the sheet). */
-export function AskButtons({ ask, busy, onAct, archive = false }: { ask: Ask; busy: boolean; onAct: (ask: Ask, b: AskButton) => void; archive?: boolean }) {
+export function AskButtons({ ask, busy, onAct, archive = false, room = "" }: { ask: Ask; busy: boolean; onAct: (ask: Ask, b: AskButton) => void; archive?: boolean; room?: string }) {
   return <div className="sh-ask-acts" role="group" aria-label="Answer">
     {askButtons(ask, { archive }).map((b) => <button key={`${b.act}:${b.value}`} type="button" className="sh-ask-btn" data-primary={b.primary || undefined} data-act={b.act}
-      // (opening the link never waits on a write)
-      disabled={busy && b.act !== "open"} onClick={() => onAct(ask, b)}
-      title={b.act === "seen" ? `Seen: ${seenHint(ask.kind)}` : b.act === "notnow" ? "Not now: it stays with its room until it needs you" : b.act === "done" ? "Done: you did it; it goes back to its room" : b.act === "archive" ? "Archive: out of your view; its room is told" : undefined}
+      // (opening the link and replying in the room never wait on a write)
+      disabled={busy && b.act !== "open" && b.act !== "reply"} onClick={() => onAct(ask, b)}
+      title={`${b.label}: ${buttonDoes(ask, b, room)}`}
       aria-label={b.act === "seen" ? `Seen: ${ask.what} (${seenHint(ask.kind)})` : b.act === "open" ? `Open the link for ${ask.what}` : undefined}>
       {b.label}{b.act === "open" && <span aria-hidden="true"> ↗</span>}</button>)}
   </div>;

@@ -3,7 +3,7 @@
 process.env.TZ = "UTC";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { answerBody, answerMeta, archiveBody, askBody, askButtons, askFault, askForRun, doneBody, notNowBody, asksByRoom, asksFrom, asksPlaced, seenBody, seenCloses, seenMeta, splitTitle, visibleAsks, whenLabel, type VaultAsk } from "../src/shape/asksCore.ts";
+import { answerBody, answerMeta, archiveBody, askBody, askButtons, askFault, askForRun, doneBody, laterBody, laterMeta, laterUntil, buttonDoes, replyQuote, snoozed, asksByRoom, asksFrom, asksPlaced, seenBody, seenCloses, seenMeta, splitTitle, visibleAsks, whenLabel, type VaultAsk } from "../src/shape/asksCore.ts";
 import type { ShapeRoom } from "../src/shape/types.ts";
 import { nodeTree } from "../src/shape/shapeCore.ts";
 import { parseRegistry } from "../src/areas/roomsRegistry.ts";
@@ -121,20 +121,44 @@ check("a look-here pin's deep link (look_url) is its link, before link and url",
   assert.equal(one({ kind: "look", url: "https://example.com/u" }).link, "https://example.com/u");
 });
 
-check("buttons by kind (T-335 fixes): choose -> its options (the default first, primary) and Not now; do -> Done (primary) and Not now", () => {
+check("buttons by kind (T-335 asks in tune): each word says what happens; choose -> its options, Seen, Later; do -> I did it, Seen, Later", () => {
+  const now = new Date(NOW);                                       // Wed 11-11: Later brings it back Sat 11-14
   const c = one({ kind: "choose", options: ["Celadon", "Tenmoku"], default: "Celadon" });
-  assert.deepEqual(askButtons(c), [
+  assert.deepEqual(askButtons(c, { now }), [
     { label: "Celadon", value: "Celadon", primary: true, act: "answer" },
     { label: "Tenmoku", value: "Tenmoku", primary: false, act: "answer" },
-    { label: "Not now", value: "Not now", primary: false, act: "notnow" },
+    { label: "Seen", value: "Seen", primary: false, act: "seen" },
+    { label: "Later · Sat", value: "2026-11-14", primary: false, act: "later" },
   ]);
-  const nd = askButtons(one({ kind: "choose", options: ["A", "B"] }));
-  assert.deepEqual(nd.map((b) => [b.label, b.primary]), [["A", true], ["B", false], ["Not now", false]], "no default: the first choice is primary");
-  assert.deepEqual(askButtons(one({ kind: "do" })).map((b) => [b.label, b.act, b.primary]), [["Done", "done", true], ["Not now", "notnow", false]]);
-  // a do ask with a link: its link is in its context (the sheet), its buttons are still Done and Not now
-  assert.deepEqual(askButtons(one({ kind: "do", link: "https://example.com/x" })).map((b) => b.label), ["Done", "Not now"]);
-  // the sheet adds Archive, last, on every kind
-  for (const k of ["do", "choose", "look", "tell"]) assert.equal(askButtons(one({ kind: k, options: ["A", "B"] }), { archive: true }).at(-1)!.act, "archive", k);
+  const nd = askButtons(one({ kind: "choose", options: ["A", "B"] }), { now });
+  assert.deepEqual(nd.map((b) => [b.label, b.primary]), [["A", true], ["B", false], ["Seen", false], ["Later · Sat", false]], "no default: the first choice is primary");
+  assert.deepEqual(askButtons(one({ kind: "do" }), { now }).map((b) => [b.label, b.act, b.primary]), [["I did it", "done", true], ["Seen", "seen", false], ["Later · Sat", "later", false]]);
+  // a do ask with a link: its link is in its context (the sheet), its buttons are the same
+  assert.deepEqual(askButtons(one({ kind: "do", link: "https://example.com/x" }), { now }).map((b) => b.label), ["I did it", "Seen", "Later · Sat"]);
+  // no button is called Done or Not now any more
+  for (const k of ["do", "choose", "look", "tell"]) for (const b of askButtons(one({ kind: k, options: ["A", "B"] }), { archive: true, now })) assert.ok(!["Done", "Not now"].includes(b.label), `${k}: ${b.label}`);
+  // the sheet adds Reply in the room (when it has a room) and Archive, last, on every kind
+  for (const k of ["do", "choose", "look", "tell"]) assert.deepEqual(askButtons(one({ kind: k, options: ["A", "B"] }), { archive: true, now }).slice(-2).map((b) => b.act), ["reply", "archive"], k);
+  assert.deepEqual(askButtons({ ...one({ kind: "do" }), room: null }, { archive: true, now }).map((b) => b.act), ["done", "seen", "later", "archive"], "no room: nowhere to reply");
+});
+
+check("what each button does, in plain words; Later's day and its write; the reply quote names the ask", () => {
+  const now = new Date(NOW);
+  const d = one({ kind: "do" }), t = one({ kind: "tell" });
+  const say = (a: VaultAsk, act: string) => buttonDoes(a, askButtons(a, { archive: true, now }).find((b) => b.act === act)!, "Kiln Studio");
+  assert.equal(say(d, "done"), "Closes it for you and tells #Kiln Studio, which does any follow-up");
+  assert.equal(say(d, "seen"), "Off your list; it stays with #Kiln Studio until it needs you again");
+  assert.equal(say(t, "seen"), "Ends it; #Kiln Studio is told");
+  assert.equal(say(d, "later"), "Off your list until Sat 11-14, then back");
+  assert.equal(say(d, "reply"), "Opens #Kiln Studio's own chat with this ask quoted");
+  assert.equal(laterUntil(new Date(2026, 11, 30, 9)), "2027-01-02", "across a year end");
+  assert.deepEqual(laterMeta("2026-11-14"), { snoozed_until: "2026-11-14" }, "the app's one snooze patch, nothing else");
+  assert.equal(laterBody({ tid: "T-9", what: "x" }, "2026-11-14"), "T-9: later. It's back on my list Sat 11-14.");
+  assert.equal(replyQuote({ tid: "T-9", what: "Paste the key", next: "Paste it into the boiler page" }), "> T-9 · Paste the key\n> Paste it into the boiler page\n\n");
+  assert.equal(replyQuote({ tid: null, what: "Paint the hive", next: null }), "> Paint the hive\n\n");
+  assert.equal(snoozed("2026-11-14", "2026-11-11"), true);
+  assert.equal(snoozed("2026-11-11", "2026-11-11"), false, "back on its day");
+  assert.equal(snoozed(null, "2026-11-11"), false);
 });
 
 check("buttons: a tell ask is Seen alone (primary); a look ask with a link: Open (primary, its value the link), Seen", () => {
@@ -156,13 +180,12 @@ check("context (T-335 fixes): next is read; the body drops a front matter block 
   assert.equal(askFault({ next: "Do it" }, null), false);
 });
 
-check("a waiting run opens the ask on its own task; Done, Not now and Archive say so in its room", () => {
+check("a waiting run opens the ask on its own task; I did it and Archive say so in its room", () => {
   const asks = [{ tid: "T-7", id: "a" }, { tid: "T-9", id: "b" }];
   assert.equal(askForRun({ task: "t-9" }, asks)?.id, "b");
   assert.equal(askForRun({ task: null }, asks), null);
   assert.equal(askForRun({ task: "T-8" }, asks), null);
   assert.equal(doneBody({ tid: "T-9", what: "x" }), "T-9: I did this. Hand it back to this room for any follow-up (tasks.py handback T-9), then post [done T-9].");
-  assert.equal(notNowBody({ tid: "T-9", what: "x" }), "T-9: not now. It stays open here; ask again when it needs my steer.");
   assert.equal(archiveBody({ tid: null, what: "Paint the hive" }), "Paint the hive: archived. It's out of my view; open a new ask if it still needs me.");
 });
 
@@ -185,6 +208,11 @@ check("Seen: a tell or look ask closes, a do or choose ask stays open; it writes
   assert.deepEqual(seenMeta("aaron", "2026-11-11T12:00:00.000Z"), { seen_at: "2026-11-11T12:00:00.000Z", seen_by: "aaron", needs_aaron: false, needs_aaron_why: "seen" });
   assert.equal(seenBody({ tid: "T-31", what: "Know this", kind: "tell" }), "T-31: seen.");
   assert.equal(seenBody({ tid: "T-32", what: "Do this", kind: "do" }), "T-32: seen. It stays open here until it needs my steer; ask again then.");
+});
+
+check("Later holds at once: an ask put off to a later day leaves the list before the sweep writes needs_aaron; on its day it is back", () => {
+  assert.equal(from([task("s", "T-40 Later", { kind: "do", snoozed_until: "2099-01-01" })]).length, 0);
+  assert.equal(from([task("s", "T-40 Later", { kind: "do", snoozed_until: "2020-01-01" })]).length, 1);
 });
 
 check("by room: grouped by channel id, newest first within; an ask with no room is in none", () => {

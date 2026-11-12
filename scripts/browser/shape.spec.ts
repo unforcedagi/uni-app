@@ -429,8 +429,8 @@ test('"Waits on you" opens to its context: the next action, why now, the body wi
   expect((await calls(page, 'vault_note')).map((c) => c.args.noteRef)).toContain('ask-summary');
   await sheet.locator('.sh-ask-context a[href="https://example.com/notes/week-45"]').click();
   await expect.poll(async () => (await calls(page, 'open_link')).map((c) => c.args.url)).toContain('https://example.com/notes/week-45');
-  // a tell: Seen, and Archive
-  await expect(sheet.locator('.sh-ask-btn')).toHaveText(['Seen', 'Archive']);
+  // a tell: Seen, Reply in the room and Archive
+  await expect(sheet.locator('.sh-ask-btn')).toHaveText(['Seen', 'Reply in the room', 'Archive']);
   await shot(page, '06-ask-sheet');
   // a note it cites by id opens as the note, the sheet out of its way
   // (it cites the note by its bare id; the link reads as the note's title)
@@ -451,8 +451,13 @@ test('"Waits on you" opens to its context: the next action, why now, the body wi
   expect(seen[0].args).toMatchObject({ from: 'open', to: 'done', metadata: { needs_aaron: false, needs_aaron_why: 'seen' } });
 });
 
-test('each kind has its buttons: Done hands a do ask back to its room, Not now puts one off, Archive takes one out of view; a run waiting on you opens its ask', async ({ page }) => {
+test('T-335 asks in tune: each button says what it does; I did it hands a do ask back, Later puts one off to a day it names, Reply in the room opens its own chat with the ask quoted (never a new chat), Archive takes one out of view', async ({ page }) => {
   await bootShape(page);
+  // Later's day, as the page reckons it (three days on, local)
+  const d = new Date(); d.setDate(d.getDate() + 3);
+  const day = d.toLocaleDateString('en-US', { weekday: 'short' });
+  const mmdd = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const later = `Later · ${day}`;
   // a run that waits on you opens the ask on its task (it lives in another room), not a story with nothing to do
   await row(page, ROOM.teach).locator('.sh-run[data-run="waiting"]').click();
   const key = page.getByRole('dialog', { name: 'Paste the boiler portal key' });
@@ -460,9 +465,37 @@ test('each kind has its buttons: Done hands a do ask back to its room, Not now p
   await expect(key.locator('.sh-ask-sheet-kind')).toHaveText(/To do · T-609 · in House/);
   await expect(key.locator('.sh-ask-next')).toHaveText('Paste the portal key into the boiler page');
   await expect(key.locator('.sh-ask-facts')).toContainText('No default: it waits for you');
-  await expect(key.locator('.sh-ask-btn')).toHaveText(['Done', 'Not now', 'Archive']);
-  // Done: out of his view (Seen's write: it stays open), and its room is told, addressed to its Uni, to take it back
-  await key.getByRole('button', { name: 'Done', exact: true }).click();
+  // the words say what happens: no Done, no Not now
+  await expect(key.locator('.sh-ask-btn')).toHaveText(['I did it', 'Seen', later, 'Reply in the room', 'Archive']);
+  // and the sheet says it beside them, and that none of them starts a new chat
+  await expect(key.locator('.sh-ask-does dt')).toHaveText(['I did it', 'Seen', later, 'Reply in the room', 'Archive']);
+  await expect(key.locator('.sh-ask-does dd')).toHaveText([
+    'Closes it for you and tells #House, which does any follow-up',
+    'Off your list; it stays with #House until it needs you again',
+    `Off your list until ${day} ${mmdd}, then back`,
+    "Opens #House's own chat with this ask quoted",
+    'Out of your view for good; #House is told',
+  ]);
+  await expect(key.locator('.sh-ask-nochat')).toHaveText("No button here starts a new chat. Your words go to #House's own chat.");
+  await key.locator('.sh-ask-does').scrollIntoViewIfNeeded();
+  await shot(page, 'ask-sheet-buttons');
+  // Reply in the room: the sheet goes, House's own chat opens with the ask quoted in its composer; nothing is sent and nothing written
+  const posted = (await calls(page, 'post_message')).length;
+  await key.getByRole('button', { name: 'Reply in the room' }).click();
+  await expect(key).toHaveCount(0);
+  await expect(page.locator('.sh-room')).toBeVisible();
+  await expect(page.locator('.composer textarea')).toHaveAttribute('placeholder', 'Message House');
+  await expect(page.locator('.composer textarea')).toHaveValue('> T-609 · Paste the boiler portal key\n> Paste the portal key into the boiler page\n\n');
+  await shot(page, 'ask-reply-in-room');
+  expect((await calls(page, 'post_message')).length).toBe(posted);
+  expect((await calls(page, 'vault_patch_meta')).filter((c) => c.args.id === 'ask-key')).toHaveLength(0);
+  expect((await calls(page, 'vault_transition')).filter((c) => c.args.id === 'ask-key')).toHaveLength(0);
+  await page.getByRole('button', { name: 'Back to rooms' }).click();
+  await expect(home(page)).toBeVisible();
+  // I did it: out of his view (Seen's write: it stays open), and its room is told, addressed to its Uni, to take it back
+  await row(page, ROOM.teach).locator('.sh-run[data-run="waiting"]').click();
+  await expect(key).toBeVisible();
+  await key.getByRole('button', { name: 'I did it', exact: true }).click();
   await expect(key).toHaveCount(0);
   await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body, c.args.recipients]))
     .toContainEqual([ROOM.house, 'T-609: I did this. Hand it back to this room for any follow-up (tasks.py handback T-609), then post [done T-609].', [UNI]]);
@@ -470,23 +503,29 @@ test('each kind has its buttons: Done hands a do ask back to its room, Not now p
   expect(done).toHaveLength(1);
   expect(done[0].args.metadata).toMatchObject({ needs_aaron: false, needs_aaron_why: 'seen' });
   await expect(row(page, ROOM.house).locator('.sh-ask')).toHaveCount(0);
-  // a choose ask: its options and Not now, inline on home too; Not now leaves it open with its room, quietly
-  await expect(row(page, ROOM.river).locator('.sh-ask-btn')).toHaveText(['Yes, Thursday 2pm', 'Friday instead', 'Not now']);
-  await row(page, ROOM.river).locator('.sh-ask-btn[data-act="notnow"]').click();
+  // a choose ask: its options, Seen and Later, inline on home too; Later writes the snooze alone and tells its room the day, quietly
+  await expect(row(page, ROOM.river).locator('.sh-ask-btn')).toHaveText(['Yes, Thursday 2pm', 'Friday instead', 'Seen', later]);
+  await row(page, ROOM.river).locator('.sh-ask-btn[data-act="later"]').click();
   await expect(row(page, ROOM.river).locator('.sh-ask')).toHaveCount(0);
   await expect.poll(async () => (await calls(page, 'post_message')).map((c) => [c.args.channel, c.args.body, c.args.recipients]))
-    .toContainEqual([ROOM.river, 'T-602: not now. It stays open here; ask again when it needs my steer.', []]);
-  expect((await calls(page, 'vault_patch_meta')).filter((c) => c.args.id === 'ask-walk')).toHaveLength(1);
-  // a look ask: Open and Seen
+    .toContainEqual([ROOM.river, `T-602: later. It's back on my list ${day} ${mmdd}.`, []]);
+  const put = (await calls(page, 'vault_patch_meta')).filter((c) => c.args.id === 'ask-walk');
+  expect(put).toHaveLength(1);
+  expect(put[0].args.metadata).toEqual({ snoozed_until: `${d.getFullYear()}-${mmdd}` });
+  // it stays off after the next read, though the sweep hasn't written needs_aaron yet
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await page.waitForTimeout(500);
+  await expect(row(page, ROOM.river).locator('.sh-ask')).toHaveCount(0);
+  // a look ask: Open and Seen (and, in its sheet, Reply in the room and Archive)
   await row(page, ROOM.studio).locator('.sh-ask-open').click();
   const cut = page.getByRole('dialog', { name: 'Cut 3 is ready to watch' });
-  await expect(cut.locator('.sh-ask-btn')).toHaveText(['Open ↗', 'Seen', 'Archive']);
+  await expect(cut.locator('.sh-ask-btn')).toHaveText(['Open ↗', 'Seen', 'Reply in the room', 'Archive']);
   await cut.getByRole('button', { name: 'Close' }).click();
   // an ask with no body and no next action: what there is, said so, and its buttons all the same; Archive takes it out of view
   await row(page, ROOM.post).locator('.sh-ask-open').click();
   const sign = page.getByRole('dialog', { name: 'Sign What the garden taught us and post it?' });
   await expect(sign.locator('.sh-ask-fault')).toHaveText('This ask came without its context. You can still answer it or archive it.');
-  await expect(sign.locator('.sh-ask-btn')).toHaveText(['Sign and post', 'Not yet', 'Not now', 'Archive']);
+  await expect(sign.locator('.sh-ask-btn')).toHaveText(['Sign and post', 'Not yet', 'Seen', later, 'Reply in the room', 'Archive']);
   await sign.getByRole('button', { name: 'Archive' }).click();
   await expect(sign).toHaveCount(0);
   const archived = (await calls(page, 'vault_transition')).filter((c) => c.args.id === 'ask-sign');
@@ -578,10 +617,10 @@ test("a write that fails keeps the ask's sheet open, with why, and the next tap 
   await bootShape(page, { writeFails: 1 });
   await row(page, ROOM.house).locator('.sh-ask-open').click();
   const key = page.getByRole('dialog', { name: 'Paste the boiler portal key' });
-  await key.getByRole('button', { name: 'Done', exact: true }).click();
+  await key.getByRole('button', { name: 'I did it', exact: true }).click();
   await expect(key.getByRole('alert')).toHaveText(/^Couldn't mark it done: vault unreachable/);
   expect(await calls(page, 'post_message')).toEqual([]);
-  await key.getByRole('button', { name: 'Done', exact: true }).click();
+  await key.getByRole('button', { name: 'I did it', exact: true }).click();
   await expect(key).toHaveCount(0);
   await expect.poll(async () => (await calls(page, 'post_message')).map((c) => c.args.channel)).toEqual([ROOM.house]);
 });
