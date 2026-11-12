@@ -509,7 +509,11 @@ async fn upload_media_with(
     let (from, name, dir) = (input.to_path_buf(), upload_filename(filename), work_dir.to_path_buf());
     let stop = StopOnDrop(Arc::new(std::sync::atomic::AtomicBool::new(false)));
     let flag = stop.0.clone();
-    let parts = tokio::task::spawn_blocking(move || voice_parts(&from, &name, &dir, codecs, &flag))
+    // The parts' remover is made on the conversion's own thread: if this upload is dropped before the answer is taken, the
+    // answer is dropped there, and the parts with it.
+    let parts = tokio::task::spawn_blocking(move || {
+        voice_parts(&from, &name, &dir, codecs, &flag).map(|o| o.map(|parts| (RemoveAll(parts.iter().map(|(p, _)| p.clone()).collect()), parts)))
+    })
         .await
         .map_err(|_| normalize::refuse("Couldn't prepare the file on this device. Attach it again."))?;
     // While our relay still takes Opus (until the patches go, target 2026-11-30), a codec that fails on one recording
@@ -521,10 +525,9 @@ async fn upload_media_with(
         }
         other => other?,
     };
-    let Some(parts) = parts else {
+    let Some((_cleanup, parts)) = parts else {
         return Ok(vec![upload_media_file(relay_url, keys, input, mime, filename, work_dir).await?]);
     };
-    let _cleanup = RemoveAll(parts.iter().map(|(p, _)| p.clone()).collect());
     let mut media = Vec::with_capacity(parts.len());
     for (path, name) in &parts {
         media.push(upload_media_file(relay_url, keys, path, "audio/mp4", name, work_dir).await?);

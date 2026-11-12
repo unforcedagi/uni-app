@@ -124,7 +124,9 @@ impl Packets {
     fn header(&mut self) -> Result<Option<(u32, u64, bool)>> {
         let start = self.at;
         let cut = |e: std::io::Error, len: u64| {
-            if e.kind() == std::io::ErrorKind::UnexpectedEof && len - start <= CUT_SLACK {
+            // Cut short, or a few bytes at the end that aren't an element (the normalizer lets both go).
+            let ending = matches!(e.kind(), std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::InvalidData);
+            if ending && len - start <= CUT_SLACK {
                 Ok(None)
             } else {
                 Err(damaged())

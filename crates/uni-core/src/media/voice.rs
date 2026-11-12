@@ -459,6 +459,16 @@ mod tests {
     }
 
     #[test]
+    fn only_a_codec_failure_sends_the_recording_as_it_is() {
+        // Anything else the converter says is about the recording, or the user stopped it: sending the WebM instead
+        // would hide it.
+        assert!(is_codec_failure(&convert_failed()));
+        for other in [damaged(), stopped(), too_long(12_000.0, MAX_PART_SECONDS), io_failed(std::io::ErrorKind::StorageFull.into())] {
+            assert!(!is_codec_failure(&other), "{other}");
+        }
+    }
+
+    #[test]
     fn a_dropped_upload_stops_the_conversion_and_leaves_nothing_behind() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("rec.webm");

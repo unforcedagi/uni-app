@@ -9,7 +9,6 @@ use ndk::media::media_codec::{
 use ndk::media::media_format::MediaFormat;
 
 use super::{Codecs, Decoder, Encoder, OpusHead};
-use crate::media::normalize::refuse;
 use crate::Result;
 
 const END_OF_STREAM: u32 = 4; // AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM
@@ -20,8 +19,9 @@ const DRAIN_LIMIT: Duration = Duration::from_secs(10);
 
 pub struct Android;
 
+/// A codec failure: the upload sends the recording as it is ([`super::is_codec_failure`]).
 fn failed() -> crate::Error {
-    refuse("Couldn't convert this recording on this device. Retry.")
+    super::convert_failed()
 }
 
 fn start(codec: Option<MediaCodec>, format: &MediaFormat, direction: MediaCodecDirection) -> Result<Option<MediaCodec>> {
@@ -142,6 +142,9 @@ impl Codec {
                         } else {
                             b.len().min(space.len() / frame * frame)
                         };
+                        if n == 0 {
+                            return Err(failed()); // a buffer too small for one sample: nothing would ever go in
+                        }
                         for (d, s) in space[..n].iter_mut().zip(&b[..n]) {
                             d.write(*s);
                         }
