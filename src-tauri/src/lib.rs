@@ -3084,23 +3084,43 @@ mod unlock_grace;
 mod messages;
 
 
-/// wry registers a `webkit.messageHandlers.ipc` script message handler in the default script world, which every
-/// frame of the page sees, sandboxed `srcdoc` frames included. Tauri on Linux sends invokes through the `ipc://`
-/// custom protocol (`scripts/ipc-protocol.js` in tauri); `window.ipc.postMessage` is only its fallback when that
-/// fetch fails. Dropping the handler leaves the fetch path working and gives no frame anything to post to.
-/// Proof: the sandbox self-test's `webkit.messageHandlers.ipc unreachable` check on the real webview (REPORT-T77).
+/// wry registers a `webkit.messageHandlers.ipc` script message handler in the page's default script world, and WebKit
+/// exposes a world's handlers to every frame of the page, sandboxed `srcdoc` frames included: WebKitGTK through
+/// `register_script_message_handler`, WKWebView through `addScriptMessageHandler:name:`
+/// (wry 0.55.1 `src/wkwebview/class/wry_web_view_delegate.rs:99`), whose delegate forwards any frame's message to Tauri
+/// with that frame's URL and never looks at `frameInfo.isMainFrame` (same file, lines 50-61). Tauri on Linux and macOS
+/// sends invokes through the `ipc://` custom protocol (`scripts/ipc-protocol.js` in tauri: `canUseCustomProtocol` is
+/// false only on Android); `window.ipc.postMessage` is only its fallback when that fetch fails. Dropping the handler
+/// leaves the fetch path working and gives no frame anything to post to.
+/// Proof: the sandbox self-test's `webkit.messageHandlers.ipc unreachable` check on the real webview: REPORT-T77 on
+/// WebKitGTK, and the macOS CI job (`.github/workflows/mac-sandbox.yml`) on WKWebView.
 ///
 /// Every window the app creates must call this. Today that is the config windows, covered by the loop in `setup`;
 /// any `WebviewWindowBuilder`/`add_child` added later must call it on its window too. Failure is logged, not
 /// fatal; the self-test pass is keyed on the wry/Tauri versions (`webview_runtime`) so a bump forces a re-run.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn close_ipc_handler(window: &tauri::WebviewWindow) {
-    use webkit2gtk::{UserContentManagerExt, WebViewExt};
     let label = window.label().to_string();
     let logged = label.clone();
-    if let Err(err) = window.with_webview(move |webview| match webview.inner().user_content_manager() {
-        Some(manager) => manager.unregister_script_message_handler("ipc"),
-        None => tracing::warn!(window = %label, "close_ipc_handler: webview has no user content manager; ipc handler left registered"),
+    if let Err(err) = window.with_webview(move |webview| {
+        #[cfg(target_os = "linux")]
+        {
+            use webkit2gtk::{UserContentManagerExt, WebViewExt};
+            match webview.inner().user_content_manager() {
+                Some(manager) => manager.unregister_script_message_handler("ipc"),
+                None => tracing::warn!(window = %label, "close_ipc_handler: webview has no user content manager; ipc handler left registered"),
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = &label;
+            // SAFETY: on macOS `inner()` is the live WKWebView, and `with_webview` runs this on the main thread.
+            unsafe {
+                let wk = &*webview.inner().cast::<objc2_web_kit::WKWebView>();
+                // `configuration` is a copy, but it shares the webview's user content controller.
+                wk.configuration().userContentController().removeScriptMessageHandlerForName(objc2_foundation::ns_string!("ipc"));
+            }
+        }
     }) {
         tracing::warn!(window = %logged, error = %err, "close_ipc_handler: with_webview failed; ipc handler left registered");
     }
@@ -3113,21 +3133,49 @@ fn webview_runtime() -> String {
     format!("wry {} tauri {}", env!("UNI_WRY_VERSION"), tauri::VERSION)
 }
 
-/// WebRTC ignores CSP, so a sealed area app could send data out through an
-/// ICE/TURN request. WebKitGTK ships with `enable-webrtc` off; this makes that
-/// explicit so a build or distro default can't silently turn it on. The
-/// in-app sandbox self-test (src/interface/selftest) is the proof, not this call.
-#[cfg(target_os = "linux")]
-fn disable_webrtc(app: &tauri::App) {
-    use tauri::Manager;
-    use webkit2gtk::{SettingsExt, WebViewExt};
-    for (_, window) in app.webview_windows() {
-        let _ = window.with_webview(|webview| {
-            if let Some(settings) = webview.inner().settings() {
-                settings.set_enable_webrtc(false);
-                settings.set_enable_media_stream(false);
+/// WebRTC ignores CSP, so a sealed area app could send data out through an ICE/TURN request. Removing
+/// `RTCPeerConnection` in the frame's own realm (`src/interface/srcdoc.ts`) does not reach a child frame the app makes:
+/// every new frame gets fresh globals from the engine. So the engine itself must have WebRTC off, which removes the
+/// constructors from every realm at once. WebKitGTK ships with `enable-webrtc` off; this makes that explicit so a
+/// build or distro default can't silently turn it on. WKWebView has it on and offers only WebKit's private
+/// `_setPeerConnectionEnabled:` (the same kind of private preference wry already sets for `fullScreenEnabled`); it is
+/// checked with `respondsToSelector:` so a WebKit without it logs instead of crashing, and the self-test's
+/// "WebRTC unavailable in a child frame" check then fails and keeps applets in approved-code mode or off.
+/// The in-app sandbox self-test (src/interface/selftest) is the proof, not this call.
+/// Media capture stays on on macOS: voice notes use `getUserMedia` in the app's own frame.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn disable_webrtc(window: &tauri::WebviewWindow) {
+    let label = window.label().to_string();
+    let logged = label.clone();
+    if let Err(err) = window.with_webview(move |webview| {
+        #[cfg(target_os = "linux")]
+        {
+            use webkit2gtk::{SettingsExt, WebViewExt};
+            match webview.inner().settings() {
+                Some(settings) => {
+                    settings.set_enable_webrtc(false);
+                    settings.set_enable_media_stream(false);
+                }
+                None => tracing::warn!(window = %label, "disable_webrtc: webview has no settings; WebRTC left as built"),
             }
-        });
+        }
+        #[cfg(target_os = "macos")]
+        {
+            use objc2::runtime::{Bool, NSObjectProtocol};
+            // SAFETY: as in `close_ipc_handler`; the selector is checked before it is sent.
+            unsafe {
+                let wk = &*webview.inner().cast::<objc2_web_kit::WKWebView>();
+                // `configuration` is a copy, but it shares the webview's preferences.
+                let prefs = wk.configuration().preferences();
+                if prefs.respondsToSelector(objc2::sel!(_setPeerConnectionEnabled:)) {
+                    let () = objc2::msg_send![&*prefs, _setPeerConnectionEnabled: Bool::NO];
+                } else {
+                    tracing::warn!(window = %label, "disable_webrtc: WKPreferences has no _setPeerConnectionEnabled:; WebRTC left on");
+                }
+            }
+        }
+    }) {
+        tracing::warn!(window = %logged, error = %err, "disable_webrtc: with_webview failed; WebRTC left as built");
     }
 }
 
@@ -3171,14 +3219,14 @@ pub fn run() {
             messages::setup(_app)?;
             #[cfg(all(debug_assertions, any(target_os = "linux", target_os = "macos")))]
             t76::replace_window(_app)?;
-            #[cfg(target_os = "linux")]
+            // Sealed applets: no WebRTC and no `ipc` script message handler in any frame, on the webviews where both can be
+            // removed (Android keeps WebRTC, so it runs only approved code: `src/interface/selftest/gate.ts`).
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             {
-                disable_webrtc(_app);
-                {
-                    use tauri::Manager;
-                    for (_, window) in _app.webview_windows() {
-                        close_ipc_handler(&window);
-                    }
+                use tauri::Manager;
+                for (_, window) in _app.webview_windows() {
+                    disable_webrtc(&window);
+                    close_ipc_handler(&window);
                 }
             }
             unlock_grace::watch();

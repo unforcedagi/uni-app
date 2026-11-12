@@ -70,6 +70,9 @@ objc2-foundation = "0.3"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace"] }
 block2 = "0.6"
 objc2 = "0.6"
+# T-335: sealed applets. Removes wry's `ipc` script message handler and turns WebRTC off in the WKWebView (lib.rs
+# `close_ipc_handler`, `disable_webrtc`). Already linked by wry, which enables the same features.
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView", "WKWebViewConfiguration", "WKUserContentController", "WKPreferences"] }
 
 [dev-dependencies]
 # T-335: the unlock grace's gate is tested against a mock app handle.

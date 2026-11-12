@@ -92,7 +92,7 @@
       const js = (v) => JSON.stringify(v).replace(/<\//g, '<\\/');
       const kid = (depth) => depth === 0 ? `<script>parent.postMessage({ kid: 1, rtc: typeof RTCPeerConnection, webkitRtc: typeof webkitRTCPeerConnection, ipc: !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) }, '*')<\/script>`
         : `<script>addEventListener('message', function (e) { if (e.data && e.data.kid) parent.postMessage(e.data, '*'); }); var f = document.createElement('iframe'); f.srcdoc = ${js(kid(depth - 1))}; document.documentElement.appendChild(f);<\/script>`;
-      exp.grandchild = await sb(`<script>addEventListener('message', function (e) { if (e.data && e.data.kid) parent.postMessage(Object.assign({ t76: 1 }, e.data), '*'); }); var f = document.createElement('iframe'); f.srcdoc = ${js(kid(1))}; document.documentElement.appendChild(f);<\/script>`);
+      exp.grandchild = await sb(`<script>addEventListener('message', function (e) { if (e.data && e.data.kid) parent.postMessage(Object.assign({ t76: 1 }, e.data), '*'); }); var f = document.createElement('iframe'); f.srcdoc = ${js(kid(1))}; document.documentElement.appendChild(f);<\/script>`, 8000);
       await sleep(1500);
       exp.frameIpcWritten = (await real.invoke('t76_read', { name: 'frame-ipc.txt' })) !== null;
       await out('experiments.json', exp); await out('done', 'ok'); note('done');

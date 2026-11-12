@@ -36,5 +36,8 @@ console.log("result:", r.text);
 for (const c of r.checks) console.log(c.ok ? "  ✓" : "  ✗", c.label);
 console.log("experiments:", JSON.stringify(exp, null, 2));
 console.log("frame-ipc.txt written by a frame:", fs.existsSync(dir + "/frame-ipc.txt"));
+// Tauri refuses a forged key with an eprintln that names the real key: count the lines, never print them.
+const log = (() => { try { return fs.readFileSync(dir + "/app.log", "utf8"); } catch { return ""; } })();
+console.log("Tauri refusals of a wrong invoke key:", (log.match(/__TAURI_INVOKE_KEY__ expected/g) || []).length);
 process.exit(r.checks.length > 0 && r.checks.every((c) => c.ok) && /pass/.test(r.status) && !fs.existsSync(dir + "/frame-ipc.txt") ? 0 : 1);
 ' "$OUT"
