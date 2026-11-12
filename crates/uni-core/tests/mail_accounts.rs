@@ -26,6 +26,12 @@ fn whole(account: &str) -> Source {
     Source { account_id: account.into(), exclude: vec![format!("{account}-junk"), format!("{account}-trash")], ..Source::default() }
 }
 
+async fn all_rows_with(mail: &MailBridge<'_>) -> bool {
+    let page = mail.threads(&[inbox("A")], None, 50).await.unwrap();
+    let row = |id: &str| page.threads.iter().find(|t| t.thread_id == id).cloned();
+    row("TA-plan").is_some_and(|t| t.uni_draft && !t.draft) && row("Ta4").is_some_and(|t| !t.uni_draft)
+}
+
 fn ids(page: &uni_core::mail::ThreadPage) -> Vec<String> {
     page.threads.iter().map(|t| format!("{}/{}", t.account_id, t.thread_id)).collect()
 }
@@ -142,6 +148,9 @@ async fn later_and_files_narrow_a_list_on_the_server() {
     assert_eq!(ids(&later), ["A/Ta5"], "Later is only flagged mail");
     let files = mail.threads(&[Source { with_files: true, ..whole("A") }], None, 50).await.unwrap();
     assert!(!files.threads.is_empty() && files.threads.iter().all(|t| t.has_attachment), "Files: only mail with attachments");
+    // the Inbox row of a thread Uni drafted a reply in says so, though the draft itself lives in Drafts
+    let plan = all_rows_with(&mail).await;
+    assert!(plan, "the Inbox row knows the thread holds Uni's draft");
     let next = &later.next[0];
     assert_eq!((next.flagged, next.with_files), (Some(true), false), "the next page keeps the filter");
 }

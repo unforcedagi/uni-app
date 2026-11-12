@@ -125,6 +125,9 @@ pub struct ThreadSummary {
     /// A message in the thread is flagged.
     #[serde(default)]
     pub flagged: bool,
+    /// T-335 Mail v2: the thread holds a draft Uni wrote (in Drafts, so not the row's own message in an Inbox list).
+    #[serde(default)]
+    pub uni_draft: bool,
 }
 
 /// A page of threads from one or more accounts, newest first.
@@ -333,6 +336,7 @@ fn thread_summary(account: &str, e: &Value, thread: Option<&Vec<String>>, states
     let unread_any = if members.is_empty() { counts(e) } else { members.iter().any(|m| counts(m)) };
     let attach = e.get("hasAttachment").and_then(Value::as_bool).unwrap_or(false) || members.iter().any(|m| m.get("hasAttachment").and_then(Value::as_bool) == Some(true));
     let flagged = keyword(e, "$flagged") || members.iter().any(|m| keyword(m, "$flagged"));
+    let uni_draft = members.iter().chain(std::iter::once(&e)).any(|m| keyword(m, "$draft") && keyword(m, "$uni-drafted"));
     ThreadSummary {
         account_id: account.to_string(),
         thread_id,
@@ -348,6 +352,7 @@ fn thread_summary(account: &str, e: &Value, thread: Option<&Vec<String>>, states
         draft: keyword(e, "$draft"),
         uni_drafted: keyword(e, "$uni-drafted"),
         flagged,
+        uni_draft,
     }
 }
 
@@ -586,7 +591,7 @@ mod tests {
     fn row(account: &str, id: &str, at: &str) -> ThreadSummary {
         ThreadSummary {
             account_id: account.into(), thread_id: format!("T{id}"), email_id: id.into(), from: vec![], to: vec![], subject: id.into(), preview: String::new(),
-            received_at: at.into(), count: 1, unread: false, has_attachment: false, draft: false, uni_drafted: false, flagged: false,
+            received_at: at.into(), count: 1, unread: false, has_attachment: false, draft: false, uni_drafted: false, flagged: false, uni_draft: false,
         }
     }
 
