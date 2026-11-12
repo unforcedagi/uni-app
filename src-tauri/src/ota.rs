@@ -1058,7 +1058,7 @@ mod tests {
     }
 
     fn act(dir: &Path, k: &Key) -> Option<String> {
-        activate(dir, &k.pk, &v("0.3.7"), 1).map(|b| b.meta.version)
+        activate(dir, &k.pk, &v("0.3.7"), SHELL_API).map(|b| b.meta.version)
     }
 
     fn ready(dir: &Path) {
@@ -1071,9 +1071,9 @@ mod tests {
     #[test]
     fn a_signed_newer_bundle_for_this_api_opens() {
         let k = key(1);
-        let (c, a) = signed(&k, "0.3.8", 1);
-        let b = open(&k.pk, &c, &a, &v("0.3.7"), 1).unwrap();
-        assert_eq!(b.meta, Meta { version: "0.3.8".into(), api: 1 });
+        let (c, a) = signed(&k, "0.3.8", SHELL_API);
+        let b = open(&k.pk, &c, &a, &v("0.3.7"), SHELL_API).unwrap();
+        assert_eq!(b.meta, Meta { version: "0.3.8".into(), api: SHELL_API });
         assert_eq!(b.get("/index.html"), Some(&b"<html>web 0.3.8</html>"[..]));
         assert_eq!(b.get("assets/app.js"), Some(&b"1"[..]));
     }
@@ -1081,25 +1081,25 @@ mod tests {
     #[test]
     fn a_tampered_archive_another_key_or_a_bad_signature_is_refused() {
         let (k, other) = (key(1), key(2));
-        let (c, a) = signed(&k, "0.3.8", 1);
+        let (c, a) = signed(&k, "0.3.8", SHELL_API);
         let mut tampered = a.clone();
         let n = tampered.len();
         tampered[n / 2] ^= 1;
-        assert!(open(&k.pk, &c, &tampered, &v("0.3.7"), 1).unwrap_err().contains("not the one its signed manifest names"));
-        assert!(open(&other.pk, &c, &a, &v("0.3.7"), 1).unwrap_err().contains("signature does not match"));
+        assert!(open(&k.pk, &c, &tampered, &v("0.3.7"), SHELL_API).unwrap_err().contains("not the one its signed manifest names"));
+        assert!(open(&other.pk, &c, &a, &v("0.3.7"), SHELL_API).unwrap_err().contains("signature does not match"));
         // The manifest text edited after signing (a longer validity, say): the signature no longer matches.
         let edited = String::from_utf8(c.clone()).unwrap().replace("\\\"expires\\\":", "\\\"expires\\\":9");
         assert_ne!(edited.as_bytes(), c.as_slice());
-        assert!(open(&k.pk, edited.as_bytes(), &a, &v("0.3.7"), 1).unwrap_err().contains("signature"));
-        assert!(open(&k.pk, b"not json", &a, &v("0.3.7"), 1).is_err());
-        assert!(open("", &c, &a, &v("0.3.7"), 1).unwrap_err().contains("no bundle key"));
+        assert!(open(&k.pk, edited.as_bytes(), &a, &v("0.3.7"), SHELL_API).unwrap_err().contains("signature"));
+        assert!(open(&k.pk, b"not json", &a, &v("0.3.7"), SHELL_API).is_err());
+        assert!(open("", &c, &a, &v("0.3.7"), SHELL_API).unwrap_err().contains("no bundle key"));
     }
 
     #[test]
     fn the_signed_text_is_domain_separated() {
         let k = key(1);
-        let a = bundle("0.3.8", 1);
-        let m = serde_json::to_string(&verify_channel(&k.pk, &channel_for(&k, "0.3.8", 1, &a, T0, 14)).unwrap()).unwrap();
+        let a = bundle("0.3.8", SHELL_API);
+        let m = serde_json::to_string(&verify_channel(&k.pk, &channel_for(&k, "0.3.8", SHELL_API, &a, T0, 14)).unwrap()).unwrap();
         // The same manifest signed without the prefix (any other use of the key) doesn't pass as a manifest.
         let sig = base64::engine::general_purpose::STANDARD.encode(k.sk.sign(m.as_bytes()).to_bytes());
         let bare = serde_json::to_vec(&serde_json::json!({"manifest": m, "sig": sig})).unwrap();
@@ -1109,19 +1109,19 @@ mod tests {
     #[test]
     fn an_archive_that_disagrees_with_its_manifest_is_refused() {
         let k = key(1);
-        let a = bundle("0.3.9", 1); // says 0.3.9 inside
-        let c = channel_for(&k, "0.3.8", 1, &a, T0, 14); // signed as 0.3.8
-        assert!(open(&k.pk, &c, &a, &v("0.3.7"), 1).unwrap_err().contains("archive says 0.3.9"));
+        let a = bundle("0.3.9", SHELL_API); // says 0.3.9 inside
+        let c = channel_for(&k, "0.3.8", SHELL_API, &a, T0, 14); // signed as 0.3.8
+        assert!(open(&k.pk, &c, &a, &v("0.3.7"), SHELL_API).unwrap_err().contains("archive says 0.3.9"));
     }
 
     #[test]
     fn an_expired_or_overlong_manifest_is_refused() {
         let k = key(1);
-        let a = bundle("0.3.8", 1);
-        let m = verify_channel(&k.pk, &channel_for(&k, "0.3.8", 1, &a, T0, 14)).unwrap();
+        let a = bundle("0.3.8", SHELL_API);
+        let m = verify_channel(&k.pk, &channel_for(&k, "0.3.8", SHELL_API, &a, T0, 14)).unwrap();
         assert!(fresh(&m, T0 + 13 * 86400).is_ok());
         assert!(fresh(&m, T0 + 14 * 86400).unwrap_err().contains("expired"));
-        assert!(verify_channel(&k.pk, &channel_for(&k, "0.3.8", 1, &a, T0, 40)).unwrap_err().contains("validity"));
+        assert!(verify_channel(&k.pk, &channel_for(&k, "0.3.8", SHELL_API, &a, T0, 40)).unwrap_err().contains("validity"));
     }
 
     #[test]
@@ -1129,8 +1129,8 @@ mod tests {
         // Empty until the sealed key exists; once pinned it must be a valid Ed25519 point.
         if !RELEASE_PUBKEY_HEX.is_empty() {
             let k = key(1);
-            let a = bundle("0.3.8", 1);
-            let c = channel_for(&k, "0.3.8", 1, &a, T0, 14);
+            let a = bundle("0.3.8", SHELL_API);
+            let c = channel_for(&k, "0.3.8", SHELL_API, &a, T0, 14);
             assert!(verify_channel(RELEASE_PUBKEY_HEX, &c).unwrap_err().contains("signature does not match"));
         }
     }
@@ -1138,10 +1138,10 @@ mod tests {
     #[test]
     fn another_api_or_an_older_bundle_is_refused() {
         let k = key(1);
-        let (c, a) = signed(&k, "0.3.8", 2);
-        assert!(open(&k.pk, &c, &a, &v("0.3.7"), 1).unwrap_err().contains("shell API"));
-        let (c, a) = signed(&k, "0.3.7", 1);
-        assert!(open(&k.pk, &c, &a, &v("0.3.7"), 1).unwrap_err().contains("not newer"));
+        let (c, a) = signed(&k, "0.3.8", SHELL_API + 1);
+        assert!(open(&k.pk, &c, &a, &v("0.3.7"), SHELL_API).unwrap_err().contains("shell API"));
+        let (c, a) = signed(&k, "0.3.7", SHELL_API);
+        assert!(open(&k.pk, &c, &a, &v("0.3.7"), SHELL_API).unwrap_err().contains("not newer"));
     }
 
     #[test]
@@ -1184,7 +1184,7 @@ mod tests {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(act(dir.path(), &k), None, "nothing installed: built-in");
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
         assert!(!dir.path().join("next.tar.gz").exists() && dir.path().join("current.tar.gz").exists());
         let s = State::load_checked(dir.path()).unwrap();
@@ -1195,11 +1195,11 @@ mod tests {
     fn a_bundle_that_never_reports_ready_falls_back_to_the_last_good_one() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
         ready(dir.path());
         // 0.3.9 arrives, takes over, and never boots.
-        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
         for _ in 0..MAX_UNCONFIRMED_BOOTS {
             assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
         }
@@ -1211,7 +1211,7 @@ mod tests {
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"), "and stays");
         // With no last good bundle, the built-in screens.
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
         for _ in 0..MAX_UNCONFIRMED_BOOTS {
             assert!(act(dir.path(), &k).is_some());
         }
@@ -1222,9 +1222,9 @@ mod tests {
     fn a_bundle_still_on_trial_is_not_kept_as_the_fallback() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
         assert!(act(dir.path(), &k).is_some()); // 0.3.8 on trial, never ready
-        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
         assert!(!dir.path().join("previous.tar.gz").exists());
     }
@@ -1233,20 +1233,20 @@ mod tests {
     fn a_ready_bundle_stays_and_a_newer_app_wins() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "current", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "current", &signed(&k, "0.3.8", SHELL_API));
         for _ in 0..5 {
             assert!(act(dir.path(), &k).is_some());
         }
         // An APK update to 0.3.8 brings the same screens built in; the bundle is no longer newer.
-        assert!(activate(dir.path(), &k.pk, &v("0.3.8"), 1).is_none());
+        assert!(activate(dir.path(), &k.pk, &v("0.3.8"), SHELL_API).is_none());
     }
 
     #[test]
     fn a_tampered_installed_bundle_falls_back_at_launch() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
-        let (c, mut a) = signed(&k, "0.3.9", 1);
+        put(dir.path(), "previous", &signed(&k, "0.3.8", SHELL_API));
+        let (c, mut a) = signed(&k, "0.3.9", SHELL_API);
         let n = a.len();
         a[n / 2] ^= 1;
         put(dir.path(), "current", &(c, a));
@@ -1257,11 +1257,11 @@ mod tests {
     fn an_older_signed_bundle_is_never_used_again() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
         // 0.3.9 is lost (cleared, refused later); the channel replays the older 0.3.8, validly signed.
         remove_slot(dir.path(), "current");
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
         assert_eq!(act(dir.path(), &k), None);
         // And a check won't fetch it.
         let state = State::load_checked(dir.path()).unwrap();
@@ -1274,11 +1274,11 @@ mod tests {
     fn a_manifest_issued_before_one_already_taken_is_not_promoted() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
         assert!(act(dir.path(), &k).is_some());
         // A newer version, but signed earlier than the manifest already taken (an old signing held back and replayed).
-        let a = bundle("0.3.9", 1);
-        put(dir.path(), "next", &(channel_for(&k, "0.3.9", 1, &a, T0, 14), a));
+        let a = bundle("0.3.9", SHELL_API);
+        put(dir.path(), "next", &(channel_for(&k, "0.3.9", SHELL_API, &a, T0, 14), a));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
     }
 
@@ -1287,7 +1287,7 @@ mod tests {
         let k = key(1);
         for damage in ["corrupt", "missing"] {
             let dir = tempfile::tempdir().unwrap();
-            put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+            put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
             assert!(act(dir.path(), &k).is_some());
             match damage {
                 "corrupt" => std::fs::write(dir.path().join("state.json"), b"{not json").unwrap(),
@@ -1297,12 +1297,12 @@ mod tests {
             assert!(!dir.path().join("current.tar.gz").exists(), "{damage}: bundles dropped");
             let s = State::load_checked(dir.path()).unwrap();
             assert_eq!((s.floor.as_deref(), s.issued), (Some("0.3.9"), T0 + 9 * 3600), "{damage}: floor kept");
-            put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+            put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
             assert_eq!(act(dir.path(), &k), None, "{damage}: the older one stays out");
         }
         // state.json damaged after the bundle that set the floor is already gone: the floor file still holds it.
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
         assert!(act(dir.path(), &k).is_some());
         remove_slot(dir.path(), "current");
         std::fs::write(dir.path().join("state.json"), b"{not json").unwrap();
@@ -1315,13 +1315,13 @@ mod tests {
     fn apply_swaps_in_a_staged_bundle() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "current", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "current", &signed(&k, "0.3.8", SHELL_API));
         let mut o = Ota::new();
         Arc::get_mut(&mut o).unwrap().pubkey = Box::leak(k.pk.clone().into_boxed_str());
         o.init(dir.path().to_path_buf(), v("0.3.7"));
         assert_eq!(o.active().unwrap().meta.version, "0.3.8");
         assert!(!o.apply(), "nothing staged: nothing to apply");
-        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
         assert!(o.apply());
         assert_eq!(o.active().unwrap().meta.version, "0.3.9");
         assert!(!dir.path().join("next.tar.gz").exists());
@@ -1332,7 +1332,7 @@ mod tests {
     fn a_page_request_before_setup_fixes_the_built_in_layer_for_the_launch() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "current", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "current", &signed(&k, "0.3.8", SHELL_API));
         let pk: &'static str = Box::leak(k.pk.clone().into_boxed_str());
         let mut late = Ota::new();
         let l = Arc::get_mut(&mut late).unwrap();
@@ -1368,7 +1368,7 @@ mod tests {
     fn a_promotion_that_cannot_be_recorded_does_not_happen() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
         if !read_only(dir.path()) {
             return;
         }
@@ -1383,10 +1383,10 @@ mod tests {
     fn a_trial_bundle_whose_start_cannot_be_counted_is_not_served() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
         ready(dir.path());
-        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"), "0.3.8 is now the last good one");
         if !read_only(dir.path()) {
             return;
@@ -1415,7 +1415,7 @@ mod tests {
     fn half_a_staging_is_not_a_staged_bundle() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        let (c, _) = signed(&k, "0.3.9", 1);
+        let (c, _) = signed(&k, "0.3.9", SHELL_API);
         State::default().save(dir.path());
         std::fs::write(dir.path().join("next.json"), &c).unwrap(); // a check killed before the archive landed
         assert_eq!(staged_version(dir.path(), &k.pk), None);
@@ -1427,7 +1427,7 @@ mod tests {
     fn a_promotion_cut_between_its_two_renames_is_finished_at_launch() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
         let mut s = State::default();
         s.trial = Some("0.3.8".into());
         s.floor = Some("0.3.8".into());
@@ -1443,10 +1443,10 @@ mod tests {
     fn a_promotion_killed_after_it_was_recorded_is_finished_at_launch() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
         assert!(act(dir.path(), &k).is_some());
         ready(dir.path());
-        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
         // Killed after the current bundle stepped aside and the promotion was recorded, before next moved.
         std::fs::rename(dir.path().join("current.json"), dir.path().join("previous.json")).unwrap();
         std::fs::rename(dir.path().join("current.tar.gz"), dir.path().join("previous.tar.gz")).unwrap();
@@ -1462,7 +1462,7 @@ mod tests {
     fn a_fallback_cut_between_its_two_renames_keeps_the_last_good_bundle() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "previous", &signed(&k, "0.3.8", SHELL_API));
         // 0.3.9 never started three times and was dropped (recorded first), then the move back was killed after
         // previous.json became current.json, before the archive followed.
         let mut s = State::default();
@@ -1473,7 +1473,7 @@ mod tests {
         std::fs::rename(dir.path().join("previous.json"), dir.path().join("current.json")).unwrap();
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
         // The next promotion keeps 0.3.8 as the fallback.
-        put(dir.path(), "next", &signed(&k, "0.3.10", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.10", SHELL_API));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.10"));
         assert!(dir.path().join("previous.tar.gz").exists(), "0.3.8 kept as the last good bundle");
     }
@@ -1483,11 +1483,11 @@ mod tests {
         let k = key(1);
         for (trial, kept) in [(None, true), (Some("0.3.7"), true), (Some("0.3.8"), false)] {
             let dir = tempfile::tempdir().unwrap();
-            put(dir.path(), "current", &signed(&k, "0.3.8", 1));
+            put(dir.path(), "current", &signed(&k, "0.3.8", SHELL_API));
             let mut s = State::default();
             s.trial = trial.map(str::to_string);
             s.save(dir.path());
-            put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+            put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
             assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
             assert_eq!(dir.path().join("previous.tar.gz").exists(), kept, "trial {trial:?}");
         }
@@ -1497,10 +1497,10 @@ mod tests {
     fn a_current_bundle_that_does_not_verify_never_replaces_the_fallback() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "previous", &signed(&k, "0.3.7", 1));
-        put(dir.path(), "current", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "previous", &signed(&k, "0.3.7", SHELL_API));
+        put(dir.path(), "current", &signed(&k, "0.3.8", SHELL_API));
         std::fs::write(dir.path().join("current.json"), b"{damaged").unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.9"));
         assert_eq!(slot_version(dir.path(), "previous", &k.pk), Some(v("0.3.7")), "the good fallback stays");
     }
@@ -1509,24 +1509,24 @@ mod tests {
     fn a_rejected_bundle_never_becomes_the_fallback_and_a_failed_move_back_serves_in_place() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
-        put(dir.path(), "current", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "previous", &signed(&k, "0.3.8", SHELL_API));
+        put(dir.path(), "current", &signed(&k, "0.3.9", SHELL_API));
         let mut s = State::default();
         s.rejected = vec!["0.3.9".into()]; // dropped, but a kill left its files
         s.save(dir.path());
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"), "a dropped version isn't served: the last good one is");
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
-        put(dir.path(), "current", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "previous", &signed(&k, "0.3.8", SHELL_API));
+        put(dir.path(), "current", &signed(&k, "0.3.9", SHELL_API));
         let mut s = State::default();
         s.rejected = vec!["0.3.9".into()];
         s.save(dir.path());
-        put(dir.path(), "next", &signed(&k, "0.3.10", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.10", SHELL_API));
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.10"));
         assert_eq!(slot_version(dir.path(), "previous", &k.pk), Some(v("0.3.8")), "0.3.9 didn't take its place");
         // The move back can't happen (something sits where current.json would go): served where it is.
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "previous", &signed(&k, "0.3.8", SHELL_API));
         std::fs::create_dir_all(dir.path().join("current.json/blocked")).unwrap();
         assert_eq!(act(dir.path(), &k).as_deref(), Some("0.3.8"));
         assert!(dir.path().join("previous.tar.gz").exists(), "still there for the next launch");
@@ -1536,8 +1536,8 @@ mod tests {
     fn screens_that_refuse_the_shell_fall_back_for_the_session_even_if_the_drop_cannot_be_recorded() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "previous", &signed(&k, "0.3.8", 1));
-        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "previous", &signed(&k, "0.3.8", SHELL_API));
+        put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
         let o = ota_for(dir.path(), &k);
         assert_eq!(o.active().unwrap().meta.version, "0.3.9");
         if !read_only(dir.path()) {
@@ -1561,10 +1561,10 @@ mod tests {
     fn screens_that_refuse_the_shell_are_dropped_only_while_on_trial() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "next", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.8", SHELL_API));
         assert!(act(dir.path(), &k).is_some());
         ready(dir.path());
-        put(dir.path(), "next", &signed(&k, "0.3.9", 1));
+        put(dir.path(), "next", &signed(&k, "0.3.9", SHELL_API));
         let o = ota_for(dir.path(), &k);
         assert_eq!(o.active().unwrap().meta.version, "0.3.9");
         assert!(!o.refused("0.3.8", "test"), "only the version that is running");
@@ -1607,14 +1607,14 @@ mod tests {
     }
 
     fn publish(k: &Key, version: &str, issued: u64, days: u64) -> HashMap<String, Vec<u8>> {
-        let a = bundle(version, 1);
-        let c = channel_for(k, version, 1, &a, issued, days);
+        let a = bundle(version, SHELL_API);
+        let c = channel_for(k, version, SHELL_API, &a, issued, days);
         HashMap::from([("web.json".to_string(), c), (format!("web-{version}.tar.gz"), a)])
     }
 
     fn run_check(dir: &Path, k: &Key, base: &str, now: u64) -> Result<CheckResult, String> {
         let lock = Mutex::new(());
-        tauri::async_runtime::block_on(check(dir, &format!("{base}web.json"), &k.pk, &v("0.3.7"), None, 1, now, &lock))
+        tauri::async_runtime::block_on(check(dir, &format!("{base}web.json"), &k.pk, &v("0.3.7"), None, SHELL_API, now, &lock))
     }
 
     #[test]
@@ -1640,7 +1640,7 @@ mod tests {
     fn a_check_never_writes_back_a_state_read_before_its_download() {
         let k = key(1);
         let dir = tempfile::tempdir().unwrap();
-        put(dir.path(), "current", &signed(&k, "0.3.8", 1));
+        put(dir.path(), "current", &signed(&k, "0.3.8", SHELL_API));
         let mut s = State::default();
         s.floor = Some("0.3.8".into());
         s.save(dir.path());

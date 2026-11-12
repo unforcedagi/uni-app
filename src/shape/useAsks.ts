@@ -1,6 +1,6 @@
 // T-335 the shape: the reads and writes around asksCore.ts. The asks come from the one reader's live tasks (src/vault/reader.ts), kept fresh by
 // its one poller (shared with every other read of the same tick: no timer of its own). An answer is one compare-and-set on the ask (state ->
-// done, with the answer's keys), then the owner's message in the ask's room, threaded under its `reply_root` when there is one. Seen is the
+// done, with the answer's keys), then the owner's message in the ask's room, in its main line (T-335 one ask: never threaded under its `reply_root`). Seen is the
 // same close for a tell or look ask, a guarded metadata patch for a do or choose ask, then one quiet line in its room.
 // An answered or seen ask leaves the list at once; if the write fails it comes back with its error line. A post that fails after the write
 // landed (the ask is closed in the vault, so it can't come back) is kept as owed, with Retry, on this device until it goes.
@@ -134,7 +134,7 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
 
   const post = useCallback(async (p: Owed) => {
     if (!p.channel) { keepOwed((l) => [...l.filter((x) => x.id !== p.id), { ...p, error: "no room to send it to" }]); return; }
-    try { await postIn(p.channel, p.body, p.quiet ? null : p.root, p.quiet); keepOwed((l) => l.filter((x) => x.id !== p.id)); }
+    try { await postIn(p.channel, p.body, null, p.quiet); keepOwed((l) => l.filter((x) => x.id !== p.id)); }
     catch (e) { keepOwed((l) => [...l.filter((x) => x.id !== p.id), { ...p, error: words(e) }]); }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -169,10 +169,11 @@ export function useAsks(o: { vault: string; identity: string | null; rooms: Shap
       void read();
       return;
     }
-    // an answer and I did it wake the room's Uni (addressed, under its reply_root); Seen, Later and Archive are one quiet line
+    // an answer and I did it wake the room's Uni (addressed); Seen, Later and Archive are one quiet line; all in the main line
     const body = d.act === "answer" ? answerBody(a, d.text) : d.act === "done" ? doneBody(a) : d.act === "later" ? laterBody(a, d.until) : d.act === "archive" ? archiveBody(a) : seenBody(a);
     const quiet = d.act !== "answer" && d.act !== "done";
-    await post({ id: a.id, what: a.what, channel: a.room, root: a.replyRoot, body, quiet, error: "", at: Date.now() });
+    // (T-335 one ask: never under its reply_root: an answer sits in the room's main line, never in a thread)
+    await post({ id: a.id, what: a.what, channel: a.room, root: null, body, quiet, error: "", at: Date.now() });
     void read();
   }, [o.vault, post, read]); // eslint-disable-line react-hooks/exhaustive-deps
 

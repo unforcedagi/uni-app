@@ -19,7 +19,8 @@ export type Ask = {
   /** A single action word ("Done"), when the ask is a thing to do. */ action: string | null;
   /** A link to look at. */ link: string | null;
   /** Seconds. */ updatedAt: number;
-  /** (added, T-335) The message an answer threads under (`reply_root`), only in the room it names: its quick replies give way to the ask's buttons. */ replyRoot?: string | null;
+  /** (added, T-335) The post its room asked under (`reply_root`), only in the room it names: its quick replies give way to the ask's buttons.
+   *  (T-335 one ask: answers never thread under it.) */ replyRoot?: string | null;
   /** (added, T-335) Its room is private: drawn in full only inside that room (its chat and strip); home shows a wordless mark. */ private?: boolean;
   /** (added, T-335 cards expand) The approval card it asks him to tap (`sealed_card`: the card's event id, 12+ lower-case hex), in its room. */ sealedCard?: string | null;
 };

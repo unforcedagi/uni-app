@@ -1,6 +1,7 @@
 // T-335 the shape: asks. The things that need the owner (vault `task` notes with `needs_aaron: true`), read through the one reader, placed in
 // their room, answered with buttons. Pure: no React, no Tauri, no clock but the `now` it is given (unit-tested in scripts/asks.test.ts).
-// The hook (useAsks.ts) only reads and writes; the component (AskMessage.tsx) only draws.
+// The hook (useAsks.ts) only reads and writes. T-335 one ask: a task is drawn as one card (oneAsk.ts taskCard, AskCard.tsx), with the
+// one card's buttons; this file keeps what a task is and what answering it writes and says.
 //
 // Moved here from For you (src/foryou/forYouCore.ts, retired with the bands, the cards and the areas tree): the field derivations of an ask
 // (kind, what, why, options, default, action, link), the answer and Seen metadata, and the words its room is told. Whether an ask needs him
@@ -19,7 +20,8 @@ export type VaultAsk = Ask & {
   /** The note's `updatedAt` as read: the revision every write is guarded by (a compare-and-set). */ rev: string;
   /** Its task state (open, doing, waiting): the `from` of the close. */ state: string;
   /** The room's name as the ask names it (`reply_room`, else `room`), no `#`; null when it names none. */ roomName: string | null;
-  /** The post an answer threads under (`reply_root`): only in the room it names (in Uni's room, where it lands for want of its own, none). */ replyRoot: string | null;
+  /** The post its room asked under (`reply_root`), only in the room it names: read so that post's quick replies give way to the ask's card.
+   *  Answers never thread under it (T-335 one ask); step 4 deletes it. */ replyRoot: string | null;
   /** When its room last asked or confirmed it (ms): a seen ask asked again since shows again. */ askedAt: number | null;
 };
 
@@ -90,7 +92,7 @@ export const roomKey = (name: string): string => name.trim().replace(/^#/, "").t
  * live rooms of that name: the one that isn't a DM, else the one the registry lists, else none (Uni's room: never a guess). A name with no
  * live room (an old name, a retired or folded room, one this device doesn't have) goes where its work went: the registry's successor, else
  * the room_fallback of a node that marks that room archived, else its own node's room (the tree's steward), else Uni's room (`opts.uniRoom`).
- * Only in the room it names is it threaded under its `reply_root`.
+ * Only in the room it names does it keep its `reply_root` (answers never thread under it: T-335 one ask).
  *
  * Privacy is judged on the result, by names, the registry (`opts.reg`), `opts.privateRooms` (ids or names) and the node tree (`opts.tree`):
  * a private node or card (by its name, or inside a private area however it is linked there), a private room named, or a room a private
@@ -325,14 +327,6 @@ export function laterBody(ask: Pick<Ask, "tid" | "what">, until: string): string
 }
 /** Is it put off? A snooze written here holds at once, before the sweep writes needs_aaron (a day as YYYY-MM-DD, local). */
 export const snoozed = (until: unknown, today: string): boolean => typeof until === "string" && /^\d{4}-\d\d-\d\d/.test(until) && until.slice(0, 10) > today;
-/** Reply in the room: the ask, quoted, for the top of his reply in its room's own chat (never a new chat). Its T-number rides along,
- *  so the room (and tasks.py chat-answers) knows which ask he answered. */
-export function replyQuote(ask: Pick<Ask, "tid" | "what" | "next">): string {
-  const head = `> ${ask.tid ? `${ask.tid} · ` : ""}${ask.what}`;
-  const next = ask.next?.trim() ? `\n> ${ask.next.trim()}` : "";
-  return `${head}${next}\n\n`;
-}
-
 /** "Archive": out of his view for good (state archived); one quiet line in its room, so the room sees it. */
 export function archiveBody(ask: Pick<Ask, "tid" | "what">): string {
   return `${ask.tid ?? ask.what}: archived. It's out of my view; open a new ask if it still needs me.`;
@@ -347,9 +341,6 @@ export function askForRun<A extends Pick<Ask, "tid">>(run: { task?: string | nul
 /** An ask with no body and no next action is a data fault (the room wrote it without its context): still shown, still answerable. */
 export const askFault = (ask: Pick<Ask, "next">, body: string | null): boolean => !ask.next?.trim() && !(body ?? "").trim();
 
-/** Kind in one word, for the sheet's head. */
-export const KIND_WORD: Record<Ask["kind"], string> = { do: "To do", choose: "Choose", look: "Look", tell: "For you to know", decision: "Choose" };
-
 /**
  * The body of an ask's note as the sheet shows it: tasks.py's context block (## Why, ## Steps, ## Links, ## Time, ## Already answered) and
  * whatever is above it, minus a front matter block and a first `# heading` (the sheet's own title says it).
@@ -360,57 +351,3 @@ export function askBody(content: string | null | undefined): string {
   b = b.replace(/^\s*# [^\n]*\n?/, "");
   return b.trim();
 }
-
-// ------------------------------------------------------------------ the buttons
-
-export type AskAct = "answer" | "done" | "seen" | "later" | "reply" | "open" | "archive";
-export type AskButton = { label: string; value: string; primary: boolean; act: AskAct };
-/**
- * An ask's buttons, by its kind (Aaron, 11-11: "I should really be able to just mark it as seen or archive it"; T-335 asks in tune: each
- * button's word says what happens, and none starts a new chat):
- * - do: I did it (back to its room, which closes it), Seen (it stays with its room) and Later (back on his list on a day it names);
- * - choose: one button per option (the default first, with its date), Seen and Later;
- * - look: Open (its link) and Seen;
- * - tell: Seen.
- * `archive` (the sheet): Reply in the room (its own chat, the ask quoted) and Archive, last. `today`: for Later's day. The first is primary.
- */
-export function askButtons(ask: Pick<Ask, "kind" | "options" | "fallback" | "action" | "link" | "room">, o: { archive?: boolean; now?: Date } = {}): AskButton[] {
-  const out: AskButton[] = [];
-  const kind = ask.kind === "decision" ? "choose" : ask.kind;
-  const until = laterUntil(o.now ?? new Date());
-  const later: AskButton = { label: `Later · ${dayWords(until).split(" ")[0]}`, value: until, primary: false, act: "later" };
-  if (kind === "do") {
-    out.push({ label: "I did it", value: "Done", primary: false, act: "done" });
-    out.push({ label: "Seen", value: "Seen", primary: false, act: "seen" });
-    out.push(later);
-  } else if (kind === "choose") {
-    if (ask.fallback) out.push({ label: ask.fallback.label, value: ask.fallback.value, primary: false, act: "answer" });
-    for (const opt of ask.options) out.push({ label: opt, value: opt, primary: false, act: "answer" });
-    out.push({ label: "Seen", value: "Seen", primary: false, act: "seen" });
-    out.push(later);
-  } else {
-    if (kind === "look" && ask.link) out.push({ label: "Open", value: ask.link, primary: false, act: "open" });
-    out.push({ label: "Seen", value: "Seen", primary: false, act: "seen" });
-  }
-  if (o.archive) {
-    if (ask.room) out.push({ label: "Reply in the room", value: "Reply", primary: false, act: "reply" });
-    out.push({ label: "Archive", value: "Archive", primary: false, act: "archive" });
-  }
-  out[0].primary = true;
-  return out;
-}
-/** What a button does, in one plain line (the sheet says it beside each button; a button's title says it too). `room`: its room's name. */
-export function buttonDoes(ask: Pick<Ask, "kind">, b: AskButton, room: string): string {
-  const to = room ? `#${room}` : "its room";
-  switch (b.act) {
-    case "answer": return `Your pick goes to ${to} and closes it`;
-    case "done": return `Closes it for you and tells ${to}, which does any follow-up`;
-    case "seen": return seenCloses(ask.kind) ? `Ends it; ${to} is told` : `Off your list; it stays with ${to} until it needs you again`;
-    case "later": return `Off your list until ${dayWords(b.value)}, then back`;
-    case "reply": return `Opens ${to}'s own chat with this ask quoted`;
-    case "open": return "Opens the link; Seen then ends it";
-    case "archive": return `Out of your view for good; ${to} is told`;
-  }
-}
-/** Seen's words for a screen reader and a title: what it does to this ask. */
-export const seenHint = (kind: Kind): string => (seenCloses(kind) ? "ends it; its room is told" : "it stays with its room until it needs you");
