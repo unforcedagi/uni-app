@@ -404,6 +404,20 @@ class ReleaseKindTests(unittest.TestCase):
                 self.commit()
                 self.assertTrue(self.kind().startswith(why), self.kind())
 
+    def test_run_by_hand_with_no_arguments_reads_the_publishers_record(self):
+        # It used to stop with an IndexError when the last-APK file wasn't named; by hand it reads the file publish.sh
+        # writes (under $HOME), and with none there it says it's an APK, like any unknown.
+        self.write("src-tauri/src/lib.rs", "x")
+        self.commit()
+        home = self.repo.parent / "home"
+        run = lambda: subprocess.run(["python3", str(self.repo / "scripts/release-kind.py")], cwd=self.repo,
+                                     capture_output=True, text=True, env={**os.environ, "HOME": str(home)})
+        r = run()
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "apk no last APK release recorded"), r.stderr)
+        (home / ".config/uni/updater").mkdir(parents=True)
+        (home / ".config/uni/updater/last-apk").write_text(self.last.read_text())
+        self.assertEqual(run().stdout.strip(), "apk src-tauri/src/lib.rs changed since 0.3.7")
+
     def test_no_record_or_a_bad_one_is_an_apk(self):
         self.write("src/App.tsx", "x")
         self.commit()

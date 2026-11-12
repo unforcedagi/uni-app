@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """T-335 OTA: does this release need an APK, or can phones take it as new screens over the air?
 
-    python3 scripts/release-kind.py <last-apk file> [<commit>]
+    python3 scripts/release-kind.py [<last-apk file> [<commit>]]
 
 Prints one line: ``bundle <last APK version> <shell API>`` when every change since the last APK release is in the
 screens (and the shell API and the screens' dependencies are unchanged), else ``apk <why>``. The last APK release is
-recorded by publish.sh in the given file as ``<version> <commit> <shell API>``. Anything unknown means an APK: no file,
+recorded by publish.sh in the given file (by default the one it writes, ~/.config/uni/updater/last-apk) as
+``<version> <commit> <shell API>``. Anything unknown means an APK: no file,
 an unreadable one, a commit that isn't an ancestor, a path that isn't the screens', ``UNI_RELEASE_KIND=apk``.
 """
 import json
@@ -76,4 +77,7 @@ def kind(last_apk: Path, head: str) -> str:
 
 
 if __name__ == "__main__":
-    print(kind(Path(sys.argv[1]), sys.argv[2] if len(sys.argv) > 2 else "HEAD"))
+    if len(sys.argv) > 3:
+        sys.exit(__doc__)
+    last = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.home() / ".config/uni/updater/last-apk"
+    print(kind(last, sys.argv[2] if len(sys.argv) > 2 else "HEAD"))
