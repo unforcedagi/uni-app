@@ -94,7 +94,9 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
     const threads = (sources: any[], text: string | null) => {
       let total = 0;
       const rows = sources.flatMap((s) => {
-        const hits = msgs.filter((m) => m.account === s.account_id && (s.mailbox_id ? m.box === s.mailbox_id : !s.exclude.includes(m.box)) && (!text || hay(m).includes(text.toLowerCase())))
+        const hits = msgs.filter((m) => m.account === s.account_id && (s.mailbox_id ? m.box === s.mailbox_id : !s.exclude.includes(m.box)) && (!text || hay(m).includes(text.toLowerCase()))
+          // T-335 Mail v2: Later is the flag (hasKeyword / notKeyword $flagged), Files is hasAttachment, as Rust asks the server
+          && (s.flagged == null || !!m.flagged === s.flagged) && (!s.with_files || m.attachments.length > 0 || (m.files?.length ?? 0) > 0))
           .sort((x, y) => y.received_at.localeCompare(x.received_at));
         const seen = new Set<string>();
         const heads = hits.filter((m) => !seen.has(m.thread_id) && seen.add(m.thread_id));
