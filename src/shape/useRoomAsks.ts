@@ -42,8 +42,8 @@ export function useRoomAsks(on: boolean, identity: string | null, moved = 0): Ro
     let t: number | undefined;
     const soon = () => { if (t === undefined) t = window.setTimeout(() => { t = undefined; void read(); }, 150); };
     soonRef.current = soon;
-    // (what can bring an ask, an answer or a close: not typing, profiles or status)
-    const un = listen<{ kind: string }>("uni://live", (e) => { if (!gone && ["message", "edit", "delete", "rooms"].includes(e.payload.kind)) soon(); });
+    // (what can bring an ask, an answer or a close, or follow a reconnect's catch-up: not typing or profiles)
+    const un = listen<{ kind: string }>("uni://live", (e) => { if (!gone && ["message", "edit", "delete", "rooms", "status"].includes(e.payload.kind)) soon(); });
     window.addEventListener("focus", soon);
     window.addEventListener(ASKS_STORED, soon);
     return () => { gone = true; soonRef.current = null; window.clearTimeout(t); window.removeEventListener("focus", soon); window.removeEventListener(ASKS_STORED, soon); void un.then((f) => f()); };

@@ -77,17 +77,16 @@ export function cardsOf(states: readonly AskState[], priv?: (room: string) => bo
 }
 
 /** Which room ask each answer message names (answer event id -> ask id), for drawing an answer as a quote of its ask in the main line.
- *  `asks`: the asks' ids (the states the rule worked out). */
+ *  `asks`: the states the rule worked out (an answer counts only in its ask's own room, as the rule counts it). */
 export function answersOf(events: unknown[], asks: readonly AskState[], policy: Pick<Policy, "owner">): Map<string, string> {
   const out = new Map<string, string>();
   const owner = new Set(policy.owner);
   const rooms = new Map<string, string>();
   for (const a of asks) if (a.ask) rooms.set(a.id, a.ask.room);
-  const ids = rooms;
   for (const e of events as { id?: unknown; pubkey?: unknown; kind?: unknown; tags?: unknown }[]) {
     if (!e || e.kind !== 9 || typeof e.id !== "string" || !owner.has(String(e.pubkey)) || !Array.isArray(e.tags)) continue;
     const tags = e.tags as unknown[];
-    const q = tags.find((t): t is string[] => Array.isArray(t) && t[0] === "q" && typeof t[1] === "string" && ids.has(t[1]));
+    const q = tags.find((t): t is string[] => Array.isArray(t) && t[0] === "q" && typeof t[1] === "string" && rooms.has(t[1]));
     // (in the ask's own room only, as the rule counts an answer)
     const h = tags.find((t): t is string[] => Array.isArray(t) && t[0] === "h");
     if (q && h && rooms.get(q[1]) === h[1]) out.set(e.id, q[1]);

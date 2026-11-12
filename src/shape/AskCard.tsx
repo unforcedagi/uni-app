@@ -38,9 +38,9 @@ const at = (s: number, now: number) => whenLabel(new Date(s * 1000).toISOString(
 
 export function AskCard({ card, place, roomName, vault, busy, error, onAct, now }: AskCardProps) {
   // (it reopens only when it comes back with why its write failed; a card left behind any other way opens closed next time)
-  // (kept per place: home's card and the room's are two views; an entry is spent when the card next mounts)
-  const key = `${place}:${card.id}`;
-  const [open, setOpen] = useState(() => { const was = OPENED.has(key); OPENED.delete(key); return was && !!error; });
+  // (read only, so React's double run of an initializer changes nothing; an entry goes when the card is closed)
+  const key = card.id;
+  const [open, setOpen] = useState(() => OPENED.has(key) && !!error);
   const id = useId();
   const home = place === "home";
   const ended = card.state !== "open" && card.state !== "later";

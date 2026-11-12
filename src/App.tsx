@@ -2078,8 +2078,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
         recordingOrigin.current || recorder.isBusy() || (!draft.trim() && !pending.length)) return;
     const files = manualAttachments(pendingStore.current.get(keyFor(channel, root)) ?? []);
     // T-335 one ask: an answer is words; with a file attached, say so rather than send it as something else
-    const answeringCard = answering && answering.room === channel && !root ? shape.cards.find(answering.id) : null;
-    if (answeringCard && answerable(answeringCard, Date.now() / 1000) && files.length) { setError("An answer is words only: remove the attachment, or stop answering (×) to send it as a message."); return; }
+    // T-335 one ask: the card the composer answers, if it can still be answered (worked out once, for the whole send)
+    const answeringHere = !!answering && answering.room === channel && !root;
+    const answeringCard = answeringHere ? shape.cards.find(answering!.id) : null;
+    const ans = answeringCard && answerable(answeringCard, Date.now() / 1000) ? answeringCard : null;
+    if (ans && files.length) { setError("An answer is words only: remove the attachment, or stop answering (×) to send it as a message."); return; }
     if ((!draft.trim() && !files.length) || files.some(attachmentBlocksSend)) {
       setError("Wait for uploads to finish or retry or remove failed files."); return;
     }
@@ -2117,10 +2120,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setError(null);
     try {
       // T-335 one ask: answering a card (Reply in the room): his words are its answer, in the main line (never a thread)
-      const found = answering && answering.room === channel && !root && !files.length ? shape.cards.find(answering.id) : null;
-      const ans = found && answerable(found, Date.now() / 1000) ? found : null;
       // (the card it answered has gone, ended or lapsed: his words go as a plain message, and the composer stops answering)
-      if (!ans && answering && answering.room === channel && !root && !files.length) setAnswering(null);
+      if (!ans && answeringHere) setAnswering(null);
       const sent = ans ? await shape.cards.answerWith(ans, snapshot) : await invoke<Message | null>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
       if (ans) setAnswering(null);
       changePending(key, (items) => {
