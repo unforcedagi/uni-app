@@ -573,3 +573,195 @@ plugin tauri_plugin_opener::init()
 plugin tauri_plugin_process::init()
 plugin tauri_plugin_updater::Builder::new().build()
 protocol unimedia
+
+api 4
+capability android-pairing.json 7420ca03049f768b
+capability default.json ac09845dda70ef59
+capability desktop-fullscreen.json f02199e22982d398
+capability desktop-notifications.json b2572689ad3be13e
+capability desktop-updates.json 40de6151b705d92c
+command app_version(app: tauri::AppHandle) -> String
+command async android_update_manifest() -> Result<AndroidUpdateManifest, String>
+command async approval_messages(app: tauri::AppHandle) -> Result<Vec<ApprovalSourceView>, String>
+command async arcade_distill(app: tauri::AppHandle, deep: Option<bool>) -> Result<serde_json::Value, ArcadeError>
+command async arcade_home(app: tauri::AppHandle, grey: Option<bool>, still: Option<bool>) -> Result<serde_json::Value, ArcadeError>
+command async arcade_media(app: tauri::AppHandle, card: String, which: String) -> Result<tauri::ipc::Response, ArcadeError>
+command async arcade_profile(app: tauri::AppHandle) -> Result<serde_json::Value, ArcadeError>
+command async arcade_react(app: tauri::AppHandle, reactions: serde_json::Value) -> Result<serde_json::Value, ArcadeError>
+command async arcade_rounds(app: tauri::AppHandle, game: String, n: u32, grey: Option<bool>, still: Option<bool>, look: Option<String>) -> Result<serde_json::Value, ArcadeError>
+command async ask_events(app: tauri::AppHandle, since: i64) -> Result<Vec<serde_json::Value>, String>
+command async ask_policy(app: tauri::AppHandle) -> Result<AskPolicy, String>
+command async cal_conflicts(app: tauri::AppHandle) -> Result<serde_json::Value, CalError>
+command async cal_event(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, CalError>
+command async cal_events(app: tauri::AppHandle, from: String, to: String) -> Result<serde_json::Value, CalError>
+command async cal_op(app: tauri::AppHandle, op: serde_json::Value) -> Result<serde_json::Value, CalError>
+command async cal_session(app: tauri::AppHandle) -> Result<serde_json::Value, CalError>
+command async delete_message(app: tauri::AppHandle, channel: String, target: String) -> Result<(), String>
+command async edit_message(app: tauri::AppHandle, channel: String, target: String, body: String) -> Result<(), String>
+command async forget_secret(app: tauri::AppHandle, channel: String, request: String) -> Result<String, String>
+command async get_identity(app: tauri::AppHandle) -> Result<String, String>
+command async get_members(app: tauri::AppHandle, channel: String) -> Result<Vec<MemberView>, String>
+command async get_messages(app: tauri::AppHandle, channel: String, root: Option<String>, limit: Option<usize>) -> Result<Vec<MessageView>, String>
+command async get_npub(app: tauri::AppHandle) -> Result<String, String>
+command async get_rooms(app: tauri::AppHandle) -> Result<Vec<RoomView>, String>
+command async identity_forget(app: tauri::AppHandle) -> Result<(), String>
+command async identity_status(app: tauri::AppHandle) -> Result<IdentityStatus, String>
+command async journal_entry(app: tauri::AppHandle, id: String) -> Result<uni_core::parachute::JournalNote, String>
+command async journal_flush(app: tauri::AppHandle) -> Result<uni_core::journal::FlushReport, String>
+command async journal_list(app: tauri::AppHandle, limit: usize, offset: usize) -> Result<Vec<uni_core::parachute::JournalNote>, String>
+command async journal_pending(app: tauri::AppHandle) -> Result<Vec<uni_core::journal::QueuedEntry>, String>
+command async journal_save_text(app: tauri::AppHandle, entry: JournalDraft, save_another: Option<bool>) -> Result<uni_core::journal::FlushReport, String>
+command async journal_save_voice(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<uni_core::journal::FlushReport, String>
+command async live_start(app: tauri::AppHandle) -> Result<bool, String>
+command async load_older(app: tauri::AppHandle, channel: String) -> Result<usize, String>
+command async mail_archive(app: tauri::AppHandle, account_id: String, email_ids: Vec<String>) -> Result<(), MailError>
+command async mail_attachment_open(app: tauri::AppHandle, account_id: Option<String>, blob_id: String, name: Option<String>, mime: Option<String>) -> Result<(), MailError>
+command async mail_draft_discard(app: tauri::AppHandle, account_id: String, draft_id: String) -> Result<(), MailError>
+command async mail_draft_review(app: tauri::AppHandle, account_id: String, draft_id: String) -> Result<Reviewed, MailError>
+command async mail_draft_save(app: tauri::AppHandle, account_id: String, fields: DraftFields, replaces: Option<String>, base: Option<String>) -> Result<Reviewed, MailError>
+command async mail_flag(app: tauri::AppHandle, account_id: String, email_ids: Vec<String>, flagged: bool) -> Result<(), MailError>
+command async mail_held_file_open(app: tauri::AppHandle, account_id: String, draft_id: String, index: usize, file: uni_core::mail::HeldFile) -> Result<(), MailError>
+command async mail_mark_seen(app: tauri::AppHandle, account_id: String, email_ids: Vec<String>, seen: bool) -> Result<(), MailError>
+command async mail_overview(app: tauri::AppHandle) -> Result<uni_core::mail::Overview, MailError>
+command async mail_parked(app: tauri::AppHandle, account_id: String) -> Result<Vec<uni_core::mail::Parked>, MailError>
+command async mail_send(app: tauri::AppHandle, account_id: String, op_id: String, reviewed: Reviewed) -> Result<SendOutcome, MailError>
+command async mail_send_approve(app: tauri::AppHandle, account_id: String, op_id: String, fingerprint: String) -> Result<SendOutcome, MailError>
+command async mail_send_as_uni(app: tauri::AppHandle, account_id: String, op_id: String, fields: DraftFields) -> Result<SendOutcome, MailError>
+command async mail_send_check(app: tauri::AppHandle, account_id: String, op_id: String) -> Result<SendOutcome, MailError>
+command async mail_send_decline(app: tauri::AppHandle, account_id: String, op_id: String) -> Result<SendOutcome, MailError>
+command async mail_thread(app: tauri::AppHandle, account_id: String, thread_id: String) -> Result<uni_core::mail::Thread, MailError>
+command async mail_threads(app: tauri::AppHandle, sources: Vec<uni_core::mail::Source>, text: Option<String>, limit: Option<u64>) -> Result<uni_core::mail::ThreadPage, MailError>
+command async mail_triage(app: tauri::AppHandle, account_id: String, email_ids: Vec<String>) -> Result<std::collections::HashMap<String, String>, MailError>
+command async mark_read(app: tauri::AppHandle, channel: String) -> Result<(), String>
+command async media_bytes(app: tauri::AppHandle, url: String, sha: Option<String>) -> Result<tauri::ipc::Response, String>
+command async media_open(app: tauri::AppHandle, url: String, sha: Option<String>, mime: Option<String>) -> Result<(), String>
+command async media_save(app: tauri::AppHandle, url: String, sha: Option<String>, name: Option<String>, mime: Option<String>) -> Result<String, String>
+command async media_stream(app: tauri::AppHandle, url: String, sha: Option<String>, mime: Option<String>) -> Result<MediaStreamView, String>
+command async media_upload(app: tauri::AppHandle, id: String, filename: String, mime: String) -> Result<Vec<uni_core::MediaRef>, String>
+command async media_upload_abort(app: tauri::AppHandle, id: String) -> Result<(), String>
+command async media_upload_begin(app: tauri::AppHandle) -> Result<String, String>
+command async media_upload_chunk(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String>
+command async messages::messages_close(s: State<'_, MessagesState>, room_id: String) -> Result<(), MessagesError>
+command async messages::messages_join(s: State<'_, MessagesState>, room_id: String) -> Result<(), MessagesError>
+command async messages::messages_link_cancel(s: State<'_, MessagesState>, network: String) -> Result<LinkRow, MessagesError>
+command async messages::messages_link_check(s: State<'_, MessagesState>, network: String) -> Result<LinkRow, MessagesError>
+command async messages::messages_link_send(s: State<'_, MessagesState>, network: String, value: String) -> Result<LinkRow, MessagesError>
+command async messages::messages_link_start(s: State<'_, MessagesState>, network: String, flow: Option<String>, relogin: Option<String>) -> Result<LinkRow, MessagesError>
+command async messages::messages_links(s: State<'_, MessagesState>) -> Result<Vec<LinkRow>, MessagesError>
+command async messages::messages_media(s: State<'_, MessagesState>, room_id: String, event_id: String) -> Result<tauri::ipc::Response, MessagesError>
+command async messages::messages_older(s: State<'_, MessagesState>, room_id: String) -> Result<bool, MessagesError>
+command async messages::messages_open(s: State<'_, MessagesState>, room_id: String) -> Result<Vec<MessageRow>, MessagesError>
+command async messages::messages_open_file(app: tauri::AppHandle, s: State<'_, MessagesState>, room_id: String, event_id: String) -> Result<(), MessagesError>
+command async messages::messages_read(s: State<'_, MessagesState>, room_id: String) -> Result<(), MessagesError>
+command async messages::messages_rooms(s: State<'_, MessagesState>) -> Result<Vec<RoomRow>, MessagesError>
+command async messages::messages_send(s: State<'_, MessagesState>, room_id: String, body: String) -> Result<(), MessagesError>
+command async messages::messages_sign_in(s: State<'_, MessagesState>, homeserver: String, user: String, password: String) -> Result<Status, MessagesError>
+command async messages::messages_sign_in_device(app: tauri::AppHandle, s: State<'_, MessagesState>) -> Result<Status, MessagesError>
+command async messages::messages_sign_out(s: State<'_, MessagesState>) -> Result<Status, MessagesError>
+command async messages::messages_status(s: State<'_, MessagesState>) -> Result<Status, MessagesError>
+command async messages::messages_telegram_keys(app: tauri::AppHandle, api_id: String, api_hash: String) -> Result<(), MessagesError>
+command async messages::messages_transcript(s: State<'_, MessagesState>, room_id: String, event_id: String) -> Result<Transcript, MessagesError>
+command async note_download(window: tauri::Window, name: String, text: String) -> Result<Option<String>, String>
+command async note_share(app: tauri::AppHandle, name: String, text: String, title: Option<String>) -> Result<(), String>
+command async ota::ota_check(ota: tauri::State<'_, Arc<Ota>>) -> Result<CheckResult, String>
+command async pair_source::pair_source_cancel(session_id: String, codes_differ: bool) -> Result<(), String>
+command async pair_source::pair_source_confirm(session_id: String) -> Result<(), String>
+command async pair_source::pair_source_start(app: AppHandle, session_id: String) -> Result<Started, String>
+command async pair_source::pair_source_wait_offer(session_id: String) -> Result<Offer, String>
+command async pairing_cancel(codes_differ: Option<bool>) -> Result<(), String>
+command async pairing_confirm(app: tauri::AppHandle) -> Result<PairingDone, String>
+command async pairing_start(uri: String) -> Result<PairingStarted, String>
+command async post_answer(app: tauri::AppHandle, channel: String, template: AnswerTemplate) -> Result<MessageView, serde_json::Value>
+command async post_approve(app: tauri::AppHandle, vault: String, id: String, if_updated_at: String, scheduled_for: Option<u64>) -> Result<serde_json::Value, String>
+command async post_drop(app: tauri::AppHandle, vault: String, id: String, if_updated_at: String) -> Result<serde_json::Value, String>
+command async post_edit(app: tauri::AppHandle, vault: String, id: String, if_updated_at: String, text: String) -> Result<serde_json::Value, String>
+command async post_message(app: tauri::AppHandle, channel: String, body: String, reply_to: Option<String>, recipients: Vec<String>, media: Option<Vec<uni_core::MediaRef>>, signed_event: Option<String>) -> Result<MessageView, serde_json::Value>
+command async prepare_voice_message(app: tauri::AppHandle, channel: String, reply_to: Option<String>, recipients: Vec<String>, media: Vec<uni_core::MediaRef>) -> Result<String, String>
+command async react_message(app: tauri::AppHandle, channel: String, target: String, emoji: String, mine: Option<String>) -> Result<(), String>
+command async refresh(app: tauri::AppHandle) -> Result<SyncView, String>
+command async remote_image(url: String) -> Result<tauri::ipc::Response, String>
+command async route_outcome(app: tauri::AppHandle, outcome: serde_json::Value) -> Result<serde_json::Value, String>
+command async route_suggest(app: tauri::AppHandle, text: String, rooms: Vec<DoorRoom>) -> Result<serde_json::Value, String>
+command async sealed_answer(app: tauri::AppHandle, channel: String, reference: String, decision: String, rids: Vec<String>) -> Result<uni_core::sealed_card::CardView, String>
+command async sealed_card(app: tauri::AppHandle, channel: String, reference: String) -> Result<uni_core::sealed_card::CardView, String>
+command async sealed_enroll(app: tauri::AppHandle, channel: String) -> Result<uni_core::sealed::EnrollmentRecord, String>
+command async sealed_enrollment_line(app: tauri::AppHandle, channel: String, reference: String) -> Result<Option<String>, String>
+command async sealed_status(app: tauri::AppHandle) -> Result<uni_core::sealed::SealedStatus, String>
+command async sealed_waiting(app: tauri::AppHandle) -> Result<Vec<uni_core::sealed_card::Waiting>, String>
+command async search(app: tauri::AppHandle, query: String, limit: Option<usize>) -> Result<Vec<SearchHitView>, String>
+command async secret_pin(app: tauri::AppHandle, channel: String, request: String) -> Result<(), String>
+command async secret_request(app: tauri::AppHandle, channel: String, request: String) -> Result<SecretRequestView, String>
+command async send_secret(app: tauri::AppHandle, channel: String, request: String, value: String) -> Result<String, String>
+command async send_typing(app: tauri::AppHandle, channel: String, root: Option<String>, parent: Option<String>) -> Result<(), String>
+command async unlock_grace(app: tauri::AppHandle) -> Option<u64>
+command async usage_set_preference(app: tauri::AppHandle, vault: String, id: String, preference: String, set_at: String, if_updated_at: String) -> Result<serde_json::Value, String>
+command async vault_attachment(app: tauri::AppHandle, vault: String, note: String, path: String) -> Result<tauri::ipc::Response, String>
+command async vault_create(app: tauri::AppHandle, vault: String, path: String, content: String) -> Result<serde_json::Value, String>
+command async vault_decide(app: tauri::AppHandle, vault: String, id: String, from: serde_json::Value, to: serde_json::Value, metadata: serde_json::Value, if_updated_at: String) -> Result<serde_json::Value, String>
+command async vault_list(app: tauri::AppHandle) -> Result<Vec<String>, String>
+command async vault_note(app: tauri::AppHandle, vault: Option<String>, note_ref: String) -> Result<VaultNote, String>
+command async vault_note_decision(app: tauri::AppHandle, vault: Option<String>, id: String, text: String, by: String, at: String) -> Result<serde_json::Value, String>
+command async vault_patch_meta(app: tauri::AppHandle, vault: String, id: String, metadata: serde_json::Value, if_updated_at: String) -> Result<serde_json::Value, String>
+command async vault_paths(app: tauri::AppHandle, vault: String) -> Result<Vec<uni_core::parachute::NotePath>, String>
+command async vault_pick_decision(app: tauri::AppHandle, vault: Option<String>, id: String, option: String, by: String, at: String, if_updated_at: String, note: Option<String>) -> Result<uni_core::parachute::Pick, String>
+command async vault_query(app: tauri::AppHandle, vault: String, tag: String, include_content: Option<bool>, limit: Option<usize>, offset: Option<usize>) -> Result<Vec<serde_json::Value>, String>
+command async vault_query_meta(app: tauri::AppHandle, vault: String, tag: String, metadata: serde_json::Value, limit: Option<usize>, offset: Option<usize>) -> Result<Vec<serde_json::Value>, String>
+command async vault_save(app: tauri::AppHandle, vault: String, id: String, content: String, if_updated_at: Option<String>, force: Option<bool>) -> Result<serde_json::Value, String>
+command async vault_search(app: tauri::AppHandle, query: String, vault: Option<String>, limit: Option<usize>, mode: Option<String>, path_prefix: Option<String>) -> Result<Vec<uni_core::parachute::NoteHit>, String>
+command async vault_subtree_nodes(app: tauri::AppHandle, vault: String, root: String) -> Result<Vec<serde_json::Value>, String>
+command async vault_subtree_tasks(app: tauri::AppHandle, vault: String, tag: String, root: String, states: Vec<String>, limit: Option<usize>) -> Result<Vec<serde_json::Value>, String>
+command async vault_transition(app: tauri::AppHandle, vault: String, id: String, from: serde_json::Value, to: serde_json::Value, if_updated_at: String, metadata: Option<serde_json::Value>) -> Result<serde_json::Value, String>
+command async voice_transcribe(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<uni_core::transcribe::Transcript, String>
+command journal_config(app: tauri::AppHandle) -> HubSetting
+command journal_set_config(app: tauri::AppHandle, hub: String, vault: String) -> Result<(), String>
+command live_stop() -> Result<(), String>
+command media_pin(sha: String) -> Result<(), String>
+command media_release(sha: String) -> Result<(), String>
+command open_link(app: tauri::AppHandle, url: String) -> Result<(), String>
+command ota::ota_apply(ota: tauri::State<'_, Arc<Ota>>) -> bool
+command ota::ota_ready(ota: tauri::State<'_, Arc<Ota>>)
+command ota::ota_refused(ota: tauri::State<'_, Arc<Ota>>, version: String, reason: String) -> bool
+command ota::ota_status(app: tauri::AppHandle, ota: tauri::State<'_, Arc<Ota>>) -> Status
+command pair_source::pair_source_available() -> bool
+command relay_origin(app: tauri::AppHandle) -> String
+command secret_requesters(app: tauri::AppHandle) -> Vec<String>
+command t76::t76_read(name: String) -> Result<Option<String>, String>
+command t76::t76_write(name: String, contents: String) -> Result<(), String>
+command webview_runtime() -> String
+crate tauri 2.11.6
+crate tauri-plugin-barcode-scanner 2.4.6
+crate tauri-plugin-clipboard-manager 2.3.3
+crate tauri-plugin-dialog 2.7.1
+crate tauri-plugin-fs 2.5.2
+crate tauri-plugin-notification 2.3.3
+crate tauri-plugin-opener 2.5.5
+crate tauri-plugin-process 2.3.1
+crate tauri-plugin-updater 2.12.0
+kotlin FilesPlugin.kt args OpenFileArgs{lateinit var path: String var mime: String? = null}
+kotlin FilesPlugin.kt args SaveFileArgs{lateinit var path: String lateinit var name: String var mime: String? = null}
+kotlin FilesPlugin.kt args SaveTextArgs{lateinit var name: String lateinit var text: String var mime: String? = null}
+kotlin FilesPlugin.kt args ShareTextArgs{lateinit var name: String lateinit var text: String var title: String? = null var mime: String? = null}
+kotlin FilesPlugin.kt command openFile
+kotlin FilesPlugin.kt command saveTextToDownloads
+kotlin FilesPlugin.kt command saveToDownloads
+kotlin FilesPlugin.kt command shareText
+kotlin KeystorePlugin.kt args AuthenticateArgs{var title: String? = null lateinit var reason: String lateinit var authenticationId: String}
+kotlin KeystorePlugin.kt args CancelAuthenticationArgs{lateinit var authenticationId: String}
+kotlin KeystorePlugin.kt args NameArgs{lateinit var name: String}
+kotlin KeystorePlugin.kt args SaveSecretArgs{lateinit var name: String lateinit var secret: String}
+kotlin KeystorePlugin.kt command authenticate
+kotlin KeystorePlugin.kt command cancelAuthenticate
+kotlin KeystorePlugin.kt command clearSecret
+kotlin KeystorePlugin.kt command lifecycle
+kotlin KeystorePlugin.kt command loadSecret
+kotlin KeystorePlugin.kt command saveSecret
+plugin files::init()
+plugin secure_store::init()
+plugin tauri_plugin_barcode_scanner::init()
+plugin tauri_plugin_clipboard_manager::init()
+plugin tauri_plugin_dialog::init()
+plugin tauri_plugin_notification::init()
+plugin tauri_plugin_opener::init()
+plugin tauri_plugin_process::init()
+plugin tauri_plugin_updater::Builder::new().build()
+protocol unimedia

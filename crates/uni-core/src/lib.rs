@@ -41,6 +41,7 @@ pub mod hub;
 pub mod parachute;
 pub mod post;
 pub mod readstate;
+pub mod remote_image;
 pub mod sealed;
 pub mod sealed_card;
 pub mod secret;

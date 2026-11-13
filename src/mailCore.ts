@@ -301,7 +301,7 @@ export const MAIL_FRAME_CSP = "default-src 'none'; style-src 'unsafe-inline'; im
  *  mail clients do: senders style for a light page, and their dark text would vanish on a dark one. */
 export function mailSrcdoc(html: string): string {
   const base = "<style>html{color-scheme:light}body{margin:16px;font:15px/1.5 system-ui,sans-serif;color:#1a1913;background:#fff;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}a{color:#2b5d8a}</style>";
-  return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${MAIL_FRAME_CSP}"><meta charset="utf-8">${base}${html}`;
+  return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${MAIL_FRAME_CSP}"><meta http-equiv="x-dns-prefetch-control" content="off"><meta charset="utf-8">${base}${html}`;
 }
 
 // ── T-210: writes ───────────────────────────────────────────────────────────────────────────────────────────────────

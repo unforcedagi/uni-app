@@ -32,6 +32,8 @@ pub const NIP98_KIND: u16 = 27235;
 pub const TRANSCRIPT_PENDING: &str = "_Transcript pending._";
 /// Largest voice note we upload (the vault's REST cap is 100 MiB).
 pub const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
+/// The largest attached image the note view reads (T-335).
+pub const MAX_ATTACHMENT_IMAGE_BYTES: u64 = 25 * 1024 * 1024;
 
 const TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -769,6 +771,48 @@ impl VaultClient {
             .map_err(save_error)?;
         check_vault_errors(&v)?;
         note_from(&v, id)
+    }
+
+    /// T-335: the bytes of an image attached to note `note_ref`, named in its body by storage `path` (`<date>/<file>`, as in
+    /// `/api/storage/<date>/<file>`). Only the note's own attachments are read: the path must be one of its attachment rows, and an
+    /// image. The bytes come over a single-use download ticket the vault mints for that row, never a URL the note supplies.
+    pub async fn attachment_image(&self, vault: &str, note_ref: &str, path: &str) -> Result<Vec<u8>> {
+        if !valid_vault_name(vault) {
+            return Err(Error::Invalid(format!("bad vault name: {vault}")));
+        }
+        let r = note_ref.trim();
+        if r.is_empty() || r.len() > 1024 {
+            return Err(Error::Invalid("note reference must be 1..1024 bytes".into()));
+        }
+        if path.is_empty() || path.len() > 1024 || path.starts_with('/') || path.chars().any(char::is_control) {
+            return Err(Error::Invalid("bad attachment path".into()));
+        }
+        let v = self
+            .call("query-notes", json!({ "vault": vault, "id": r, "include_attachments": true }))
+            .await?;
+        let note = note_from(&v, r)?;
+        let row = note["attachments"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|a| a["path"].as_str() == Some(path)))
+            .ok_or_else(|| Error::Vault("not an attachment of this note".into()))?;
+        if !crate::remote_image::is_image_type(row["mimeType"].as_str()) {
+            return Err(Error::Vault("that attachment isn't an image".into()));
+        }
+        let id = row["id"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| Error::Vault("attachment has no id".into()))?;
+        let ticket = self
+            .call("request-attachment-download", json!({ "vault": vault, "attachment_id": id }))
+            .await?;
+        let url = ticket_url(&self.current_origin(), vault, &ticket)?;
+        let res = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| Error::Vault(format!("download failed: {}", chain(&e))))?;
+        if !res.status().is_success() {
+            return Err(Error::Vault(format!("download refused ({})", res.status().as_u16())));
+        }
+        crate::remote_image::read_capped(res, MAX_ATTACHMENT_IMAGE_BYTES).await
     }
 
     /// Discover readable vaults through the same signed fan-out door.
@@ -1606,7 +1650,7 @@ fn notes_in(v: &Value) -> Vec<Value> {
 fn ticket_url(origin: &str, vault: &str, ticket: &Value) -> Result<String> {
     let raw = ticket["url"]
         .as_str()
-        .ok_or_else(|| Error::Vault("upload ticket has no url".into()))?;
+        .ok_or_else(|| Error::Vault("ticket has no url".into()))?;
     let parsed = url::Url::parse(raw).map_err(|e| Error::Vault(format!("ticket url: {e}")))?;
     let prefix = format!("/vault/{vault}/tickets/");
     let id = parsed
@@ -2942,5 +2986,90 @@ mod pick_tests {
     fn the_title_is_the_question() {
         assert_eq!(decision_title(&open_decision()), "Which layout for the garden page?");
         assert_eq!(decision_title(&json!({"path": "Decisions/2026-10-09 Which layout?"})), "Which layout?");
+    }
+}
+
+#[cfg(test)]
+mod attachment_tests {
+    use super::*;
+    use std::io::{BufRead, Read, Write};
+
+    /// A hub on loopback: `/mcp` answers query-notes and request-attachment-download (recording each call's arguments), and
+    /// `/vault/scope-test/tickets/t1` serves `bytes`.
+    fn hub(attachments: Value, bytes: &'static [u8]) -> (VaultClient, std::sync::Arc<std::sync::Mutex<Vec<(String, Value)>>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = calls.clone();
+        let base = origin.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut first = String::new();
+                reader.read_line(&mut first).unwrap();
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() { break; }
+                    if let Some(n) = line.to_lowercase().strip_prefix("content-length:") { length = n.trim().parse().unwrap(); }
+                }
+                if first.starts_with("GET /vault/scope-test/tickets/t1 ") {
+                    log.lock().unwrap().push(("GET ticket".into(), Value::Null));
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", bytes.len()).unwrap();
+                    stream.write_all(bytes).unwrap();
+                    continue;
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let body: Value = serde_json::from_slice(&body).unwrap();
+                let tool = body["params"]["name"].as_str().unwrap_or_default().to_string();
+                log.lock().unwrap().push((tool.clone(), body["params"]["arguments"].clone()));
+                let result = match tool.as_str() {
+                    "query-notes" => json!({"notes": [{"id": "n1", "path": "Field notes", "attachments": attachments}]}),
+                    // the vault names its own (internal) origin; the client re-roots it on the hub it called
+                    "request-attachment-download" => json!({"url": "http://127.0.0.1:1939/vault/scope-test/tickets/t1", "expires_at": "2026-11-13T00:00:00Z"}),
+                    _ => json!({}),
+                };
+                let text = json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": result.to_string()}]}}).to_string();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", text.len(), text).unwrap();
+            }
+        });
+        let client = VaultClient::new(VaultConfig { hub: base, vault: "scope-test".into() }, Keys::generate()).unwrap();
+        (client, calls)
+    }
+
+    fn rows() -> Value {
+        json!([
+            {"id": "a-img", "path": "2026-11-13/diagram.png", "mimeType": "image/png"},
+            {"id": "a-pdf", "path": "2026-11-13/report.pdf", "mimeType": "application/pdf"},
+        ])
+    }
+
+    #[tokio::test]
+    async fn reads_the_notes_own_image_attachment_over_a_ticket() {
+        crate::init_crypto();
+        let (client, calls) = hub(rows(), b"PNGBYTES");
+        let got = client.attachment_image("scope-test", "n1", "2026-11-13/diagram.png").await.unwrap();
+        assert_eq!(got, b"PNGBYTES");
+        let calls = calls.lock().unwrap().clone();
+        assert_eq!(calls[0], ("query-notes".into(), json!({"vault": "scope-test", "id": "n1", "include_attachments": true})));
+        assert_eq!(calls[1], ("request-attachment-download".into(), json!({"vault": "scope-test", "attachment_id": "a-img"})));
+        assert_eq!(calls[2].0, "GET ticket");
+    }
+
+    #[tokio::test]
+    async fn refuses_a_path_the_note_does_not_own_or_that_is_not_an_image() {
+        crate::init_crypto();
+        let (client, calls) = hub(rows(), b"x");
+        let other = client.attachment_image("scope-test", "n1", "2026-11-13/elsewhere.png").await.unwrap_err().to_string();
+        assert!(other.contains("not an attachment of this note"), "{other}");
+        let pdf = client.attachment_image("scope-test", "n1", "2026-11-13/report.pdf").await.unwrap_err().to_string();
+        assert!(pdf.contains("isn't an image"), "{pdf}");
+        assert!(calls.lock().unwrap().iter().all(|(t, _)| t == "query-notes"), "no ticket was minted for either");
+        for bad in ["", "/2026/x.png", "a\nb"] {
+            assert!(client.attachment_image("scope-test", "n1", bad).await.is_err(), "{bad:?}");
+        }
     }
 }

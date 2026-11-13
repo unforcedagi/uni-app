@@ -4,7 +4,7 @@ import { recordingHolder } from "./recLock.ts";
 
 /** The shell command API these screens were built against. Must equal `SHELL_API` in src-tauri/src/ota.rs
  *  (scripts/ota.test.ts); scripts/ota-bundle.sh writes it into each bundle's uni-bundle.json. */
-export const SHELL_API = 3;
+export const SHELL_API = 4;
 
 export type OtaStatus = {
   shell_api: number;

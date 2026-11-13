@@ -2,7 +2,10 @@
 // opened (and when, and from where), so it shows as a link with a "Load image" tap for that one image; the vault's own attachments
 // still show. Two walls: the renderer (no remote src ever reaches the DOM; raw HTML in a note is never rendered) and the app's CSP
 // (tauri.conf.json, which vite serves here as the packaged app does), which refuses anything that slips past the renderer.
-// The tracker is made up (`tracker.example`); page.route serves it, so any request the webview makes is seen and answered for real.
+// The tracker is made up (`tracker.example`); page.route serves it, and a request counts only when it reaches that handler (Chromium
+// reports a load the CSP blocked as a `request` event too, so those events prove nothing). The CSP test also aims every kind at a
+// real HTTP server on this machine (`localhost`, which no CSP source names) and counts what arrives.
+import http from 'node:http';
 import { test, expect, type Page } from '@playwright/test';
 import { startInRoom } from './startInRoom';
 
@@ -14,8 +17,7 @@ type Seen = { tracker: string[] };
 
 async function boot(page: Page, content: string, opts: { attachment?: string } = {}): Promise<Seen> {
   const seen: Seen = { tracker: [] };
-  page.on('request', (r) => { if (r.url().startsWith(TRACKER)) seen.tracker.push(r.url()); });
-  await page.route(`${TRACKER}/**`, (route) => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(PNG, 'base64') }));
+  await page.route(`${TRACKER}/**`, (route) => { seen.tracker.push(route.request().url()); return route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(PNG, 'base64') }); });
   await page.addInitScript(({ content, png, attachment }) => {
     const w = window as any;
     const bytes = () => Uint8Array.from(atob(png), (c) => c.charCodeAt(0)).buffer;
@@ -106,37 +108,52 @@ test('raw HTML in a note loads nothing: img, CSS url(), stylesheets, prefetch, a
   await expect(page.locator('.note-body').locator('img, iframe, audio, video, source, link, style, object, embed, image, picture')).toHaveCount(0);
 });
 
-test('the CSP refuses every content-driven load that reaches the page anyway', async ({ page }) => {
-  const seen = await boot(page, '# Wall\n\nNothing here.');
-  const violated = await page.evaluate(async (T) => {
-    const v: string[] = [];
-    document.addEventListener('securitypolicyviolation', (e) => v.push(`${e.effectiveDirective} ${e.blockedURI}`));
-    const add = (html: string) => { const d = document.createElement('div'); d.innerHTML = html; document.body.appendChild(d); };
-    add(`<img src="${T}/img.png">`);
-    add(`<div style="width:10px;height:10px;background:url(${T}/css-attr.png)"></div>`);
-    const s = document.createElement('style'); s.textContent = `@import url(${T}/import.css); .x-bg { background: url(${T}/css-style.png) } @font-face { font-family: tracked; src: url(${T}/font.woff2) } .x-font { font-family: tracked }`;
-    document.head.appendChild(s);
-    add('<div class="x-bg" style="width:10px;height:10px"></div><p class="x-font">font</p>');
-    for (const [rel, extra] of [['stylesheet', ''], ['prefetch', ''], ['preload', ' as="image"'], ['preload', ' as="fetch" crossorigin']] as const) {
-      add(`<link rel="${rel}"${extra} href="${T}/${rel}-${extra ? 'x' : 'plain'}">`);
-    }
-    add(`<audio src="${T}/audio.mp3" autoplay></audio><video src="${T}/video.mp4" poster="${T}/poster.png" muted autoplay></video>`);
-    add(`<iframe src="${T}/frame"></iframe><object data="${T}/object" type="text/html"></object><embed src="${T}/embed" type="text/html">`);
-    add(`<svg width="10" height="10"><image href="${T}/svg.png" width="10" height="10"/></svg>`);
-    await new FontFace('tracked2', `url(${T}/fontface.woff2)`).load().catch(() => {});
-    await fetch(`${T}/fetch`).catch(() => {});
-    navigator.sendBeacon(`${T}/beacon`, 'x');
-    await new Promise<void>((r) => { const x = new XMLHttpRequest(); x.open('GET', `${T}/xhr`); x.onloadend = () => r(); try { x.send(); } catch { r(); } });
-    try { new EventSource(`${T}/events`); } catch { /* refused */ }
-    try { new WebSocket('wss://tracker.example/ws'); } catch { /* refused */ }
-    await new Promise((r) => setTimeout(r, 1200));
-    return v;
-  }, TRACKER);
-  await settle(page);
-  expect(seen.tracker, 'nothing reached the tracker').toEqual([]);
-  const directives = new Set(violated.map((x) => x.split(' ')[0]));
-  for (const d of ['img-src', 'style-src-elem', 'font-src', 'media-src', 'frame-src', 'object-src', 'connect-src']) expect([...directives], d).toContain(d);
-});
+/** A real server: every request it gets is logged, and answered as an image (so nothing fails for a reason other than the CSP). */
+async function listener() {
+  const urls: string[] = [];
+  const server = http.createServer((req, res) => { urls.push(req.url ?? ''); res.writeHead(200, { 'content-type': 'image/png', 'access-control-allow-origin': '*' }); res.end(Buffer.from(PNG, 'base64')); });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  return { origin: `http://localhost:${(server.address() as { port: number }).port}`, urls, close: () => { server.closeAllConnections?.(); return new Promise<void>((r) => server.close(() => r())); } };
+}
+
+for (const target of ['tracker', 'listener'] as const) {
+  test(`the CSP refuses every content-driven load that reaches the page anyway (${target})`, async ({ page }) => {
+    const L = await listener();
+    try {
+      const seen = await boot(page, '# Wall\n\nNothing here.');
+      const T = target === 'tracker' ? TRACKER : L.origin;
+      const violated = await page.evaluate(async (T) => {
+        const v: string[] = [];
+        document.addEventListener('securitypolicyviolation', (e) => v.push(`${e.effectiveDirective} ${e.blockedURI}`));
+        const add = (html: string) => { const d = document.createElement('div'); d.innerHTML = html; document.body.appendChild(d); };
+        add(`<img src="${T}/img.png">`);
+        add(`<div style="width:10px;height:10px;background:url(${T}/css-attr.png)"></div>`);
+        const s = document.createElement('style'); s.textContent = `@import url(${T}/import.css); .x-bg { background: url(${T}/css-style.png) } @font-face { font-family: tracked; src: url(${T}/font.woff2) } .x-font { font-family: tracked }`;
+        document.head.appendChild(s);
+        add('<div class="x-bg" style="width:10px;height:10px"></div><p class="x-font">font</p>');
+        for (const [rel, extra] of [['stylesheet', ''], ['prefetch', ''], ['preload', ' as="image"'], ['preload', ' as="fetch" crossorigin']] as const) {
+          add(`<link rel="${rel}"${extra} href="${T}/${rel}-${extra ? 'x' : 'plain'}">`);
+        }
+        add(`<audio src="${T}/audio.mp3" autoplay></audio><video src="${T}/video.mp4" poster="${T}/poster.png" muted autoplay></video>`);
+        add(`<iframe src="${T}/frame"></iframe><object data="${T}/object" type="text/html"></object><embed src="${T}/embed" type="text/html">`);
+        add(`<svg width="10" height="10"><image href="${T}/svg.png" width="10" height="10"/></svg>`);
+        await new FontFace('tracked2', `url(${T}/fontface.woff2)`).load().catch(() => {});
+        await fetch(`${T}/fetch`).catch(() => {});
+        try { navigator.sendBeacon(`${T}/beacon`, 'x'); } catch { /* refused */ }
+        await new Promise<void>((r) => { const x = new XMLHttpRequest(); x.open('GET', `${T}/xhr`); x.onloadend = () => r(); try { x.send(); } catch { r(); } });
+        try { new EventSource(`${T}/events`); } catch { /* refused */ }
+        try { new WebSocket(T.replace(/^http/, 'ws') + '/ws'); } catch { /* refused */ }
+        await new Promise((r) => setTimeout(r, 1500));
+        return v;
+      }, T);
+      await settle(page);
+      expect(seen.tracker, 'nothing reached the tracker').toEqual([]);
+      expect(L.urls, 'nothing reached the real server').toEqual([]);
+      const directives = new Set(violated.map((x) => x.split(' ')[0]));
+      for (const d of ['img-src', 'style-src-elem', 'font-src', 'media-src', 'frame-src', 'object-src', 'connect-src']) expect([...directives], d).toContain(d);
+    } finally { await L.close(); }
+  });
+}
 
 test('an image attached to the note still shows, read through the app', async ({ page }) => {
   const seen = await boot(page, '# Field notes\n\n![diagram](/api/storage/2026-11-13/diagram.png)\n\n![other note\'s](/api/storage/2026-11-13/elsewhere.png)', { attachment: '2026-11-13/diagram.png' });

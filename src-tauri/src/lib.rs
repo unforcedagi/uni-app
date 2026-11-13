@@ -2708,6 +2708,31 @@ async fn vault_note(
     .await
 }
 
+/// T-335: an image attached to note `note` (its storage `path`, `<date>/<file>`), for the note view: only the note's own image
+/// attachments, read over a vault download ticket (`VaultClient::attachment_image`). Raw bytes, made a `blob:` URL in the webview,
+/// which itself never reaches the vault (the CSP refuses it).
+#[tauri::command]
+async fn vault_attachment(
+    app: tauri::AppHandle,
+    vault: String,
+    note: String,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.attachment_image(vault.trim(), &note, &path)).map_err(|e| e.to_string())
+    })
+    .await?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// T-335: the one remote image a person tapped "Load image" for (`uni_core::remote_image`): no cookies, credentials or
+/// referrer, never this device, images only. Content never fetches anything by itself; this runs only from that tap.
+#[tauri::command]
+async fn remote_image(url: String) -> Result<tauri::ipc::Response, String> {
+    let bytes = uni_core::remote_image::fetch(&url).await.map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Search Parachute notes by meaning, signed with this device's Nostr key
 /// (NIP-98) — the same door as the Journal and note view. `vault: None`
 /// searches every vault the key can read.
@@ -3343,6 +3368,8 @@ pub fn run() {
             journal_list,
             journal_entry,
             vault_note,
+            vault_attachment,
+            remote_image,
             vault_search,
             vault_list,
             vault_paths,

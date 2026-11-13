@@ -986,7 +986,7 @@ fn client_with(timeout: Duration, redirect: reqwest::redirect::Policy) -> Result
         .map_err(|e| Error::Media(format!("http client: {e}")))
 }
 
-fn client_builder(redirect: reqwest::redirect::Policy) -> Result<reqwest::ClientBuilder> {
+pub(crate) fn client_builder(redirect: reqwest::redirect::Policy) -> Result<reqwest::ClientBuilder> {
     // Mozilla roots (the same set tokio-tungstenite uses for the relay socket),
     // not the platform verifier: that one needs JNI setup on Android.
     let mut roots = rustls::RootCertStore::empty();

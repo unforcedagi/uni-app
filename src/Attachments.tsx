@@ -1,5 +1,5 @@
 // Message attachments: Buzz relay media (imeta + Blossom-authenticated fetch
-// in Rust) and previews of plain third-party image links. Images come through
+// in Rust) and plain third-party image links (T-335: a "Load image" tap each, RemoteImage.tsx). Images come through
 // the `media_bytes` command → `blob:` URL, like Buzz desktop's
 // `fetch_media_bytes`; video and audio are streamed to the disk cache by
 // `media_stream` and played from the local `unimedia` protocol, or on Linux
@@ -13,6 +13,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { pdfThumbnail } from "./pdfPreview";
 import { holdTop, trapTab } from "./areas/focusTrap";
+import { ChatLinkImage } from "./RemoteImage";
 import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, playerPin, relayMediaSha, stripAttachmentLines, type MediaRef } from "./media";
 
 export type { MediaRef } from "./media";
@@ -270,15 +271,6 @@ function RelayFile({ m }: { m: MediaRef }) {
   </div>;
 }
 
-function LinkImage({ url, onOpen }: { url: string; onOpen: Open }) {
-  const [ref, visible] = useVisible<HTMLButtonElement>();
-  const [failed, setFailed] = useState(false);
-  if (failed) return null;
-  return <button ref={ref} className="attachment-image" onClick={() => onOpen(url, url)} aria-label={`Open image ${url}`}>
-    {visible && <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />}
-  </button>;
-}
-
 /**
  * An image filling the window. T-260 (Codex r2): the same dialog contract as the full-screen video: rendered at the body, the app
  * behind it inert, Tab and Shift+Tab kept among its own buttons, Escape (and Android Back, which sends one) closes only it, and focus
@@ -471,14 +463,14 @@ export const Attachments = memo(function Attachments({ body, media }: { body: st
       const kind = attachmentKind(m);
       const onRelay = !!relayMediaSha(m.url, relayOrigin);
       if (!onRelay) {
-        // Off-relay imeta: never send our auth there. Images load directly.
-        return kind === "image" && m.url.startsWith("https://") ? <LinkImage key={m.url} url={m.url} onOpen={onOpen} /> : null;
+        // Off-relay imeta: never send our auth there. T-335: and never fetched on sight: a "Load image" tap fetches it.
+        return kind === "image" && m.url.startsWith("https://") ? <ChatLinkImage key={m.url} url={m.url} onOpen={onOpen} /> : null;
       }
       if (kind === "image") return <RelayImage key={m.url} m={m} onOpen={onOpen} />;
       if (kind === "video" || kind === "audio") return <RelayPlayer key={m.url} m={m} />;
       return <RelayFile key={m.url} m={m} />;
     })}
-    {links.map((u) => <LinkImage key={u} url={u} onOpen={onOpen} />)}
+    {links.map((u) => <ChatLinkImage key={u} url={u} onOpen={onOpen} />)}
     {open && <Lightbox src={open.src} alt={open.alt} m={open.m} onClose={() => setOpen(null)} />}
   </div>;
 });

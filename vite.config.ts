@@ -2,12 +2,15 @@ import { readFileSync } from "node:fs";
 import { build, defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
-// The app's CSP lives in tauri.conf.json (a frame-src that allows only srcdoc
-// frames, so a sandboxed area app can't navigate itself). Serve the same policy
-// from the dev and preview servers so they behave like the packaged app.
+// The app's CSP lives in tauri.conf.json: a frame-src that allows only srcdoc frames (a sandboxed area app can't navigate
+// itself), and (T-335) no remote image, media, style, font or connection, so nothing a note or message says is fetched. Serve
+// the same policy from the dev and preview servers so they behave like the packaged app (the dev server also lets in its own
+// hot-reload socket).
 const csp = JSON.parse(readFileSync(new URL("./src-tauri/tauri.conf.json", import.meta.url), "utf8")).app?.security?.csp as Record<string, string> | string | null | undefined;
-const cspHeader = typeof csp === "string" ? csp : csp ? Object.entries(csp).map(([k, v]) => `${k} ${v}`).join("; ") : null;
-const headers = cspHeader ? { "Content-Security-Policy": cspHeader } : undefined;
+const cspHeader = (extra: Record<string, string> = {}) => typeof csp === "string" ? csp : csp ? Object.entries(csp).map(([k, v]) => `${k} ${v}${extra[k] ? ` ${extra[k]}` : ""}`).join("; ") : null;
+const asHeaders = (h: string | null) => h ? { "Content-Security-Policy": h } : undefined;
+const headers = asHeaders(cspHeader());
+const devHeaders = asHeaders(cspHeader({ "connect-src": "ws://127.0.0.1:1420 ws://localhost:1420" }));
 
 // surface-client's VaultClient, bundled once to an IIFE string that the host
 // injects into every sealed frame (src/interface/kits). Pure TS, no deps.
@@ -50,7 +53,7 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: "127.0.0.1",
-    headers,
+    headers: devHeaders,
     watch: {
       ignored: ["**/src-tauri/**"],
     },

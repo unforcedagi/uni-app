@@ -1,7 +1,8 @@
 // The srcdoc for a sealed interface. Pure: data in, string out.
 
 export const FRAME_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
-export const CSP_META = `<meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}">`;
+// T-335: and no DNS lookup ahead of a tap for a host the app's markup names (CSP can't stop those).
+export const CSP_META = `<meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}"><meta http-equiv="x-dns-prefetch-control" content="off">`;
 
 // WebRTC ignores CSP. This removes it from the app's own realm before app code
 // runs. It is NOT a seal: a srcdoc child frame is a fresh realm. The seal is a
