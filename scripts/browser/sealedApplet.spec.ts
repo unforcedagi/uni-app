@@ -307,6 +307,28 @@ test.describe('the frame\'s reach', () => {
     expect((await calls(page, 'vault_paths')).length, 'one cached listing').toBeLessThanOrEqual(1);
   });
 
+  // T-335: an applet that shows note content puts it in its own markup. Whatever that markup names (an image, a CSS url(), a font,
+  // a style sheet, a prefetch, audio, video, a poster, a frame, an object, an SVG image) is never fetched: the frame's CSP refuses
+  // it, and the listener (a real server on this machine) sees nothing.
+  test('markup in a frame loads nothing it names: images, CSS url(), fonts, style sheets, prefetch, media, frames, objects', async ({ page }) => {
+    const L = await startListener();
+    try {
+      const T = `http://127.0.0.1:${L.ports.http}/leak`;
+      const html = `<!doctype html><html><head><link rel="stylesheet" href="${T}?sheet"><link rel="prefetch" href="${T}?prefetch"><link rel="preload" as="image" href="${T}?preload">
+        <style>@import url(${T}?import); body { background: url(${T}?css-style) } @font-face { font-family: tracked; src: url(${T}?font) } p { font-family: tracked }</style></head>
+        <body><p id="x">note</p><img src="${T}?img"><div style="width:9px;height:9px;background:url(${T}?css-attr)"></div>
+        <picture><source srcset="${T}?srcset"><img src="${T}?picture"></picture><audio src="${T}?audio" autoplay></audio>
+        <video src="${T}?video" poster="${T}?poster" muted autoplay></video><video><source src="${T}?source"></video>
+        <iframe src="${T}?frame"></iframe><object data="${T}?object"></object><embed src="${T}?embed"><svg width="9" height="9"><image href="${T}?svg" width="9" height="9"/></svg>
+        <script>document.getElementById('x').textContent = 'rendered';</script></body></html>`;
+      await bootSealed(page, { applets: [seedListApplet({ html })] });
+      await openFromDrawer(page, 'Seed list');
+      await expect(frame(page).locator('#x')).toHaveText('rendered');
+      await page.waitForTimeout(1500);
+      expect(L.urls, 'nothing the markup named reached the listener').toEqual([]);
+    } finally { await L.close(); }
+  });
+
   test('a hostile applet is contained', async ({ page, browserName }) => {
     test.setTimeout(120000);
     const L = await startListener();
