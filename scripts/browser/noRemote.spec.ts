@@ -74,13 +74,15 @@ test('a remote image in a note is never fetched: it shows as a link with a Load 
 });
 
 test('Load image fetches that one image, through the app, and no other', async ({ page }) => {
-  const seen = await boot(page, '![first](https://tracker.example/one.png)\n\n![second](https://tracker.example/two.png)\n\n[![linked](https://tracker.example/three.png)](https://www.example.org/)\n\n![ref][r]\n\n[r]: https://tracker.example/four.png');
+  const seen = await boot(page, '![first](https://tracker.example/one.png)\n\n![second](https://tracker.example/two.png)\n\n[![linked](https://tracker.example/three.png)](https://www.example.org/)\n\n[![](https://tracker.example/badge.png)](https://www.example.org/badge)\n\n![ref][r]\n\n[r]: https://tracker.example/four.png');
   await settle(page);
   const body = page.locator('.note-body');
   // an image inside a link is that link's words only: no second link, no button inside a link; the link itself still works
   const linked = body.locator('a[href="https://www.example.org/"]');
   await expect(linked).toHaveText('linked');
   await expect(linked.locator('a, button, img')).toHaveCount(0);
+  // a badge with no words still has something to tap: its host
+  await expect(body.locator('a[href="https://www.example.org/badge"]')).toHaveText('tracker.example image');
   await expect(body.getByRole('button', { name: /^Load image/ })).toHaveCount(3);
   await body.getByRole('button', { name: 'Load image: first' }).click();
   const img = body.locator('img');

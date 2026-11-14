@@ -797,8 +797,9 @@ impl VaultClient {
             .ok_or_else(|| Error::Vault("not an attachment of this note".into()))?;
         // a row with no type, or a generic one, is judged by its file name (an upload that didn't say what it was)
         let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
-        let mime = match row["mimeType"].as_str().map(str::trim).filter(|m| !m.is_empty() && *m != "application/octet-stream") {
-            Some(m) => m.to_string(),
+        let given = row["mimeType"].as_str().map(|m| m.split(';').next().unwrap_or("").trim().to_ascii_lowercase()).unwrap_or_default();
+        let mime = match Some(given).filter(|m| !m.is_empty() && !m.ends_with("/octet-stream")) {
+            Some(m) => m,
             None => match ext.as_str() {
                 "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" => format!("image/{ext}"),
                 "svg" => "image/svg+xml".into(),
@@ -3060,6 +3061,7 @@ mod attachment_tests {
             {"id": "a-svg", "path": "2026-11-13/chart.svg", "mimeType": "image/svg+xml"},
             {"id": "a-untyped", "path": "2026-11-13/scan.jpg", "mimeType": "application/octet-stream"},
             {"id": "a-untyped-svg", "path": "2026-11-13/sketch.svg"},
+            {"id": "a-binary", "path": "2026-11-13/photo.PNG", "mimeType": "Binary/Octet-Stream; x=1"},
             {"id": "a-untyped-bin", "path": "2026-11-13/data.bin"},
         ])
     }
@@ -3082,6 +3084,7 @@ mod attachment_tests {
         let (client, calls) = hub(rows(), b"JPEG");
         assert_eq!(client.attachment_image("scope-test", "n1", "2026-11-13/scan.jpg").await.unwrap(), b"JPEG");
         assert_eq!(calls.lock().unwrap()[1].1["attachment_id"], "a-untyped");
+        assert_eq!(client.attachment_image("scope-test", "n1", "2026-11-13/photo.PNG").await.unwrap(), b"JPEG", "any */octet-stream, any case");
     }
 
     #[tokio::test]
