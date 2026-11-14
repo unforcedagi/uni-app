@@ -42,7 +42,7 @@ export function RemoteImage({ url, alt, Link }: { url: string; alt: string; Link
   return <span className="note-image-remote">
     {inLink ? <span className="note-image-words">{words}</span> : <Link href={url} className="note-image-link">{words}</Link>}
     {img.busy ? <span className="note-image-state" role="status">Loading image…</span>
-      : <button type="button" className="note-image-load" aria-label={`Load image: ${label}`} title="Loads this one image from its site, which then knows it was opened"
+      : <button type="button" className="note-image-load" aria-label={`Load image: ${label}`} title={img.error ?? "Loads this one image from its site, which then knows it was opened"}
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (img.error) img.retry(); else setAsked(true); }}>
           {img.error ? "Couldn't load · Retry" : "Load image"}
         </button>}
@@ -86,7 +86,7 @@ export function ChatLinkImage({ url, onOpen }: { url: string; onOpen: (src: stri
   return <div className="attachment-remote">
     <span className="attachment-remote-host" title={url}>🖼 {host}</span>
     {img.busy ? <small role="status">Loading image…</small>
-      : <button type="button" className="attachment-save attachment-save-pill" aria-label={`Load image from ${host}`} title="Loads this one image from its site, which then knows it was opened"
+      : <button type="button" className="attachment-save attachment-save-pill" aria-label={`Load image from ${host}`} title={img.error ?? "Loads this one image from its site, which then knows it was opened"}
           onClick={() => { if (img.error) img.retry(); else setAsked(true); }}>{img.error ? "Couldn't load · Retry" : "Load image"}</button>}
   </div>;
 }

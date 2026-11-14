@@ -795,6 +795,9 @@ impl VaultClient {
             .as_array()
             .and_then(|rows| rows.iter().find(|a| a["path"].as_str() == Some(path)))
             .ok_or_else(|| Error::Vault("not an attachment of this note".into()))?;
+        if crate::remote_image::is_svg(row["mimeType"].as_str()) {
+            return Err(Error::Vault("SVG attachments aren't shown in the app".into()));
+        }
         if !crate::remote_image::is_image_type(row["mimeType"].as_str()) {
             return Err(Error::Vault("that attachment isn't an image".into()));
         }
@@ -3044,6 +3047,7 @@ mod attachment_tests {
         json!([
             {"id": "a-img", "path": "2026-11-13/diagram.png", "mimeType": "image/png"},
             {"id": "a-pdf", "path": "2026-11-13/report.pdf", "mimeType": "application/pdf"},
+            {"id": "a-svg", "path": "2026-11-13/chart.svg", "mimeType": "image/svg+xml"},
         ])
     }
 
@@ -3067,6 +3071,8 @@ mod attachment_tests {
         assert!(other.contains("not an attachment of this note"), "{other}");
         let pdf = client.attachment_image("scope-test", "n1", "2026-11-13/report.pdf").await.unwrap_err().to_string();
         assert!(pdf.contains("isn't an image"), "{pdf}");
+        let svg = client.attachment_image("scope-test", "n1", "2026-11-13/chart.svg").await.unwrap_err().to_string();
+        assert!(svg.contains("SVG attachments aren't shown"), "{svg}");
         assert!(calls.lock().unwrap().iter().all(|(t, _)| t == "query-notes"), "no ticket was minted for either");
         for bad in ["", "/2026/x.png", "a\nb"] {
             assert!(client.attachment_image("scope-test", "n1", bad).await.is_err(), "{bad:?}");

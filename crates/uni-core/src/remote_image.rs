@@ -87,6 +87,14 @@ pub fn is_image_type(content_type: Option<&str>) -> bool {
         .is_some_and(|c| c.starts_with("image/") && c.len() > "image/".len() && !c.starts_with("image/svg"))
 }
 
+/// What the app says for an SVG it won't show (open the link instead).
+pub const SVG_REFUSED: &str = "SVG images aren't shown in the app; open the link to see it";
+
+/// `image/svg…`: an image type the app refuses, as opposed to something that isn't an image.
+pub fn is_svg(content_type: Option<&str>) -> bool {
+    content_type.is_some_and(|c| c.trim().to_ascii_lowercase().starts_with("image/svg"))
+}
+
 /// Fetch the image at `url` (see the module docs).
 pub async fn fetch(url: &str) -> Result<Vec<u8>> {
     fetch_with(url, check_url).await
@@ -110,6 +118,8 @@ async fn fetch_with(url: &str, check: fn(&str) -> Result<url::Url>) -> Result<Ve
         // many image hosts refuse a request with no User-Agent; this one names the app, never the person or device
         .user_agent(USER_AGENT)
         .dns_resolver(OffDevice)
+        // a proxy would resolve the host itself, past the rule above
+        .no_proxy()
         .referer(false)
         .build()
         .map_err(|e| Error::Media(format!("http client: {e}")))?;
@@ -124,6 +134,9 @@ async fn fetch_with(url: &str, check: fn(&str) -> Result<url::Url>) -> Result<Ve
         return Err(Error::Media(format!("the image's server answered {status}")));
     }
     let ct = resp.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(str::to_string);
+    if is_svg(ct.as_deref()) {
+        return Err(Error::Media(SVG_REFUSED.into()));
+    }
     if !is_image_type(ct.as_deref()) {
         return Err(Error::Media("that address isn't an image".into()));
     }
@@ -220,6 +233,7 @@ mod tests {
         let (base, seen) = serve(vec![
             ("/a.png", format!("HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncontent-length: {}\r\n\r\n{png}", png.len())),
             ("/page", "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: 2\r\n\r\nhi".into()),
+            ("/logo.svg", "HTTP/1.1 200 OK\r\ncontent-type: image/svg+xml\r\ncontent-length: 6\r\n\r\n<svg/>".into()),
             ("/huge.png", format!("HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncontent-length: {}\r\n\r\n", MAX_REMOTE_IMAGE_BYTES + 1)),
         ]);
         let got = fetch_with(&format!("{base}/a.png"), loopback_ok).await.unwrap();
@@ -228,6 +242,7 @@ mod tests {
         assert!(!req.contains("cookie") && !req.contains("referer") && !req.contains("authorization"), "{req}");
         assert!(req.contains("user-agent: mozilla/5.0 (compatible; uni image loader)"), "{req}");
         assert!(fetch_with(&format!("{base}/page"), loopback_ok).await.unwrap_err().to_string().contains("isn't an image"));
+        assert!(fetch_with(&format!("{base}/logo.svg"), loopback_ok).await.unwrap_err().to_string().contains("SVG images aren't shown"));
         assert!(fetch_with(&format!("{base}/huge.png"), loopback_ok).await.unwrap_err().to_string().contains("larger than"));
         assert!(fetch_with(&format!("{base}/missing.png"), loopback_ok).await.unwrap_err().to_string().contains("404"));
     }
