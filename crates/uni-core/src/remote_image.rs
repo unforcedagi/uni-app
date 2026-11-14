@@ -14,6 +14,7 @@ use crate::{Error, Result};
 pub const MAX_REMOTE_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REDIRECTS: usize = 5;
+const USER_AGENT: &str = "Mozilla/5.0 (compatible; Uni image loader)";
 
 /// A URL this may fetch: http(s), a host, no user or password, and not this device.
 pub fn check_url(raw: &str) -> Result<url::Url> {
@@ -79,6 +80,8 @@ async fn fetch_with(url: &str, check: fn(&str) -> Result<url::Url>) -> Result<Ve
     });
     let client = crate::media::client_builder(policy)?
         .timeout(TIMEOUT)
+        // many image hosts refuse a request with no User-Agent; this one names the app, never the person or device
+        .user_agent(USER_AGENT)
         .referer(false)
         .build()
         .map_err(|e| Error::Media(format!("http client: {e}")))?;
@@ -195,6 +198,7 @@ mod tests {
         assert_eq!(got, png.as_bytes());
         let req = seen.lock().unwrap()[0].to_ascii_lowercase();
         assert!(!req.contains("cookie") && !req.contains("referer") && !req.contains("authorization"), "{req}");
+        assert!(req.contains("user-agent: mozilla/5.0 (compatible; uni image loader)"), "{req}");
         assert!(fetch_with(&format!("{base}/page"), loopback_ok).await.unwrap_err().to_string().contains("isn't an image"));
         assert!(fetch_with(&format!("{base}/huge.png"), loopback_ok).await.unwrap_err().to_string().contains("larger than"));
         assert!(fetch_with(&format!("{base}/missing.png"), loopback_ok).await.unwrap_err().to_string().contains("404"));
