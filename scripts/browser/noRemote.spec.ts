@@ -169,3 +169,60 @@ test('an image attached to the note still shows, read through the app', async ({
   expect(seen.tracker).toEqual([]);
   expect(await calls(page, 'remote_image')).toEqual([]);
 });
+
+// Chat follows the same rule: an image link in a message (or an image attachment off the relay) used to preview on sight; now it is a
+// "Load image" tap, fetched through the app, and opens large from that copy.
+test('an image link in a chat message is not fetched until its Load image tap', async ({ page }) => {
+  const seen: Seen = { tracker: [] };
+  await page.route(`${TRACKER}/**`, (route) => { seen.tracker.push(route.request().url()); return route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(PNG, 'base64') }); });
+  await page.addInitScript(({ png }) => {
+    const w = window as any;
+    const bytes = () => Uint8Array.from(atob(png), (c) => c.charCodeAt(0)).buffer;
+    w.__calls = [];
+    const now = Math.floor(Date.now() / 1000);
+    const msg = (ref: string, ts: number, body: string, media: unknown[]) => ({ ref, channel: 'test', author: 'b'.repeat(64), author_name: 'Test member', ts, body,
+      mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [], media });
+    const messages = [
+      msg('m1', now - 60, 'Look at this https://tracker.example/photo.jpg', []),
+      msg('m2', now - 30, 'And this one', [{ url: 'https://tracker.example/attached.png', mime: 'image/png', sha256: null, size: 70, dim: null, blurhash: null, alt: null, filename: 'attached.png' }]),
+    ];
+    w.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
+      transformCallback: () => 1,
+      invoke: async (cmd: string, args: any) => {
+        w.__calls.push({ cmd, args });
+        switch (cmd) {
+          case 'identity_status': return { paired: true, pubkey: 'a'.repeat(64) };
+          case 'get_identity': return 'a'.repeat(64);
+          case 'relay_origin': return 'https://relay.example';
+          case 'get_npub': return 'test';
+          case 'get_rooms': return [{ id: 'test', name: 'Test room', unread: 0 }];
+          case 'get_members': return [{ pubkey: 'b'.repeat(64), name: 'Test member' }];
+          case 'get_messages': return messages;
+          case 'vault_list': return [];
+          case 'journal_config': return { hub: 'test' };
+          case 'refresh': return { total_items: 2, channel_errors: {}, truncated_channels: [] };
+          case 'remote_image': return bytes();
+          default: return null;
+        }
+      },
+    };
+    w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+  }, { png: PNG });
+  await startInRoom(page, 'test');
+  await page.goto('/');
+  const load = page.getByRole('button', { name: 'Load image from tracker.example' });
+  await expect(load).toHaveCount(2);
+  await settle(page);
+  expect(seen.tracker, 'showing the room told the image server nothing').toEqual([]);
+  await expect(page.locator('.attachments img')).toHaveCount(0);
+  await load.first().click();
+  const shown = page.getByRole('button', { name: 'Open image https://tracker.example/photo.jpg' });
+  await expect(shown.locator('img')).toHaveAttribute('src', /^blob:/);
+  expect(await calls(page, 'remote_image')).toEqual([{ url: 'https://tracker.example/photo.jpg' }]);
+  await expect(load).toHaveCount(1);
+  await shown.click();
+  await expect(page.locator('.lightbox img')).toHaveAttribute('src', /^blob:/);
+  await settle(page);
+  expect(seen.tracker).toEqual([]);
+});

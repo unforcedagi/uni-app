@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test';
 // T-335: a note's content never makes the webview fetch anything (scripts/browser/noRemote.spec.ts). Served by vite preview with the
 // app's CSP from tauri.conf.json, as the packaged app is. NOREMOTE_TEST_PORT: another worktree's preview may hold the default.
-const port = Number(process.env.NOREMOTE_TEST_PORT || 1447);
+const port = Number(process.env.NOREMOTE_TEST_PORT || 1449);
 export default defineConfig({
   outputDir: 'test-results/noremote',
   testDir: './scripts/browser', testMatch: /noRemote\.spec\.ts$/, reporter: 'list',
