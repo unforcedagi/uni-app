@@ -326,7 +326,8 @@ Inter (400–600) as `data:` fonts.
 The frame is `<iframe srcdoc sandbox="allow-scripts">` (opaque origin: no storage, no cookies, no Tauri,
 no top navigation), with an app CSP inserted before any app markup
 (`default-src 'none'; … connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'`),
-inside a host whose own CSP allows only `frame-src about:`. That host CSP is what stops navigation of the
+inside a host whose own CSP allows only `frame-src about:` (and, since T-335, no remote image, media, style, font or
+connection either: see "Host CSP trade-off" below). That host CSP is what stops navigation of the
 frame (self, meta refresh, link, `document.write`, and navigation **during parse**). The host listens for
 the resulting `frame-src` violation and stops the app.
 
@@ -412,9 +413,13 @@ mode, so inline handlers injected from data do not run (the frame CSP is still `
 
 ### Host CSP trade-off and guards (T-77b)
 
-The host CSP is `frame-src about:` only: `dangerousDisableAssetCspModification: ["script-src"]` stops Tauri adding
-`'self'` and inline-script hashes, because a `srcdoc` frame inherits the embedder's policy and its inline scripts
-would otherwise be blocked. The cost: the host has **no `script-src`**, and `withGlobalTauri` is on, so any HTML sink
+The host CSP was `frame-src about:` only. T-335 added the rest, so nothing a note or message names is fetched:
+`default-src 'self'`, no remote `img-src` / `media-src` / `style-src` / `font-src` / `connect-src`, `object-src 'none'`
+(the one remote source is published media on the hub's tailnet host, `https://*.ts.net:8444`; `scripts/areasR3.test.ts`
+P1-1 pins the policy). `dangerousDisableAssetCspModification: ["script-src", "style-src"]` stops Tauri adding nonces or
+inline hashes, because a `srcdoc` frame inherits the embedder's policy and its inline scripts and styles would otherwise
+be blocked. The cost: the host's `script-src` keeps `'unsafe-inline'` (and refuses only remote scripts), and
+`withGlobalTauri` is on, so any HTML sink
 in `src/` would be script execution with the full Tauri command surface. Guard: `scripts/htmlSinks.test.ts` (part of
 `npm test`) fails on `dangerouslySetInnerHTML`, `.innerHTML =`, `insertAdjacentHTML`, `document.write`, `rehype-raw`,
 `allowDangerousHtml` or a `highlight=` prop anywhere in `src/` (`@openparachute/surface-render` renders `highlight`
