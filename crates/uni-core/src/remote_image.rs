@@ -3,8 +3,9 @@
 //! Note and message content never makes the webview fetch anything (the app's CSP refuses remote images, media, styles and
 //! connections). A remote image shows as a link; its "Load image" tap calls this, which fetches that one URL here and hands the
 //! bytes to the webview as a `blob:` URL. It sends no cookies, credentials or referrer, takes only http(s) to a host off this
-//! device (never loopback, `localhost`, link-local or unspecified, also after a redirect), reads at most [`MAX_REMOTE_IMAGE_BYTES`],
-//! and returns only what the server says is an image.
+//! device (never loopback, `localhost`, link-local or unspecified: by the address as written, by what a name resolves to, and
+//! after a redirect), reads at most [`MAX_REMOTE_IMAGE_BYTES`], and returns only what the server says is a raster image (never
+//! SVG, which can carry script). Hosts on the LAN or tailnet are allowed, as an `<img>` would be: the tap is the person's choice.
 
 use std::time::Duration;
 
@@ -43,21 +44,47 @@ fn on_this_device(u: &url::Url) -> bool {
             let d = d.trim_end_matches('.').to_ascii_lowercase();
             d == "localhost" || d.ends_with(".localhost")
         }
-        Some(url::Host::Ipv4(ip)) => ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() || ip.is_broadcast(),
-        Some(url::Host::Ipv6(ip)) => {
-            ip.is_loopback()
-                || ip.is_unspecified()
-                || (ip.segments()[0] & 0xffc0) == 0xfe80
-                || ip.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback() || v4.is_link_local() || v4.is_unspecified())
+        Some(url::Host::Ipv4(ip)) => ip_on_this_device(ip.into()),
+        Some(url::Host::Ipv6(ip)) => ip_on_this_device(ip.into()),
+    }
+}
+
+/// An address that reaches this device (or nowhere): loopback, link-local, unspecified, broadcast, and their IPv4-in-IPv6 forms.
+fn ip_on_this_device(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_link_local() || v4.is_unspecified() || v4.is_broadcast(),
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+                || v6.to_ipv4_mapped().is_some_and(|v4| ip_on_this_device(v4.into()))
+                || v6.to_ipv4().is_some_and(|v4| v4.is_loopback() || v4.is_unspecified())
         }
     }
 }
 
-/// `image/…` (parameters ignored).
+/// DNS that drops this device's addresses, so a name that resolves to loopback (or rebinds to it) is refused like the address.
+struct OffDevice;
+
+impl reqwest::dns::Resolve for OffDevice {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let found: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
+            let off: Vec<std::net::SocketAddr> = found.into_iter().filter(|a| !ip_on_this_device(a.ip())).collect();
+            if off.is_empty() {
+                return Err("the image's host is this device".into());
+            }
+            Ok(Box::new(off.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+/// An image the app shows: `image/…` (parameters ignored), but never SVG, which is a document that can carry script.
 pub fn is_image_type(content_type: Option<&str>) -> bool {
     content_type
         .map(|c| c.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
-        .is_some_and(|c| c.starts_with("image/") && c.len() > "image/".len())
+        .is_some_and(|c| c.starts_with("image/") && c.len() > "image/".len() && !c.starts_with("image/svg"))
 }
 
 /// Fetch the image at `url` (see the module docs).
@@ -82,6 +109,7 @@ async fn fetch_with(url: &str, check: fn(&str) -> Result<url::Url>) -> Result<Ve
         .timeout(TIMEOUT)
         // many image hosts refuse a request with no User-Agent; this one names the app, never the person or device
         .user_agent(USER_AGENT)
+        .dns_resolver(OffDevice)
         .referer(false)
         .build()
         .map_err(|e| Error::Media(format!("http client: {e}")))?;
@@ -133,6 +161,7 @@ fn short(e: &reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::dns::Resolve as _;
     use std::io::{Read, Write};
 
     #[test]
@@ -155,8 +184,7 @@ mod tests {
     fn image_types() {
         assert!(is_image_type(Some("image/png")));
         assert!(is_image_type(Some("IMAGE/JPEG; charset=binary")));
-        assert!(is_image_type(Some("image/svg+xml")));
-        for bad in [None, Some(""), Some("image/"), Some("text/html"), Some("application/octet-stream"), Some("text/html; x=image/png")] {
+        for bad in [Some("image/svg+xml"), Some("IMAGE/SVG+XML; charset=utf-8"), None, Some(""), Some("image/"), Some("text/html"), Some("application/octet-stream"), Some("text/html; x=image/png")] {
             assert!(!is_image_type(bad), "{bad:?}");
         }
     }
@@ -215,6 +243,20 @@ mod tests {
         let err = fetch_with(&format!("{outer}/start.png"), first_hop_only).await.unwrap_err().to_string();
         assert!(err.contains("redirected off the web"), "{err}");
         assert!(inner_seen.lock().unwrap().is_empty(), "the loopback target was never asked");
+    }
+
+    #[tokio::test]
+    async fn a_name_that_resolves_to_this_device_is_refused_before_any_request() {
+        let (base, seen) = serve(vec![("/a.png", "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncontent-length: 1\r\n\r\nx".into())]);
+        // past the address rule (as a name like 127.0.0.1.nip.io would be), the resolver still drops loopback
+        let named = base.replace("127.0.0.1", "localhost");
+        let err = fetch_with(&format!("{named}/a.png"), loopback_ok).await.unwrap_err().to_string();
+        assert!(err.contains("this device"), "{err}");
+        assert!(seen.lock().unwrap().is_empty(), "the listener was never asked");
+        let direct = OffDevice.resolve("localhost".parse().unwrap()).await;
+        assert!(direct.is_err());
+        assert!(ip_on_this_device("::ffff:127.0.0.1".parse().unwrap()) && ip_on_this_device("169.254.1.1".parse().unwrap()));
+        assert!(!ip_on_this_device("192.0.2.9".parse().unwrap()) && !ip_on_this_device("10.0.0.1".parse().unwrap()));
     }
 
     #[tokio::test]

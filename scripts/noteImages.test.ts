@@ -1,8 +1,8 @@
 // Run: node --experimental-strip-types scripts/noteImages.test.ts
-// T-335: an image in a note is a vault attachment (read by the app), inline data, a remote image (a "Load image" tap) or words.
+// T-335: an image in a note is a vault attachment (read by the app), a remote image (a "Load image" tap) or words.
 // Never anything the webview would fetch by itself.
 import assert from "node:assert/strict";
-import { imageBlob, imageLabel, imageSource } from "../src/noteImages.ts";
+import { imageLabel, imageSource } from "../src/noteImages.ts";
 
 const HUB = ["https://hub.example.ts.net", null, undefined];
 const vault = (path: string) => ({ kind: "vault", path });
@@ -29,12 +29,9 @@ assert.deepEqual(imageSource("https://hub.example.ts.net/vault/uni/notes/x.png",
 assert.deepEqual(imageSource("https://tracker.example/pixel.png?n=1", HUB), remote("https://tracker.example/pixel.png?n=1"));
 assert.deepEqual(imageSource("http://example.org/a.gif", []), remote("http://example.org/a.gif"));
 
-// inline data is already in the note
-assert.deepEqual(imageSource("data:image/png;base64,iVBOR", HUB), { kind: "inline", src: "data:image/png;base64,iVBOR" });
-assert.deepEqual(imageSource("data:image/svg+xml,%3Csvg%3E", HUB), { kind: "inline", src: "data:image/svg+xml,%3Csvg%3E" });
 
 // everything else is words: other schemes, relative paths, credentials, whitespace tricks, non-strings
-for (const bad of ["data:text/html,<b>x</b>", "javascript:alert(1)", "blob:https://x/1", "file:///etc/passwd", "//tracker.example/a.png", "img/a.png",
+for (const bad of ["data:image/png;base64,iVBOR", "data:text/html,<b>x</b>", "javascript:alert(1)", "blob:https://x/1", "file:///etc/passwd", "//tracker.example/a.png", "img/a.png",
   "https://user:pw@tracker.example/a.png", "https://tracker.example/a b.png", "https:\\\\tracker.example\\a.png", "", "   ", undefined, null, 42]) {
   assert.deepEqual(imageSource(bad, HUB), none, String(bad));
 }
@@ -44,10 +41,4 @@ assert.equal(imageLabel(" weekly chart ", "https://tracker.example/a.png"), "wee
 assert.equal(imageLabel("", "https://tracker.example/a.png"), "tracker.example");
 assert.equal(imageLabel(undefined, "not a url"), "image");
 
-// SVG bytes get their type (an <img> won't sniff SVG); other formats are left to the webview
-const enc = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer;
-assert.equal(imageBlob(enc('<svg xmlns="http://www.w3.org/2000/svg"/>')).type, "image/svg+xml");
-assert.equal(imageBlob(enc('<?xml version="1.0"?>\n<svg/>')).type, "image/svg+xml");
-assert.equal(imageBlob(enc("x"), "/2026/a.svg").type, "image/svg+xml");
-assert.equal(imageBlob(enc("\u0089PNG")).type, "");
 console.log("note image tests passed");

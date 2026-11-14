@@ -4,7 +4,9 @@
 // 8444 (`publish_origins` from the app's hub setting), at `/<slug>-<sha8>.<ext>`, and writes a `published` note whose metadata
 // says `url`, `mime` and `kind`. Only those origins and the publisher's own file types play inline: video and audio with controls,
 // images as images. A page or a PDF stays a link, as does anything from anywhere else; no URL is ever framed or fetched with the
-// user's credentials (the webview loads the file itself, as any image in a note).
+// user's credentials (the webview loads the file itself). T-335: the app's CSP lets the webview load only from a tailnet host on port
+// 8444 (`https://*.ts.net:8444`, tauri.conf.json): published media on a hub with any other name show their error and a link. This is
+// the one load a note makes on open, and only ever from the user's own hub.
 
 import { parseMarkdown, type Block, type Inline } from "./markdown.ts";
 

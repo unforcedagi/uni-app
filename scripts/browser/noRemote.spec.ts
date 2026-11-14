@@ -57,7 +57,7 @@ async function boot(page: Page, content: string, opts: { attachment?: string } =
 }
 
 /** Give anything the page would fetch time to go out. */
-const settle = async (page: Page) => { await page.waitForLoadState('networkidle'); await page.waitForTimeout(400); };
+const settle = async (page: Page) => { await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {}); await page.waitForTimeout(600); };
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 
 test('a remote image in a note is never fetched: it shows as a link with a Load image tap', async ({ page }) => {
@@ -85,6 +85,15 @@ test('Load image fetches that one image, through the app, and no other', async (
   expect(await img.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
   expect(await calls(page, 'remote_image')).toEqual([{ url: 'https://tracker.example/one.png' }]);
   await expect(body.getByRole('button', { name: /^Load image/ })).toHaveCount(3);
+  // an image inside a link: its words aren't a second link, and its tap loads it without following the link
+  const linked = body.locator('a[href="https://www.example.org/"]');
+  await expect(linked).toHaveAttribute('href', 'https://www.example.org/');
+  await expect(linked.getByRole('link')).toHaveCount(0);
+  await linked.getByRole('button', { name: 'Load image: linked' }).click();
+  await expect(linked.locator('img')).toHaveAttribute('src', /^blob:/);
+  const opened = await page.evaluate(() => (window as any).__calls.filter((x: any) => /opener|open_url|open_link/.test(x.cmd)).length);
+  expect(opened, 'the link around it was not followed').toBe(0);
+  expect(await calls(page, 'remote_image')).toEqual([{ url: 'https://tracker.example/one.png' }, { url: 'https://tracker.example/three.png' }]);
   await settle(page);
   expect(seen.tracker, 'the webview itself never fetched any of them').toEqual([]);
 });

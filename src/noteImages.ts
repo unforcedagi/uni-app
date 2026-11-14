@@ -3,19 +3,16 @@
 // Nothing a note says is fetched by the webview. An image is one of:
 // - `vault`: the vault's storage (`/api/storage/<date>/<file>`, relative or on this hub), read by the app as one of the note's own
 //   attachments (`vault_attachment`) and shown from a `blob:` URL;
-// - `inline`: a `data:image/…` URL, already in the note (no request);
 // - `remote`: an http(s) image anywhere else, shown as a link with a "Load image" tap (`remote_image`), never automatically;
-// - `none`: anything else (a relative path, another scheme), shown as its words.
+// - `none`: anything else (a relative path, another scheme, `data:`, which the markdown renderer drops anyway), shown as its words.
 
 export type ImageSource =
   | { kind: "vault"; path: string }
-  | { kind: "inline"; src: string }
   | { kind: "remote"; url: string }
   | { kind: "none" };
 
 const STORAGE = /^\/?api\/storage\/([^?#]+)/;
 const VAULT_STORAGE = /^(?:\/vault\/[^/]+)?\/api\/storage\/(.+)$/;
-const DATA_IMAGE = /^data:image\/[a-z0-9.+-]+[;,]/i;
 
 /** A storage path as the vault stores it (`<date>/<file>`): decoded, relative, no `.`/`..` segment; else null. */
 function storagePath(raw: string): string | null {
@@ -36,7 +33,6 @@ export function imageSource(src: unknown, hubs: readonly (string | null | undefi
   if (typeof src !== "string") return { kind: "none" };
   const s = src.trim();
   if (!s || s.length > 8192) return { kind: "none" };
-  if (DATA_IMAGE.test(s)) return { kind: "inline", src: s };
   const rel = STORAGE.exec(s);
   if (rel) {
     const path = storagePath(rel[1]);
@@ -60,11 +56,4 @@ export function imageLabel(alt: unknown, url: string): string {
   const a = typeof alt === "string" ? alt.trim() : "";
   if (a) return a;
   try { return new URL(url).hostname || "image"; } catch { return "image"; }
-}
-
-/** A Blob for image bytes: SVG needs its type to show in an <img>; every other format is sniffed by the webview. */
-export function imageBlob(bytes: ArrayBuffer, nameHint = ""): Blob {
-  const head = new TextDecoder().decode(new Uint8Array(bytes.slice(0, 256))).trimStart().toLowerCase();
-  const svg = /\.svg(?:[?#]|$)/i.test(nameHint) || head.startsWith("<svg") || (head.startsWith("<?xml") && head.includes("<svg"));
-  return new Blob([bytes], svg ? { type: "image/svg+xml" } : {});
 }

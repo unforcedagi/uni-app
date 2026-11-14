@@ -3,10 +3,10 @@
 // and a remote image is a link with a "Load image" tap that fetches that one image through the app (`remote_image`).
 import { createContext, useContext, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { imageBlob, imageLabel, imageSource } from "./noteImages";
+import { imageLabel, imageSource } from "./noteImages";
 
 /** Bytes → an object URL, revoked when the image goes or changes. `load` null: nothing yet (a remote image before its tap). */
-function useBlobImage(load: (() => Promise<ArrayBuffer>) | null, key: string, nameHint: string) {
+function useBlobImage(load: (() => Promise<ArrayBuffer>) | null, key: string) {
   const [state, setState] = useState<{ url: string | null; error: string | null }>({ url: null, error: null });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -16,7 +16,8 @@ function useBlobImage(load: (() => Promise<ArrayBuffer>) | null, key: string, na
     setState({ url: null, error: null });
     load().then((buf) => {
       if (!live) return;
-      made = URL.createObjectURL(imageBlob(buf, nameHint));
+      // untyped: the webview sniffs the raster format (the app never fetches SVG, which would need its type to show)
+      made = URL.createObjectURL(new Blob([buf]));
       setState({ url: made, error: null });
     }, (e) => { if (live) setState({ url: null, error: String(e) || "couldn't load" }); });
     return () => { live = false; if (made) URL.revokeObjectURL(made); };
@@ -34,7 +35,7 @@ type LinkLike = ComponentType<{ href: string; className?: string; children?: Rea
 export function RemoteImage({ url, alt, Link }: { url: string; alt: string; Link: LinkLike }) {
   const inLink = useContext(InLink);
   const [asked, setAsked] = useState(false);
-  const img = useBlobImage(asked ? () => invoke<ArrayBuffer>("remote_image", { url }) : null, url, url);
+  const img = useBlobImage(asked ? () => invoke<ArrayBuffer>("remote_image", { url }) : null, url);
   if (img.url) return <img src={img.url} alt={alt} className="note-image" />;
   const label = imageLabel(alt, url);
   const words = alt.trim() || url;
@@ -50,7 +51,7 @@ export function RemoteImage({ url, alt, Link }: { url: string; alt: string; Link
 
 /** An image attached to the note, read by the app. */
 function VaultAttachmentImage({ vault, note, path, alt }: { vault: string; note: string; path: string; alt: string }) {
-  const img = useBlobImage(() => invoke<ArrayBuffer>("vault_attachment", { vault, note, path }), `${vault}\n${note}\n${path}`, path);
+  const img = useBlobImage(() => invoke<ArrayBuffer>("vault_attachment", { vault, note, path }), `${vault}\n${note}\n${path}`);
   const name = alt.trim() || path.split("/").pop() || "image";
   if (img.url) return <img src={img.url} alt={alt} className="note-image" />;
   if (img.error) return <span className="note-image-missing" role="img" aria-label={`${name}: couldn't show this attachment`} title={img.error}>🖼 {name} · couldn't show this attachment</span>;
@@ -67,7 +68,6 @@ export function noteImage(o: { vault: string; note: string; hubs: readonly (stri
     const s = imageSource(src, o.hubs);
     switch (s.kind) {
       case "vault": return <VaultAttachmentImage vault={o.vault} note={o.note} path={s.path} alt={words} />;
-      case "inline": return <img src={s.src} alt={words} className="note-image" />;
       case "remote": return <RemoteImage url={s.url} alt={words} Link={o.Link} />;
       default: return words ? <span className="note-image-words">{words}</span> : null;
     }
@@ -80,7 +80,7 @@ export function noteImage(o: { vault: string; note: string; hubs: readonly (stri
  */
 export function ChatLinkImage({ url, onOpen }: { url: string; onOpen: (src: string, alt: string) => void }) {
   const [asked, setAsked] = useState(false);
-  const img = useBlobImage(asked ? () => invoke<ArrayBuffer>("remote_image", { url }) : null, url, url);
+  const img = useBlobImage(asked ? () => invoke<ArrayBuffer>("remote_image", { url }) : null, url);
   if (img.url) return <button className="attachment-image" onClick={() => onOpen(img.url!, url)} aria-label={`Open image ${url}`}><img src={img.url} alt="" /></button>;
   const host = imageLabel("", url);
   return <div className="attachment-remote">
