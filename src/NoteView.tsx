@@ -15,10 +15,15 @@ import { isMarkdownNote, noteRender } from "./noteFile";
 import { bodyWithoutTitle, noteMeta, noteTitle } from "./noteText";
 import { inline, PLAYER_TAG, publishedFromNote, rehypePublished } from "./publishedMedia";
 import { PublishedInNote, PublishedMedia, usePublishOrigins } from "./PublishedPlayer";
-import { InLink, noteImage } from "./RemoteImage";
+import { InLink, NoteImage, NoteImageContext } from "./RemoteImage";
 import { refCandidates, isNoteNotFound, noteUrl, parseNoteRoute, parseNoteUrl, wikilinkResolver, type VaultRef } from "./vaultlinks";
 
 type VaultNote = { hub: string; vault: string; note: Note & { extension?: string } };
+
+/** T-260: the player a published link in the body becomes (see rehypePublished). T-335: an image never loads from where the note
+ *  says: an attachment is read by the app, a remote image waits for its own "Load image" tap (RemoteImage.tsx). One object for the
+ *  app's life, so a redraw never remounts what the note shows. */
+const COMPONENTS = { [PLAYER_TAG]: PublishedInNote, img: NoteImage } as NoteRendererProps["components"];
 
 
 function openExternal(url: string) {
@@ -116,12 +121,9 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
       else if (safe) openExternal(safe);
     }}><InLink.Provider value={true}>{children}</InLink.Provider></a>;
   }, [onOpen]);
-  // T-260: a published link in the body becomes its player (see rehypePublished). T-335: an image never loads from where the note
-  // says: an attachment is read by the app, a remote image waits for its own "Load image" tap (RemoteImage.tsx).
-  const components = useMemo(() => ({
-    [PLAYER_TAG]: PublishedInNote,
-    img: noteImage({ vault: data?.vault ?? target.vault, note: data?.note.id ?? target.ref, hubs: [data?.hub, target.hub, hub], Link }),
-  }) as NoteRendererProps["components"], [data, target.vault, target.ref, target.hub, hub, Link]);
+  // T-335: the note its images are in (NoteImage reads it)
+  const imageScope = useMemo(() => ({ vault: data?.vault ?? target.vault, note: data?.note.id ?? target.ref, hubs: [data?.hub, target.hub, hub], Link }),
+    [data?.vault, data?.note.id, data?.hub, target.vault, target.ref, target.hub, hub, Link]);
 
   const note = data?.note;
   const heading = note ? noteTitle(note.content, note.path, note.id) : target.ref.split("/").pop() || target.ref;
@@ -177,7 +179,9 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
         </div>}
         {shown && <>
           {own && <PublishedMedia m={own} />}
-          <NoteRenderer note={shown} format={render.format} overrides={overrides} className="md note-body" resolve={resolve} linkComponent={Link} rehypePlugins={rehype} components={components} />
+          <NoteImageContext.Provider value={imageScope}>
+            <NoteRenderer note={shown} format={render.format} overrides={overrides} className="md note-body" resolve={resolve} linkComponent={Link} rehypePlugins={rehype} components={COMPONENTS} />
+          </NoteImageContext.Provider>
           <details className="note-backlinks"><summary>Linked from ({inbound.length})</summary>
             {inbound.map((link) => <button className="vault-note" key={JSON.stringify([link.id, link.relationship])} onClick={() => onOpen({ hub: null, vault: data!.vault, ref: link.id }, null)}>{link.path} <small>· {link.relationship}</small></button>)}
           </details>

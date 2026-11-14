@@ -12,6 +12,7 @@ const none = { kind: "none" };
 // the vault's storage: relative, on this hub (the vault's own route or the bare one), percent-encoded; query and fragment dropped
 assert.deepEqual(imageSource("/api/storage/2026-11-13/a.png", HUB), vault("2026-11-13/a.png"));
 assert.deepEqual(imageSource("api/storage/2026-11-13/a.png", HUB), vault("2026-11-13/a.png"));
+assert.deepEqual(imageSource("/vault/uni/api/storage/2026-11-13/a.png", HUB), vault("2026-11-13/a.png"));
 assert.deepEqual(imageSource(" /api/storage/2026-11-13/my%20file.png?x=1#y ", HUB), vault("2026-11-13/my file.png"));
 assert.deepEqual(imageSource("https://hub.example.ts.net/vault/uni/api/storage/2026-11-13/a.png", HUB), vault("2026-11-13/a.png"));
 assert.deepEqual(imageSource("https://hub.example.ts.net/api/storage/2026-11-13/a.png", HUB), vault("2026-11-13/a.png"));

@@ -39,7 +39,8 @@ async function boot(page: Page, content: string, opts: { attachment?: string } =
           case 'refresh': return { total_items: 0, channel_errors: {}, truncated_channels: [] };
           case 'vault_note':
             if (args.noteRef !== 'n-field') return { vault: 'uni', note: { id: args.noteRef, content: '' } };
-            return { hub: 'https://hub.example.ts.net', vault: 'uni', note: { id: 'n-field', path: 'Field notes', extension: 'md', content, tags: [] } };
+            return { hub: 'https://hub.example.ts.net', vault: 'uni', note: { id: 'n-field', path: 'Field notes', extension: 'md', content, tags: [], updatedAt: '2026-11-13T10:00:00Z' } };
+          case 'vault_save': return { id: 'n-field', path: 'Field notes', extension: 'md', content: args.content, tags: [], updatedAt: '2026-11-13T10:05:00Z' };
           case 'vault_attachment':
             if (args.vault === 'uni' && args.note === 'n-field' && args.path === attachment) return bytes();
             throw 'not an attachment of this note';
@@ -76,7 +77,11 @@ test('Load image fetches that one image, through the app, and no other', async (
   const seen = await boot(page, '![first](https://tracker.example/one.png)\n\n![second](https://tracker.example/two.png)\n\n[![linked](https://tracker.example/three.png)](https://www.example.org/)\n\n![ref][r]\n\n[r]: https://tracker.example/four.png');
   await settle(page);
   const body = page.locator('.note-body');
-  await expect(body.getByRole('button', { name: /^Load image/ })).toHaveCount(4);
+  // an image inside a link is that link's words only: no second link, no button inside a link; the link itself still works
+  const linked = body.locator('a[href="https://www.example.org/"]');
+  await expect(linked).toHaveText('linked');
+  await expect(linked.locator('a, button, img')).toHaveCount(0);
+  await expect(body.getByRole('button', { name: /^Load image/ })).toHaveCount(3);
   await body.getByRole('button', { name: 'Load image: first' }).click();
   const img = body.locator('img');
   await expect(img).toHaveCount(1);
@@ -84,16 +89,7 @@ test('Load image fetches that one image, through the app, and no other', async (
   await expect(img).toHaveAttribute('alt', 'first');
   expect(await img.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
   expect(await calls(page, 'remote_image')).toEqual([{ url: 'https://tracker.example/one.png' }]);
-  await expect(body.getByRole('button', { name: /^Load image/ })).toHaveCount(3);
-  // an image inside a link: its words aren't a second link, and its tap loads it without following the link
-  const linked = body.locator('a[href="https://www.example.org/"]');
-  await expect(linked).toHaveAttribute('href', 'https://www.example.org/');
-  await expect(linked.getByRole('link')).toHaveCount(0);
-  await linked.getByRole('button', { name: 'Load image: linked' }).click();
-  await expect(linked.locator('img')).toHaveAttribute('src', /^blob:/);
-  const opened = await page.evaluate(() => (window as any).__calls.filter((x: any) => /opener|open_url|open_link/.test(x.cmd)).length);
-  expect(opened, 'the link around it was not followed').toBe(0);
-  expect(await calls(page, 'remote_image')).toEqual([{ url: 'https://tracker.example/one.png' }, { url: 'https://tracker.example/three.png' }]);
+  await expect(body.getByRole('button', { name: /^Load image/ })).toHaveCount(2);
   await settle(page);
   expect(seen.tracker, 'the webview itself never fetched any of them').toEqual([]);
 });
@@ -170,7 +166,15 @@ test('an image attached to the note still shows, read through the app', async ({
   const img = body.locator('img[alt="diagram"]');
   await expect(img).toHaveAttribute('src', /^blob:/);
   await expect.poll(() => img.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
-  expect(await calls(page, 'vault_attachment')).toContainEqual({ vault: 'uni', note: 'n-field', path: '2026-11-13/diagram.png' });
+  // the note is edited and saved: it shows again from the copy the app already has, never read again
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('textbox', { name: 'Note content' }).fill('# Field notes\n\n![diagram](/api/storage/2026-11-13/diagram.png)\n\n![other note\'s](/api/storage/2026-11-13/elsewhere.png)\n\nEdited.');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(body).toContainText('Edited.');
+  await expect(body.locator('img[alt="diagram"]')).toHaveAttribute('src', /^blob:/);
+  await settle(page);
+  // read once: a redraw of the note never reads its attachments again
+  expect((await calls(page, 'vault_attachment')).filter((c: any) => c.path === '2026-11-13/diagram.png')).toEqual([{ vault: 'uni', note: 'n-field', path: '2026-11-13/diagram.png' }]);
   // a storage path the note doesn't own is refused by the app and says so; it is never tried as a remote image
   await expect(body.getByText(/elsewhere\.png|other note's/)).toBeVisible();
   await expect(body.locator('img[alt="other note\'s"]')).toHaveCount(0);

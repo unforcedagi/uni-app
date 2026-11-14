@@ -5,53 +5,95 @@ import { createContext, useContext, useEffect, useState, type ComponentType, typ
 import { invoke } from "@tauri-apps/api/core";
 import { imageLabel, imageSource } from "./noteImages";
 
-/** Bytes → an object URL, revoked when the image goes or changes. `load` null: nothing yet (a remote image before its tap). */
-function useBlobImage(load: (() => Promise<ArrayBuffer>) | null, key: string) {
-  const [state, setState] = useState<{ url: string | null; error: string | null }>({ url: null, error: null });
+// ── Loaded images, kept across redraws and remounts ─────────────────────────────────────────────────────────────────
+// A note re-rendering, or a chat row scrolling out and back, shows the same object URL again instead of fetching again (and a
+// tapped remote image stays loaded, so its site isn't told twice). The newest 60 are kept; an older one is revoked.
+
+const KEEP = 60;
+const shown = new Map<string, string>();
+const going = new Map<string, Promise<string>>();
+let active = 0;
+const waiting: (() => void)[] = [];
+/** At most 4 reads at once (a note with many attachments doesn't fire them all together). */
+async function slot<T>(run: () => Promise<T>): Promise<T> {
+  if (active >= 4) await new Promise<void>((r) => waiting.push(r));
+  active++;
+  try { return await run(); } finally { active--; waiting.shift()?.(); }
+}
+const cached = (key: string): string | null => {
+  const url = shown.get(key);
+  if (url) { shown.delete(key); shown.set(key, url); }
+  return url ?? null;
+};
+function blobFor(key: string, load: () => Promise<ArrayBuffer>): Promise<string> {
+  const have = cached(key);
+  if (have) return Promise.resolve(have);
+  let p = going.get(key);
+  if (!p) {
+    // untyped: the webview sniffs the raster format (the app never fetches SVG, which would need its type to show)
+    p = slot(load).then((buf) => {
+      const url = URL.createObjectURL(new Blob([buf]));
+      shown.set(key, url);
+      while (shown.size > KEEP) { const [k, old] = shown.entries().next().value!; shown.delete(k); URL.revokeObjectURL(old); }
+      return url;
+    }).finally(() => going.delete(key));
+    going.set(key, p);
+  }
+  return p;
+}
+
+/** The object URL for `key` once `load` (null: not asked for yet) has read it; errors are not kept, so Retry reads again. */
+function useBlobImage(key: string, load: (() => Promise<ArrayBuffer>) | null) {
+  const [state, setState] = useState<{ url: string | null; error: string | null }>(() => ({ url: cached(key), error: null }));
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    if (!load) { setState({ url: null, error: null }); return; }
+    const have = cached(key);
+    if (have || !load) { setState({ url: have, error: null }); return; }
     let live = true;
-    let made: string | null = null;
     setState({ url: null, error: null });
-    load().then((buf) => {
-      if (!live) return;
-      // untyped: the webview sniffs the raster format (the app never fetches SVG, which would need its type to show)
-      made = URL.createObjectURL(new Blob([buf]));
-      setState({ url: made, error: null });
-    }, (e) => { if (live) setState({ url: null, error: String(e) || "couldn't load" }); });
-    return () => { live = false; if (made) URL.revokeObjectURL(made); };
+    blobFor(key, load).then((url) => { if (live) setState({ url, error: null }); }, (e) => { if (live) setState({ url: null, error: String(e) || "couldn't load" }); });
+    return () => { live = false; };
     // `load` is rebuilt each render; `key` names what it loads
   }, [key, attempt, !!load]);
   return { ...state, busy: !!load && !state.url && !state.error, retry: () => setAttempt((n) => n + 1) };
 }
 
-/** Inside a link already: an image there shows as words, not a second link. */
-export const InLink = createContext(false);
+/** A remote image behind its "Load image" tap: nothing is fetched until `tap`, and a tapped image stays loaded. */
+function useTappedImage(url: string) {
+  const key = `remote\n${url}`;
+  const [asked, setAsked] = useState(() => !!cached(key));
+  const img = useBlobImage(key, asked ? () => invoke<ArrayBuffer>("remote_image", { url }) : null);
+  return { ...img, tap: () => { if (img.error) img.retry(); else setAsked(true); } };
+}
+
+/** The tap itself (or "Loading image…"): one button for notes and chat. */
+function LoadButton({ img, label, className }: { img: ReturnType<typeof useTappedImage>; label: string; className: string }) {
+  if (img.busy) return <span className="note-image-state" role="status">Loading image…</span>;
+  return <button type="button" className={className} aria-label={label} title={img.error ?? "Loads this one image from its site, which then knows it was opened"}
+    onClick={img.tap}>{img.error ? "Couldn't load · Retry" : "Load image"}</button>;
+}
+
+// ── In a note ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 type LinkLike = ComponentType<{ href: string; className?: string; children?: ReactNode }>;
+/** The note an image is in, for {@link NoteImage}. */
+export type NoteImageScope = { vault: string; note: string; hubs: readonly (string | null | undefined)[]; Link: LinkLike };
+export const NoteImageContext = createContext<NoteImageScope | null>(null);
+/** Inside a link already: an image there shows as its words only (no second link, and no button inside a link). */
+export const InLink = createContext(false);
 
-/** A remote image: its words as a link (or plain, inside a link) and a "Load image" tap; once tapped, the image. */
-export function RemoteImage({ url, alt, Link }: { url: string; alt: string; Link: LinkLike }) {
-  const inLink = useContext(InLink);
-  const [asked, setAsked] = useState(false);
-  const img = useBlobImage(asked ? () => invoke<ArrayBuffer>("remote_image", { url }) : null, url);
+function RemoteImage({ url, alt, Link }: { url: string; alt: string; Link: LinkLike }) {
+  const img = useTappedImage(url);
   if (img.url) return <img src={img.url} alt={alt} className="note-image" />;
-  const label = imageLabel(alt, url);
   const words = alt.trim() || url;
   return <span className="note-image-remote">
-    {inLink ? <span className="note-image-words">{words}</span> : <Link href={url} className="note-image-link">{words}</Link>}
-    {img.busy ? <span className="note-image-state" role="status">Loading image…</span>
-      : <button type="button" className="note-image-load" aria-label={`Load image: ${label}`} title={img.error ?? "Loads this one image from its site, which then knows it was opened"}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (img.error) img.retry(); else setAsked(true); }}>
-          {img.error ? "Couldn't load · Retry" : "Load image"}
-        </button>}
+    <Link href={url} className="note-image-link">{words}</Link>
+    <LoadButton img={img} label={`Load image: ${imageLabel(alt, url)}`} className="note-image-load" />
   </span>;
 }
 
-/** An image attached to the note, read by the app. */
 function VaultAttachmentImage({ vault, note, path, alt }: { vault: string; note: string; path: string; alt: string }) {
-  const img = useBlobImage(() => invoke<ArrayBuffer>("vault_attachment", { vault, note, path }), `${vault}\n${note}\n${path}`);
+  const img = useBlobImage(`vault\n${vault}\n${note}\n${path}`, () => invoke<ArrayBuffer>("vault_attachment", { vault, note, path }));
   const name = alt.trim() || path.split("/").pop() || "image";
   if (img.url) return <img src={img.url} alt={alt} className="note-image" />;
   if (img.error) return <span className="note-image-missing" role="img" aria-label={`${name}: couldn't show this attachment`} title={img.error}>🖼 {name} · couldn't show this attachment</span>;
@@ -59,34 +101,31 @@ function VaultAttachmentImage({ vault, note, path, alt }: { vault: string; note:
 }
 
 /**
- * The `img` of a rendered note (react-markdown's component), bound to the note it is in. Never renders a remote `src`: see
- * {@link imageSource}.
+ * The `img` of a rendered note (react-markdown's component; one type for the app's life, so a redraw never remounts an image). The
+ * note it is in comes from {@link NoteImageContext}. Never renders a remote `src`: see {@link imageSource}.
  */
-export function noteImage(o: { vault: string; note: string; hubs: readonly (string | null | undefined)[]; Link: LinkLike }) {
-  return function NoteImage({ src, alt }: { src?: unknown; alt?: unknown }) {
-    const words = typeof alt === "string" ? alt : "";
-    const s = imageSource(src, o.hubs);
-    switch (s.kind) {
-      case "vault": return <VaultAttachmentImage vault={o.vault} note={o.note} path={s.path} alt={words} />;
-      case "remote": return <RemoteImage url={s.url} alt={words} Link={o.Link} />;
-      default: return words ? <span className="note-image-words">{words}</span> : null;
-    }
-  };
+export function NoteImage({ src, alt }: { src?: unknown; alt?: unknown }) {
+  const scope = useContext(NoteImageContext);
+  const inLink = useContext(InLink);
+  const words = typeof alt === "string" ? alt : "";
+  const s = scope ? imageSource(src, scope.hubs) : { kind: "none" as const };
+  if (s.kind === "vault" && scope) return <VaultAttachmentImage vault={scope.vault} note={scope.note} path={s.path} alt={words} />;
+  if (s.kind === "remote" && scope && !inLink) return <RemoteImage url={s.url} alt={words} Link={scope.Link} />;
+  return words ? <span className="note-image-words">{words}</span> : null;
 }
+
+// ── In chat ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
  * A chat message's link to an image (T-335: was a preview the webview fetched on sight). The link is in the message already; this is
  * its "Load image" tap, then the image, which opens full size.
  */
 export function ChatLinkImage({ url, onOpen }: { url: string; onOpen: (src: string, alt: string) => void }) {
-  const [asked, setAsked] = useState(false);
-  const img = useBlobImage(asked ? () => invoke<ArrayBuffer>("remote_image", { url }) : null, url);
+  const img = useTappedImage(url);
   if (img.url) return <button className="attachment-image" onClick={() => onOpen(img.url!, url)} aria-label={`Open image ${url}`}><img src={img.url} alt="" /></button>;
   const host = imageLabel("", url);
   return <div className="attachment-remote">
     <span className="attachment-remote-host" title={url}>🖼 {host}</span>
-    {img.busy ? <small role="status">Loading image…</small>
-      : <button type="button" className="attachment-save attachment-save-pill" aria-label={`Load image from ${host}`} title={img.error ?? "Loads this one image from its site, which then knows it was opened"}
-          onClick={() => { if (img.error) img.retry(); else setAsked(true); }}>{img.error ? "Couldn't load · Retry" : "Load image"}</button>}
+    <LoadButton img={img} label={`Load image from ${host}`} className="attachment-save attachment-save-pill" />
   </div>;
 }

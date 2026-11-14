@@ -795,10 +795,20 @@ impl VaultClient {
             .as_array()
             .and_then(|rows| rows.iter().find(|a| a["path"].as_str() == Some(path)))
             .ok_or_else(|| Error::Vault("not an attachment of this note".into()))?;
-        if crate::remote_image::is_svg(row["mimeType"].as_str()) {
+        // a row with no type, or a generic one, is judged by its file name (an upload that didn't say what it was)
+        let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+        let mime = match row["mimeType"].as_str().map(str::trim).filter(|m| !m.is_empty() && *m != "application/octet-stream") {
+            Some(m) => m.to_string(),
+            None => match ext.as_str() {
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" => format!("image/{ext}"),
+                "svg" => "image/svg+xml".into(),
+                _ => String::new(),
+            },
+        };
+        if crate::remote_image::is_svg(Some(&mime)) {
             return Err(Error::Vault("SVG attachments aren't shown in the app".into()));
         }
-        if !crate::remote_image::is_image_type(row["mimeType"].as_str()) {
+        if !crate::remote_image::is_image_type(Some(&mime)) {
             return Err(Error::Vault("that attachment isn't an image".into()));
         }
         let id = row["id"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| Error::Vault("attachment has no id".into()))?;
@@ -3048,6 +3058,9 @@ mod attachment_tests {
             {"id": "a-img", "path": "2026-11-13/diagram.png", "mimeType": "image/png"},
             {"id": "a-pdf", "path": "2026-11-13/report.pdf", "mimeType": "application/pdf"},
             {"id": "a-svg", "path": "2026-11-13/chart.svg", "mimeType": "image/svg+xml"},
+            {"id": "a-untyped", "path": "2026-11-13/scan.jpg", "mimeType": "application/octet-stream"},
+            {"id": "a-untyped-svg", "path": "2026-11-13/sketch.svg"},
+            {"id": "a-untyped-bin", "path": "2026-11-13/data.bin"},
         ])
     }
 
@@ -3064,6 +3077,14 @@ mod attachment_tests {
     }
 
     #[tokio::test]
+    async fn an_untyped_row_named_like_a_photo_is_read() {
+        crate::init_crypto();
+        let (client, calls) = hub(rows(), b"JPEG");
+        assert_eq!(client.attachment_image("scope-test", "n1", "2026-11-13/scan.jpg").await.unwrap(), b"JPEG");
+        assert_eq!(calls.lock().unwrap()[1].1["attachment_id"], "a-untyped");
+    }
+
+    #[tokio::test]
     async fn refuses_a_path_the_note_does_not_own_or_that_is_not_an_image() {
         crate::init_crypto();
         let (client, calls) = hub(rows(), b"x");
@@ -3073,6 +3094,10 @@ mod attachment_tests {
         assert!(pdf.contains("isn't an image"), "{pdf}");
         let svg = client.attachment_image("scope-test", "n1", "2026-11-13/chart.svg").await.unwrap_err().to_string();
         assert!(svg.contains("SVG attachments aren't shown"), "{svg}");
+        let sketch = client.attachment_image("scope-test", "n1", "2026-11-13/sketch.svg").await.unwrap_err().to_string();
+        assert!(sketch.contains("SVG attachments aren't shown"), "an untyped row is judged by its name: {sketch}");
+        let bin = client.attachment_image("scope-test", "n1", "2026-11-13/data.bin").await.unwrap_err().to_string();
+        assert!(bin.contains("isn't an image"), "{bin}");
         assert!(calls.lock().unwrap().iter().all(|(t, _)| t == "query-notes"), "no ticket was minted for either");
         for bad in ["", "/2026/x.png", "a\nb"] {
             assert!(client.attachment_image("scope-test", "n1", bad).await.is_err(), "{bad:?}");

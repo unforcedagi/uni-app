@@ -1,8 +1,8 @@
 // T-335: where an image in a note comes from, and so how it may be shown. Pure (node tests it: scripts/noteImages.test.ts).
 //
 // Nothing a note says is fetched by the webview. An image is one of:
-// - `vault`: the vault's storage (`/api/storage/<date>/<file>`, relative or on this hub), read by the app as one of the note's own
-//   attachments (`vault_attachment`) and shown from a `blob:` URL;
+// - `vault`: the vault's storage (`/api/storage/<date>/<file>` or `/vault/<name>/api/storage/…`, relative or on this hub), read by
+//   the app as one of the note's own attachments (`vault_attachment`) and shown from a `blob:` URL;
 // - `remote`: an http(s) image anywhere else, shown as a link with a "Load image" tap (`remote_image`), never automatically;
 // - `none`: anything else (a relative path, another scheme, `data:`, which the markdown renderer drops anyway), shown as its words.
 
@@ -11,7 +11,7 @@ export type ImageSource =
   | { kind: "remote"; url: string }
   | { kind: "none" };
 
-const STORAGE = /^\/?api\/storage\/([^?#]+)/;
+const STORAGE = /^\/?(?:vault\/[^/?#]+\/)?api\/storage\/([^?#]+)/;
 const VAULT_STORAGE = /^(?:\/vault\/[^/]+)?\/api\/storage\/(.+)$/;
 
 /** A storage path as the vault stores it (`<date>/<file>`): decoded, relative, no `.`/`..` segment; else null. */
