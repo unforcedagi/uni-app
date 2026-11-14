@@ -14,12 +14,27 @@ async function check(name: string, fn: () => void | Promise<void>) {
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------- P1-1
-await check("P1-1 tauri.conf.json sets a frame-src about: CSP (map form, only what is needed)", () => {
+await check("P1-1 tauri.conf.json sets a frame-src about: CSP (map form); T-335: and no remote load but published media", () => {
   const conf = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
   const csp = conf.app.security.csp;
   assert.ok(csp && typeof csp === "object", "csp is the map form");
   assert.equal(csp["frame-src"], "about:");
-  assert.deepEqual(Object.keys(csp), ["frame-src"], "no other directive: nothing else can break");
+  // T-335: nothing a note or message names is fetched: every fetching directive is local sources only, except published media
+  // on the hub's tailnet host (port 8444, which Funnel can't serve). The sealed frames inherit this and add their own.
+  assert.equal(csp["default-src"], "'self'");
+  assert.equal(csp["object-src"], "'none'");
+  const PUBLISH = "https://*.ts.net:8444";
+  const LOCAL = new Set(["'self'", "data:", "blob:", "'unsafe-inline'", "'unsafe-eval'", "'wasm-unsafe-eval'", "ipc:", "http://ipc.localhost",
+    "unimedia:", "http://unimedia.localhost", "http://127.0.0.1:*", "about:", "'none'"]);
+  for (const [d, v] of Object.entries(csp as Record<string, string>)) {
+    for (const src of v.split(/\s+/)) {
+      const ok = LOCAL.has(src) || (src === PUBLISH && (d === "img-src" || d === "media-src"));
+      assert.ok(ok, `${d} allows ${src}`);
+    }
+  }
+  for (const d of ["script-src", "style-src", "img-src", "media-src", "connect-src", "font-src", "worker-src"]) assert.ok(csp[d], `${d} is set`);
+  assert.ok(csp["script-src"].includes("'unsafe-inline'"), "the sealed frames' inline scripts still run (they inherit this policy)");
+  assert.deepEqual(conf.app.security.dangerousDisableAssetCspModification, ["script-src", "style-src"], "no nonce turns 'unsafe-inline' off");
 });
 // ---------------------------------------------------------------- P2-1
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 WebKitGTK/2.46";
